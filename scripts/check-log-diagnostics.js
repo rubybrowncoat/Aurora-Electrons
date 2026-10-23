@@ -596,6 +596,10 @@ const UNIT_FAULTS = [
   { name: 'the ship and fleet input is read as present', sources: () => swap('log-diagnostics', "fleet: unavailable({ rule: 'logDiagnostic.fleet', missing: ['ship, fleet and boarding-party state'] })", "fleet: envelope({ value: [], status: 'confirmed', rule: 'logDiagnostic.fleet', inputs: { present: ['ships'] } })"), fails: ['fleet-unread'] },
   { name: 'the unknown verdict is worded as the absent one', sources: () => swap('log-diagnostics', "unavailable: 'Unknown. No read of the log covers this window, so nothing can be said of it.',", "unavailable: 'None of the watched event types was found in the observed part of this window. The log keeps only what the game wrote, so this says nothing about the game beyond the log.',"), fails: ['verdict-text'] },
   { name: 'the absent verdict is worded as safe', sources: () => swap('log-diagnostics', "absent: 'None of the watched event types was found in the observed part of this window. The log keeps only what the game wrote, so this says nothing about the game beyond the log.',", "absent: 'Nothing happened in this window: the race is safe.',"), fails: ['verdict-text'] },
+  { name: 'a page fault leaves out the race transition its check reads', pageFaults: () => PAGE_FAULTS.map((fault, index) => (index === 0 ? { ...fault, screens: ['window:0'] } : fault)), fails: ['fault-screens'] },
+  { name: 'a page fault leaves out every window its check reads', pageFaults: () => PAGE_FAULTS.map((fault, index) => (index === 3 ? { ...fault, screens: ['broken'] } : fault)), fails: ['fault-screens'] },
+  { name: 'a benign page rewrite leaves out screens of the head', pageRewrites: () => PAGE_REWRITES.map((rewrite, index) => (index === 0 ? { ...rewrite, screens: ['window:0'] } : rewrite)), fails: ['fault-screens'] },
+  { name: 'the head leaves a hole in its four saved windows', headWindows: () => { const windows = Array.from({ length: 4 }, () => ({})); delete windows[2]; return windows }, fails: ['fault-screens'] },
 ]
 
 const UNIT_REWRITES = [
@@ -603,6 +607,7 @@ const UNIT_REWRITES = [
   { name: 'the verdict decided by parenthesised conditions', sources: () => swap('log-diagnostics', "const verdict = coverage.state === 'unavailable' ? 'unavailable' : observed ? 'found' : 'absent'", "const verdict = (coverage.state === 'unavailable') ? 'unavailable' : (observed > 0) ? 'found' : 'absent'") },
   { name: 'the observations sorted by an equivalent comparison', sources: () => swap('log-diagnostics', 'observations.sort((a, b) => b.time - a.time || b.increment[0] - a.increment[0] || a.type - b.type)', 'observations.sort((a, b) => (a.time !== b.time ? b.time - a.time : a.increment[0] !== b.increment[0] ? b.increment[0] - a.increment[0] : a.type - b.type))') },
   { name: 'the cut taken off a copy of the archive another way', sources: () => swap('log-diagnostics', '{ ...archive, cut: undefined }', 'Object.assign({}, archive, { cut: undefined })') },
+  { name: 'the fault screen declarations listed in reverse order', pageFaults: () => PAGE_FAULTS.map((fault) => (fault.screens ? { ...fault, screens: fault.screens.slice().reverse() } : fault)).reverse() },
 ]
 
 /* eslint-enable no-template-curly-in-string */
@@ -1006,17 +1011,26 @@ const switchRace = (page, RaceID, NPR) => page.evaluate((race) => window.$app.$s
 
 const isRaceLog = (race) => (sql) => new RegExp(`^select FCT_GameLog\\.IncrementID, FCT_GameLog\\.Time, .* from FCT_GameLog where FCT_GameLog\\.GameID = ${GAME} and FCT_GameLog\\.RaceID = ${race}$`).test(sql)
 
-// What the player does on the save: every window of the race, the race switched while its read is held, a race whose read fails, and back. The value of the record is { windows: [4 screens], held, quiet, broken, back }.
-const observeSaved = (browser, url) => observe(browser, async ({ page, step }) => {
+// The head and rewrites drive every window and race transition. A fault may name just the screens its credited checks read; their reader-path requirements are checked before the drive starts.
+const observeSaved = (browser, url, screens = null) => observe(browser, async ({ page, step }) => {
   const { state, settle } = await prepare(page, url, step)
   const seen = { windows: [] }
+  const wanted = (name) => screens === null || screens.includes(name)
 
   for (let index = 0; index < WINDOW_SECONDS.length; index++) {
+    if (!wanted(`window:${index}`)) {
+      continue
+    }
+
     step(`window ${WINDOW_SECONDS[index]} is chosen`)
     const menu = await chooseWindow(page, WINDOW_SECONDS[index])
 
     await settle()
-    seen.windows.push(await read(page, menu))
+    seen.windows[index] = await read(page, menu)
+  }
+
+  if (screens && screens.every((name) => name.startsWith('window:'))) {
+    return seen
   }
 
   step('the day is chosen again')
@@ -1024,34 +1038,40 @@ const observeSaved = (browser, url) => observe(browser, async ({ page, step }) =
 
   await settle()
   seen.day = await read(page, day)
-  step('the race is switched while its read is held')
-  state.hold = isRaceLog(QUIET)
-  state.held.length = 0
-  await switchRace(page, QUIET, true)
-  // Held, and the page has asked for all else it needs: the reads in flight are the held ones, and none has started for 1.5 s.
-  await until(page, 'the page with the read of the new race held', async () => state.held.length > 0 && state.pending.size <= state.held.length && Date.now() - state.last >= 1500, () => `${state.held.length} reads held, ${state.pending.size} in flight, ${Date.now() - state.last} ms since the last`)
-  seen.held = { screen: await read(page), calls: state.held.length }
-  state.hold = null
+  if (wanted('held') || wanted('quiet') || wanted('back')) {
+    step('the race is switched while its read is held')
+    state.hold = isRaceLog(QUIET)
+    state.held.length = 0
+    await switchRace(page, QUIET, true)
+    // Held, and the page has asked for all else it needs: the reads in flight are the held ones, and none has started for 1.5 s.
+    await until(page, 'the page with the read of the new race held', async () => state.held.length > 0 && state.pending.size <= state.held.length && Date.now() - state.last >= 1500, () => `${state.held.length} reads held, ${state.pending.size} in flight, ${Date.now() - state.last} ms since the last`)
+    seen.held = { screen: await read(page), calls: state.held.length }
+    state.hold = null
 
-  for (const route of state.held.splice(0)) {
-    await route.continue()
+    for (const route of state.held.splice(0)) {
+      await route.continue()
+    }
+
+    step('the held read is answered')
+    await settle()
+    seen.quiet = await read(page)
   }
-
-  step('the held read is answered')
-  await settle()
-  seen.quiet = await read(page)
-  step('a race whose read fails is opened')
-  state.fail = isRaceLog(BROKEN)
-  await switchRace(page, BROKEN, true)
-  await until(page, 'the switch to the race whose log fails', () => raceOpenIn(page, BROKEN), () => 'the store does not hold the race')
-  await settle()
-  seen.broken = await read(page)
+  if (wanted('broken') || wanted('back')) {
+    step('a race whose read fails is opened')
+    state.fail = isRaceLog(BROKEN)
+    await switchRace(page, BROKEN, true)
+    await until(page, 'the switch to the race whose log fails', () => raceOpenIn(page, BROKEN), () => 'the store does not hold the race')
+    await settle()
+    seen.broken = await read(page)
+  }
   state.fail = null
-  step('the player\'s race is opened again')
-  await switchRace(page, PLAYER, false)
-  await until(page, 'the switch back to the player\'s race', () => raceOpenIn(page, PLAYER), () => 'the store does not hold the race')
-  await settle()
-  seen.back = await read(page)
+  if (wanted('back')) {
+    step('the player\'s race is opened again')
+    await switchRace(page, PLAYER, false)
+    await until(page, 'the switch back to the player\'s race', () => raceOpenIn(page, PLAYER), () => 'the store does not hold the race')
+    await settle()
+    seen.back = await read(page)
+  }
 
   return seen
 }, { expected: [FAILED_FETCH] })
@@ -1385,9 +1405,10 @@ const pageCheck = (id, observation, name, test) => PAGE_CHECKS.push({ id, observ
 const forKind = (item, kind) => item.observation === kind || item.observation === 'any'
 
 const windowScreens = (o) => o.windows.filter(Boolean)
+const windowPositions = (windows) => windows.map((screen, index) => (screen ? index : null))
 
 pageCheck('panel', 'saved', 'the panel is on screen at every window with its summary, a window control whose menu draws the four windows and which draws the window chosen, a window range, a state and a verdict', async ({ o }) => {
-  assert.equal(o.windows.length, 4)
+  assert.deepEqual(windowPositions(o.windows), [0, 1, 2, 3])
   o.windows.forEach((screen, index) => {
     assert.ok(screen.present && screen.visible, `window ${index}`)
     assert.ok(screen.summary.length > 20)
@@ -1463,10 +1484,13 @@ pageCheck('events', 'saved', 'every window lists the events SQL says the race\'s
   // The dates are the oracle's game times written by the app's shared date formatter, which this check does not test.
   const dateOf = (seconds) => FORMAT.dateText(truth.startYear, seconds)
 
-  for (let index = 0; index < 4; index++) {
+  for (const [index, screen] of o.windows.entries()) {
+    if (!screen) {
+      continue
+    }
+
     const groups = await truth.watchedRows(PLAYER, truth.end - WINDOW_SECONDS[index], truth.end)
     const expected = await truth.watched(PLAYER, truth.end - WINDOW_SECONDS[index], truth.end)
-    const screen = o.windows[index]
 
     listedAs(screen, groups, truth, labels, `window ${index}`)
     assert.equal(screen.verdict, expected.length ? 'found' : 'absent', `window ${index}`)
@@ -1492,12 +1516,16 @@ pageCheck('events', 'saved', 'every window lists the events SQL says the race\'s
 })
 
 pageCheck('event-order', 'saved', 'every window lists its events newest first: the game time falling, then the increment, then the type, each row placed by the group it names', async ({ o, truth }) => {
-  for (let index = 0; index < 4; index++) {
+  for (const [index, screen] of o.windows.entries()) {
+    if (!screen) {
+      continue
+    }
+
     const groups = await truth.watchedRows(PLAYER, truth.end - WINDOW_SECONDS[index], truth.end)
     const byKey = new Map(groups.map((group) => [group.key, group]))
     const placeOf = (group) => `${group.time}|${group.increment}|${group.type}`
 
-    assert.deepEqual(o.windows[index].observations.map((observation) => placeOf(byKey.get(observation.key) || {})), groups.map(placeOf), `window ${index}`)
+    assert.deepEqual(screen.observations.map((observation) => placeOf(byKey.get(observation.key) || {})), groups.map(placeOf), `window ${index}`)
   }
 })
 
@@ -1685,49 +1713,79 @@ const PANEL = 'src/renderer/components/log/DiagnosticPanel.vue'
 const PAGE = 'src/renderer/pages/log.vue'
 const DIAGNOSTICS = 'src/renderer/utilities/log-diagnostics.js'
 const ARCHIVE = 'src/renderer/utilities/event-archive.js'
+const WINDOW_SCREENS = WINDOW_SECONDS.map((_seconds, index) => `window:${index}`)
+const SAVED_SCREENS = [...WINDOW_SCREENS, 'held', 'quiet', 'broken', 'back']
+const SCREEN_READS = {
+  panel: WINDOW_SCREENS.map((screen) => [screen]),
+  'window-chosen': [WINDOW_SCREENS],
+  'window-state': WINDOW_SCREENS.map((screen) => [screen]),
+  events: [WINDOW_SCREENS],
+  'event-order': [WINDOW_SCREENS],
+  'event-copies': [['window:1']],
+  'event-states': [['window:3']],
+  'game-master': [WINDOW_SCREENS],
+  'hidden-flag': [['window:1']],
+  inputs: [['window:1']],
+  pointers: [WINDOW_SCREENS],
+  'race-switch': [['held'], ['quiet']],
+  'unavailable-read': [['broken']],
+  'no-claims': SAVED_SCREENS.map((screen) => [screen]),
+  back: [['held'], ['quiet'], ['broken'], ['back']],
+  hooks: [SAVED_SCREENS],
+  'no-errors': [],
+}
+
+const screenProblems = (faults) => faults.filter((fault) => fault.screens !== undefined && (fault.needs[0] !== 'saved' || !Array.isArray(fault.screens) || !fault.screens.length || fault.screens.some((screen) => !SAVED_SCREENS.includes(screen)) || fault.fails.some((id) => !SCREEN_READS[id] || SCREEN_READS[id].some((choices) => !choices.some((screen) => fault.screens.includes(screen)))))).map((fault) => fault.name)
+
+unit('fault-screens', 'every narrowed page fault drives a screen or state of every reader path its named checks use, and rewrites drive every screen', ({ pageFaults = PAGE_FAULTS, pageRewrites = PAGE_REWRITES, headWindows = Array.from({ length: 4 }, () => ({})) }) => {
+  assert.deepEqual(screenProblems(pageFaults), [])
+  assert.deepEqual(pageRewrites.filter((rewrite) => rewrite.screens !== undefined).map((rewrite) => rewrite.name), [])
+  assert.deepEqual(windowPositions(headWindows), [0, 1, 2, 3])
+})
+
 const GLOSSARY = 'src/renderer/utilities/glossary.js'
 
 /* eslint-disable no-template-curly-in-string */
 const PAGE_FAULTS = [
-  { name: 'the evidence of the earlier race is kept while the new one is read', file: PAGE, change: swapText('this.diagnostic = Object.freeze({ key, database, inputs: null })', 'this.diagnostic = Object.freeze({ key, database, inputs: this.diagnostic.inputs })'), fails: ['race-switch'], needs: ['saved'] },
-  { name: 'an unavailable window carries counts of 0 in its hooks', file: PANEL, change: swapText(':data-count="diagnosis.verdict === \'unavailable\' ? null : entry.count"', ':data-count="entry.count"'), fails: ['hooks'], needs: ['saved'] },
-  { name: 'every event carries the state of the window in its hook', file: PANEL, change: swapText(':data-state="observation.state"', ':data-state="diagnosis.state"'), fails: ['hooks'], needs: ['saved'] },
-  { name: 'a type draws a count other than its own', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count + 1) }}</span>'), fails: ['events'], needs: ['saved'] },
-  { name: 'every event draws a constant state', file: PANEL, change: swapText('data-event-state>{{ stateText[observation.state] }}</span>', 'data-event-state>{{ stateText.partial }}</span>'), fails: ['event-states'], needs: ['saved'] },
-  { name: 'the window draws a constant state', file: PANEL, change: swapText('data-window-state>{{ stateText[diagnosis.state] }}</span>', 'data-window-state>{{ stateText.observed }}</span>'), fails: ['window-state'], needs: ['saved'] },
-  { name: 'identical events draw no copies', file: PANEL, change: swapText('<span v-if="observation.copies > 1" class="diagnostic-chip" data-event-copies>', '<span v-if="false" class="diagnostic-chip" data-event-copies>'), fails: ['event-copies', 'events'], needs: ['saved'] },
-  { name: 'every input draws a constant status', file: PANEL, change: swapText('<provenance-mark :result="input.result" label />', '<provenance-mark status="confirmed" label />'), fails: ['inputs'], needs: ['saved'] },
-  { name: 'every reason draws the same words', file: PANEL, change: swapText(':data-reason="reason">{{ reasonText[reason] }}</li>', ':data-reason="reason">{{ reasonText.tail }}</li>'), fails: ['window-state'], needs: ['saved'] },
+  { name: 'the evidence of the earlier race is kept while the new one is read', file: PAGE, change: swapText('this.diagnostic = Object.freeze({ key, database, inputs: null })', 'this.diagnostic = Object.freeze({ key, database, inputs: this.diagnostic.inputs })'), fails: ['race-switch'], needs: ['saved'], screens: ['held', 'quiet'] },
+  { name: 'an unavailable window carries counts of 0 in its hooks', file: PANEL, change: swapText(':data-count="diagnosis.verdict === \'unavailable\' ? null : entry.count"', ':data-count="entry.count"'), fails: ['hooks'], needs: ['saved'], screens: ['broken'] },
+  { name: 'every event carries the state of the window in its hook', file: PANEL, change: swapText(':data-state="observation.state"', ':data-state="diagnosis.state"'), fails: ['hooks'], needs: ['saved'], screens: ['window:3'] },
+  { name: 'a type draws a count other than its own', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count + 1) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'every event draws a constant state', file: PANEL, change: swapText('data-event-state>{{ stateText[observation.state] }}</span>', 'data-event-state>{{ stateText.partial }}</span>'), fails: ['event-states'], needs: ['saved'], screens: ['window:3'] },
+  { name: 'the window draws a constant state', file: PANEL, change: swapText('data-window-state>{{ stateText[diagnosis.state] }}</span>', 'data-window-state>{{ stateText.observed }}</span>'), fails: ['window-state'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { name: 'identical events draw no copies', file: PANEL, change: swapText('<span v-if="observation.copies > 1" class="diagnostic-chip" data-event-copies>', '<span v-if="false" class="diagnostic-chip" data-event-copies>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'every input draws a constant status', file: PANEL, change: swapText('<provenance-mark :result="input.result" label />', '<provenance-mark status="confirmed" label />'), fails: ['inputs'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'every reason draws the same words', file: PANEL, change: swapText(':data-reason="reason">{{ reasonText[reason] }}</li>', ':data-reason="reason">{{ reasonText.tail }}</li>'), fails: ['window-state'], needs: ['saved'], screens: WINDOW_SCREENS },
   { name: 'an absent window draws the unknown verdict', file: PANEL, change: swapText('<span v-else-if="diagnosis.verdict === \'absent\'" data-verdict-shown="absent">', '<span v-else-if="false" data-verdict-shown="absent">'), fails: ['events', 'no-claims'], needs: ['saved'] },
-  { name: 'a found window draws the count of groups, not of events', file: PANEL, change: swapText('<span data-verdict-count>{{ count(diagnosis.observed) }}</span>', '<span data-verdict-count>{{ count(diagnosis.observations.length) }}</span>'), fails: ['events'], needs: ['saved'] },
-  { name: 'a type draws its count negative', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(-entry.count) }}</span>'), fails: ['events'], needs: ['saved'] },
-  { name: 'identical events draw their copies negative', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value>{{ count(-observation.copies) }}</span>'), fails: ['event-copies', 'events'], needs: ['saved'] },
-  { name: 'a type draws its count with a stray character', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count) }} %</span>'), fails: ['events'], needs: ['saved'] },
-  { name: 'a pointer draws another release', file: PANEL, change: swapText('Release {{ entry.versions }}, reviewed {{ entry.reviewed }}', 'Release 2.0.0, reviewed {{ entry.reviewed }}'), fails: ['pointers'], needs: ['saved'] },
-  { name: 'a pointer draws the definition of the first pointer under its own name', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition>{{ pointers[0].definition }}</div>'), fails: ['pointers'], needs: ['saved'] },
-  { name: 'a pointer draws its definition at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>', '<div data-pointer-definition style="opacity: 0">'), fails: ['pointers'], needs: ['saved'] },
+  { name: 'a found window draws the count of groups, not of events', file: PANEL, change: swapText('<span data-verdict-count>{{ count(diagnosis.observed) }}</span>', '<span data-verdict-count>{{ count(diagnosis.observations.length) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'a type draws its count negative', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(-entry.count) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'identical events draw their copies negative', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value>{{ count(-observation.copies) }}</span>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'a type draws its count with a stray character', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count) }} %</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'a pointer draws another release', file: PANEL, change: swapText('Release {{ entry.versions }}, reviewed {{ entry.reviewed }}', 'Release 2.0.0, reviewed {{ entry.reviewed }}'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
+  { name: 'a pointer draws the definition of the first pointer under its own name', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition>{{ pointers[0].definition }}</div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
+  { name: 'a pointer draws its definition at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>', '<div data-pointer-definition style="opacity: 0">'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'the checklist reads the archive before the watcher refreshes it and keys it by the revision only', file: PAGE, change: chain(swapText('      archiveChoice: false,\n', '      archiveChoice: false,\n      archive: null,\n'), swapText('    archive() {\n      return this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null\n    },\n\n', ''), swapText('this.archiveSnapshot,', "this.archiveRecord ? this.archiveRecord.revision : '',"), swapText('    archiveRecord(record) {', '    archiveKey: {\n      immediate: true,\n      handler() {\n        this.archive = this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null\n      },\n    },\n    archiveRecord(record) {')), fails: ['archive-refresh'], needs: ['refresh'] },
-  { name: 'the Fleet window controls are left out of the pointers', file: DIAGNOSTICS, change: swapText("['cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window']", "['cease-fire', 'game-events-window']"), fails: ['pointers'], needs: ['saved'] },
+  { name: 'the Fleet window controls are left out of the pointers', file: DIAGNOSTICS, change: swapText("['cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window']", "['cease-fire', 'game-events-window']"), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'an empty window is worded as safe', file: DIAGNOSTICS, change: swapText('None of the watched event types was found in the observed part of this window. The log keeps only what the game wrote, so this says nothing about the game beyond the log.', 'Nothing happened in this window: the race is safe.'), fails: ['no-claims'], needs: ['saved'] },
-  { name: 'the absent sentence is drawn for a found diagnosis with its hooks intact', file: PANEL, change: swapText("{{ verdictText.found[diagnosis.observed === 1 ? 'one' : 'many'] }}", '{{ verdictText.absent }}'), fails: ['events', 'hooks'], needs: ['saved'] },
-  { name: 'the absent sentence is drawn for an unavailable diagnosis with its hooks intact', file: PANEL, change: swapText('<span data-verdict-words>{{ verdictText.unavailable }}</span>', '<span data-verdict-words>{{ verdictText.absent }}</span>'), fails: ['unavailable-read', 'hooks'], needs: ['saved'] },
-  { name: 'the end of the range is shifted by one increment', file: PANEL, change: swapText('{{ date(diagnosis.window.to) }}', '{{ date(diagnosis.window.to - 432000) }}'), fails: ['events'], needs: ['saved'] },
-  { name: 'the copies numeral is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value><span style="opacity: 0">{{ count(observation.copies) }}</span></span>'), fails: ['event-copies', 'events'], needs: ['saved'] },
-  { name: 'the end of the range is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-window-to>{{ date(diagnosis.window.to) }}</span>', '<span data-window-to><span style="opacity: 0">{{ date(diagnosis.window.to) }}</span></span>'), fails: ['panel', 'events'], needs: ['saved'] },
-  { name: 'a pointer definition is drawn by a child at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition><span style="opacity: 0">{{ entry.definition }}</span></div>'), fails: ['pointers'], needs: ['saved'] },
-  { name: 'two events of one type draw one another\'s date and increment', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('data-event-increment>{{ observation.increment[0] }}', 'data-event-increment>{{ twin(at).increment[0] }}'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events'], needs: ['saved'] },
-  { name: 'two events of one type draw one another\'s date', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events'], needs: ['saved'] },
-  { name: 'the events are listed in reverse', file: PANEL, change: swapText('this.diagnosis.observations.slice(0, LISTED)', 'this.diagnosis.observations.slice(0, LISTED).reverse()'), fails: ['event-order'], needs: ['saved'] },
-  { name: 'two events of one type draw one another\'s message', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('<div class="diagnostic-message">{{ observation.message }}</div>', '<div class="diagnostic-message">{{ twin(at).message }}</div>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events', 'hooks'], needs: ['saved'] },
-  { name: 'a type draws the group of the other kind', file: PANEL, change: swapText('<span class="diagnostic-chip">{{ groups[entry.group] }}</span>', '<span class="diagnostic-chip">{{ groups[entry.group === \'fire\' ? \'boarding\' : \'fire\'] }}</span>'), fails: ['events'], needs: ['saved'] },
-  { name: 'a game-master-only event is listed', file: DIAGNOSTICS, change: swapText(' && !group[GAME_MASTER]', ''), fails: ['game-master', 'events'], needs: ['saved'] },
+  { name: 'the absent sentence is drawn for a found diagnosis with its hooks intact', file: PANEL, change: swapText("{{ verdictText.found[diagnosis.observed === 1 ? 'one' : 'many'] }}", '{{ verdictText.absent }}'), fails: ['events', 'hooks'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'the absent sentence is drawn for an unavailable diagnosis with its hooks intact', file: PANEL, change: swapText('<span data-verdict-words>{{ verdictText.unavailable }}</span>', '<span data-verdict-words>{{ verdictText.absent }}</span>'), fails: ['unavailable-read', 'hooks'], needs: ['saved'], screens: ['broken'] },
+  { name: 'the end of the range is shifted by one increment', file: PANEL, change: swapText('{{ date(diagnosis.window.to) }}', '{{ date(diagnosis.window.to - 432000) }}'), fails: ['events'], needs: ['saved'], screens: ['window:0'] },
+  { name: 'the copies numeral is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value><span style="opacity: 0">{{ count(observation.copies) }}</span></span>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'the end of the range is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-window-to>{{ date(diagnosis.window.to) }}</span>', '<span data-window-to><span style="opacity: 0">{{ date(diagnosis.window.to) }}</span></span>'), fails: ['panel', 'events'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { name: 'a pointer definition is drawn by a child at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition><span style="opacity: 0">{{ entry.definition }}</span></div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
+  { name: 'two events of one type draw one another\'s date and increment', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('data-event-increment>{{ observation.increment[0] }}', 'data-event-increment>{{ twin(at).increment[0] }}'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events'], needs: ['saved'], screens: ['window:3'] },
+  { name: 'two events of one type draw one another\'s date', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events'], needs: ['saved'], screens: ['window:3'] },
+  { name: 'the events are listed in reverse', file: PANEL, change: swapText('this.diagnosis.observations.slice(0, LISTED)', 'this.diagnosis.observations.slice(0, LISTED).reverse()'), fails: ['event-order'], needs: ['saved'], screens: ['window:2'] },
+  { name: 'two events of one type draw one another\'s message', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('<div class="diagnostic-message">{{ observation.message }}</div>', '<div class="diagnostic-message">{{ twin(at).message }}</div>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events', 'hooks'], needs: ['saved'], screens: ['window:3'] },
+  { name: 'a type draws the group of the other kind', file: PANEL, change: swapText('<span class="diagnostic-chip">{{ groups[entry.group] }}</span>', '<span class="diagnostic-chip">{{ groups[entry.group === \'fire\' ? \'boarding\' : \'fire\'] }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:0'] },
+  { name: 'a game-master-only event is listed', file: DIAGNOSTICS, change: swapText(' && !group[GAME_MASTER]', ''), fails: ['game-master', 'events'], needs: ['saved'], screens: ['window:0'] },
   { name: 'a gap between the archive and the save is not told', file: DIAGNOSTICS, change: swapText('if (gaps.slice(1).some(meets)) {', 'if (false) {'), fails: ['gap'], needs: ['older'] },
   { name: 'a window an archive covers is partial all the same', file: ARCHIVE, change: swapText("? 'partial' : 'observed'\n\n  return {\n    state,", "? 'partial' : 'partial'\n\n  return {\n    state,"), fails: ['observed-window'], needs: ['ahead'] },
-  { name: 'the verdict sits in a hidden ancestor', file: PANEL, change: swapText('<div v-else class="diagnostic-body">', '<div v-else class="diagnostic-body" v-show="false">'), fails: ['panel'], needs: ['saved'] },
-  { name: 'the verdict sits in an ancestor at opacity 0', file: PANEL, change: swapText('<div v-else class="diagnostic-body">', '<div v-else class="diagnostic-body" style="opacity: 0">'), fails: ['panel'], needs: ['saved'] },
-  { name: 'an unavailable window draws the words of none observed under its unknown hook', file: PANEL, change: swapText('data-count-unknown>{{ countText.unknown }}</span>', 'data-count-unknown>{{ countText.none }}</span>'), fails: ['unavailable-read'], needs: ['saved'] },
-  { name: 'a hidden type draws the words of the unlisted mark under its hidden hook', file: PANEL, change: swapText('data-hidden>{{ markText.hidden }}</span>', 'data-hidden>{{ markText.unlisted }}</span>'), fails: ['hidden-flag'], needs: ['saved'] },
-  { name: 'every window of the menu and the window chosen draw the label of the first window, the values intact', file: PANEL, change: swapText('item-text="text"', ':item-text="() => windows[0].text"'), fails: ['panel', 'window-chosen'], needs: ['saved'] },
+  { name: 'the verdict sits in a hidden ancestor', file: PANEL, change: swapText('<div v-else class="diagnostic-body">', '<div v-else class="diagnostic-body" v-show="false">'), fails: ['panel'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { name: 'the verdict sits in an ancestor at opacity 0', file: PANEL, change: swapText('<div v-else class="diagnostic-body">', '<div v-else class="diagnostic-body" style="opacity: 0">'), fails: ['panel'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { name: 'an unavailable window draws the words of none observed under its unknown hook', file: PANEL, change: swapText('data-count-unknown>{{ countText.unknown }}</span>', 'data-count-unknown>{{ countText.none }}</span>'), fails: ['unavailable-read'], needs: ['saved'], screens: ['broken'] },
+  { name: 'a hidden type draws the words of the unlisted mark under its hidden hook', file: PANEL, change: swapText('data-hidden>{{ markText.hidden }}</span>', 'data-hidden>{{ markText.unlisted }}</span>'), fails: ['hidden-flag'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'every window of the menu and the window chosen draw the label of the first window, the values intact', file: PANEL, change: swapText('item-text="text"', ':item-text="() => windows[0].text"'), fails: ['panel', 'window-chosen'], needs: ['saved'], screens: WINDOW_SCREENS },
 ]
 
 // One equivalent rewrite of each family, made together so that the page is observed once for all of them: the window control written long-hand and listening to its input event, its labels bound by a function and one of them worded another way (R047-2), the page taking the window by an explicit handler, each condition in parentheses or turned round, the qualifier of the hidden mark moved from prefix to suffix, the verdicts, a pointer and the headings worded another way, the pointer ids registered by a spread and a template literal, the order of the events by parenthesised comparisons, each value drawn by `v-text`, through `Number`, `String` or a template literal, and each element and its ancestors at opacity 1 with its text in a child at opacity 1 (R161-6, R161-9). The page, the panel, the checklist and the glossary each change; where two families meet on one element, both are made on it.
@@ -1812,7 +1870,10 @@ const resultsOfUnits = async (modules, ids = null) => runChecks(UNIT.filter((ite
 
 // A fault or a rewrite of the utilities, run against the whole suite of units.
 const judgeUnits = async (variant) => {
-  const modules = await loadModules(variant.sources())
+  const modules = await loadModules(variant.sources ? variant.sources() : {})
+  modules.pageFaults = variant.pageFaults ? variant.pageFaults() : PAGE_FAULTS
+  modules.pageRewrites = variant.pageRewrites ? variant.pageRewrites() : PAGE_REWRITES
+  modules.headWindows = variant.headWindows ? variant.headWindows() : undefined
 
   return judged(await resultsOfUnits(modules), `the ${variant.name}`)
 }
@@ -1962,7 +2023,7 @@ const view = async (kind, variant) => {
   }
 
   try {
-    const seen = kind === 'saved' ? await observeSaved(chrome, server.url) : kind === 'refresh' ? await observeRefreshed(chrome, server.url, seeds.ahead.file, refreshes) : await observeArchived(chrome, server.url, seeds[kind].file, kind === 'older' ? [1, 3] : [0, 1, 2, 3])
+    const seen = kind === 'saved' ? await observeSaved(chrome, server.url, variant && variant.screens) : kind === 'refresh' ? await observeRefreshed(chrome, server.url, seeds.ahead.file, refreshes) : await observeArchived(chrome, server.url, seeds[kind].file, kind === 'older' ? [1, 3] : [0, 1, 2, 3])
 
     // A page that did not get through is told whole where it is met, in the output of its variant: the step, the message with Playwright's call log, and what the page showed then. Its checks say it in one line.
     if (seen.error !== null) {
@@ -2012,8 +2073,14 @@ const checkRecorder = async () => {
 }
 
 const checkPageFault = async (fault) => {
+  const missing = screenProblems([fault])
+
+  if (missing.length) {
+    throw new HarnessError(`the fault omits a screen its named check reads: ${missing.join(', ')}`)
+  }
+
   const seen = await view(fault.needs[0], fault)
-  const outcome = await resultsOfPage(seen, await contextOf(fault.needs[0], fault), { ids: null, label: `the page with the fault "${fault.name}"`, list: PAGE_CHECKS.filter((item) => forKind(item, fault.needs[0])) })
+  const outcome = await resultsOfPage(seen, await contextOf(fault.needs[0], fault), { ids: fault.screens ? [...fault.fails, 'no-errors'] : null, label: `the page with the fault "${fault.name}"`, list: PAGE_CHECKS.filter((item) => forKind(item, fault.needs[0])) })
 
   if (outcome.unobserved) {
     throw new HarnessError(`the page with the fault "${fault.name}" did not get through: ${outcome.unobserved}`)

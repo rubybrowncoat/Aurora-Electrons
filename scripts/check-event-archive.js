@@ -1716,13 +1716,17 @@ const expectedSeed = (record, t) => {
 }
 
 const snapshotCount = (branch) => branch.races[FALRYX_RACE].snapshots.length
+const RECORDER_SCHEDULES = ['rthrow', 'rsuperseded']
+const recorderSchedules = (only, schedules = RECORDER_SCHEDULES) => schedules.filter((key) => only === null || only.includes(key))
 
-const recorder = async (m) => {
+const recorder = async (m, only = null) => {
   const files = falryxOrder()
 
   if (!files) {
     return null
   }
+
+  const schedules = recorderSchedules(only)
 
   const result = { files, sql: await Promise.all(files.map((file) => saveOf(file, FALRYX_GAME, FALRYX_RACE))) }
   const inst = installation()
@@ -1865,66 +1869,68 @@ const recorder = async (m) => {
   result.orphan = { run: orphanRun, parent: orphan.files.get(own), child: orphan.events(campaignId, 'b2'), eventWrites: orphan.eventWrites(), registry: orphanRegistry, branch: orphan.branch(campaignId, 'b2'), writes: orphan.writes.slice(orphanWrites).map(({ name }) => name) }
 
   // A store that throws when read (damaged JSON, an I/O error): the same refusal as an archive this version cannot read, and never the pass's outer catch, which would skip the empire's snapshot.
-  const record1 = async (inst2, file2, options) => {
-    const run = await recordOf(m, inst2, file2, options)
+  if (schedules.includes('rthrow')) {
+    const record1 = async (inst2, file2, options) => {
+      const run = await recordOf(m, inst2, file2, options)
 
-    return { run, branch: inst2.branch(campaignId), eventWrites: inst2.eventWrites() }
+      return { run, branch: inst2.branch(campaignId), eventWrites: inst2.eventWrites() }
+    }
+
+    const throwBase = inst.start.copy()
+
+    turnOn(m, throwBase, campaignId, FALRYX_RACE)
+    await recordOf(m, throwBase, files[0])
+
+    const throwWhole = throwBase.copy()
+
+    await recordOf(m, throwWhole, files[1])
+
+    const throwOwn = throwBase.copy()
+
+    throwOwn.breakStore(own)
+
+    const ownBefore = throwOwn.eventWrites()
+    const ownRun = await record1(throwOwn, files[1])
+
+    result.throwOwn = { run: ownRun.run, snapshots: snapshotCount(ownRun.branch), expected: snapshotCount(throwWhole.branch(campaignId)), events: throwOwn.files.get(own), eventsBefore: throwBase.files.get(own), writes: ownRun.eventWrites - ownBefore }
+
+    const throwTwice = throwBase.copy()
+
+    throwTwice.breakStore(own, 1)
+
+    const twiceRun = await recordOf(m, throwTwice, files[1])
+
+    result.throwTwice = { run: twiceRun, writes: throwTwice.eventWrites(), events: throwTwice.files.get(own), eventsBefore: throwBase.files.get(own) }
+
+    const throwFork = inst.afterB1.copy()
+
+    throwFork.breakStore(own)
+
+    const forkWritesBefore = throwFork.eventWrites()
+    const forkRun = await recordOf(m, throwFork, files[4])
+    const forkRegistry = throwFork.registry().campaigns[campaignId]
+
+    result.throwFork = { run: forkRun, child: throwFork.events(campaignId, 'b2'), registry: forkRegistry, branch: throwFork.branch(campaignId, 'b2'), writes: throwFork.eventWrites() - forkWritesBefore, colonies: [...throwFork.files.keys()].filter((name) => name.includes('colonies') && name.includes('-b2')) }
+    throwFork.mendStore(own)
+    await recordOf(m, throwFork, files[4])
+    result.throwFork.mended = throwFork.events(campaignId, 'b2')
+
+    const throwOff = inst.start.copy()
+
+    await recordOf(m, throwOff, files[1])
+    await recordOf(m, throwOff, files[3])
+    throwOff.breakStore(own)
+
+    const offFork = await recordOf(m, throwOff, files[4])
+
+    result.throwOff = { run: offFork, registry: throwOff.registry().campaigns[campaignId], branch: throwOff.branch(campaignId, 'b2'), names: [...throwOff.files.keys()].filter((name) => name.includes('events')) }
+
+    const throwQuiet = inst.start.copy()
+
+    throwQuiet.breakStore(own)
+    throwQuiet.breakStore('file:' + m.a.eventFileName(campaignId, 'b2'))
+    result.throwQuiet = { run: await recordOf(m, throwQuiet, files[1]), branch: throwQuiet.branch(campaignId) }
   }
-
-  const throwBase = inst.start.copy()
-
-  turnOn(m, throwBase, campaignId, FALRYX_RACE)
-  await recordOf(m, throwBase, files[0])
-
-  const throwWhole = throwBase.copy()
-
-  await recordOf(m, throwWhole, files[1])
-
-  const throwOwn = throwBase.copy()
-
-  throwOwn.breakStore(own)
-
-  const ownBefore = throwOwn.eventWrites()
-  const ownRun = await record1(throwOwn, files[1])
-
-  result.throwOwn = { run: ownRun.run, snapshots: snapshotCount(ownRun.branch), expected: snapshotCount(throwWhole.branch(campaignId)), events: throwOwn.files.get(own), eventsBefore: throwBase.files.get(own), writes: ownRun.eventWrites - ownBefore }
-
-  const throwTwice = throwBase.copy()
-
-  throwTwice.breakStore(own, 1)
-
-  const twiceRun = await recordOf(m, throwTwice, files[1])
-
-  result.throwTwice = { run: twiceRun, writes: throwTwice.eventWrites(), events: throwTwice.files.get(own), eventsBefore: throwBase.files.get(own) }
-
-  const throwFork = inst.afterB1.copy()
-
-  throwFork.breakStore(own)
-
-  const forkWritesBefore = throwFork.eventWrites()
-  const forkRun = await recordOf(m, throwFork, files[4])
-  const forkRegistry = throwFork.registry().campaigns[campaignId]
-
-  result.throwFork = { run: forkRun, child: throwFork.events(campaignId, 'b2'), registry: forkRegistry, branch: throwFork.branch(campaignId, 'b2'), writes: throwFork.eventWrites() - forkWritesBefore, colonies: [...throwFork.files.keys()].filter((name) => name.includes('colonies') && name.includes('-b2')) }
-  throwFork.mendStore(own)
-  await recordOf(m, throwFork, files[4])
-  result.throwFork.mended = throwFork.events(campaignId, 'b2')
-
-  const throwOff = inst.start.copy()
-
-  await recordOf(m, throwOff, files[1])
-  await recordOf(m, throwOff, files[3])
-  throwOff.breakStore(own)
-
-  const offFork = await recordOf(m, throwOff, files[4])
-
-  result.throwOff = { run: offFork, registry: throwOff.registry().campaigns[campaignId], branch: throwOff.branch(campaignId, 'b2'), names: [...throwOff.files.keys()].filter((name) => name.includes('events')) }
-
-  const throwQuiet = inst.start.copy()
-
-  throwQuiet.breakStore(own)
-  throwQuiet.breakStore('file:' + m.a.eventFileName(campaignId, 'b2'))
-  result.throwQuiet = { run: await recordOf(m, throwQuiet, files[1]), branch: throwQuiet.branch(campaignId) }
 
   // A failed read on the parent, then a fork: the parent's record holds a noted failure and no rows, and the fork is given it.
   const noted = inst.start.copy()
@@ -1941,40 +1947,42 @@ const recorder = async (m) => {
 
   result.noted = { parent: notedParent, fork: notedRegistry.branches.b2 && notedRegistry.branches.b2.fork, child: noted.events(campaignId, 'b2'), t: await gameTimeOf(files[1], FALRYX_GAME) }
 
-  // A pass replaced at each of its checks.
-  const base = inst.start.copy()
+  // A pass replaced at each of its checks. A fault runs this schedule only when it names the supersession check; the unchanged head still runs every schedule.
+  if (schedules.includes('rsuperseded')) {
+    const base = inst.start.copy()
 
-  turnOn(m, base, campaignId, FALRYX_RACE)
-  await recordOf(m, base, files[0])
+    turnOn(m, base, campaignId, FALRYX_RACE)
+    await recordOf(m, base, files[0])
 
-  const baseEvents = base.events(campaignId, 'b1')
-  let guards = 0
+    const baseEvents = base.events(campaignId, 'b1')
+    let guards = 0
 
-  await recordOf(m, base.copy(), files[1], { isCurrent: () => { guards++; return true } })
+    await recordOf(m, base.copy(), files[1], { isCurrent: () => { guards++; return true } })
 
-  let unchangedGuards = 0
-  const unchanged = base.copy()
+    let unchangedGuards = 0
+    const unchanged = base.copy()
 
-  await recordOf(m, unchanged, files[1])
-  await recordOf(m, unchanged, files[1], { isCurrent: () => { unchangedGuards++; return true } })
+    await recordOf(m, unchanged, files[1])
+    await recordOf(m, unchanged, files[1], { isCurrent: () => { unchangedGuards++; return true } })
 
-  const complete = base.copy()
+    const complete = base.copy()
 
-  await recordOf(m, complete, files[1])
+    await recordOf(m, complete, files[1])
 
-  const whole = complete.events(campaignId, 'b1')
+    const whole = complete.events(campaignId, 'b1')
 
-  result.superseded = { guards, unchangedGuards, baseEvents, whole, runs: [] }
+    result.superseded = { guards, unchangedGuards, baseEvents, whole, runs: [] }
 
-  for (let allowed = 0; allowed <= guards; allowed++) {
-    const run = base.copy()
-    let calls = 0
+    for (let allowed = 0; allowed <= guards; allowed++) {
+      const run = base.copy()
+      let calls = 0
 
-    run.setCut(() => calls > allowed)
+      run.setCut(() => calls > allowed)
 
-    const outcome = await recordOf(m, run, files[1], { isCurrent: () => ++calls <= allowed })
+      const outcome = await recordOf(m, run, files[1], { isCurrent: () => ++calls <= allowed })
 
-    result.superseded.runs.push({ allowed, superseded: outcome.superseded, afterCut: run.writes.filter(({ cut }) => cut).length, events: run.events(campaignId, 'b1') })
+      result.superseded.runs.push({ allowed, superseded: outcome.superseded, afterCut: run.writes.filter(({ cut }) => cut).length, events: run.events(campaignId, 'b1') })
+    }
   }
 
   // The cap in force: 25,000 events held of the two saves of the first branch (20,051 and 17,571 events).
@@ -2275,6 +2283,20 @@ check('rclear', 'clearing a race\'s history on a branch clears its event archive
   assert.equal(m.a.eventFileProblem(m.history.eventStore(campaignId, 'b1').store), null)
 })
 
+check('recorder-schedules', 'the full head keeps both replay schedules and every named recorder check keeps the schedules its assertions read', 'unit', ({ scheduleKeys }) => {
+  assert.deepEqual(recorderSchedules(null, scheduleKeys).sort(), ['rsuperseded', 'rthrow'])
+  assert.deepEqual(recorderSchedules([], scheduleKeys), [])
+
+  for (const { key } of checks.filter((entry) => entry.needs === 'recorder')) {
+    const expected = key === 'rthrow' || key === 'rsuperseded' ? [key] : []
+
+    assert.deepEqual(recorderSchedules([key], scheduleKeys), expected, key)
+    assert.deepEqual(recorderSchedules([key], scheduleKeys.slice().reverse()), expected, `${key}, declarations reversed`)
+  }
+
+  assert.deepEqual(recorderSchedules(['rthrow', 'rsuperseded'], scheduleKeys).sort(), ['rsuperseded', 'rthrow'])
+})
+
 // ---------- the mutations ----------
 
 const MUTATIONS = [
@@ -2417,6 +2439,8 @@ const MUTATIONS = [
   { name: 'a pin is held at any count above its own', file: 'event-pins.js', find: 'if (held === pin.count) {', replace: 'if (held >= pin.count) {', fails: ['pinstate'] },
   { name: 'an event the save does not hold is gone even in the oldest increment', file: 'event-pins.js', find: "return id === window.first ? 'older' : 'gone'", replace: "return 'gone'", fails: ['pinstate'] },
   { name: 'a different count is told as held', file: 'event-pins.js', find: "  return 'count'\n}", replace: "  return 'held'\n}", fails: ['pinstate'] },
+  { name: 'the throwing-store replay is omitted from its named check', schedules: ['rsuperseded'], fails: ['recorder-schedules'] },
+  { name: 'the supersession replay is omitted from its named check', schedules: ['rthrow'], fails: ['recorder-schedules'] },
 ]
 
 // ---------- running ----------
@@ -2448,8 +2472,8 @@ const memo = (work) => {
 }
 
 // The context a check runs in for one set of modules; a scenario is run once, on its first use.
-const contextOf = (m) => {
-  const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m)) }
+const contextOf = (m, only = null, scheduleKeys = RECORDER_SCHEDULES) => {
+  const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m, only)) }
 
   return {
     run: async ({ needs, run }) => {
@@ -2461,7 +2485,7 @@ const contextOf = (m) => {
         return 'skip'
       }
 
-      return run({ m, f, s, r })
+      return run({ m, f, s, r, scheduleKeys })
     },
   }
 }
@@ -2484,9 +2508,11 @@ const judge = async (mutation) => {
   let directory = null
 
   try {
-    directory = planted(mutation)
+    if (!mutation.schedules) {
+      directory = planted(mutation)
+    }
 
-    const mutant = contextOf(await loadModules(directory))
+    const mutant = contextOf(await loadModules(directory || utilitiesDirectory), mutation.fails, mutation.schedules)
     const named = checks.filter((entry) => mutation.fails.includes(entry.key))
     const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
     const missed = []
