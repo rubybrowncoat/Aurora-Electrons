@@ -10,7 +10,7 @@
 
   The saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only; a save that is not there is skipped and counts as neither a pass nor a failure) give the real reads, which are compared with raw counts, the engineers' rating at each colony compared with the figure the Production page's modifiers hold, the routes of real colonies, and copies of the saves in memory (temporary tables over the read-only save) with a colony short of workers, a null rating, a null commander bonus, a dropped column and an unconfirmed commander bonus lookup.
 
-  Each mutation of a utility, the page or the haul module must fail the checks it names. Exit code 1 when a check fails.
+  Each mutation of a utility, the page or the haul module must fail the checks it names. A mutation's run calls only the functions that make the checks it names and loads the page only for the page's checks or the saves'; the head fails when a check a run names reads the page that run leaves out. Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
@@ -2156,16 +2156,56 @@ const sourcesOf = (mutant) => {
   return sources
 }
 
-const contextOf = async (sources) => {
+// The functions that make the checks that need no save, in the order they run. Each key's checks are all made by one of them (checked by the head), so a mutation's run calls only theirs.
+const BUILDERS = { pure, loaders, page: pageStatements }
+const BUILDER_NAMES = Object.keys(BUILDERS)
+const builderOf = (key) => (key === 'loaders' ? 'loaders' : ['page', 'template', 'capabilities'].includes(key) ? 'page' : 'pure')
+const buildersOf = (keys) => BUILDER_NAMES.filter((name) => keys.some((key) => builderOf(key) === name))
+
+// Whether a run judging `keys` loads the page: for the page's checks and the saves'.
+const loadsPage = (keys) => keys.some((key) => key.startsWith('save-')) || buildersOf(keys).includes('page')
+
+const contextOf = async (sources, page = true) => {
   const utilitySources = Object.fromEntries([U, D, H].filter((file) => sources[file] !== textOf(file)).map((file) => [FILES[file], sources[file]]))
   const m = await loadUtilities(NAMES, { stubs: STUBS, sources: utilitySources })
-  const pageSources = { 'pages/colony-outlook': sources[P], ...Object.fromEntries(Object.entries(utilitySources).map(([name, text]) => [`utilities/${name}`, text])) }
-  const pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+  const ctx = { m, pageText: sources[P], capabilitiesText: sources[C] }
 
-  return { m, pageOptions, pageText: sources[P], capabilitiesText: sources[C] }
+  if (page) {
+    const pageSources = { 'pages/colony-outlook': sources[P], ...Object.fromEntries(Object.entries(utilitySources).map(([name, text]) => [`utilities/${name}`, text])) }
+
+    ctx.pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+  }
+
+  return ctx
 }
 
-const runStatements = async (statements, keys = null) => {
+// The context of the head, whose loaded page notes each read: `reader` is the function making its checks (`make <name>`, `make saves`) or the key of the check running (`check <key>`), and `reads` holds the readers.
+const traced = (ctx) => {
+  const reads = new Set()
+  const seen = { ...ctx, reader: null }
+
+  Object.defineProperty(seen, 'pageOptions', {
+    enumerable: true,
+    get: () => {
+      reads.add(seen.reader)
+
+      return ctx.pageOptions
+    },
+  })
+
+  return { ctx: seen, reads }
+}
+
+// The mutations whose run leaves out the page that a check it names, or a function making them, read in the head: none, when `page` says which runs load it.
+const leftOut = (reads, page = loadsPage) => MUTATIONS.filter((mutation) => !page(mutation.fails) && [...buildersOf(mutation.fails).map((name) => `make ${name}`), ...mutation.fails.map((key) => `check ${key}`)].some((reader) => reads.has(reader))).map((mutation) => mutation.name)
+
+// Faults planted in the choice of the runs that load the page, which the guard of the page's load must catch.
+const LOAD_FAULTS = [
+  { name: 'the page loaded only for the saves', page: (keys) => keys.some((key) => key.startsWith('save-')) },
+]
+
+// The statements run, as [name, result]; `keys` limits them to the checks of those keys. A traced context hears which check is running.
+const runStatements = async (statements, keys = null, ctx = {}) => {
   const results = []
 
   for (const [name, test] of statements) {
@@ -2176,6 +2216,7 @@ const runStatements = async (statements, keys = null) => {
     let result
 
     try {
+      ctx.reader = `check ${keyOf(name)}`
       result = await test()
     } catch (error) {
       result = `threw ${String(error.message).split('\n')[0]}`
@@ -2188,12 +2229,20 @@ const runStatements = async (statements, keys = null) => {
 }
 
 // The statements of one run: those that need no save, and the saves' own when `withSaves`.
-const statementsOf = async (ctx, withSaves, keys = null) => {
-  const statements = [...pure(ctx), ...loaders(ctx), ...pageStatements(ctx)]
+const statementsOf = async (ctx, withSaves, keys = null, names = BUILDER_NAMES) => {
+  const built = names.map((name) => {
+    ctx.reader = `make ${name}`
+
+    return [name, BUILDERS[name](ctx)]
+  })
+  const statements = built.flatMap(([, list]) => list)
+  const misplaced = [...new Set(built.flatMap(([name, list]) => list.map(([title]) => keyOf(title)).filter((key) => builderOf(key) !== name).map((key) => `${key} made by ${name}`)))]
   const opened = []
   const skipped = []
 
   if (withSaves) {
+    ctx.reader = 'make saves'
+
     for (const save of SAVES) {
       const result = await saveStatements(ctx, save)
 
@@ -2206,12 +2255,12 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
     }
   }
 
-  return { statements: statements.filter(([name]) => !keys || keys.includes(keyOf(name))), opened, skipped }
+  return { statements: statements.filter(([name]) => !keys || keys.includes(keyOf(name))), opened, skipped, misplaced }
 }
 
 const checkHead = async (withSaves) => {
-  const ctx = await contextOf(sourcesOf(null))
-  const { statements, opened, skipped } = await statementsOf(ctx, withSaves)
+  const { ctx, reads } = traced(await contextOf(sourcesOf(null)))
+  const { statements, opened, skipped, misplaced } = await statementsOf(ctx, withSaves)
 
   console.log('\nThe routes to mining capacity at a colony, on colonies, freighters and formations worked by hand, on a database of its own, on the page and on the saves')
 
@@ -2219,8 +2268,18 @@ const checkHead = async (withSaves) => {
     console.log(`SKIP  ${file} is not there`)
   }
 
-  for (const [name, result] of await runStatements(statements)) {
+  check('mutations: the checks of each key are all made by the function a mutation\'s run calls for that key, so the run judges every check of the keys it names', misplaced.length ? misplaced.join('; ') : true)
+
+  for (const [name, result] of await runStatements(statements, null, ctx)) {
     check(name, result)
+  }
+
+  const missing = leftOut(reads)
+
+  check('mutations: a mutation\'s run loads the page whenever a check it names reads it, so no check it names fails for want of the page', missing.length ? missing.join('; ') : true)
+
+  for (const fault of LOAD_FAULTS) {
+    check(`mutations: the guard of the page's load catches a fault planted in it: ${fault.name}`, leftOut(reads, fault.page).length ? true : 'no run left out the page its checks read')
   }
 
   opened.forEach((database) => database.close())
@@ -2238,17 +2297,18 @@ const checkMutant = async (mutant) => {
     return
   }
 
+  const withSaves = mutant.fails.some((key) => key.startsWith('save-'))
   let ctx
 
   try {
-    ctx = await contextOf(sources)
+    ctx = await contextOf(sources, loadsPage(mutant.fails))
   } catch (error) {
     check(`mutation caught: ${mutant.name}`, `does not load: ${error.message}`)
 
     return
   }
 
-  const { statements, opened } = await statementsOf(ctx, mutant.fails.some((key) => key.startsWith('save-')), mutant.fails)
+  const { statements, opened } = await statementsOf(ctx, withSaves, mutant.fails, buildersOf(mutant.fails))
   const absent = mutant.fails.filter((key) => !statements.some(([name]) => keyOf(name) === key))
   const results = await runStatements(statements, mutant.fails)
   const missed = mutant.fails.filter((key) => !results.some(([name, result]) => keyOf(name) === key && result !== true))

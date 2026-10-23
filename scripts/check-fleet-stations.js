@@ -22,7 +22,7 @@
 
   The saves (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loaders, compared with raw counts, and the orbit rule on every fleet in orbit.
 
-  Each planted fault must fail a check that needs no save and that it names. Each benign edit (wording, whitespace, the order of attributes or of a list) must leave every check that needs no save green, alone, stacked, and under every planted fault. Exit code 1 when a check fails.
+  Each planted fault must fail a check that needs no save and that it names. Each benign edit (wording, whitespace, the order of attributes or of a list) must leave every check that needs no save green with every other edit applied and under every planted fault, and alone for the first edit of each family in each file and for an edit a later one overwrites. A planted fault's run calls only the functions that make the checks it names and loads only the panel or the page they read; the head fails when a check a run names reads a part that run leaves out. Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
@@ -114,7 +114,15 @@ const descriptorOf = (source) => {
   return parsed.descriptor || parsed
 }
 
-const compiled = (source) => require('vue/compiler-sfc').compileTemplate({ source: descriptorOf(source).template.content, filename: 'component.vue', id: 'component' })
+// A template compiles to the same result whenever its text is the same, and the checks only read what it gives: each text is compiled once in a process, however many times it is rendered or read.
+const compilations = new Map()
+const compiled = (source) => {
+  if (!compilations.has(source)) {
+    compilations.set(source, require('vue/compiler-sfc').compileTemplate({ source: descriptorOf(source).template.content, filename: 'component.vue', id: 'component' }))
+  }
+
+  return compilations.get(source)
+}
 
 const templateErrors = (source) => compiled(source).errors.map(String)
 
@@ -1317,10 +1325,21 @@ const attrsOf = (node) => (node && node.data && node.data.attrs) || {}
 
 const marksIn = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').map((node) => attrsOf(node))
 
+// The render function of a compiled template, made once for each text of it: it keeps nothing between calls, as every record it makes comes from the helpers of the call.
+const renders = new Map()
+const renderOf = (componentText) => {
+  const { code } = compiled(componentText)
+
+  if (!renders.has(code)) {
+    renders.set(code, require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {}))
+  }
+
+  return renders.get(code)
+}
+
 // What a compiled template renders for a mounted instance: the render function of the component's own template runs with the instance as its scope. Each element it creates is a record { tag, data, children }; the scoped slots are functions of the record of the table, to be called with a row.
 const rendered = (componentText, vm) => {
-  const { code } = compiled(componentText)
-  const render = require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {})
+  const render = renderOf(componentText)
   const tags = []
   const texts = []
   const make = (tag, data, children) => {
@@ -2213,31 +2232,34 @@ const ATTRIBUTES = new RegExp(`([^\\s=]+)(?:\\s*=\\s*(${QUOTED}))?`, 'g')
 const reversed = (inside) => [...inside.matchAll(ATTRIBUTES)].reverse().map(([, name, value]) => (value === undefined ? name : `${name}=${value}`)).join(' ')
 const STRING = '\'[^\']*\'|"[^"]*"|`[^`]*`'
 
+// `family` is the kind of rewrite. Every edit is applied in the stacked run and under the planted faults on it; a run of its own is kept for the first edit of each family in each file (`ALONE`), and for an edit that a later one overwrites at the same anchor, which the stacked source no longer holds.
 const BENIGN = [
-  { name: 'the summary reworded', file: V, at: attribute('data-summary'), to: () => 'data-summary="The notes kept for each fleet about where it is meant to sit and where it is meant to resupply, set beside the fleet and its saved orders."' },
-  { name: 'the summary shortened to one sentence', file: V, at: attribute('data-summary'), to: () => 'data-summary="Intended stations and supply bases of the fleets, apart from their saved orders."' },
-  { name: 'the summary naming a numbered product', file: V, at: attribute('data-summary'), to: () => 'data-summary="Intended fleet stations and supply bases in Aurora 4X, apart from saved orders."' },
-  { name: 'the words of an unknown movement reworded', file: V, at: /(data-station-movement-unknown>)[^<]*(<\/div>)/, to: (found0) => `${found0[1]}The record does not say whether this station moves with the fleet, because an orbit is missing.${found0[2]}` },
-  { name: 'the label of the retry of the body picker reworded', file: V, at: /(<v-btn\b[^>]*\bdata-station-picker-retry\b[^>]*>)[^<]*(<\/v-btn>)/, to: (found0) => `${found0[1]}Read the bodies again${found0[2]}` },
-  { name: 'the words of the refusal of a waypoint without an anchor reworded', file: U, at: /(const NO_ANCHOR = ')[^']*(')/, to: (found0) => `${found0[1]}Nothing in the save tells where this waypoint is or what it is tied to, so a later read could not show that it is the waypoint named.${found0[2]}` },
-  { name: 'the keys of the fixed anchor of a waypoint written in another order', file: U, at: /return finite\(row\.x, row\.y\) \? \{ (?:x: row\.x, y: row\.y|y: row\.y, x: row\.x) \} : null/, to: () => 'return finite(row.x, row.y) ? { y: row.y, x: row.x } : null' },
-  { name: 'whitespace around the equals sign of a bound property on the mount', file: P, at: attribute(':scope'), to: (found0) => `:scope  =  ${found0[1]}` },
-  { name: 'the attributes of the mount reordered', file: P, at: /(<fleet-stations)([^>]*?)(\s*\/>)/, to: (found0) => `${found0[1]} ${reversed(found0[2])}${found0[3]}` },
-  { name: 'the bound values of the mount written another way', file: P, at: attribute(':repository-error'), to: (found0) => `:repository-error=${quote(`(${valueOf(found0[1])})`)}` },
-  { name: 'the attributes of the count chip reordered', file: V, at: /(<v-chip)([^>]*?data-station-count[^>]*)(>)/, to: (found0) => `${found0[1]} ${reversed(found0[2])}${found0[3]}` },
-  { name: 'whitespace in the mark of a comparison cell', file: V, at: /(<template\s+#\[`item\.stationStatus`\]\s*=\s*"[^"]*"\s*>[\s\S]*?)<provenance-mark\s+:result\s*=\s*(?:"[^"]*"|'[^']*')\s*\/>/, to: (found0) => `${found0[1]}<provenance-mark  :result = "item.location.station.result"  />` },
-  { name: 'the attributes of the comparison cell reordered', file: V, at: /(<template\s+#\[`item\.stationStatus`\]\s*=\s*"[^"]*"\s*>\s*<span)([^>]*)>/, to: (found0) => `${found0[1]} ${reversed(found0[2])}>` },
-  { name: 'the words of a step of the checklist reworded', file: V, at: new RegExp(`(if \\(step\\.key === 'orbit'\\) \\{\\s*return )(?:${STRING})`), to: (found0) => `${found0[1]}\`Put the fleet in orbit of \${step.target}.\`` },
-  { name: 'the words of the verdicts reworded', file: V, at: /(const VERDICT_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} evidence: 'Shown by the save', confirmed: 'Confirmed by the player', reused: 'Held by another object', unwitnessed: 'Not shown to be the same'${found0[2]}` },
-  { name: 'the words of the places of a fleet that is off station reworded', file: V, at: /(const WHERE_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} 'other-system': 'elsewhere in the galaxy', 'other-orbit': 'around another body', 'open-space': 'in the open'${found0[2]}` },
-  { name: 'the table headers listed in the opposite order', file: V, at: /(headers\(\) \{\s*return \[)([\s\S]*?)(\s*\]\s*\})/, to: (found0) => `${found0[1]}${found0[2].split('\n').reverse().join('\n')}${found0[3]}` },
-  { name: 'the foot of the panel reworded', file: V, at: /(data-station-limits>)[\s\S]*?(\s*<\/div>)/, to: (found0) => `${found0[1]}\n        Notes are local to the campaign; a fleet is matched to its note only where the save shows it or the player confirmed it.${found0[2]}` },
-  { name: 'the label of the view reworded', file: P, at: /(stations\s*:\s*)(?:'[^']*'|"[^"]*")(?=\s*\})/, to: (found0) => `${found0[1]}'Stations of fleets'` },
-  { name: 'the words naming the reads of the panel reworded', file: X, at: /(stationObjects\s*:\s*)(?:'[^']*'|"[^"]*")/, to: (found0) => `${found0[1]}'the fleets and the places they can sit at'` },
-  { name: 'the assumptions of a note reworded', file: U, at: /(const ASSUMPTIONS = Object\.freeze\(\[)[^\]]*(\]\))/, to: (found0) => `${found0[1]}'The note is the player\\'s own and gives the game no order', 'The fleet a note names is the fleet only where the save shows it or the player confirmed that object'${found0[2]}` },
-  { name: 'the reason of an unknown comparison reworded', file: U, at: /(if \(km === null\) \{\s*return UNKNOWN\('station', sameSystem === null \? )'(?:[^'\\]|\\.)*'/, to: (found0) => `${found0[1]}'The system of the fleet or of the station is not known.'` },
-  { name: 'the arrival caveat of an order worded as a negated completion', file: V, at: /(<span v-if="order\.arrived">)[^<]*(<\/span>)/, to: (found0) => `${found0[1]} (arrived; work at the destination is not necessarily complete)${found0[2]}` },
+  { name: 'the summary reworded', family: 'words', file: V, at: attribute('data-summary'), to: () => 'data-summary="The notes kept for each fleet about where it is meant to sit and where it is meant to resupply, set beside the fleet and its saved orders."' },
+  { name: 'the summary shortened to one sentence', family: 'words', file: V, at: attribute('data-summary'), to: () => 'data-summary="Intended stations and supply bases of the fleets, apart from their saved orders."' },
+  { name: 'the summary naming a numbered product', family: 'words', file: V, at: attribute('data-summary'), to: () => 'data-summary="Intended fleet stations and supply bases in Aurora 4X, apart from saved orders."' },
+  { name: 'the words of an unknown movement reworded', family: 'words', file: V, at: /(data-station-movement-unknown>)[^<]*(<\/div>)/, to: (found0) => `${found0[1]}The record does not say whether this station moves with the fleet, because an orbit is missing.${found0[2]}` },
+  { name: 'the label of the retry of the body picker reworded', family: 'words', file: V, at: /(<v-btn\b[^>]*\bdata-station-picker-retry\b[^>]*>)[^<]*(<\/v-btn>)/, to: (found0) => `${found0[1]}Read the bodies again${found0[2]}` },
+  { name: 'the words of the refusal of a waypoint without an anchor reworded', family: 'words', file: U, at: /(const NO_ANCHOR = ')[^']*(')/, to: (found0) => `${found0[1]}Nothing in the save tells where this waypoint is or what it is tied to, so a later read could not show that it is the waypoint named.${found0[2]}` },
+  { name: 'the keys of the fixed anchor of a waypoint written in another order', family: 'key order', file: U, at: /return finite\(row\.x, row\.y\) \? \{ (?:x: row\.x, y: row\.y|y: row\.y, x: row\.x) \} : null/, to: () => 'return finite(row.x, row.y) ? { y: row.y, x: row.x } : null' },
+  { name: 'whitespace around the equals sign of a bound property on the mount', family: 'whitespace', file: P, at: attribute(':scope'), to: (found0) => `:scope  =  ${found0[1]}` },
+  { name: 'the attributes of the mount reordered', family: 'attribute order', file: P, at: /(<fleet-stations)([^>]*?)(\s*\/>)/, to: (found0) => `${found0[1]} ${reversed(found0[2])}${found0[3]}` },
+  { name: 'the bound values of the mount written another way', family: 'bound expression', file: P, at: attribute(':repository-error'), to: (found0) => `:repository-error=${quote(`(${valueOf(found0[1])})`)}` },
+  { name: 'the attributes of the count chip reordered', family: 'attribute order', file: V, at: /(<v-chip)([^>]*?data-station-count[^>]*)(>)/, to: (found0) => `${found0[1]} ${reversed(found0[2])}${found0[3]}` },
+  { name: 'whitespace in the mark of a comparison cell', family: 'whitespace', file: V, at: /(<template\s+#\[`item\.stationStatus`\]\s*=\s*"[^"]*"\s*>[\s\S]*?)<provenance-mark\s+:result\s*=\s*(?:"[^"]*"|'[^']*')\s*\/>/, to: (found0) => `${found0[1]}<provenance-mark  :result = "item.location.station.result"  />` },
+  { name: 'the attributes of the comparison cell reordered', family: 'attribute order', file: V, at: /(<template\s+#\[`item\.stationStatus`\]\s*=\s*"[^"]*"\s*>\s*<span)([^>]*)>/, to: (found0) => `${found0[1]} ${reversed(found0[2])}>` },
+  { name: 'the words of a step of the checklist reworded', family: 'words', file: V, at: new RegExp(`(if \\(step\\.key === 'orbit'\\) \\{\\s*return )(?:${STRING})`), to: (found0) => `${found0[1]}\`Put the fleet in orbit of \${step.target}.\`` },
+  { name: 'the words of the verdicts reworded', family: 'words', file: V, at: /(const VERDICT_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} evidence: 'Shown by the save', confirmed: 'Confirmed by the player', reused: 'Held by another object', unwitnessed: 'Not shown to be the same'${found0[2]}` },
+  { name: 'the words of the places of a fleet that is off station reworded', family: 'words', file: V, at: /(const WHERE_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} 'other-system': 'elsewhere in the galaxy', 'other-orbit': 'around another body', 'open-space': 'in the open'${found0[2]}` },
+  { name: 'the table headers listed in the opposite order', family: 'list order', file: V, at: /(headers\(\) \{\s*return \[)([\s\S]*?)(\s*\]\s*\})/, to: (found0) => `${found0[1]}${found0[2].split('\n').reverse().join('\n')}${found0[3]}` },
+  { name: 'the foot of the panel reworded', family: 'words', file: V, at: /(data-station-limits>)[\s\S]*?(\s*<\/div>)/, to: (found0) => `${found0[1]}\n        Notes are local to the campaign; a fleet is matched to its note only where the save shows it or the player confirmed it.${found0[2]}` },
+  { name: 'the label of the view reworded', family: 'words', file: P, at: /(stations\s*:\s*)(?:'[^']*'|"[^"]*")(?=\s*\})/, to: (found0) => `${found0[1]}'Stations of fleets'` },
+  { name: 'the words naming the reads of the panel reworded', family: 'words', file: X, at: /(stationObjects\s*:\s*)(?:'[^']*'|"[^"]*")/, to: (found0) => `${found0[1]}'the fleets and the places they can sit at'` },
+  { name: 'the assumptions of a note reworded', family: 'words', file: U, at: /(const ASSUMPTIONS = Object\.freeze\(\[)[^\]]*(\]\))/, to: (found0) => `${found0[1]}'The note is the player\\'s own and gives the game no order', 'The fleet a note names is the fleet only where the save shows it or the player confirmed that object'${found0[2]}` },
+  { name: 'the reason of an unknown comparison reworded', family: 'words', file: U, at: /(if \(km === null\) \{\s*return UNKNOWN\('station', sameSystem === null \? )'(?:[^'\\]|\\.)*'/, to: (found0) => `${found0[1]}'The system of the fleet or of the station is not known.'` },
+  { name: 'the arrival caveat of an order worded as a negated completion', family: 'negated words', file: V, at: /(<span v-if="order\.arrived">)[^<]*(<\/span>)/, to: (found0) => `${found0[1]} (arrived; work at the destination is not necessarily complete)${found0[2]}` },
 ].map((edit, index) => ({ id: `benign:${index}`, ...edit }))
+
+const ALONE = BENIGN.filter((edit, index) => BENIGN.findIndex((other) => other.family === edit.family && other.file === edit.file) === index || BENIGN.slice(index + 1).some((later) => later.file === edit.file && String(later.at) === String(edit.at)))
 
 // The text to find and its replacement for a planted fault or a benign edit: the literal `find` and `replace`, or what the pattern `at` matches (exactly once) and `to` makes of the match.
 const resolved = (edit, text) => {
@@ -2275,26 +2297,76 @@ const sourcesOf = (mutant) => {
 // The real sources with every benign edit applied in turn.
 const stackedSources = () => BENIGN.reduce((sources, edit) => applied(sources, edit), sourcesOf(null))
 
-const contextOf = async (sources) => {
+// The functions that make the checks, in the order they run. Each key's checks are all made by one of them (checked by the head), so a run judging some keys calls only theirs.
+const BUILDERS = { pure, panel, page, optional }
+const BUILDER_NAMES = Object.keys(BUILDERS)
+const builderOf = (key) => (key === 'component' ? 'panel' : key === 'page' || key === 'optional' ? key : 'pure')
+const buildersOf = (keys) => BUILDER_NAMES.filter((name) => keys.some((key) => builderOf(key) === name))
+
+// What a run loads besides the utilities, by the functions it calls: the panel for the panel's checks, and the page with its mixin for the page's and the optional reads' checks.
+const loadsPanel = (names) => names.includes('panel')
+const loadsPage = (names) => names.includes('page') || names.includes('optional')
+const LOADED = { options: loadsPanel, mixinOptions: loadsPage, pageOptions: loadsPage, persisted: loadsPage, livePageOptions: loadsPage }
+
+const contextOf = async (sources, names = BUILDER_NAMES) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
   const utilityName = changed(U) ? { 'fleet-stations': sources[U] } : {}
   const utilitySources = changed(U) ? { 'utilities/fleet-stations': sources[U] } : {}
   const mixinSources = changed(X) ? { 'mixins/fleet-stations': sources[X] } : {}
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: utilityName })
-  const options = await loadPage('components/fleets/FleetStations', { stubs: STUBS, sources: { 'components/fleets/FleetStations': sources[V], ...utilitySources } })
-  const mixinOptions = await loadPage('mixins/fleet-stations', { stubs: STUBS, sources: { ...utilitySources, ...mixinSources } })
-  const pageSources = { 'pages/logistics': sources[P], ...utilitySources, ...mixinSources }
-  const pageOptions = await loadPage('pages/logistics', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/persisted-view': RECORDER }, sources: pageSources })
-  const persisted = globalThis.__persistedFields
-  const livePageOptions = await loadPage('pages/logistics', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
+  const ctx = { m: { fs: loaded['fleet-stations'], records: loaded['scenario-records'], provenance: loaded.provenance, placeData: loaded['place-data'] }, componentText: sources[V], pageText: sources[P], mixinText: sources[X] }
 
-  return { m: { fs: loaded['fleet-stations'], records: loaded['scenario-records'], provenance: loaded.provenance, placeData: loaded['place-data'] }, options, mixinOptions, pageOptions, livePageOptions, persisted, componentText: sources[V], pageText: sources[P], mixinText: sources[X] }
+  if (loadsPanel(names)) {
+    ctx.options = await loadPage('components/fleets/FleetStations', { stubs: STUBS, sources: { 'components/fleets/FleetStations': sources[V], ...utilitySources } })
+  }
+
+  if (loadsPage(names)) {
+    const pageSources = { 'pages/logistics': sources[P], ...utilitySources, ...mixinSources }
+
+    ctx.mixinOptions = await loadPage('mixins/fleet-stations', { stubs: STUBS, sources: { ...utilitySources, ...mixinSources } })
+    ctx.pageOptions = await loadPage('pages/logistics', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/persisted-view': RECORDER }, sources: pageSources })
+    ctx.persisted = globalThis.__persistedFields
+    ctx.livePageOptions = await loadPage('pages/logistics', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
+  }
+
+  return ctx
 }
+
+// The context of the head, whose loaded parts note each read: `reader` is the function making its checks (`make <name>`) or the key of the check running (`check <key>`), and `reads` holds `<reader> <part>`.
+const traced = (ctx) => {
+  const reads = new Set()
+  const seen = { ...ctx, reader: null }
+
+  Object.keys(LOADED).forEach((part) => Object.defineProperty(seen, part, {
+    enumerable: true,
+    get: () => {
+      reads.add(`${seen.reader} ${part}`)
+
+      return ctx[part]
+    },
+  }))
+
+  return { ctx: seen, reads }
+}
+
+// The planted faults whose run leaves out a part that a check it names, or a function making them, read in the head: none, when `loaded` says what each run loads.
+const leftOut = (reads, loaded = LOADED) => MUTATIONS.flatMap((mutation) => {
+  const required = mutation.fails.filter((key) => !key.startsWith('save-'))
+  const names = buildersOf(required)
+  const readers = [...names.map((name) => `make ${name}`), ...required.map((key) => `check ${key}`)]
+
+  return Object.keys(loaded).filter((part) => !loaded[part](names) && readers.some((reader) => reads.has(`${reader} ${part}`))).map((part) => `${mutation.name} (${part})`)
+})
+
+// Faults planted in what the runs load, which the guard of the loads must catch.
+const LOAD_FAULTS = [
+  { name: 'the page loaded only for the optional reads\' checks', loaded: { ...LOADED, pageOptions: (names) => names.includes('optional') } },
+]
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))
 
-// The statements run, as [name, result]; `keys` limits them to the checks of those keys.
-const runStatements = async (statements, keys = null) => {
+// The statements run, as [name, result]; `keys` limits them to the checks of those keys. A traced context hears which check is running.
+const runStatements = async (statements, keys = null, ctx = {}) => {
   const results = []
 
   for (const [name, test] of statements) {
@@ -2305,6 +2377,7 @@ const runStatements = async (statements, keys = null) => {
     let result
 
     try {
+      ctx.reader = `check ${keyOf(name)}`
       result = await test()
     } catch (error) {
       result = `threw ${error.message}`
@@ -2318,12 +2391,20 @@ const runStatements = async (statements, keys = null) => {
 
 let useSaves = true
 
-const statementsOf = async (ctx, withSaves) => {
-  const statements = [...pure(ctx), ...panel(ctx), ...page(ctx), ...optional(ctx)]
+const statementsOf = async (ctx, withSaves, names = BUILDER_NAMES) => {
+  const built = names.map((name) => {
+    ctx.reader = `make ${name}`
+
+    return [name, BUILDERS[name](ctx)]
+  })
+  const statements = built.flatMap(([, list]) => list)
+  const misplaced = [...new Set(built.flatMap(([name, list]) => list.map(([title]) => keyOf(title)).filter((key) => builderOf(key) !== name).map((key) => `${key} made by ${name}`)))]
   const opened = []
   const skipped = []
 
   if (withSaves && useSaves) {
+    ctx.reader = 'make saves'
+
     for (const save of SAVES) {
       const read = await saveStatements(ctx, save)
 
@@ -2336,12 +2417,12 @@ const statementsOf = async (ctx, withSaves) => {
     }
   }
 
-  return { statements, opened, skipped }
+  return { statements, opened, skipped, misplaced }
 }
 
 const checkHead = async () => {
-  const ctx = await contextOf(sourcesOf(null))
-  const { statements, opened, skipped } = await statementsOf(ctx, true)
+  const { ctx, reads } = traced(await contextOf(sourcesOf(null)))
+  const { statements, opened, skipped, misplaced } = await statementsOf(ctx, true)
 
   console.log('\nFleet stations: the intended station and supply base of a fleet beside where it is and its saved orders, on fixtures worked by hand, the panel, the page and the saves')
 
@@ -2353,9 +2434,18 @@ const checkHead = async () => {
   const bare = MUTATIONS.filter((mutation) => !mutation.fails.some((key) => !key.startsWith('save-') && keys.has(key))).map((mutation) => mutation.name)
 
   check('mutations: every planted fault names a group of checks that needs no save, so a checkout without the saves still catches it', bare.length ? short(bare) : true)
+  check('mutations: the checks of each key are all made by the function a planted fault\'s run calls for that key, so the run judges every check of the keys it names', misplaced.length ? short(misplaced) : true)
 
-  for (const [name, result] of await runStatements(statements)) {
+  for (const [name, result] of await runStatements(statements, null, ctx)) {
     check(name, result)
+  }
+
+  const missing = leftOut(reads)
+
+  check('mutations: a planted fault\'s run loads the panel and the page wherever a check it names reads them, so no check it names fails for want of either', missing.length ? short(missing) : true)
+
+  for (const fault of LOAD_FAULTS) {
+    check(`mutations: the guard of the loads catches a fault planted in them: ${fault.name}`, leftOut(reads, fault.loaded).length ? true : 'no run left out a part its checks read')
   }
 
   await Promise.all(opened.map((read) => read.close()))
@@ -2374,18 +2464,19 @@ const checkMutant = async (mutant, composed = false) => {
     return
   }
 
+  const required = mutant.fails.filter((key) => !key.startsWith('save-'))
+  const names = buildersOf(required)
   let ctx
 
   try {
-    ctx = await contextOf(sources)
+    ctx = await contextOf(sources, names)
   } catch (error) {
     check(label, `does not load: ${error.message}`)
 
     return
   }
 
-  const required = mutant.fails.filter((key) => !key.startsWith('save-'))
-  const { statements } = await statementsOf(ctx, false)
+  const { statements } = await statementsOf(ctx, false, names)
   const present = (key) => statements.some(([name]) => keyOf(name) === key)
   const absent = required.filter((key) => !present(key))
   const results = await runStatements(statements, required)
@@ -2507,11 +2598,11 @@ const run = async () => {
   }
 
   const wanted = options.mutations ? MUTANTS : []
-  const benign = options.mutations ? BENIGN : []
+  const benign = options.mutations ? ALONE : []
   const extra = options.saves ? [] : ['--no-saves']
   const stacked = options.mutations ? ['stacked'] : []
   const composed = options.mutations ? COMPOSED : []
-  const sections = await runSections(__filename, [{ args: ['--part', 'head', ...extra], weight: 30 }, ...[...wanted, ...benign, ...composed].map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 })), ...stacked.map((id) => ({ args: ['--part', id, ...extra], weight: 5 }))])
+  const sections = await runSections(__filename, [{ args: ['--part', 'head', ...extra], weight: 30 }, ...[...wanted, ...benign].map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 })), ...stacked.map((id) => ({ args: ['--part', id, ...extra], weight: 5 })), ...composed.map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 }))])
   let at = 0
 
   const printed = () => {
@@ -2529,7 +2620,7 @@ const run = async () => {
   }
 
   if (benign.length) {
-    console.log('\nBenign edits: each must leave every save-free check green')
+    console.log('\nBenign edits alone, the first of each family in each file and each one a later edit overwrites: each must leave every save-free check green')
     benign.forEach(printed)
   }
 
