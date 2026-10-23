@@ -9,7 +9,7 @@
   - the loader reads the officers from SQLite databases built here with the columns the real queries use: every prerequisite it lacks becomes a gap of its own factor and never rejects the read, and a population with no naval headquarters still covers its own system;
   - the read follows the race the page shows, and every figure of the breakdown carries a provenance result.
 
-  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, alone and after every benign edit (a rewording, a reordered attribute list, extra whitespace) has been applied; each benign edit alone and all of them together must leave every check green. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and an edit whose anchor does not match exactly once each set exit code 1. `--no-mutations` skips the faults and the benign edits.
+  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, alone and after every benign edit (a rewording, a reordered attribute list, extra whitespace) has been applied; each benign edit alone and all of them together must leave every check green. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and an edit whose anchor does not match exactly once each set exit code 1. `--no-mutations` skips the faults and the benign edits. `--only=text|text` selects edits by name and always runs the head; `--detail` prints the named check's failure for each caught fault.
 
   The component and the pages are checked by what they do: the component's computed values and the pages' computed rows evaluated on a pseudo instance, the asynchronous read on a real Vue instance, and the compiled templates' elements and bound expressions evaluated against rendered states. No statement matches source text or prose; a planted fault or a benign edit finds its place by an attribute, a key or a piece of code, never by what the page says.
 */
@@ -1289,6 +1289,9 @@ const LABEL_KEY = /(const INPUT_LABELS = \{(?:(?!\n\})[\s\S])*?\n\s+)handlingSup
 // A cell of the component: the whole of the cell that carries `marker`, the mark inside it taken out or bound to `result`.
 const cellMark = (marker) => new RegExp(`(<td\\b[^>]*\\b${marker}\\b[^>]*>(?:(?!</td>)[\\s\\S])*?)<provenance-mark\\b[^>]*/>`)
 
+// The held class trip, not the second trip recomputed for propagated positions.
+const CLASS_SUPPORT = /(const heldTrip = roundTrip\([^\n]*\bsupport: )(\(?this\.officerSupport\)?)/
+
 const BENIGN = [
   edit('the label of the read reworded on Hauling', 'haulingPage', /(\n\s+handlingSupport: )(?:'(?:[^'\\]|\\.)*'|"[^"]*")/, (m) => `${m[1]}'Officer bonuses'`),
   edit('the label of the read reworded on Transport', 'transportPage', /(\n\s+handlingSupport: )(?:'(?:[^'\\]|\\.)*'|"[^"]*")/, (m) => `${m[1]}'Officer bonuses'`),
@@ -1307,6 +1310,7 @@ const BENIGN = [
   edit('the reason of officers not being read reworded', 'bonuses', /(return OFFICER_KEYS\.map\(\(key\) => unknown\(key, )(?:'(?:[^'\\]|\\.)*')(\)\))/, (m) => `${m[1]}'no officer was loaded'${m[2]}`),
   edit('the noun of the governor reworded', 'bonuses', /(personal\('governor',\s*support\.governors,\s*endpoint\.populationId,\s*)(?:'(?:[^'\\]|\\.)*'|"[^"]*")(?=[,)])/, (m) => `${m[1]}'local governor'`),
   edit('the words of the officer cells reworded', 'bonuses', /(factor\.state === 'none' \? )'[^']*' : '[^']*'/, (m) => `${m[1]}'-' : 'Not known'`),
+  edit('the held class trip parenthesises its officer support', 'transportPage', CLASS_SUPPORT, (m) => `${m[1]}(this.officerSupport)`),
 ].filter(present).map((one, index) => ({ ...one, id: `benign:${index}` }))
 
 const FAULTS = [
@@ -1382,7 +1386,7 @@ const FAULTS = [
   edit('the time cell carries the result of the crew share', 'component', /(data-time>[^<]*(?:\{\{[^}]*\}\}[^<]*)?<provenance-mark\s+:result\s*=\s*")row\.results\.seconds/, (m) => `${m[1]}row.results.crew`, ['template']),
   edit('the strength cell carries the result of the own strength', 'component', /(data-strength>[^<]*(?:\{\{[^}]*\}\}[^<]*)?<provenance-mark\s+:result\s*=\s*")row\.result(?=")/, (m) => `${m[1]}row.results.own`, ['template']),
   edit('the Hauling page does not hand the officers over', 'haulingPage', /(cycleHandling\([^)]*\{ version: this\.formulaVersion, support: )this\.officerSupport/, (m) => `${m[1]}null`, ['pages']),
-  edit('the Transport page does not hand the officers to the class runs', 'transportPage', /(roundTrip\([^)]*\{ colonists: true, version: this\.formulaVersion, support: )this\.officerSupport/, (m) => `${m[1]}null`, ['pages']),
+  edit('the Transport page does not hand the officers to the class runs', 'transportPage', CLASS_SUPPORT, (m) => `${m[1]}null`, ['pages']),
   fleetEdit('the Transport page does not hand the officers to the fleets', 'transportPage', /(fleetTrip\(profile, reach\.route\.km, endpoints, \{ colonists: true, version: this\.formulaVersion, support: )this\.officerSupport/, (m) => `${m[1]}null`, ['pages']),
   edit('the Hauling page waits for the officers', 'haulingPage', /const CORE_INPUTS = Object\.keys\(INPUT_LABELS\)\.filter\(\(key\) => !OPTIONAL_INPUTS\.includes\(key\)\)/, () => 'const CORE_INPUTS = Object.keys(INPUT_LABELS)', ['pages']),
   edit('the Transport page waits for the officers', 'transportPage', /const CORE_INPUTS = Object\.keys\(INPUT_LABELS\)\.filter\(\(key\) => !OPTIONAL_INPUTS\.includes\(key\)\)/, () => 'const CORE_INPUTS = Object.keys(INPUT_LABELS)', ['pages']),
@@ -1449,6 +1453,9 @@ const stacked = (edits) => edits.reduce(applied, ORIGINALS)
 
 const main = async () => {
   const mutate = !process.argv.includes('--no-mutations')
+  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split('|').filter(Boolean)
+  const selected = (one) => !only.length || only.some((text) => one.name.includes(text))
+  const detail = process.argv.includes('--detail')
   const failures = await run(CHECKS, worldOf(ORIGINALS))
   let passed = CHECKS.length - failures.length
   let total = CHECKS.length
@@ -1480,6 +1487,8 @@ const main = async () => {
 
         if (!failed) {
           missed.push(name)
+        } else if (detail) {
+          console.log(`CAUGHT ${fault.name} by ${name}: ${short(failed.error)}`)
         }
       }
 
@@ -1488,9 +1497,10 @@ const main = async () => {
     // The checks that fail on sources `base` (none, when every edit applied to it is benign).
     const green = async (base) => (await run(CHECKS, worldOf(base))).map(({ name, error }) => `${name}: ${short(error)}`).join('\n  ')
 
-    const outcomes = await every(BENIGN, async (one) => green(applied(ORIGINALS, one)))
+    const benign = BENIGN.filter(selected)
+    const outcomes = await every(benign, async (one) => green(applied(ORIGINALS, one)))
 
-    outcomes.forEach((outcome, index) => settle(`benign edit ${BENIGN[index].name}`, outcome instanceof Error ? outcome.message : outcome))
+    outcomes.forEach((outcome, index) => settle(`benign edit ${benign[index].name}`, outcome instanceof Error ? outcome.message : outcome))
 
     const conflicts = []
 
@@ -1517,14 +1527,16 @@ const main = async () => {
     if (everything) {
       settle('benign edits: all of them together keep every check green', await green(everything))
 
-      const composed = await every(FAULTS, (fault) => caught(fault, everything))
+      const faults = FAULTS.filter(selected)
+      const composed = await every(faults, (fault) => caught(fault, everything))
 
-      composed.forEach((outcome, index) => settle(`planted fault after every benign edit: ${FAULTS[index].name}`, outcome instanceof Error ? outcome.message : outcome))
+      composed.forEach((outcome, index) => settle(`planted fault after every benign edit: ${faults[index].name}`, outcome instanceof Error ? outcome.message : outcome))
     }
 
-    const alone = await every(FAULTS, (fault) => caught(fault, ORIGINALS))
+    const faults = FAULTS.filter(selected)
+    const alone = await every(faults, (fault) => caught(fault, ORIGINALS))
 
-    alone.forEach((outcome, index) => settle(`planted fault: ${FAULTS[index].name}`, outcome instanceof Error ? outcome.message : outcome))
+    alone.forEach((outcome, index) => settle(`planted fault: ${faults[index].name}`, outcome instanceof Error ? outcome.message : outcome))
   }
 
   console.log(`${passed} of ${total} checks passed`)

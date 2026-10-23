@@ -12,7 +12,7 @@
   - the loader reads the engines, links and towed mass from the tables as they are, reads a column the save lacks as null and keeps to the fleets asked for;
   - the pages take speed, burn and counted cargo from the profile, say why a fleet is left out, and track the optional read under the key the page labels it with.
 
-  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, both on the real sources and on the sources with every benign edit (wording, attribute order) applied. Each benign edit, and all of them together, must leave every check green. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits.
+  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, both on the real sources and on the sources with every benign edit (wording, attribute order) applied. Each benign edit, and all of them together, must leave every check green. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits. `--only=text|text` selects edits by name and always runs the head and complete benign composition; `--detail` prints the named check's failure for each caught fault.
 
   The component and the pages are checked by what they do: the pages' computed rows and reads evaluated on a pseudo instance, and the compiled templates' elements and bound expressions. No statement matches source text or prose; only a planted fault names a source anchor, and each is found by an identifier, a key or a code expression.
 */
@@ -1330,6 +1330,8 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
 
 // ---- The planted faults ----------------------------------------------------------------------------------------------
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
+const DISTANCE_RESULT = /(pathResult: )(?:this\.pathOf\(reach\)|\(this\.pathOf\(reach\)\))(?=, savedPositions:)/
+
 const FAULTS = [
   ['a ship in a hangar or under tow is taken as under its own power', 'profile', 'const role = hangared ? \'hangared\' : towed ? \'towed\' : \'independent\'', 'const role = \'independent\'', ['carried']],
   ['the holds of carried and towed ships are counted', 'profile', 'const loaders = independent.filter((participant) => participant.cargoStatus === \'counted\').map((participant) => participant.ship)', 'const loaders = participants.filter((participant) => participant.cargoStatus !== \'none\').map((participant) => participant.ship)', ['carried', 'stop-bottleneck']],
@@ -1391,7 +1393,7 @@ const FAULTS = [
   ['a panel of Transport binds its summary to a name the page does not have', 'transportPage', /<v-card class="panel"(?=[^>]*data-fleet-panel)[^>]*>/, (m) => m[0].replace(/ data-summary="[^"]*"/, ' :data-summary="summaryOfTheFleets"'), ['template']],
   ['Transport marks no ship count', 'transportPage', /(count\(item\.ships\) \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
   ['Transport marks no count of ships under their own power', 'transportPage', /(\{\{ item\.independent \}\} of \{\{ item\.ships \}\}[^<]*)<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
-  ['Transport gives a fleet no result for its distance when no avoid setting is on', 'transportPage', /pathResult: (?:withPositions\()?pathResult\(reach\.route, this\.avoid\)(?:, positions\))?, /, () => 'pathResult: null, ', ['pages', 'template']],
+  ['Transport gives a fleet no result for its distance when no avoid setting is on', 'transportPage', DISTANCE_RESULT, (m) => `${m[1]}null`, ['pages', 'template']],
   ['Transport drops a fleet whose holds the save leaves empty', 'transportPage', ' or carrierClass.CargoCapacity is null or carrierClass.ColonistCapacity is null', '', ['pages']],
   ['Hauling marks no ship count', 'haulingPage', /(item\.Ships === 1 \? 'ship' : 'ships' \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
   ['Hauling marks no speed of the fleet', 'haulingPage', /(\{\{ item\.speedText \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
@@ -1440,6 +1442,7 @@ const BENIGN = [
   { label: 'the attributes of the participants rows reordered', target: 'component', at: /<tr v-for="row in participants" :key="row.key" (:data-participant="row.key") (:data-role="row.role") (:data-limiting="[^"]*")>/, to: (m) => `<tr ${m[3]} ${m[2]} ${m[1]} v-for="row in participants" :key="row.key">` },
   { label: 'the label of the fleets input reworded', target: 'transportPage', at: /^( {2}fleetShips: )'[^']*'/m, to: (m) => `${m[1]}'the membership of the fleets'` },
   { label: 'the optional inputs listed in the opposite order', target: 'transportPage', at: /(const OPTIONAL_INPUTS = )\[((?:'[^']*'|\.\.\.\w+)(?:, (?:'[^']*'|\.\.\.\w+))*)\]/, to: (m) => `${m[1]}[${m[2].split(', ').reverse().join(', ')}]` },
+  { label: 'the fleet distance result is parenthesised', target: 'transportPage', at: DISTANCE_RESULT, to: (m) => `${m[1]}(this.pathOf(reach))` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
@@ -1461,6 +1464,9 @@ const describeFailure = ({ name, error }) => `${name}: ${(error && error.message
 
 const main = async () => {
   const mutate = !process.argv.includes('--no-mutations')
+  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split('|').filter(Boolean)
+  const selected = (label) => !only.length || only.some((text) => label.includes(text))
+  const detail = process.argv.includes('--detail')
   const failures = await run(CHECKS, worldOf())
   let passed = CHECKS.length - failures.length
   let total = CHECKS.length
@@ -1473,8 +1479,8 @@ const main = async () => {
     FAULTS.forEach(([label, , , , fails]) => fails.forEach((name) => assert.ok(known.has(name), `${label}: no check named ${name}`)))
 
     const stages = [
-      ...BENIGN.map((edit) => [`benign edit kept: ${edit.label}`, async () => (await run(CHECKS, worldOf([edit]))).map(describeFailure)]),
-      ...BENIGN.slice(1, -1).map((_edit, index) => [`benign edits stacked: the first ${index + 2}`, async () => (await run(CHECKS, worldOf(BENIGN.slice(0, index + 2)))).map(describeFailure)]),
+      ...BENIGN.filter((edit) => selected(edit.label)).map((edit) => [`benign edit kept: ${edit.label}`, async () => (await run(CHECKS, worldOf([edit]))).map(describeFailure)]),
+      ...(!only.length ? BENIGN.slice(1, -1).map((_edit, index) => [`benign edits stacked: the first ${index + 2}`, async () => (await run(CHECKS, worldOf(BENIGN.slice(0, index + 2)))).map(describeFailure)]) : []),
       ['every benign edit applied: every check stays green', async () => (await run(CHECKS, worldOf(BENIGN))).map(describeFailure)],
     ]
     const benign = await inParallel(stages, async ([, test]) => test())
@@ -1491,7 +1497,7 @@ const main = async () => {
       }
     })
 
-    const attempts = FAULTS.flatMap(([label, target, from, to, fails]) => {
+    const attempts = FAULTS.filter(([label]) => selected(label)).flatMap(([label, target, from, to, fails]) => {
       const planted = from instanceof RegExp ? { target, at: from, to } : { target, from, to }
 
       return [[label, [planted], fails], [`${label}, on the sources with every benign edit`, [...BENIGN, planted], fails]]
@@ -1505,6 +1511,8 @@ const main = async () => {
 
         if (!failed) {
           missed.push(name)
+        } else if (detail) {
+          console.log(`CAUGHT ${label} by ${describeFailure(failed)}`)
         }
       }
 
