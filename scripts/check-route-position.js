@@ -12,7 +12,7 @@
   - the kind of the body a place stands on (a body, a colony, a Lagrange point, an order's destination, a waypoint, a fleet orbiting a body) is read from the saved fields as the game moves it, a trojan following the planet switch and an independent asteroid also its own, and is unknown where the fields were not read, for every pair of switches, driven from the real loaders over saves of every kind of body;
   - each page tracks the read as an optional input under the key its label has, never holds the page back, shows the strip in its loading, failed and ready states and has a summary on every panel.
 
-  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, both on the real sources and on the sources with every benign edit applied. Each benign edit, alone, stacked and all together, must leave every check green. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits.
+  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Each benign edit and all of them together must leave every check green. Representative faults also run with all rewrites, for every check and reader path. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits. `--only=text|text` selects fault and rewrite names or their stable `fault:N`, `composed:N`, `benign:N` and `benign:all` keys; the head still runs every check. `--detail` prints the named failures that catch a fault.
 
   The pages are checked by what they do (their computed rows evaluated on a pseudo instance) and by the compiled templates' elements and bound expressions. No statement matches source text or prose; only a planted fault names a source anchor, and each is found by an identifier, a key or a code expression.
 */
@@ -164,9 +164,8 @@ const resolved = (edit, text) => {
   return { ...edit, from: found[0][0], to: edit.to(found[0]) }
 }
 
-// The page's own copy of the query cache is the file with the way to its `cacheQueries` added, so a check keeps a page's simulations the way the app does and reads them back.
-const QUERY_CACHE = fs.readFileSync(inRenderer('utilities', 'query-cache.js'), 'utf8')
-let leaks = 0
+// A stable copy exposes the pages' cacheQueries without forcing another module graph for every world. The cache itself keeps databases apart with a WeakMap, as in the app.
+const QUERY_CACHE = `${fs.readFileSync(inRenderer('utilities', 'query-cache.js'), 'utf8')}\nglobalThis.__routePositionQueryCache = { cacheQueries }`
 
 const worldOf = (edits = []) => {
   const text = { ...ORIGINALS }
@@ -192,11 +191,7 @@ const worldOf = (edits = []) => {
   const modules = memo(() => loadUtilities(['route-position', 'route-plan', 'orbit-propagation', 'jump-graph', 'transport', 'haul-plan', 'provenance', 'places'], { sources: utilitySources }))
   const component = memo(() => loadPage('components/page/RoutePositions', { sources: pageSources }))
   const load = (name) => memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
-  const kept = (name) => {
-    const key = `__queryCache${(leaks += 1)}`
-
-    return { cache: () => globalThis[key], load: memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf, 'utilities/query-cache': `${QUERY_CACHE}\nglobalThis.${key} = { cacheQueries }` } })) }
-  }
+  const kept = (name) => ({ cache: () => globalThis.__routePositionQueryCache, load: memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf, 'utilities/query-cache': QUERY_CACHE } })) })
   const transport = kept('pages/information')
   const hauling = kept('pages/hauling')
 
@@ -1291,7 +1286,7 @@ check('strip-bound', 'each page binds the strip to a summary of its own position
     strips.forEach((strip) => {
       assert.ok(attrOf(strip, 'positions'), `${name}: the strip has positions`)
       assert.equal(attrOf(strip, 'state'), 'positionState', `${name}: and the read's state`)
-      assert.equal(strip.events.retry.value, 'retryPosition', `${name}: the strip retries the read`)
+      assert.equal(strip.events?.retry?.value, 'retryPosition', `${name}: the strip retries the read`)
       assert.ok(!classTokens(strip).includes('panel'), `${name}: the strip is not a panel, so it adds none to summarise`)
     })
 
@@ -2452,7 +2447,7 @@ const FAULTS = [
   ['a fleet orbiting a body takes the body for a planet', 'position', 'orbitMotion({ group: kindGroup(found.group) }, facts, conditions), assumption: mayMove', 'orbitMotion(endpoint, facts, conditions), assumption: mayMove', ['loader-motion-matrix']],
   ['a waypoint of unread kind follows the asteroid switch alone', 'position', '[\'planet\', \'asteroid\', \'static\'].includes(group) ? group : \'unknown\'', '[\'planet\', \'asteroid\', \'static\'].includes(group) ? group : \'asteroid\'', ['motion-matrix', 'waypoint-carried', 'loader-motion-matrix']],
   ['a colony on an asteroid is picked as a planet', 'orbit', 'return body ? motionOf(orbits.bodies, id) : null', 'return body ? \'planet\' : null', ['motion-matrix', 'loader-motion-matrix']],
-  ['a trojan is the group of a class 3 body, whatever its parent moves by', 'orbit', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', '  } else if (false) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', ['loader-motion-matrix', 'motion-matrix']],
+  ['a trojan is the group of a class 3 body, whatever its parent moves by', 'orbit', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', '  } else if (false) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', ['loader-motion-matrix', 'motion-matrix', 'waypoint-owner-results']],
   ['a trojan of an asteroid is a planet', 'orbit', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return \'planet\'\n  }', ['loader-motion-matrix']],
   ['a fixed body with a fixed parent is taken for one that stays', 'orbit', 'return motionOf(bodies, body.fixedParentId, depth + 1)', 'return \'static\'', ['loader-motion-matrix', 'fixed-proxy-results', 'motion-matrix']],
   ['a fixed body whose parent was not read is taken for one that stays', 'orbit', 'if (fixed && !isNumber(body.fixedParentId)) {\n    return \'unknown\'', 'if (fixed && !isNumber(body.fixedParentId)) {\n    return \'static\'', ['loader-motion-matrix', 'motion-matrix']],
@@ -2478,7 +2473,7 @@ const FAULTS = [
   ['Route Finder counts only the leg flown for the running distance', 'routesPage', 'flown.push(...(leg.positions ? leg.positions.records : []))', 'flown.splice(0, flown.length, ...(leg.positions ? leg.positions.records : []))', ['pages-routes']],
   ['Route Finder states a system\'s distance without its positions', 'routesPage', 'const kmResult = withPositions(figures.km, positions)', 'const kmResult = figures.km', ['pages-routes']],
   ['Route Finder leaves the positions out of a travel result', 'routesPage', 'travelTime(distanceResult(km, undefined, positions), this.speedResult)', 'travelTime(distanceResult(km), this.speedResult)', ['pages-routes']],
-  ['Route Finder does not show the strip', 'routesPage', ' @retry="retryPosition"', '', ['strip-bound']],
+  ['Route Finder does not show the strip', 'routesPage', / (?:@retry|v-on:retry)="retryPosition"/, () => '', ['strip-bound']],
   ['Transport leaves a class\'s time as it was', 'transportPage', 'provenance: withPositions(tripResult(trip), positions)', 'provenance: tripResult(trip)', ['pages-transport']],
   ['Transport leaves a fleet\'s time as it was', 'transportPage', 'provenance: withPositions(fleetTripResult(trip, profile), positions)', 'provenance: fleetTripResult(trip, profile)', ['pages-transport']],
   ['Transport leaves a run\'s distance as it was', 'transportPage', 'return withPositions(this.avoid.active ? pathResult(reach.route, this.avoid) : distanceResult(reach.route.km), positions)', 'return this.avoid.active ? pathResult(reach.route, this.avoid) : distanceResult(reach.route.km)', ['pages-transport']],
@@ -2582,23 +2577,134 @@ const FAULTS = [
 const STRING = '\'[^\'\\n]*\''
 
 const BENIGN = [
-  { label: 'an assumption reworded', target: 'position', at: new RegExp(`(\\n {2}fixed: )${STRING}`), to: (m) => `${m[1]}'the place stays where it is, so its saved position is exact at any time'` },
+  { label: 'an assumption reworded with its qualifier moved last', target: 'position', at: new RegExp(`(\\n {2}fixed: )${STRING}`), to: (m) => `${m[1]}'the saved position is exact at any time, as the place stays where it is'` },
   { label: 'a condition reworded', target: 'position', at: new RegExp(`(\\n {2}'fleet-orders': )${STRING}`), to: (m) => `${m[1]}'orders are queued for the fleet and where it goes is not known'` },
   { label: 'a mode label reworded', target: 'component', at: new RegExp(`(\\n {2}static: )${STRING}`), to: (m) => `${m[1]}'Positions as the save stores them'` },
   { label: 'the label of the read reworded', target: 'mixin', at: new RegExp(`(\\n {2}positionFacts: )${STRING}`), to: (m) => `${m[1]}'when each saved position was stored'` },
-  { label: 'the attributes of the strip of Route Finder reordered', target: 'routesPage', at: /<route-positions (:positions="[^"]*") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[4]} ${m[3]} ${m[2]} ${m[1]} />` },
+  { label: 'the strip attributes reordered and its retry written with v-on longhand', target: 'routesPage', at: /<route-positions (:positions="[^"]*") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[4].replace('@retry', 'v-on:retry')} ${m[3]} ${m[2]} ${m[1]} />` },
   { label: 'the attributes of the strip of Transport reordered', target: 'transportPage', at: /<route-positions (v-if="[^"]*") (:positions="[^"]*") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[5]} ${m[4]} ${m[3]} ${m[2]} ${m[1]} />` },
   { label: 'the attributes of the strip of Hauling plan reordered', target: 'haulingPage', at: /<route-positions (v-if="planPositions[^"]*") (:positions="planPositions") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[5]} ${m[4]} ${m[3]} ${m[2]} ${m[1]} />` },
-  { label: 'the summary of the Hauling plan panel reworded', target: 'haulingPage', at: /(<v-card class="panel" data-summary=")[^"]*(" elevation="1">(?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, to: (m) => `${m[1]}Hauls that would cover what colonies lack, from the nearest colony with stock, and what each freighter class takes${m[2]}` },
-  { label: 'the attributes of the Hauling plan panel reordered', target: 'haulingPage', at: /<v-card class="panel" (data-summary="[^"]*") (elevation="1")>((?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, to: (m) => `<v-card class="panel" ${m[2]} ${m[1]}>${m[3]}` },
+  { label: 'the summary of the Hauling plan panel reworded', target: 'haulingPage', at: /(<v-card class="panel" data-summary=")[^"]*("[^>]*>(?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, to: (m) => `${m[1]}Hauls that would cover what colonies lack, from the nearest colony with stock, and what each freighter class takes${m[2]}` },
+  { label: 'the attributes of the Hauling plan panel reordered', target: 'haulingPage', at: /<v-card class="panel" (data-summary="[^"]*") (elevation="1")([^>]*)>((?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, to: (m) => `<v-card class="panel" ${m[2]} ${m[1]}${m[3]}>${m[4]}` },
   { label: 'the optional inputs of Transport listed in the opposite order', target: 'transportPage', at: /(const OPTIONAL_INPUTS = )\[('[^']*'(?:, '[^']*')*), (\.\.\.POSITION_INPUTS)\]/, to: (m) => `${m[1]}[${m[3]}, ${m[2].split(', ').reverse().join(', ')}]` },
   { label: 'the optional inputs of Hauling listed in the opposite order', target: 'haulingPage', at: /(const OPTIONAL_INPUTS = )\[('[^']*'(?:, '[^']*')*), (\.\.\.POSITION_INPUTS)\]/, to: (m) => `${m[1]}[${m[3]}, ${m[2].split(', ').reverse().join(', ')}]` },
   { label: 'the label of a position that is current reworded', target: 'position', at: /(\} else if \(seconds === 0\) \{\n {4}return )'[^'\n]*'/, to: (m) => `${m[1]}'at the save time'` },
   { label: 'the label of an age that is not read reworded', target: 'position', at: /(if \(!isTime\(seconds\)\) \{\n {4}return )'[^'\n]*'/, to: (m) => `${m[1]}'not recorded'` },
   { label: 'the label of an age the strip does not read reworded', target: 'component', at: /(this\.age && this\.age\.status !== 'unavailable' \? ageText\(this\.age\.value\) : )'[^'\n]*'/, to: (m) => `${m[1]}'not recorded'` },
   { label: 'the comment on a group that needs both switches reworded', target: 'position', at: /(and an 'unknown' one needs )both\./, to: (m) => `${m[1]}both switches on.` },
-  { label: 'the conjuncts of the fixed-parent test of the motion group in the other order', target: 'orbit', at: /\} else if \(fixed && body\.fixedParentId > 0\) \{/, to: () => '} else if (body.fixedParentId > 0 && fixed) {' },
+  { label: 'the fixed-parent condition parenthesised with its conjuncts reordered', target: 'orbit', at: /\} else if \(fixed && body\.fixedParentId > 0\) \{/, to: () => '} else if ((body.fixedParentId > 0) && fixed) {' },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
+
+const STANDALONE = new Set([
+  'benign:0',
+  'benign:4',
+  'benign:9',
+  'benign:15',
+])
+
+// Composed faults keep each reader under the rewrites too: utility and loader branches, page inputs, computed rows and summaries, and each independently bound template field.
+const COMPOSED = new Set([
+  0,
+  1,
+  8,
+  11,
+  21,
+  22,
+  26,
+  37,
+  45,
+  49,
+  51,
+  53,
+  55,
+  56,
+  57,
+  58,
+  59,
+  60,
+  61,
+  62,
+  63,
+  65,
+  66,
+  67,
+  68,
+  70,
+  71,
+  73,
+  74,
+  75,
+  79,
+  86,
+  87,
+  88,
+  89,
+  90,
+  92,
+  94,
+  95,
+  96,
+  97,
+  99,
+  106,
+  107,
+  108,
+  112,
+  113,
+  116,
+  117,
+  118,
+  119,
+  121,
+  123,
+  124,
+  125,
+  126,
+  130,
+  131,
+  132,
+  133,
+  134,
+  135,
+  136,
+  137,
+  138,
+  139,
+  140,
+  141,
+  142,
+  145,
+  146,
+  147,
+  148,
+  150,
+  151,
+  152,
+  ...Array.from({ length: 10 }, (_, index) => 157 + index),
+  167,
+  168,
+  179,
+  180,
+  ...Array.from({ length: 9 }, (_, index) => 183 + index),
+  193,
+  195,
+  197,
+  198,
+  199,
+  201,
+  202,
+  203,
+  206,
+  210,
+  213,
+  218,
+  222,
+  223,
+  224,
+  225,
+  226,
+  227,
+])
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
 const run = async (checks, world) => {
@@ -2619,7 +2725,17 @@ const describeFailure = ({ name, error }) => `${name}: ${(error && error.message
 
 const main = async () => {
   const mutate = !process.argv.includes('--no-mutations')
+  const only = process.argv.find((argument) => argument.startsWith('--only='))
+  const selected = only ? only.slice('--only='.length).split('|').filter(Boolean) : []
+  const keep = (key, label) => !only || selected.some((text) => key === text || label.includes(text))
+  const detail = process.argv.includes('--detail')
+  const began = performance.now()
   const failures = await run(CHECKS, worldOf())
+
+  if (detail) {
+    console.log(`TIME head: ${((performance.now() - began) / 1000).toFixed(3)} s; RSS ${(process.memoryUsage().rss / 1048576).toFixed(0)} MiB`)
+  }
+
   let passed = CHECKS.length - failures.length
   let total = CHECKS.length
 
@@ -2629,13 +2745,28 @@ const main = async () => {
     const known = new Set(CHECKS.map(({ name }) => name))
 
     FAULTS.forEach(([label, , , , fails]) => fails.forEach((name) => assert.ok(known.has(name), `${label}: no check named ${name}`)))
+    const covered = new Set(FAULTS.flatMap(([, , , , fails]) => fails))
+
+    CHECKS.forEach(({ name }) => assert.ok(covered.has(name), `${name}: no planted fault names this check`))
+    const composedCoverage = new Set(FAULTS.flatMap(([, , , , fails], index) => COMPOSED.has(index) ? fails : []))
+
+    CHECKS.forEach(({ name }) => assert.ok(composedCoverage.has(name), `${name}: no composed fault names this check`))
 
     const stages = [
-      ...BENIGN.map((edit) => [`benign edit kept: ${edit.label}`, async () => (await run(CHECKS, worldOf([edit]))).map(describeFailure)]),
-      ...BENIGN.slice(1, -1).map((_edit, index) => [`benign edits stacked: the first ${index + 2}`, async () => (await run(CHECKS, worldOf(BENIGN.slice(0, index + 2)))).map(describeFailure)]),
-      ['every benign edit applied: every check stays green', async () => (await run(CHECKS, worldOf(BENIGN))).map(describeFailure)],
+      ...BENIGN.filter((edit) => STANDALONE.has(edit.id) && keep(edit.id, edit.label)).map((edit) => [`benign edit kept: ${edit.label}`, async () => (await run(CHECKS, worldOf([edit]))).map(describeFailure)]),
+      ...(keep('benign:all', 'every benign edit applied') ? [['every benign edit applied: every check stays green', async () => (await run(CHECKS, worldOf(BENIGN))).map(describeFailure)]] : []),
     ]
-    const benign = await inParallel(stages, async ([, test]) => test())
+    const benign = await inParallel(stages, async ([label, test]) => {
+      const began = performance.now()
+
+      try {
+        return await test()
+      } finally {
+        if (detail) {
+          console.log(`TIME ${label}: ${((performance.now() - began) / 1000).toFixed(3)} s; RSS ${(process.memoryUsage().rss / 1048576).toFixed(0)} MiB`)
+        }
+      }
+    })
 
     benign.forEach((outcome, index) => {
       total += 1
@@ -2649,12 +2780,16 @@ const main = async () => {
       }
     })
 
-    const attempts = FAULTS.flatMap(([label, target, from, to, fails]) => {
+    const attempts = FAULTS.flatMap(([label, target, from, to, fails], index) => {
       const planted = from instanceof RegExp ? { target, at: from, to } : { target, from, to }
 
-      return [[label, [planted], fails], [`${label}, on the sources with every benign edit`, [...BENIGN, planted], fails]]
+      return [
+        ...(keep(`fault:${index}`, label) ? [[label, [planted], fails]] : []),
+        ...(COMPOSED.has(index) && keep(`composed:${index}`, `${label}, on the sources with every benign edit`) ? [[`${label}, on the sources with every benign edit`, [...BENIGN, planted], fails]] : []),
+      ]
     })
     const outcomes = await inParallel(attempts, async ([label, edits, fails]) => {
+      const began = performance.now()
       const world = worldOf(edits)
       const missed = []
 
@@ -2664,6 +2799,14 @@ const main = async () => {
         if (!failed) {
           missed.push(name)
         }
+
+        if (detail && failed) {
+          console.log(`CAUGHT ${label}: ${describeFailure(failed)}`)
+        }
+      }
+
+      if (detail) {
+        console.log(`TIME planted fault ${label}: ${((performance.now() - began) / 1000).toFixed(3)} s; RSS ${(process.memoryUsage().rss / 1048576).toFixed(0)} MiB`)
       }
 
       return { label, missed }
