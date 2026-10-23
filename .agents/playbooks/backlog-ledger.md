@@ -34,6 +34,12 @@ This repository has no CI and the owner lands commits on the working branch. Ope
   - The full suites (and every dependent check whose faults anchor on a changed file) run once, as the landing run, before the closing round.
   - Reviewers verify with their own probes and do not rerun whole suites.
   - Every heavy run counts against the machine-wide slot limit, reviewers' runs included.
+- Full-run supervision (FU-53):
+  - After the lead grants a heavy slot, start the suite with `CHECK_JOBS=1 bun scripts/run-check.js start --label=<ID>-<suite> <suite> [args]`. Record its label, supervisor pid and `.check-runs/<label>/status.json` path. Use `run-check.js status <label>` to read the result or `run-check.js wait <label>` to await completion.
+  - The detached supervisor survives the starter's turn. A run still occupies its heavy slot until its supervisor exits. Report active runs before ending a turn; never treat the end of a turn as cancellation. Direct background jobs do not have this contract.
+  - Resume a runner-based suite with the same command and arguments plus `--resume`. It refuses changed source, input saves or variant lists. Labels separate supervisor output, not suite progress records, so never run identical suite arguments concurrently.
+  - Read the failed step and browser scene before another run. Fix the cause instead of retrying. Keep fix rounds focused; a full adopting-suite rerun is unnecessary when only the runner's own regressions changed.
+  - Shared baseline work belongs in bounded `prepare`, not in a first variant. Every child has a watchdog or `runChild`/`startChild` limit, and the variant deadline covers its sequential child bounds plus its own work. The separate `between` bound covers every close, including after failed preparation. The runner's full contract is in `docs/plans/backlog/evidence/FU-53.md`.
 - Research items: the closing review judges the contract, the open questions and reproducible figures. Unsettled parsing cases become open questions for the implementing item.
 - Record each review round with `node docs/plans/backlog/ledger.mjs log <id> <status> <by> [note] [ref] --payload <agent>`.
   - The note is led by the payload's verdict, served model and finding ids, and the round is appended to the evidence file's `### Closing review record`.
