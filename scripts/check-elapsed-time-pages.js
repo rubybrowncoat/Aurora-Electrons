@@ -13,9 +13,9 @@
   - the Transport page's round trip for a fleet shows flying, loading, transits, the wait range, the total and the round trips a year, which reconcile with one another.
   - the Travel time of the table of distances, in the time order, is the elapsed time of the way the order picks to each system, found by searching the table for the system;
   - each stop of a round trip (Transport) or of a cycle (Hauling), paired with the oracle's by the name it is drawn under (the colony's or the order's, save data either way), shows the loading strength and the hours that the cargo, the crew, the race's technology and the colony's spaceport give, worked out here from SQL rows and the rules of the game, and the Hauling sentence gives the order delays the fixture sets, read by the role of each figure and not by its wording.
-  Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names by a wrong value of its own, never because the page threw (scripts/lib/fault-credit.js), and a fault under which the page raises an error it does not name is not credited. The baseline of every world and every benign rewrite is judged by `no-errors` beside its own checks, so a page that raises an error no check names never passes. Every fault is paired with a benign rewrite of the same text that must still pass. The standing faults of the in-process checks (scripts/check-fleet-profile.js, scripts/check-route-time.js) cover the modules; this script proves that their results reach the screen.
+  Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names by a wrong value of its own, never because the page threw (scripts/lib/fault-credit.js), and a fault under which the page raises an error it does not name is not credited. The baseline of every world and every benign rewrite is judged by `no-errors` beside its own checks, so a page that raises an error no check names never passes. Every fault is paired with a benign rewrite of the same text that must still pass. The rewrites of a world are served in stacks, each joining the first stack whose texts it still applies to, and each stack is read on the pages of its rewrites and judged by the checks of those pages; one rewrite of each family (an explicit value and event for `v-model`, a longhand binding, a qualifier moved, prose worded another way, a condition in brackets) is also served alone. The standing faults of the in-process checks (scripts/check-fleet-profile.js, scripts/check-route-time.js) cover the modules; this script proves that their results reach the screen.
 
-  Prints `N of N checks passed`; any failed check sets exit code 1. It needs Playwright's Chromium (`bunx playwright install chromium` once). Vite starts with a cold cache on every run, so a run takes minutes. `--only=<text>|<text>` runs the faults and rewrites whose name holds any of the texts, and `--probe` prints what each page shows and stops.
+  Prints `N of N checks passed`; any failed check sets exit code 1. It needs Playwright's Chromium (`bunx playwright install chromium` once). Vite starts with a cold cache on every run, so a run takes minutes. `--only=<text>|<text>` runs the faults and rewrites whose name holds any of the texts (the rewrites chosen stacked as in a full run, so that one chosen rewrite is served alone), and `--probe` prints what each page shows and stops.
 */
 const fs = require('fs')
 const os = require('os')
@@ -525,7 +525,7 @@ const deadlineOnly = (error) => {
   }
 }
 
-// The page that `observe` opens, made ready: the readers of the screen put in it and the race picked on the Empires page. Gives the function that waits for the page to settle: no database call in flight for a moment and no read of the page under way, within TIMEOUT.
+// The page that `observe` opens, made ready: the readers of the screen put in it and the race picked on the Empires page. Gives the function that waits for the page to settle: no database call in flight, none started or ended for `quiet` ms and no read of the page under way, within TIMEOUT.
 const prepare = async (page, url) => {
   const state = { inFlight: 0, last: Date.now() }
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
@@ -543,10 +543,10 @@ const prepare = async (page, url) => {
     }
   })
 
-  const settle = async () => {
+  const settle = async (quiet = 1500) => {
     const started = Date.now()
 
-    while (state.inFlight > 0 || Date.now() - state.last < 1500 || await page.evaluate(pageLoading)) {
+    while (state.inFlight > 0 || Date.now() - state.last < quiet || await page.evaluate(pageLoading)) {
       if (Date.now() - started > TIMEOUT) {
         throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
       }
@@ -567,7 +567,8 @@ const prepare = async (page, url) => {
   }
 
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
-  await settle()
+  // The reads the pick started are waited for with no quiet period: every run then opens a page first (`open`), and its settle waits out the quiet period over every call, a call of the pick reported late included.
+  await settle(0)
 
   return { settle }
 }
@@ -1158,6 +1159,31 @@ const swap = (from, to) => (text) => {
   return text.replace(from, () => to)
 }
 
+// The text of each file `variants` change, each change made on the text the one before it left: Map { file => text }. A change that does not apply exactly once throws (`swap`).
+const changedTexts = (variants, original) => variants.reduce((texts, variant) => texts.set(variant.file, variant.change(texts.has(variant.file) ? texts.get(variant.file) : original(variant.file))), new Map())
+
+// The rewrites of a run gathered into stacks, in their order: each joins the first stack whose texts it still applies to, else starts one of its own. Two rewrites of one text (the handling seconds of Transport and of Hauling) or of texts that overlap fall into different stacks, and a rewrite that does not apply to the files as they are throws, as a variant that does not apply always has.
+const stacksOf = (variants, original) => variants.reduce((stacks, variant) => {
+  const stack = stacks.find((members) => {
+    try {
+      changedTexts([...members, variant], original)
+
+      return true
+    } catch (error) {
+      return false
+    }
+  })
+
+  if (stack) {
+    stack.push(variant)
+  } else {
+    changedTexts([variant], original)
+    stacks.push([variant])
+  }
+
+  return stacks
+}, [])
+
 const LEG_PANEL = 'data-leg-detail elevation="1">'
 const EXPANDED = '            <template #expanded-item="{ headers, item }">\n              <td :colspan="headers.length" class="py-3">\n                <div v-if="item.cycleRows.length"'
 
@@ -1205,17 +1231,18 @@ const FAULTS = [
   { name: 'the note of the travel time states the flight at its lowest case', file: ROUTES_FILE, scope: 'routes', world: 'capped', change: swap("{ text: this.flightText(flight, flightHi), part: 'flight' }", "{ text: this.span(flight), part: 'flight' }"), fails: ['tile'] },
 ]
 
+// Every rewrite runs in a stack with the others of its world (`stacksOf`); `alone` marks the one rewrite of each family that also runs by itself: an explicit value and event for `v-model`, a longhand binding, a qualifier moved, prose worded another way and a condition in brackets.
 const BENIGN = [
-  { name: 'the order toggle bound by an explicit value and event', file: ROUTES_FILE, scope: 'routes', change: swap('<v-btn-toggle v-model="order" mandatory dense>', '<v-btn-toggle :value="order" mandatory dense @change="order = $event">') },
-  { name: 'the wait text with its condition in brackets', file: ROUTES_FILE, scope: 'routes', change: swap("wait === null ? 'Not known' : wait.lo === wait.hi ?", "wait === null ? 'Not known' : (wait.lo === wait.hi) ?") },
+  { name: 'the order toggle bound by an explicit value and event', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap('<v-btn-toggle v-model="order" mandatory dense>', '<v-btn-toggle :value="order" mandatory dense @change="order = $event">') },
+  { name: 'the wait text with its condition in brackets', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap("wait === null ? 'Not known' : wait.lo === wait.hi ?", "wait === null ? 'Not known' : (wait.lo === wait.hi) ?") },
   { name: 'the elapsed cell with its condition turned round', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.elapsed ? span(item.elapsed.hi) : '—' }}", "{{ !item.elapsed ? '—' : span(item.elapsed.hi) }}") },
   { name: 'the start offset note with its condition in brackets', file: ROUTES_FILE, scope: 'routes', change: swap('v-if="plan.time && plan.time.startDelay > 0"', 'v-if="plan.time && (plan.time.startDelay > 0)"') },
   { name: 'the leg table shown by v-show', file: ROUTES_FILE, scope: 'routes', change: swap(LEG_PANEL, 'data-leg-detail v-show="true" elevation="1">') },
-  { name: 'the start offset sentence worded another way', file: ROUTES_FILE, scope: 'routes', change: swap('The fleet starts with <span data-part="offset">', 'The fleet sets out with <span data-part="offset">') },
+  { name: 'the start offset sentence worded another way', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap('The fleet starts with <span data-part="offset">', 'The fleet sets out with <span data-part="offset">') },
   { name: 'the Wait column header reworded', file: ROUTES_FILE, scope: 'routes', change: swap("{ text: 'Wait', value: 'wait'", "{ text: 'Waiting', value: 'wait'") },
   { name: 'the range of a round trip with its condition turned round', file: INFORMATION_FILE, scope: 'transport', change: swap('(low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)', '(low !== high ? `${this.span(low)} to ${this.span(high)}` : this.span(low))') },
   { name: 'the flying row written as a template', file: INFORMATION_FILE, scope: 'transport', change: swap("{ key: 'flight', label: 'Flying', text: this.span(trip.travelSeconds) }", "{ key: 'flight', label: 'Flying', text: `${this.span(trip.travelSeconds)}` }") },
-  { name: 'the hook of a round trip row bound by the longhand', file: INFORMATION_FILE, scope: 'transport', change: swap(':data-cycle-row="row.key"', 'v-bind:data-cycle-row="row.key"') },
+  { name: 'the hook of a round trip row bound by the longhand', file: INFORMATION_FILE, scope: 'transport', alone: true, change: swap(':data-cycle-row="row.key"', 'v-bind:data-cycle-row="row.key"') },
   { name: 'the lower case of the cycle shown by a condition turned round', file: HAULING_FILE, scope: 'hauling', change: swap('v-if="item.year.cycleLowDays !== item.year.cycleDays"', 'v-if="item.year.cycleDays !== item.year.cycleLowDays"') },
   { name: 'the wait of the cycle with its condition turned round', file: HAULING_FILE, scope: 'hauling', change: swap('year.waitLowDays === year.waitDays ?', 'year.waitDays === year.waitLowDays ?') },
   { name: 'the sentence of the cycle shown by v-show', file: HAULING_FILE, scope: 'hauling', change: swap('class="caption text--secondary mt-2" data-cycle-parts>', 'class="caption text--secondary mt-2" v-show="true" data-cycle-parts>') },
@@ -1224,7 +1251,7 @@ const BENIGN = [
   { name: 'the distance cell with its condition turned round', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.elapsed === null ? '—' : span(item.elapsed.hi) }}", "{{ item.elapsed !== null ? span(item.elapsed.hi) : '—' }}") },
   { name: 'the joiner of the delay with its condition turned round', file: HAULING_FILE, scope: 'hauling', change: swap("{{ item.waitText ? ',' : ' and' }}", "{{ !item.waitText ? ' and' : ',' }}") },
   { name: 'the sentence of the cycle worded another way', file: HAULING_FILE, scope: 'hauling', change: swap('Each cycle: <span data-part="moving">', 'Per cycle: <span data-part="moving">') },
-  { name: 'the days moving moved ahead of their figure', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving', 'moving for <span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days') },
+  { name: 'the days moving moved ahead of their figure', file: HAULING_FILE, scope: 'hauling', alone: true, change: swap('<span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving', 'moving for <span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days') },
   { name: 'the handling of the cycle worded with another suffix', file: HAULING_FILE, scope: 'hauling', change: swap(' hours loading and unloading<template v-if="item.delayHours > 0">', ' hours in loading and unloading<template v-if="item.delayHours > 0">') },
   { name: 'the handling seconds listed in another order (Transport)', file: TRANSPORT_JS, scope: 'transport', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }', 'const HANDLING_SECONDS = { colonists: 10, installations: 20, minerals: 20 }') },
   { name: 'the handling seconds listed in another order (Hauling)', file: TRANSPORT_JS, scope: 'hauling', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }', 'const HANDLING_SECONDS = { colonists: 10, installations: 20, minerals: 20 }') },
@@ -1339,9 +1366,28 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
 
     const names = Object.fromEntries(Object.entries(truth.fleets).map(([key, fleet]) => [key, fleet.name]))
     const original = (name) => fs.readFileSync(path.join(root, name), 'utf8')
-    const view = async (scopes, variant) => {
-      if (variant) {
-        server.replace(variant.file, variant.change(original(variant.file)))
+    // Puts back each of `files` that a view served in place of the file, and throws the first restore that failed once all have been tried.
+    const restore = (files) => {
+      const failed = []
+
+      for (const file of files) {
+        try {
+          server.replace(file, null)
+        } catch (error) {
+          failed.push(error)
+        }
+      }
+
+      if (failed.length) {
+        throw failed[0]
+      }
+    }
+    // What the pages in `scopes` show with each of `variants` served in place of the text it changes (`changedTexts`), every file served restored afterwards.
+    const view = async (scopes, variants = []) => {
+      const texts = changedTexts(variants, original)
+
+      for (const [file, text] of texts) {
+        server.replace(file, text)
       }
 
       try {
@@ -1369,9 +1415,7 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
           return seen
         })
       } finally {
-        if (variant) {
-          server.replace(variant.file, null)
-        }
+        restore(texts.keys())
       }
     }
 
@@ -1414,16 +1458,22 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
       console.log('\nplanted faults')
 
       for (const fault of FAULTS.filter((variant) => wanted(variant) && mine(variant))) {
-        report(`fault caught: ${fault.name}`, faultVerdict(await view([fault.scope], fault), x, fault), `fails ${fault.fails.join(', ')}`)
+        report(`fault caught: ${fault.name}`, faultVerdict(await view([fault.scope], [fault]), x, fault), `fails ${fault.fails.join(', ')}`)
       }
 
       console.log('\nrewrites that say the same thing')
 
-      for (const variant of BENIGN.filter((one) => wanted(one) && mine(one))) {
-        const seen = await view([variant.scope], variant)
-        const wrong = resultsOf(seen, x, { label: `the pages rewritten as "${variant.name}"`, ids: judgedBy(plan.ids || SCOPES[variant.scope]) }).filter(({ result }) => result !== true).map(({ id }) => id)
+      const rewrites = BENIGN.filter((one) => wanted(one) && mine(one))
+      // The rewrites marked `alone` by themselves, then every stack, but for a stack of one rewrite that has run alone.
+      const served = [...rewrites.filter((one) => one.alone).map((one) => [one]), ...stacksOf(rewrites, original).filter((stack) => stack.length > 1 || !stack[0].alone)]
 
-        report(`rewrite passes: ${variant.name}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
+      for (const stack of served) {
+        const scopes = [...new Set(stack.map(({ scope }) => scope))]
+        const titles = stack.map(({ name }) => name)
+        const seen = await view(scopes, stack)
+        const wrong = resultsOf(seen, x, { label: `the pages rewritten as "${titles.join('", "')}"`, ids: judgedBy(plan.ids || scopes.flatMap((scope) => SCOPES[scope])) }).filter(({ result }) => result !== true).map(({ id }) => id)
+
+        report(stack.length === 1 ? `rewrite passes: ${titles[0]}` : `rewrites pass together: ${titles.join('; ')}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
       }
     }
   } finally {

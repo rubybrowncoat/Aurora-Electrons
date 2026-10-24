@@ -7,7 +7,7 @@
 
   The elapsed times are checked against a clock that is stepped through the journey (a timer that every jump sets and flights and stops run down), not against the walk the code makes of them.
 
-  Mutations: each planted fault must fail the checks it names; benign edits (a wording, the form of a binding, a comment) must leave every check green. Exit code 1 when a check fails.
+  Mutations: each planted fault must fail the checks it names; benign edits (a wording, the form of a binding, a comment) must leave every check green. Exit code 1 when a check fails. A planted fault is judged on a world that loads the Routes page only when it names a statement that reads the page (`PAGE_KEYS`, which the head holds to the statements that do).
 */
 const fs = require('fs')
 const path = require('path')
@@ -183,19 +183,40 @@ const applied = (text, edit) => {
   return { ...text, [edit.target]: patched(FILES[edit.target], text[edit.target], change.find, change.replace) }
 }
 
-const worldOf = async (edits = []) => {
+// The keys of the statements that read the Routes page (`world.page`, `world.fields`). A world loads the page only for a run of one of them, so a planted fault that names none of them is judged on a world without it. The head records the statements that read the page and fails when that set is not this list; a statement that reads the page of a world without it throws, which credits no fault.
+const PAGE_KEYS = ['order', 'page', 'gate', 'distance', 'voice']
+
+const worldOf = async (edits = [], { withPage = true } = {}) => {
   const text = edits.reduce(applied, { ...ORIGINALS })
   const utilitySources = Object.fromEntries(UTILITIES.map((name) => [name, text[name]]))
   const pageSources = { ...Object.fromEntries(UTILITIES.map((name) => [`utilities/${name}`, text[name]])), 'pages/routes': text.routes }
   const loaded = await loadUtilities(NAMES, { sources: utilitySources })
-  const page = await loadPage('pages/routes', { sources: pageSources, modules: { 'mixins/load-state': LABELS_STUB } })
-  const fields = async () => {
+  const page = withPage ? await loadPage('pages/routes', { sources: pageSources, modules: { 'mixins/load-state': LABELS_STUB } }) : null
+  // `reading` is the key of the statement that runs (set by `fixtures`), and `readers` the keys of those that read the page.
+  const world = { text, m: { time: loaded['route-time'], graph: loaded['jump-graph'], plan: loaded['route-plan'], transport: loaded.transport, hauling: loaded.hauling, fleet: loaded['fleet-profile'], provenance: loaded.provenance }, reading: null, readers: new Set() }
+  const reach = () => {
+    world.readers.add(world.reading)
+
+    if (!withPage) {
+      throw new Error(`the statement ${world.reading} reads the Routes page, which a world loads only for ${PAGE_KEYS.join(', ')}`)
+    }
+  }
+
+  Object.defineProperty(world, 'page', {
+    get: () => {
+      reach()
+
+      return page
+    },
+  })
+  world.fields = async () => {
+    reach()
     await loadPage('pages/routes', { sources: pageSources, modules: { 'mixins/load-state': LABELS_STUB, 'mixins/persisted-view': RECORDER } })
 
     return globalThis.__persistedFields
   }
 
-  return { text, m: { time: loaded['route-time'], graph: loaded['jump-graph'], plan: loaded['route-plan'], transport: loaded.transport, hauling: loaded.hauling, fleet: loaded['fleet-profile'], provenance: loaded.provenance }, page, fields }
+  return world
 }
 
 // ---------- the statements ----------
@@ -224,7 +245,12 @@ const memoryDatabase = async (withColumn = true) => {
 
 const fixtures = (world) => {
   const all = []
-  const add = (name, run) => all.push([name, run])
+  // Each statement tells the world its key as it runs, so that the world can record the statements that read the page.
+  const add = (name, run) => all.push([name, () => {
+    world.reading = keyOf(name)
+
+    return run()
+  }])
   const { m } = world
   const { graph, time, plan, transport, hauling } = m
   const search = (points, order, timing, origin = ORIGIN) => graph.searchRoutes(points, [origin], { order, timing: timing ? time.searchTiming(timing) : null })
@@ -1620,7 +1646,16 @@ const runStatements = async (statements, keys = null) => {
   return results
 }
 
+// The keys of `fails` whose statements ran and none of which failed by an assertion: a statement that threw credits no planted fault.
+const missedOf = (results, fails) => fails.filter((key) => {
+  const ran = results.filter(([name]) => keyOf(name) === key)
+
+  return ran.length > 0 && !ran.some(([, result]) => result !== true && !String(result).startsWith('threw '))
+})
+
 const checkHead = async () => {
+  // The world without the page runs first, before this process has loaded the page, as the world of a planted fault that names no statement of PAGE_KEYS does.
+  const bare = await runStatements(fixtures(await worldOf([], { withPage: false })))
   const world = await worldOf()
 
   console.log('\nElapsed-time routing on a constructed graph')
@@ -1628,6 +1663,17 @@ const checkHead = async () => {
   for (const [name, result] of await runStatements(fixtures(world))) {
     check(name, result)
   }
+
+  const strays = [...world.readers].filter((key) => !PAGE_KEYS.includes(key))
+  const unread = PAGE_KEYS.filter((key) => !world.readers.has(key))
+
+  check('guard: the statements that read the Routes page are those of PAGE_KEYS, so a planted fault that names none of them is judged on a world without the page', strays.length || unread.length ? `the page is read by ${strays.join(', ') || 'no other statement'} and not by ${unread.join(', ') || 'none of the list'}` : true)
+
+  const unlike = bare.filter(([name, result]) => !PAGE_KEYS.includes(keyOf(name)) && result !== true).map(([name]) => keyOf(name))
+  const loud = bare.filter(([name, result]) => PAGE_KEYS.includes(keyOf(name)) && !String(result).startsWith('threw ')).map(([name]) => keyOf(name))
+  const credited = PAGE_KEYS.filter((key) => !missedOf(bare, [key]).length)
+
+  check('guard: on a world without the page every other statement passes as it does with the page, and each statement of PAGE_KEYS throws, which credits no planted fault', unlike.length || loud.length || credited.length ? `failed without the page: ${unlike.join(', ') || 'none'}; did not throw: ${loud.join(', ') || 'none'}; credited: ${credited.join(', ') || 'none'}` : true)
 }
 
 const checkMutant = async (mutant, composed = false) => {
@@ -1636,7 +1682,7 @@ const checkMutant = async (mutant, composed = false) => {
   let world
 
   try {
-    world = await worldOf(composed ? [...BENIGN, mutant] : [mutant])
+    world = await worldOf(composed ? [...BENIGN, mutant] : [mutant], { withPage: Boolean(mutant.benign) || mutant.fails.some((key) => PAGE_KEYS.includes(key)) })
   } catch (error) {
     check(`${label}: ${mutant.name}`, `${/does not apply|does not parse/.test(error.message) ? 'invalid mutant' : 'does not load'}: ${error.message}`)
 
@@ -1656,11 +1702,7 @@ const checkMutant = async (mutant, composed = false) => {
 
   const absent = mutant.fails.filter((key) => !statements.some(([name]) => keyOf(name) === key))
   const results = await runStatements(statements, mutant.fails)
-  const missed = mutant.fails.filter((key) => {
-    const ran = results.filter(([name]) => keyOf(name) === key)
-
-    return ran.length > 0 && !ran.some(([, result]) => result !== true && !String(result).startsWith('threw '))
-  })
+  const missed = missedOf(results, mutant.fails)
 
   check(`${label}: ${mutant.name}`, absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
