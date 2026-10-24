@@ -1,9 +1,9 @@
 /*
   Checks the warning snoozes (src/renderer/utilities/warnings/snoozes.js, the signatures the 24 checks of the classes B, C and K declare in utilities/warnings/*.js, and the wiring of pages/warnings.vue) against worked fixtures and against what the saves hold, read-only.
 
-  node scripts/check-warning-snoozes.js [--no-mutations] [--all] [--only=key,key]
+  node scripts/check-warning-snoozes.js [--no-mutations] [--all] [--only=key,key] [--faults=n,n] [--controls] [--detail]
 
-  --all lists the checks each mutation breaks, not only the ones it names; --only runs the checks of those keys and the mutations that name one.
+  --all lists the checks each mutation breaks, not only the ones it names; --only runs the checks of those keys and the mutations that name one; --faults runs only the mutations of those numbers (as the run numbers them) and --controls only the controls of the credit rule, with no baseline; --detail prints what each named check said under its mutation (CHECK_VERBOSE=1 keeps the whole message, not its first line).
 
   Groups, each check numbered and keyed (a mutation names the keys it must break):
   - unit: when a snooze ends and when it holds (a game date at and after its expiry and the guards before it, a declared change, an episode that is seen to end and a return that is a new one), what a failed read, a row that could not be evaluated, an id listed twice, a signature or an identity that cannot be read, an unknown clock, changed options and a save earlier than the snooze leave alone, a snooze of the whole check, what a record is made of and refused for, the stored form and the ended records kept apart, a restart, the isolation of races and campaigns, the seeding of a branch at a fork whatever the parent did since, the dates of the game, the bands and the signatures, the 24 checks that declare a material change, the signature of a damaged ship made of ids, the condition told in words, a Settings reset keeping the snoozes, the wording;
@@ -12,15 +12,16 @@
   - forks: the same eight saves through the real recorder into in-memory stores, so the registry gives the branches (a rollback and three forks); the snoozes of one branch seeded to the next and judged on the real rows of the child, against the identity of each object read independently.
   A save that is not there skips its group and says so (a skip is never agreement); only SELECTs are issued to a save, which is opened read only.
 
-  Each mutation is planted in an isolated copy of the source (scripts/lib/mutant-source.js) and must break every check it names. Prints `N of N checks passed`; any failed check sets exit code 1.
+  Each mutation is planted in an isolated copy of the source (scripts/lib/mutant-source.js) and must break every check it names by an assertion of the check's own on a value it read (scripts/lib/fault-credit.js `caughtAll`). The code under test runs only through `through` of fault-credit.js (`subjectUtilities` for the utilities, `subjectIndex` for the read and the signature readers of each check, `subjectVm` for the page, whose errors that Vue or the process caught are a throw of the page), so a named check that failed only because a call of it threw credits nothing: it stops the run, unless the mutation declares `throws`, and so does a check that ended in an exception of its own (`judged`). The line of each mutation names the kind of each credit (value, throw). The controls plant a crash of a utility and of the page and show the run stopped, and a declared crash credited. Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2.
 */
 const fs = require('fs')
 const path = require('path')
-const { format } = require('util')
+const { format, types } = require('util')
 const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const { parse: parseComponent } = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert: markedAssert, failure, through, harnessOwn, harnessStore, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
+const { HarnessError } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { loadPage } = require('./lib/page-loader')
@@ -40,6 +41,8 @@ const SAVES = {
 }
 const SAVE_KEYS = Object.keys(SAVES).filter((key) => fs.existsSync(SAVES[key].file))
 const FAST_SAVES = ['modded', 'f2904201340'].filter((key) => SAVE_KEYS.includes(key))
+// The checks that compare particular saves with each other (the rewinds and the forks of the Falryx game), which the fast saves do not hold.
+const ACROSS_SAVES = ['rewind-real', 'fork-real']
 const DEFAULT_OPTIONS = { idleFleetsAtColonies: false, maintenanceThreshold: 100, maintenanceExclusions: [] }
 
 const MATERIAL_KEYS = ['undermanned-ships', 'damaged-ships', 'armor-damaged-ships', 'low-morale-crews', 'low-maintenance-ships', 'misconfigured-supply-classes', 'misconfigured-tanker-classes', 'free-construction-capacity', 'free-ordnance-capacity', 'free-fighter-capacity', 'idle-ground-training', 'projects-short-of-minerals', 'idle-slipways', 'low-efficiency-populations', 'wasted-mining-capacity', 'mining-redeployment', 'mass-driver-orphans', 'idle-research-labs', 'stalled-research-projects', 'mismatched-research-fields', 'stranded-miners', 'intruders', 'dangerous-rifts', 'active-lifepods', 'known-unexploited-constructs']
@@ -72,10 +75,219 @@ const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stri
 // The text of each file of the utilities, read once for all the loads of the process: the folder does not change while the checks run, and a mutation's own text is given as `sources`.
 const texts = new Map()
 
+// A call of the code under test (scripts/lib/fault-credit.js `through`) whose result is handed over as it is, not read whole as `subjectModule` reads it: the utilities hand back the records of the store they were given, and reading a store of thousands of them on every call made the checks that build one call by call quadratic (seed-order, past-store and page-prune took more than 300 s instead of 16 s). What a call returned is read where a deep assertion compares it (`assert`).
+const subjectCall = (label, call) => through(label, call, { read: false })
+
+// The functions and constructors of the language the harness reads a compared value and checks the language with, taken before any module of the code under test is loaded, which could change them.
+const { apply, defineProperty, deleteProperty, getOwnPropertyDescriptor, getPrototypeOf, ownKeys, setPrototypeOf } = Reflect
+const { Array: LanguageArray, Map: LanguageMap, Set: LanguageSet, Date: LanguageDate, structuredClone: structuredCopy } = globalThis
+const { isArray } = Array
+const { isDate, isMap, isProxy, isSet } = types
+const forEachOfMap = Map.prototype.forEach
+const getOfMap = Map.prototype.get
+const hasOfMap = Map.prototype.has
+const setOfMap = Map.prototype.set
+const forEachOfSet = Set.prototype.forEach
+const addOfSet = Set.prototype.add
+const timeOf = Date.prototype.getTime
+
+// The kind of object each prototype of the language holds that a deep assertion may compare: the kinds a structured clone copies whole, with all the comparison reads of them.
+const DETACHABLE = new Map([[Object.prototype, 'Object'], [Array.prototype, 'Array'], [Map.prototype, 'Map'], [Set.prototype, 'Set'], [Date.prototype, 'Date']])
+
+// The kinds of object a structured clone copies only in part, or not at all, told by what they are, whatever their prototype.
+const NOT_DETACHABLE = [[types.isNativeError, 'Error'], [types.isRegExp, 'RegExp'], [types.isBoxedPrimitive, 'boxed primitive'], [types.isArrayBufferView, 'typed array'], [types.isAnyArrayBuffer, 'ArrayBuffer'], [types.isWeakMap, 'WeakMap'], [types.isWeakSet, 'WeakSet'], [types.isPromise, 'Promise'], [types.isArgumentsObject, 'arguments object']]
+
+const cannotDetach = (what) => new HarnessError(`a deep assertion compares a value holding ${what}, which cannot be detached`)
+
+// Whether `key` (an own key of an array) is one of its indices below its length.
+const isIndex = (array, key) => typeof key === 'string' && `${+key >>> 0}` === key && +key < array.length
+
+// A value a deep assertion compares, read once as data: each object (`copies` holding each one read, for the two values of the assertion) copied with the properties the comparison reads, its own enumerable ones and every index of an array, enumerable or not, and the entries of a Map or a Set, each getter run once, as the code under test. What a structured clone does not copy whole stops the run as a defect of the harness, since the comparison would read more of it than a detached copy holds: a function, a symbol, a Proxy, an object of another kind than a plain object, an array, a Map, a Set or a Date (`NOT_DETACHABLE`), or on another prototype than its kind's (`DETACHABLE`), a property keyed by a symbol, and a Date with properties of its own.
+const readAsData = (value, copies) => {
+  if (typeof value === 'function') {
+    throw cannotDetach('a function')
+  }
+
+  if (typeof value === 'symbol') {
+    throw cannotDetach('a symbol')
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
+
+  if (apply(hasOfMap, copies, [value])) {
+    return apply(getOfMap, copies, [value])
+  }
+
+  if (isProxy(value)) {
+    throw cannotDetach('a Proxy')
+  }
+
+  for (let at = 0; at < NOT_DETACHABLE.length; at += 1) {
+    if (NOT_DETACHABLE[at][0](value)) {
+      throw cannotDetach(`an object of kind ${NOT_DETACHABLE[at][1]}`)
+    }
+  }
+
+  const kind = isArray(value) ? 'Array' : isMap(value) ? 'Map' : isSet(value) ? 'Set' : isDate(value) ? 'Date' : 'Object'
+
+  if (DETACHABLE.get(getPrototypeOf(value)) !== kind) {
+    throw cannotDetach('an object on a prototype not of the language')
+  }
+
+  const copy = kind === 'Array' ? new LanguageArray(value.length) : kind === 'Map' ? new LanguageMap() : kind === 'Set' ? new LanguageSet() : kind === 'Date' ? new LanguageDate(apply(timeOf, value, [])) : {}
+
+  apply(setOfMap, copies, [value, copy])
+
+  if (kind === 'Map') {
+    apply(forEachOfMap, value, [(item, key) => apply(setOfMap, copy, [readAsData(key, copies), readAsData(item, copies)])])
+  } else if (kind === 'Set') {
+    apply(forEachOfSet, value, [(item) => apply(addOfSet, copy, [readAsData(item, copies)])])
+  }
+
+  const keys = ownKeys(value)
+
+  for (let at = 0; at < keys.length; at += 1) {
+    const key = keys[at]
+
+    if (typeof key === 'symbol') {
+      throw cannotDetach('a property keyed by a symbol')
+    }
+
+    const own = getOwnPropertyDescriptor(value, key)
+
+    if (own !== undefined && (own.enumerable || (kind === 'Array' && isIndex(value, key)))) {
+      if (kind === 'Date') {
+        throw cannotDetach('a Date with properties of its own')
+      }
+
+      defineProperty(copy, key, { value: readAsData(value[key], copies), enumerable: true, writable: true, configurable: true })
+    }
+  }
+
+  return copy
+}
+
+// The prototypes of the language whose code a marked assertion runs before its verdict, each with its own prototype and its own properties as they were before any module of the code under test was loaded: those of the objects a comparison is given, whose tags, constructors and iterators it reads, that of the patterns `match` runs, and those of the iterators fault-credit's `assert` spreads its arguments with. Each one's prototype is another of them or null, so the whole chain of each is here. Object.prototype is first: every other check reads the fields of descriptors, which a property put on it could answer.
+const LANGUAGE = [['Object.prototype', Object.prototype], ['Array.prototype', Array.prototype], ['Map.prototype', Map.prototype], ['Set.prototype', Set.prototype], ['Date.prototype', Date.prototype], ['RegExp.prototype', RegExp.prototype], ['the prototype of array iterators', getPrototypeOf([][Symbol.iterator]())], ['the prototype of Map iterators', getPrototypeOf(new Map().entries())], ['the prototype of Set iterators', getPrototypeOf(new Set().values())], ['the prototype of iterators', getPrototypeOf(getPrototypeOf([][Symbol.iterator]()))]].map(([name, proto]) => ({ name, proto, parent: getPrototypeOf(proto), keys: ownKeys(proto), owns: ownKeys(proto).map((key) => getOwnPropertyDescriptor(proto, key)) }))
+
+const sameOwn = (was, now) => now !== undefined && was.value === now.value && was.get === now.get && was.set === now.set && was.writable === now.writable && was.enumerable === now.enumerable && was.configurable === now.configurable
+
+// What of a prototype of `LANGUAGE` is not as it was loaded, or null: its own prototype, or the first of its own keys that differs. Its prototype and its keys are compared before any of its properties is read, and no list is read past its end, where a property put on Array.prototype would answer.
+const changeOf = ({ proto, parent, keys, owns }) => {
+  if (getPrototypeOf(proto) !== parent) {
+    return 'its prototype'
+  }
+
+  const now = ownKeys(proto)
+  const both = now.length < keys.length ? now.length : keys.length
+
+  for (let index = 0; index < both; index += 1) {
+    if (now[index] !== keys[index]) {
+      return String(now[index])
+    }
+  }
+
+  if (now.length !== keys.length) {
+    return String(now.length > keys.length ? now[keys.length] : keys[now.length])
+  }
+
+  for (let index = 0; index < keys.length; index += 1) {
+    if (!sameOwn(owns[index], getOwnPropertyDescriptor(proto, keys[index]))) {
+      return String(keys[index])
+    }
+  }
+
+  return null
+}
+
+// Puts a prototype of `LANGUAGE` back as it was loaded: its own prototype, and its keys in their order.
+const restore = ({ proto, parent, keys, owns }) => {
+  setPrototypeOf(proto, parent)
+
+  const now = ownKeys(proto)
+
+  for (let index = 0; index < now.length; index += 1) {
+    deleteProperty(proto, now[index])
+  }
+
+  for (let index = 0; index < keys.length; index += 1) {
+    defineProperty(proto, keys[index], owns[index])
+  }
+}
+
+// Puts back every prototype of `LANGUAGE` that the code under test changed, in their order, so that each is checked on the ones before it as they were loaded, and gives the first change, as `<prototype> (<what changed>)`, or null.
+const restoreLanguage = () => {
+  let first = null
+
+  for (let at = 0; at < LANGUAGE.length; at += 1) {
+    const change = changeOf(LANGUAGE[at])
+
+    if (change !== null) {
+      restore(LANGUAGE[at])
+      first = first === null ? `${LANGUAGE[at].name} (${change})` : first
+    }
+  }
+
+  return first
+}
+
+// Stops the run when the code under test has changed a prototype of `LANGUAGE` (a getter put on the tag of every object, an iterator replaced, a Proxy put under Array.prototype), since a marked assertion would run what was put there, and what it threw would pass as the assertion's verdict. Every changed prototype is put back first (`restoreLanguage`).
+const assertLanguageAsLoaded = () => {
+  const changed = restoreLanguage()
+
+  if (changed !== null) {
+    throw new HarnessError(`the code under test changed ${changed}, whose code a marked assertion runs`)
+  }
+}
+
+// The two values of a deep assertion as the comparison is given them: each read as data (`readAsData`), as a call of the code under test, then copied by a structured clone, which keeps the objects the two share shared, and handed over once the language is found as it was loaded. What a getter throws while a value is read fails the check as a throw of the code under test, and the comparison and the text of its failure meet only objects that no code of the code under test has ever held, on the language's own prototypes.
+const detach = (actual, expected) => {
+  const copies = new LanguageMap()
+  const read = [subjectCall('a value an assertion of the check compares', () => readAsData(actual, copies)), subjectCall('a value an assertion of the check compares', () => readAsData(expected, copies))]
+  let detached = null
+
+  try {
+    detached = structuredCopy(read)
+  } catch (error) {
+    throw new HarnessError(`the values a deep assertion compares, read as data, cannot be detached: ${error && error.message}`)
+  }
+
+  assertLanguageAsLoaded()
+
+  return detached
+}
+
+// The deep comparisons, which read every property of what they compare.
+const DEEP = ['deepEqual', 'deepStrictEqual', 'notDeepEqual', 'notDeepStrictEqual', 'partialDeepStrictEqual']
+
+// The assertions of the checks: fault-credit's marked `assert`, each run on the language as it was loaded (`assertLanguageAsLoaded`), a deep comparison comparing the detached copies of what it is given (`detach`), so that nothing of the code under test runs inside a marked assertion before its verdict. The other assertions (equal, notEqual, ok, match) decide by identity, truthiness or a pattern of the check, which runs nothing of what they are given; only the text of a failure inspects their values, once the assertion has failed, so what a value runs there cannot make a passing assertion fail.
+const assert = Object.fromEntries(Object.entries(markedAssert).map(([name, member]) => [name, typeof member !== 'function' || name === 'AssertionError' ? member : DEEP.includes(name) ? (actual, expected, ...rest) => {
+  const [actualCopy, expectedCopy] = detach(actual, expected)
+
+  return member(actualCopy, expectedCopy, ...rest)
+} : (...args) => {
+  assertLanguageAsLoaded()
+
+  return member(...args)
+}]))
+
+// The functions of a module of the code under test, each behind `subjectCall`; the rest as it is.
+const subjectUtilities = (mod) => Object.fromEntries(Object.keys(mod).map((name) => [name, typeof mod[name] === 'function' ? (...args) => subjectCall(`the utility ${name}`, () => mod[name](...args)) : mod[name]]))
+
+// The index of the checks behind `subjectCall`, with the read of each check and the readers of its signature behind it too, as a check calls them itself; the rest of each check as it is.
+const subjectIndex = (mod) => ({
+  ...subjectUtilities(mod),
+  CHECKS: Object.freeze(mod.CHECKS.map((entry) => Object.freeze({ ...entry, read: (...args) => subjectCall(`the read of ${entry.key}`, () => entry.read(...args)), ...(entry.captured ? { captured: Object.freeze(entry.captured.map((reader, index) => (token) => subjectCall(`reader ${index + 1} of the signature of ${entry.key}`, () => reader(token)))) } : {}) }))),
+})
+
+// The modules as the checks call them: every function of the code under test behind `subjectCall`, so what it throws fails the check that called it as a throw of the code under test.
 const loadModules = async (sources, names = NAMES, pageEdits = []) => {
   const loaded = await loadUtilities(names, { stubs: STUBS, directory: utilitiesDirectory, sources, texts })
+  const subject = (name) => (loaded[name] ? subjectUtilities(loaded[name]) : undefined)
 
-  return { common: loaded['warnings/common'], index: loaded['warnings/index'], snoozes: loaded['warnings/snoozes'], milestones: loaded['history-milestones'], campaign: loaded.campaign, remembered: loaded['remembered-views'], history: loaded.history, pages: pagesDirectory, pageEdits }
+  return { common: subject('warnings/common'), index: subjectIndex(loaded['warnings/index']), snoozes: subject('warnings/snoozes'), milestones: subject('history-milestones'), campaign: subject('campaign'), remembered: subject('remembered-views'), history: subject('history'), pages: pagesDirectory, pageEdits }
 }
 
 // ---------- the saves, read only ----------
@@ -111,7 +323,7 @@ const databaseOf = (file) => {
   return databases.get(file)
 }
 
-// A save as the check reads it: every check of the page read as the page reads it, with the game time of the save.
+// A save as the check reads it: every check of the page read as the page reads it, with the game time of the save. Every read succeeds on the saves here, so a read that fails (a throw of the code under test, or a defect of the harness) fails each check that reads the save with it, never a read the checks pass over or a save with fewer rows.
 const readSave = async (m, key) => {
   const save = SAVES[key]
   const database = databaseOf(save.file)
@@ -120,14 +332,9 @@ const readSave = async (m, key) => {
 
   for (const check of m.index.CHECKS) {
     const options = Object.fromEntries((check.options || []).map((name) => [name, DEFAULT_OPTIONS[name]]))
+    const rows = await check.read({ database, GameID: save.game, RaceID: save.race, RaceNPR: false, separator: ',', count: m.common.counter(','), options, GameTime })
 
-    try {
-      const rows = await check.read({ database, GameID: save.game, RaceID: save.race, RaceNPR: false, separator: ',', count: m.common.counter(','), options, GameTime })
-
-      reads[check.key] = Object.freeze({ ok: true, rows: m.common.normalizeRows(rows, check), GameTime, options: Object.freeze({ ...options }) })
-    } catch (error) {
-      reads[check.key] = Object.freeze({ ok: false, error: error.message, rows: [], GameTime, options })
-    }
+    reads[check.key] = Object.freeze({ ok: true, rows: m.common.normalizeRows(rows, check), GameTime, options: Object.freeze({ ...options }) })
   }
 
   return { key, save, database, GameTime, reads }
@@ -162,6 +369,7 @@ const installation = () => {
   }
 }
 
+// The branches of the eight saves, recorded by the real recorder. The clock, the ids and the callback it is given are the harness's (`harnessOwn`): what they throw stops the run, the recorder keeping it among the failures of its pass or not; the database and the stores are handed over as they are, their failures being data the recorder has to handle.
 const forksOf = async (m) => {
   const keys = FALRYX_TIMES.map((time) => `f${time}`)
 
@@ -175,9 +383,14 @@ const forksOf = async (m) => {
   for (const key of keys) {
     const resolved = []
     const database = databaseOf(SAVES[key].file)
-    const run = await m.history.recordHistory({ transaction: (work) => work({ id: 'transaction' }), query: database.query }, { storage: inst.io, path: `C:/saves/${path.basename(SAVES[key].file)}`, now: inst.now, newId: inst.newId, onResolved: (GameID, resolution) => resolved.push({ GameID, ...resolution }) })
+    const run = await m.history.recordHistory({ transaction: (work) => work({ id: 'transaction' }), query: database.query }, { storage: inst.io, path: `C:/saves/${path.basename(SAVES[key].file)}`, now: harnessOwn(inst.now), newId: harnessOwn(inst.newId), onResolved: harnessOwn((GameID, resolution) => resolved.push({ GameID, ...resolution })) })
     const mine = resolved.find((entry) => entry.GameID === SAVES[key].game)
     const [[{ GameTime }]] = await database.query(`select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${SAVES[key].game}`)
+    const harness = (run.failed || []).find((entry) => entry && entry.error instanceof HarnessError)
+
+    if (harness) {
+      throw harness.error
+    }
 
     assert.deepEqual(run.failed, [], `the recorder failed on ${key}`)
     saves.push({ key, GameTime, campaignId: mine.campaignId, branchId: mine.branchId, relation: mine.relation })
@@ -1030,23 +1243,35 @@ check('voice', 'what the page says of a snooze is impersonal: no I, me, my, mine
 
 // ---------- the page, run for real ----------
 
-// The page's own options (its mixins, its computed values, its watchers and its reads, through the real load tracking and the async computed plugin) in Vue 2.7 without a template, over the real checks on a real save, with a store that is a plain object: nothing here is a copy of what the page does.
+// The page's own options (its mixins, its computed values, its watchers and its reads, through the real load tracking and the async computed plugin) in Vue 2.7 without a template, over the real checks on a real save, with a store that is a plain object: nothing here is a copy of what the page does. The store is the harness's (scripts/lib/fault-credit.js `harnessStore`: a getter that throws, or one of another kind than the page reads, stops the run), the database and the config being handed over as they are, since their failures are data the page has to handle.
 Vue.config.productionTip = false
 Vue.config.devtools = false
 Vue.config.silent = true
-Vue.use(require('vue-async-computed').default, { errorHandler: () => {} })
 
+// What the page raised that Vue, the async-computed plugin or the process caught for it: a watcher, a hook, a read, a promise of the page that rejected.
 const pageErrors = []
 
+// The read failures the harness plants on purpose (`control.broken` of `mountPage`): data the page has to handle, so the plugin passes them over. Any other error a read of the page rejects with is the page's.
+const plantedFailures = new WeakSet()
+
+Vue.use(require('vue-async-computed').default, { useRawError: true, errorHandler: (error) => { if (!plantedFailures.has(error)) { pageErrors.push(error) } } })
 Vue.config.errorHandler = (error) => pageErrors.push(error)
 process.on('unhandledRejection', (error) => pageErrors.push(error))
 
+// An error the page raised, as the failure of a call of the code under test: a throw of the page, never a value a check read. A HarnessError the page met (the store of the harness that failed under it) is the one taken, and passes as it is and stops the run; otherwise the first.
+const pageThrew = () => subjectCall(`the page (${pageErrors.length} error${pageErrors.length === 1 ? '' : 's'} raised)`, () => { throw pageErrors.find((error) => error instanceof HarnessError) || pageErrors[0] })
+
 const pause = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// Waits for `test` to hold, to `limit` ms: a page that never gets there fails the check by its own assertion, and one that raised an error while it was waited for fails it as a throw of the page.
 const until = async (test, what, limit = 60000) => {
   const began = Date.now()
 
   for (;;) {
+    if (pageErrors.length) {
+      pageThrew()
+    }
+
     const value = test()
 
     if (value) {
@@ -1054,7 +1279,7 @@ const until = async (test, what, limit = 60000) => {
     }
 
     if (Date.now() - began > limit) {
-      throw new Error(`the page did not reach: ${what}`)
+      throw failure(`the page did not reach: ${what}`)
     }
 
     await pause()
@@ -1080,6 +1305,21 @@ const pageOptionsOf = (m) => {
   return m.pageOptions
 }
 
+// The page as a check reads and drives it: every value read off the instance and every method called on it is a call of the code under test (`through`), so what the page throws there fails the check as a throw of the page.
+const subjectVm = (vm) => new Proxy(vm, {
+  get: (target, key) => {
+    if (typeof key === 'symbol') {
+      return target[key]
+    }
+
+    const value = subjectCall(`the page's ${key}`, () => target[key])
+
+    return typeof value === 'function' ? (...args) => subjectCall(`the page's ${key}`, () => value.apply(target, args)) : value
+  },
+})
+
+const PAGE_STORE_SHAPE = { config: ['object'], database: ['object'], GameID: ['number'], RaceID: ['number'], GameTime: ['number', 'null', 'undefined', 'string'], StartYear: ['number'], racePrefix: ['string'], campaignId: ['string'], 'history/campaign': ['object'] }
+
 const mountPage = async (m, { save = 'modded', world: overrides = {}, config = memoryConfig() } = {}) => {
   const spec = SAVES[save]
   const real = databaseOf(spec.file)
@@ -1093,10 +1333,11 @@ const mountPage = async (m, { save = 'modded', world: overrides = {}, config = m
       try {
         if (control.broken) {
           // The page's modules are loaded from data: URLs, so a formatted stack of an error made here is tens of megabytes, and the async-computed plugin formats every one it catches.
-          const failure = new Error('disk I/O error')
+          const broken = new Error('disk I/O error')
 
-          failure.stack = 'Error: disk I/O error'
-          throw failure
+          broken.stack = 'Error: disk I/O error'
+          plantedFailures.add(broken)
+          throw broken
         }
 
         if (control.hold && sql.includes(control.hold.match)) {
@@ -1133,27 +1374,47 @@ const mountPage = async (m, { save = 'modded', world: overrides = {}, config = m
   define('campaignId', () => 'c1')
   define('history/campaign', () => ({ branchId: world.branchId }))
 
-  const $store = { getters, state: { RaceNPR: false, get freshness () { return { generation: world.generation, inputs: {} } } }, commit: () => {}, dispatch: () => {} }
+  const $store = harnessStore({ getters, state: { RaceNPR: false, get freshness () { return { generation: world.generation, inputs: {} } } }, commit: () => {}, dispatch: () => {} }, PAGE_STORE_SHAPE, { raw: ['config', 'database'] })
   const options = await pageOptionsOf(m)
-  const vm = new Vue({ ...options, beforeCreate () { this.$store = $store } })
+  const instance = subjectCall('the page', () => new Vue({ ...options, beforeCreate () { this.$store = $store } }))
 
   // No template is mounted (there is no DOM), and the plugin refreshes a read on request only once its mounted hook has run, so the flag that hook sets is set here.
-  vm._asyncComputedIsMounted = true
+  instance._asyncComputedIsMounted = true
 
-  return { m, vm, world, control, config, prefix, key: `${prefix}.warningsSnoozed`, rewire: () => { world.database = wrap() } }
+  return { m, vm: subjectVm(instance), instance, world, control, config, prefix, key: `${prefix}.warningsSnoozed`, rewire: () => { world.database = wrap() } }
 }
 
+// Runs `work` on a page mounted for it, then takes the page down. A defect of the harness the work met stops the run; otherwise a page that raised an error, while the work ran or while it was taken down, fails the check as a throw of the page (`pageThrew`), whatever else the check saw: a value read off a page that threw is not credited.
 const withPage = async (m, options, work) => {
   pageErrors.length = 0
 
   const page = await mountPage(m, options)
+  let outcome = null
 
   try {
     await work(page)
-    await pause(30)
-    assert.deepEqual(pageErrors.map(String), [], 'the page raised errors')
-  } finally {
-    page.vm.$destroy()
+  } catch (error) {
+    outcome = { error }
+  }
+
+  try {
+    page.instance.$destroy()
+  } catch (error) {
+    pageErrors.push(error)
+  }
+
+  await pause(30)
+
+  if (outcome && outcome.error instanceof HarnessError) {
+    throw outcome.error
+  }
+
+  if (pageErrors.length) {
+    pageThrew()
+  }
+
+  if (outcome) {
+    throw outcome.error
   }
 }
 
@@ -1497,7 +1758,7 @@ check('page-text', 'on the page a snooze until a material change shows the chang
 
 // ---------- the saves ----------
 
-const eligible = (read) => (read.ok ? read.rows.filter((row) => !row.unevaluated && !row.ambiguous) : [])
+const eligible = (read) => read.rows.filter((row) => !row.unevaluated && !row.ambiguous)
 
 const STAMP_TABLES = { ship: ['FCT_Ship', 'ShipID', 'ShipClassID, Constructed'], colony: ['FCT_Population', 'PopulationID', 'SystemBodyID'], commander: ['FCT_Commander', 'CommanderID', 'CareerStart, Female, SpeciesID'], wreck: ['FCT_Wrecks', 'WreckID', 'ShipID, SystemID, ClassID'] }
 
@@ -1518,7 +1779,7 @@ const tuplesOf = async (database, GameID) => {
   return tuples
 }
 
-const rowIds = (read) => (read.ok ? read.rows.map((row) => row.raw) : [])
+const rowIds = (read) => read.rows.map((row) => row.raw)
 
 check('sig-real', 'on every save each row of the 24 checks carries a signature that is a non-empty text or null, and in words a reader of its check tells each of its tokens; a check that is not read, and checks that list nothing, are said and never counted as agreement', 'reads', async ({ m, ctx }) => {
   await ctx.saves(ctx.keys)
@@ -1532,7 +1793,6 @@ check('sig-real', 'on every save each row of the 24 checks carries a signature t
     for (const checkKey of MATERIAL_KEYS) {
       const read = reads[checkKey]
 
-      assert.equal(read.ok, true, `${key} ${checkKey}: ${read.error}`)
       read.rows.filter((row) => !row.unevaluated).forEach((row) => {
         rowsSeen++
         assert.ok(row.signature === null || (typeof row.signature === 'string' && row.signature !== ''), `${key} ${checkKey} ${row.id}: ${JSON.stringify(row.signature)}`)
@@ -1637,10 +1897,6 @@ check('real-hide', 'on every save every row of every check that can be snoozed i
     let savedHeld = 0
 
     for (const [checkKey, read] of Object.entries(reads)) {
-      if (!read.ok) {
-        continue
-      }
-
       const stamps = await readStamps(database, save.game, rowIds(read))
       const records = []
       const snoozable = eligible(read).filter((row) => !m.snoozes.isStamped(row.raw) || typeof stamps.get(row.raw) === 'string')
@@ -1735,11 +1991,6 @@ check('rewind-real', 'a snooze set at a later save and judged on an earlier one 
     for (const entry of m.index.CHECKS) {
       const newer = later.reads[entry.key]
       const older = earlier.reads[entry.key]
-
-      if (!newer.ok || !older.ok) {
-        continue
-      }
-
       const newerStamps = await readStamps(later.database, later.save.game, rowIds(newer))
       const olderStamps = await readStamps(earlier.database, earlier.save.game, rowIds(older))
       const records = eligible(newer).flatMap((row) => [makeRecord({ check: entry, scope: 'item', kind: 'clear', row, read: newer, stamps: newerStamps, branch: 'b1' }), makeRecord({ check: entry, scope: 'item', kind: 'date', expiresAt: newer.GameTime + 1000, row, read: newer, stamps: newerStamps, branch: 'b1' })]).filter((made) => made.ok).map((made) => made.record)
@@ -1789,11 +2040,6 @@ check('fork-real', 'across each fork of the real saves a snooze of one branch se
 
     for (const entry of m.index.CHECKS) {
       const read = parent.reads[entry.key]
-
-      if (!read.ok) {
-        continue
-      }
-
       const stamps = await readStamps(parent.database, parent.save.game, rowIds(read))
 
       for (const row of eligible(read)) {
@@ -1818,7 +2064,7 @@ check('fork-real', 'across each fork of the real saves a snooze of one branch se
       const mine = copies.filter((record) => record.check === entry.key)
       const read = child.reads[entry.key]
 
-      if (!mine.length || !read.ok) {
+      if (!mine.length) {
         continue
       }
 
@@ -1928,7 +2174,7 @@ const MUTATIONS = [
   { name: 'a snooze set later than the save ends on a change', edits: [[U, 'if (verdict.end && !ahead) {\n      result.ended.push({ record, reason: verdict.end })\n    } else if (verdict.end) {', 'if (verdict.end) {\n      result.ended.push({ record, reason: verdict.end })\n    } else if (false) {']], fails: ['ahead', 'rewind-real'] },
   { name: 'an unknown game time expires a date', edits: [[U, '(now === null ? shown(NOTES.clock) :', '(now === null ? ended(\'expired\') :']], fails: ['clock'] },
   { name: 'a stored value of another version is read', edits: [[U, '|| value.version !== VERSION || !Array.isArray(value.records)', '|| !Array.isArray(value.records)']], fails: ['store'] },
-  { name: 'an invalid record is kept', edits: [[U, 'const records = value.records.filter(validRecord)', 'const records = value.records']], fails: ['store'] },
+  { name: 'an invalid record that is an object is kept', edits: [[U, 'const records = value.records.filter(validRecord)', 'const records = value.records.filter(isObject)']], fails: ['store'] },
   { name: 'a date in the past is accepted', edits: [[U, 'isFiniteNumber(expiresAt) && expiresAt > read.GameTime', 'isFiniteNumber(expiresAt)']], fails: ['make'] },
   { name: 'a material change is offered by a check that declares none', edits: [[U, 'if (kind === \'material\' && !check.material) {', 'if (false) {']], fails: ['make'] },
   { name: 'a row whose signature cannot be read is snoozed until it changes', edits: [[U, 'if (!isText(row.signature)) {\n        return { ok: false, error: \'An input of the declared change cannot be read, so the row cannot be snoozed until it changes.\' }', 'if (false) {\n        return { ok: false, error: \'x\' }']], fails: ['make'] },
@@ -1964,6 +2210,100 @@ const MUTATIONS = [
   { name: 'a material snooze does not say what it ends on', edits: [['@page', 'parts.push(this.materialText(record))', '']], fails: ['page-text'] },
   { name: 'a material snooze says the raw signature it was set under', edits: [['@page', '$' + '{describeSignature(check, signature)}', '$' + '{signature}']], fails: ['page-text'] },
   { name: 'a Settings reset drops the snoozes', edits: [['@settings', '\'warningsSnoozed\', ', '']], fails: ['reset'] },
+]
+
+// ---------- the controls of the credit rule ----------
+
+const PLANTED = 'a planted crash'
+const CRASH = `throw new Error('${PLANTED}')`
+const EVALUATE = 'export const evaluate = (records, read, stamps = new Map()) => {'
+const READ_STORE = 'export const readStore = (value) => {'
+const IMPORT_ASSERTION = [U, 'export const VERSION = 1', 'import { AssertionError } from \'node:assert\'\nexport const VERSION = 1']
+const AMBIGUOUS = 'ambiguous: totals.get(row.id) > 1,'
+const SHOWN = 'const shown = (...notes) => ({ state: \'shown\', notes })'
+const EMPTY_STORE = 'export const emptyStore = () => ({ version: VERSION, seeded: {}, records: [], past: [] })'
+const TAG_ASSERTION = `if (++tagReads > 2) { throw new AssertionError({ message: '${PLANTED}' }) }`
+const ASSERTION_CRASH = `throw new AssertionError({ message: '${PLANTED}' })`
+const INSPECT_HOOK = `[Symbol.for('nodejs.util.inspect.custom')] () { ${ASSERTION_CRASH} }`
+
+// A readStore that gives, for a missing value, an otherwise empty store whose `ok` is a getter running `body`, with `reads` counting the reads of that store.
+const storeOkGetter = (body) => `${READ_STORE}\n  if (value === undefined) {\n    let reads = 0\n\n    return { get ok () { ${body} }, store: emptyStore(), dropped: 0 }\n  }`
+
+// A `shown` whose notes are listed at indices that are not enumerable, each note being `note` (an expression of it).
+const hiddenNotes = (note) => `const shown = (...notes) => ({ state: 'shown', notes: notes.reduce((list, note, index) => Object.defineProperty(list, index, { value: ${note}, enumerable: false, writable: true, configurable: true }), []) })`
+
+// An emptyStore whose stores all share one prototype, `proto` (an expression of it), made once, with `tagReads` counting the reads of their tag.
+const sharedStoreProto = (proto) => `let tagReads = 0\nconst storeProto = ${proto}\nexport const emptyStore = () => Object.assign(Object.create(storeProto), { version: VERSION, seeded: {}, records: [], past: [] })`
+
+// The lines of a class `Tagged` of `kind` (Map or Set) whose tag says Object.
+const taggedClass = (kind) => `class Tagged extends ${kind} {}\nObject.defineProperty(Tagged.prototype, Symbol.toStringTag, { value: 'Object' })\n`
+
+// An emptyStore whose stores hold a Date holding a Map, `map` (an expression of it, of its entry `val`), after the lines `before`, and a readStore that gives, for a missing value, such a store whose entry is `held` (an expression of it) where an empty store's is `{ held: 0 }`.
+const datedStore = (before, map, held) => [IMPORT_ASSERTION, [U, EMPTY_STORE, `${before}const detailOf = (val) => Object.assign(new Date(0), { detail: ${map} })\nexport const emptyStore = () => ({ version: VERSION, seeded: {}, records: [], past: [], meta: detailOf({ held: 0 }) })`], [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: { ...emptyStore(), meta: detailOf(${held}) }, dropped: 0 }\n  }`]]
+
+// An emptyStore whose ended snoozes (`past`) are an empty `collection` (a function of a list of entries that the lines `before` make), and a readStore that gives, for a missing value, such a store whose `collection` holds `entries` (an expression of them).
+const pastOf = (before, entries) => [[U, EMPTY_STORE, `${before}export const emptyStore = () => ({ version: VERSION, seeded: {}, records: [], past: collection() })`], [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: { ...emptyStore(), past: collection(${entries}) }, dropped: 0 }\n  }`]]
+
+// The lines of a `collection` of `kind` (Map or Set) of a class whose tag says Object.
+const taggedCollection = (kind) => `${taggedClass(kind)}const collection = (entries) => new Tagged(entries)\n`
+
+// The lines of a `collection` of `kind` (Map or Set) with an iterator of its own, the language's.
+const iteratedCollection = (kind) => `const ownIterator = function () { return ${kind}.prototype[Symbol.iterator].call(this) }\nconst collection = (entries) => Object.assign(new ${kind}(entries), { [Symbol.iterator]: ownIterator })\n`
+
+// The words of the stop of a deep assertion given a value holding `what`, which a structured clone does not copy whole.
+const refused = (what) => `a deep assertion compares a value holding ${what}, which cannot be detached`
+
+// An emptyStore whose stores are Dates holding their fields.
+const DATED_STORE = [U, EMPTY_STORE, 'export const emptyStore = () => Object.assign(new Date(0), { version: VERSION, seeded: {}, records: [], past: [] })']
+
+// A readStore that gives, for a missing value, an empty store with a getter `dropped` beside it that gives the store's records a getter running `body`, `dropped` coming before the store when `early` and after it otherwise.
+const plantedRecords = (body, early) => {
+  const dropped = `get dropped () {\n      Object.defineProperty(store, 'records', { enumerable: true, configurable: true, get () { ${body} } })\n\n      return 0\n    }`
+
+  return [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    const store = emptyStore()\n\n    return { ok: true, ${early ? `${dropped}, store` : `store, ${dropped}`} }\n  }`]
+}
+
+// Faults planted and judged as a mutation is. A fault that only makes the code under test throw, and does not declare it, stops the run (`stops`) wherever the crash is met: a call of a utility, a getter in a value a check compares as the value is read (an AssertionError among them), a read of a save, and a watcher, a read and the teardown of the page. One that declares that a throw is how it is caught is credited by the throw (`credited`). What the harness cannot judge stops the run as a defect of the harness, with the words given in `harness`: a crash that the code under test makes a callback of the harness meet, the recorder keeping it among the failures of its pass; a value given a deep comparison that a structured clone does not copy whole, whatever a getter in it would do: an object on a prototype not of the language (of a class, or on a prototype of the code under test, a Proxy among them), an Error, a function, a Date with properties of its own and a property keyed by a symbol (an inspection hook or an iterator of its own among them); and a prototype of the language that the code under test changed, a property put on it or a Proxy put under it, every changed one put back however the fault ended. A getter that would throw only when a comparison read it again, a getter given a compared value once the value was read, a mutation that reads the saves again and changes nothing, notes listed at indices that are not enumerable and a Map that holds the same entries leave every named check holding and are credited with nothing (`none`); the same notes changed, and a Map, a Set or a Date that differs, are credited by value, with no planted crash's words (`value`).
+const CONTROLS = [
+  { name: 'the evaluation of the snoozes throws', edits: [[U, EVALUATE, `${EVALUATE}\n  ${CRASH}`]], fails: ['date'], expect: 'stops' },
+  { name: 'the evaluation of the snoozes throws, the throw declared as how it is caught', edits: [[U, EVALUATE, `${EVALUATE}\n  ${CRASH}`]], fails: ['date'], throws: true, expect: 'credited' },
+  { name: 'the page throws when it evaluates the snoozes', edits: [['@page', 'this.snoozeRun += 1', CRASH]], fails: ['page-mute'], expect: 'stops' },
+  { name: 'a read of the page throws', edits: [['@page', 'return this.runCheck(check)', CRASH]], fails: ['page-mute'], expect: 'stops' },
+  { name: 'the page throws when it is taken down', edits: [['@page', '  asyncComputed: {\n    ...checkReads,', `  beforeDestroy() {\n    ${CRASH}\n  },\n  asyncComputed: {\n    ...checkReads,`]], fails: ['page-mute'], expect: 'stops' },
+  { name: 'the store read for a missing value has a getter that throws', edits: [[U, READ_STORE, storeOkGetter(CRASH)]], fails: ['store'], expect: 'stops' },
+  { name: 'the store read for a missing value has a getter that throws an AssertionError', edits: [IMPORT_ASSERTION, [U, READ_STORE, storeOkGetter(`throw new AssertionError({ message: '${PLANTED}' })`)]], fails: ['store'], thrown: 'AssertionError', expect: 'stops' },
+  { name: 'the rows of each read of a save are made by a function that throws', rereads: true, edits: [['warnings/common.js', 'export const normalizeRows = (rows, check) => {', `export const normalizeRows = (rows, check) => {\n  ${CRASH}`]], fails: ['sig-names'], expect: 'stops' },
+  { name: 'the read of the known wrecks throws', rereads: true, edits: [['warnings/space.js', 'const wrecks = await rowsOf(ctx, ', `${CRASH}\n      const wrecks = await rowsOf(ctx, `]], fails: ['real-hide'], expect: 'stops' },
+  { name: 'the recorder hands its callback a settlement whose campaign throws', rereads: true, edits: [['history.js', '        onResolved(GameID, resolution)', `        onResolved(GameID, { get campaignId () { ${CRASH} } })`]], fails: ['fork-real'], expect: 'harness', harness: `a callback of the harness threw: ${PLANTED}` },
+  { name: 'the store read for a missing value has a getter that throws an AssertionError when it is read again', edits: [IMPORT_ASSERTION, [U, READ_STORE, storeOkGetter(`reads += 1\n\n      if (reads > 1) {\n        throw new AssertionError({ message: '${PLANTED}' })\n      }\n\n      return true`)]], fails: ['store'], expect: 'none' },
+  { name: 'a mutation that reads the saves again changes nothing', rereads: true, edits: [['warnings/common.js', AMBIGUOUS, AMBIGUOUS]], fails: ['rewind-real', 'fork-real'], expect: 'none' },
+  { name: 'the store read for a missing value is a Date with a getter that throws', edits: [[U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: Object.defineProperty(new Date(0), 'records', { get () { ${CRASH} }, enumerable: true }), dropped: 0 }\n  }`]], fails: ['store'], expect: 'harness', harness: refused('a Date with properties of its own') },
+  { name: 'the notes of a row are listed at indices that are not enumerable', edits: [[U, SHOWN, hiddenNotes('note')]], fails: ['material'], expect: 'none' },
+  { name: 'the notes of a row are changed and listed at indices that are not enumerable', edits: [[U, SHOWN, hiddenNotes('note + \' (planted)\'')]], fails: ['material'], expect: 'value' },
+  { name: 'the stores share a prototype whose tag getter throws an AssertionError when it is read a third time', edits: [IMPORT_ASSERTION, [U, EMPTY_STORE, sharedStoreProto(`Object.create(Object.prototype, { [Symbol.toStringTag]: { get () { ${TAG_ASSERTION} } } })`)]], fails: ['store'], expect: 'harness', harness: refused('an object on a prototype not of the language') },
+  { name: 'the stores share a Proxy prototype whose tag trap throws an AssertionError when it is read a third time', edits: [IMPORT_ASSERTION, [U, EMPTY_STORE, sharedStoreProto(`new Proxy({}, { get (target, key, receiver) { if (key === Symbol.toStringTag) { ${TAG_ASSERTION} } return Reflect.get(target, key, receiver) } })`)]], fails: ['store'], expect: 'harness', harness: refused('an object on a prototype not of the language') },
+  { name: 'the store read for a missing value is an Error holding a Proxy', edits: [[U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: Object.assign(new Error('${PLANTED}'), { detail: new Proxy({}, {}) }), dropped: 0 }\n  }`]], fails: ['store'], expect: 'harness', harness: refused('an object of kind Error') },
+  { name: 'the stores hold a Date holding a Map of a class whose tag says Object, and the store read for a missing value has a getter in it that throws an AssertionError', edits: datedStore(taggedClass('Map'), 'new Tagged([[\'key\', val]])', `{ get held () { ${ASSERTION_CRASH} } }`), fails: ['store'], expect: 'harness', harness: refused('a Date with properties of its own') },
+  { name: 'the stores hold a Date holding a Map whose own tag says Object, and the store read for a missing value has a getter in it that throws an AssertionError', edits: datedStore('', 'Object.defineProperty(new Map([[\'key\', val]]), Symbol.toStringTag, { value: \'Object\' })', `{ get held () { ${ASSERTION_CRASH} } }`), fails: ['store'], expect: 'harness', harness: refused('a Date with properties of its own') },
+  { name: 'the ended snoozes are a Map of a class whose tag says Object, holding an entry in the store read for a missing value', edits: pastOf(taggedCollection('Map'), '[[1, 2]]'), fails: ['store'], expect: 'harness', harness: refused('an object on a prototype not of the language') },
+  { name: 'the ended snoozes are a Set of a class whose tag says Object, holding an entry in the store read for a missing value', edits: pastOf(taggedCollection('Set'), '[1]'), fails: ['store'], expect: 'harness', harness: refused('an object on a prototype not of the language') },
+  { name: 'the store read for a missing value has an inspection hook that throws an AssertionError', edits: [IMPORT_ASSERTION, [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: emptyStore(), dropped: 0, ${INSPECT_HOOK} }\n  }`]], fails: ['store'], expect: 'harness', harness: refused('a property keyed by a symbol') },
+  { name: 'the store read for a missing value is a Date with an inspection hook that throws an AssertionError', edits: [IMPORT_ASSERTION, [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: Object.assign(new Date(0), { ${INSPECT_HOOK} }), dropped: 0 }\n  }`]], fails: ['store'], expect: 'harness', harness: refused('a property keyed by a symbol') },
+  { name: 'the ended snoozes are a Map with an iterator of its own, holding an entry in the store read for a missing value', edits: pastOf(iteratedCollection('Map'), '[[1, 2]]'), fails: ['store'], expect: 'harness', harness: refused('a property keyed by a symbol') },
+  { name: 'the ended snoozes are a Set with an iterator of its own, holding an entry in the store read for a missing value', edits: pastOf(iteratedCollection('Set'), '[1]'), fails: ['store'], expect: 'harness', harness: refused('a property keyed by a symbol') },
+  { name: 'the ended snoozes are a Map, empty in the store read for a missing value', edits: pastOf('const collection = (entries) => new Map(entries)\n', ''), fails: ['store'], expect: 'none' },
+  { name: 'the ended snoozes are a Map, holding an entry in the store read for a missing value', edits: pastOf('const collection = (entries) => new Map(entries)\n', '[[1, 2]]'), fails: ['store'], expect: 'value' },
+  { name: 'the ended snoozes are a Set, holding an entry in the store read for a missing value', edits: pastOf('const collection = (entries) => new Set(entries)\n', '[1]'), fails: ['store'], expect: 'value' },
+  { name: 'the ended snoozes are a Date, a later one in the store read for a missing value', edits: pastOf('const collection = (time) => new Date(time || 0)\n', '1'), fails: ['store'], expect: 'value' },
+  { name: 'the store read for a missing value gives Object.prototype a tag getter that throws an AssertionError', edits: [IMPORT_ASSERTION, [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    Object.defineProperty(Object.prototype, Symbol.toStringTag, { get () { ${ASSERTION_CRASH} }, configurable: true })\n  }`]], fails: ['store'], expect: 'harness', harness: 'the code under test changed Object.prototype (Symbol(Symbol.toStringTag))' },
+  { name: 'the store read for a missing value has a getter, read after the store, that gives the records a getter giving them unchanged', edits: [plantedRecords('return []', false)], fails: ['store'], expect: 'none' },
+  { name: 'the store read for a missing value has a getter, read after the store, that gives the records a getter that throws an AssertionError', edits: [IMPORT_ASSERTION, plantedRecords(ASSERTION_CRASH, false)], fails: ['store'], expect: 'none' },
+  { name: 'the store read for a missing value has a getter, read before the store, that gives the records a getter that throws an AssertionError', edits: [IMPORT_ASSERTION, plantedRecords(ASSERTION_CRASH, true)], fails: ['store'], thrown: 'AssertionError', expect: 'stops' },
+  { name: 'the stores are Dates, and the store read for a missing value has a getter, read after the store, that gives the records a getter giving them unchanged', edits: [DATED_STORE, plantedRecords('return []', false)], fails: ['store'], expect: 'harness', harness: refused('a Date with properties of its own') },
+  { name: 'the stores are Dates, and the store read for a missing value has a getter, read after the store, that gives the records a getter that throws an AssertionError', edits: [IMPORT_ASSERTION, DATED_STORE, plantedRecords(ASSERTION_CRASH, false)], fails: ['store'], expect: 'harness', harness: refused('a Date with properties of its own') },
+  { name: 'the store read for a missing value puts a Proxy whose tag trap throws an AssertionError under Array.prototype', edits: [IMPORT_ASSERTION, [U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    Object.setPrototypeOf(Array.prototype, new Proxy(Object.prototype, { get (target, key, receiver) { if (key === Symbol.toStringTag) { ${ASSERTION_CRASH} } return Reflect.get(target, key, receiver) } }))\n  }`]], fails: ['store'], expect: 'harness', harness: 'the code under test changed Array.prototype (its prototype)' },
+  { name: 'the store read for a missing value puts a property on Object.prototype and on Array.prototype', edits: [[U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    Object.defineProperty(Object.prototype, 'plantedMark', { value: 1, configurable: true })\n    Object.defineProperty(Array.prototype, 'plantedMark', { value: 2, configurable: true })\n  }`]], fails: ['store'], expect: 'harness', harness: 'the code under test changed Object.prototype (plantedMark)' },
+  { name: 'the store read for a missing value puts a property on Object.prototype and holds a function', edits: [[U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    Object.defineProperty(Object.prototype, 'plantedMark', { value: 1, configurable: true })\n\n    return { ok: true, store: emptyStore(), dropped: 0, plantedCall: () => 0 }\n  }`]], fails: ['store'], expect: 'harness', harness: refused('a function') },
 ]
 
 // ---------- running ----------
@@ -2039,13 +2379,16 @@ const runEntry = async (m, context, entry) => {
   return entry.run({ m, ctx: { ...context, ...extra } })
 }
 
-const outcomeOf = async (m, context, entry) => {
-  try {
-    return (await runEntry(m, context, entry)) === 'skip' ? 'skip' : true
-  } catch (error) {
-    return String((error && error.stack) || error).split('\n').slice(0, 8).join('\n         ')
-  }
+// The result of a check over the modules `m` (scripts/lib/fault-credit.js `runChecks`: { id, name, ok, kind, threw, detail }), with `skip` when the saves it reads are not here. A HarnessError stops the run.
+const resultOf = async (m, context, entry) => {
+  let skip = false
+  const [result] = await runChecks([{ id: entry.key, name: entry.name, run: async () => { skip = (await runEntry(m, context, entry)) === 'skip' } }], {})
+
+  return { ...result, skip }
 }
+
+// How a check failed: by a value it read, by a call of the code under test that threw, or by an exception of its own; 'held' when it did not fail.
+const kindOfCredit = (result) => (result.ok ? 'held' : result.kind !== 'assertion' ? 'error' : result.threw ? 'throw' : 'value')
 
 // What a mutation plants: `sources` is the text of each module it changes by the name the loader knows it by, with every edit made (the others are read from the folder, so no copy of it is made), and `pageEdits` the edits of the page's script.
 const planted = (mutation) => {
@@ -2070,11 +2413,21 @@ const planted = (mutation) => {
 }
 
 const ARGS = process.argv.slice(2)
-const ONLY = (ARGS.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
+const listOf = (name) => (ARGS.find((argument) => argument.startsWith(`--${name}=`)) || '').slice(name.length + 3).split(',').filter(Boolean)
+const ONLY = listOf('only')
+const FAULTS = listOf('faults').map(Number)
+const FOCUSED = FAULTS.length > 0 || ARGS.includes('--controls')
 const ALL = ARGS.includes('--all')
+const DETAIL = ARGS.includes('--detail')
 const RESULT = 'RESULT '
 
+// No child may run longer than the whole suite may (15 minutes with CHECK_JOBS=1): one that does has hung, and is ended with everything it started.
+const CHILD_LIMIT = 15 * 60 * 1000
+
 const selectedChecks = checks.filter((item) => !ONLY.length || ONLY.includes(item.key))
+
+// The mutations, numbered as the run numbers them, then the controls of the credit rule.
+const VARIANTS = [...MUTATIONS.map((mutation, index) => ({ label: `mutation ${index + 1} caught: ${mutation.name}`, mutation })), ...CONTROLS.map((control, index) => ({ label: `control ${index + 1}: ${control.name}`, mutation: control }))]
 
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs, and a skip), or the arguments of `show`. The entries of a check carry its number, `at`, which is its place among the checks run.
 const baselineEntries = async (entries, keys) => {
@@ -2088,14 +2441,26 @@ const baselineEntries = async (entries, keys) => {
     at = selectedChecks.indexOf(entry) + 1
 
     const began = Date.now()
-    const outcome = await outcomeOf(real, context, entry)
+    let result = null
 
-    if (outcome === 'skip') {
+    try {
+      result = await resultOf(real, context, entry)
+    } catch (error) {
+      if (!(error instanceof HarnessError)) {
+        throw error
+      }
+
+      entries.push({ at, harness: `${at}. ${entry.key}: ${error.message}` })
+
+      return
+    }
+
+    if (result.skip) {
       entries.push({ at, log: `  skip   ${at}. ${entry.key}: the saves it reads are not here (a skip is not agreement)` })
       continue
     }
 
-    entries.push({ at, show: [`${at}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - began) / 1000).toFixed(1)} s`] })
+    entries.push({ at, show: [`${at}. ${entry.key}: ${entry.name}`, result.ok || `${kindOfCredit(result)}: ${result.detail}`, entry.needs === 'unit' ? '' : `${((Date.now() - began) / 1000).toFixed(1)} s`] })
   }
 }
 
@@ -2121,46 +2486,103 @@ const baselineOf = () => {
 
 const baseline = baselineOf()
 
-// A mutation that is judged on the reads or the branches of the unmodified modules, and so is run with the others that are, to make them once.
-const readsBaseline = (mutation) => !mutation.rereads && (ALL || mutation.fails.some((key) => ['reads', 'forks'].includes((checks.find((entry) => entry.key === key) || {}).needs)))
+// What a check runs on ('unit', 'reads', 'forks' or 'page'), by its key.
+const needsOf = (key) => (checks.find((entry) => entry.key === key) || {}).needs
 
-const mutationEntries = async (entries, mutation) => {
-  const began = Date.now()
-  let planting = null
+// A mutation that is judged on the reads or the branches of the unmodified modules, and so is run with the others that are, to make them once.
+const readsBaseline = (mutation) => !mutation.rereads && (ALL || mutation.fails.some((key) => ['reads', 'forks'].includes(needsOf(key))))
+
+// What a mutation is credited with: the checks it names (every check with --all) run over its modules and judged, so a check that ended in an exception of its own stops the run (`judged`), and caught when every named check that could run failed by an assertion of its own (`caughtAll`), a credit that rests on a throw of the code under test stopping the run unless the mutation declares `throws`. Gives { caught, named, detail }, `caught` being true or what is wrong, and `detail` the kind of each credit.
+const creditOf = async (mutation) => {
+  const planting = planted(mutation)
+  const selected = ALL ? checks : checks.filter((item) => mutation.fails.includes(item.key))
+  // A mutation that reads the saves again is judged over its own modules: on the fast saves, or on every save where a check that compares particular saves runs, with the recorder loaded where a check reads the branches it records.
+  const recorder = mutation.rereads && selected.some((entry) => entry.needs === 'forks')
+  const absent = mutation.fails.filter((key) => !checks.some((entry) => entry.key === key))
+  const results = []
+  let changed = null
 
   try {
-    planting = planted(mutation)
+    const mutant = await loadModules(planting.sources, recorder ? NAMES_WITH_HISTORY : NAMES, planting.pageEdits)
+    const across = selected.some((entry) => ACROSS_SAVES.includes(entry.key))
+    const mutantContext = !mutation.rereads ? contextOf(mutant, { shared: baseline, keys: SAVE_KEYS }) : across ? contextOf(mutant) : { ...contextOf(mutant, { keys: FAST_SAVES }), minSigned: 0, minObjects: 0, minHeld: 0 }
 
-    const mutant = await loadModules(planting.sources, NAMES, planting.pageEdits)
-    const reread = contextOf(mutant, { keys: FAST_SAVES })
-    const mutantContext = mutation.rereads ? { ...reread, minSigned: 0, minObjects: 0, minHeld: 0 } : contextOf(mutant, { shared: baseline, keys: SAVE_KEYS })
-    const named = checks.filter((entry) => mutation.fails.includes(entry.key))
-    const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
-    const missed = []
-    const skipped = []
-    const broke = []
+    for (const entry of selected) {
+      results.push(await resultOf(mutant, mutantContext, entry))
+    }
+  } finally {
+    // However the loading or the checks of a fault ended, a defect of the harness included, the faults after it in the same process meet the language as it was loaded.
+    changed = restoreLanguage()
+  }
 
-    for (const entry of ALL ? checks : named) {
-      const outcome = await outcomeOf(mutant, mutantContext, entry)
+  // A fault that changed the language stops the run here, where it is named, even when no assertion met the change.
+  if (changed !== null) {
+    throw new HarnessError(`the code under test changed ${changed}, whose code a marked assertion runs`)
+  }
 
-      if (outcome === 'skip') {
-        skipped.push(entry.key)
-      } else if (outcome !== true) {
-        broke.push(entry.key)
-      } else if (named.includes(entry)) {
-        missed.push(entry.key)
-      }
+  const broke = judged(results, `the fault '${mutation.name}'`)
+  const named = results.filter((result) => !result.skip && mutation.fails.includes(result.id))
+  const skipped = results.filter((result) => result.skip && mutation.fails.includes(result.id)).map((result) => result.id)
+  const caught = absent.length ? `no check is keyed ${absent.join(', ')}` : !named.length ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : caughtAll(named, { name: mutation.name, throws: mutation.throws }) || notCaught(named)
+
+  return { caught, named, detail: `credited by ${named.filter((result) => !result.ok).map((result) => `${result.id} (${kindOfCredit(result)})`).join(', ') || 'nothing'}${ALL ? `; breaks ${broke.map((result) => result.id).join(', ')}` : ''}${skipped.length ? `; not run: ${skipped.join(', ')}` : ''}` }
+}
+
+// What a control of the credit rule shows, as [verdict, what happened]: the run stopped by a HarnessError that names the control and the planted crash as its only credit (`stops`), the declared crash credited by a throw of every named check (`credited`), the run stopped by a HarnessError with the control's words (`harness`), the fault credited by a value of every named check, none failing with the planted crash's words (`value`), or the run gone on with every named check run and holding (`none`). Whatever the control did, the language must be left as it was loaded for the faults after it in the same process (`restoreLanguage` finds nothing to put back).
+const controlVerdict = async (control) => {
+  let credit = null
+
+  try {
+    credit = await creditOf(control)
+  } catch (error) {
+    if (!(error instanceof HarnessError)) {
+      throw error
     }
 
-    const ran = named.length - skipped.length
+    credit = error
+  }
 
-    entries.push({ show: [`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${ALL ? `breaks ${broke.join(', ')}` : mutation.fails.join(', ')}${skipped.length ? `; not run: ${skipped.join(', ')}` : ''}; ${((Date.now() - began) / 1000).toFixed(1)} s`] })
+  const left = restoreLanguage()
+  const stopped = credit instanceof HarnessError
+  const said = `${stopped ? `the run stopped: ${credit.message}` : `the run went on: ${credit.caught === true ? credit.detail : `${credit.caught}; ${credit.detail}`}`}${left === null ? '' : `; the language was left changed: ${left}`}`
+  const verdicts = {
+    stops: () => stopped && credit.message.includes(`the fault '${control.name}' is caught only by a call of the code under test that threw`) && credit.message.includes(`threw ${control.thrown || 'Error'}: ${PLANTED}`),
+    credited: () => !stopped && credit.caught === true && credit.named.length > 0 && credit.named.every((result) => kindOfCredit(result) === 'throw'),
+    harness: () => stopped && credit.message.includes(control.harness),
+    value: () => !stopped && credit.caught === true && credit.named.length > 0 && credit.named.every((result) => kindOfCredit(result) === 'value' && !String(result.detail).includes(PLANTED)),
+    none: () => !stopped && credit.caught !== true && credit.named.length === control.fails.length && credit.named.every((result) => result.ok),
+  }
+
+  return [left === null && verdicts[control.expect](), said]
+}
+
+// The entries of one variant (a mutation or a control): its line, the detail of each named check with --detail, or, for a defect of the harness, `harness`, which stops the run.
+const mutationEntries = async (entries, variant) => {
+  const began = Date.now()
+  const seconds = () => `${((Date.now() - began) / 1000).toFixed(1)} s`
+
+  try {
+    if (variant.mutation.expect) {
+      const [verdict, said] = await controlVerdict(variant.mutation)
+
+      entries.push({ show: [variant.label, verdict || said, `${said.slice(0, 300)}; ${seconds()}`] })
+
+      return
+    }
+
+    const { caught, named, detail } = await creditOf(variant.mutation)
+
+    entries.push({ show: [variant.label, caught === true || `${caught}; ${detail}`, `${detail}; ${seconds()}`] })
+
+    if (DETAIL) {
+      named.forEach((result) => entries.push({ log: `         ${result.id} (${kindOfCredit(result)}): ${result.detail}` }))
+    }
   } catch (error) {
-    entries.push({ show: [`mutation caught: ${mutation.name}`, `does not apply or load: ${error.message}`] })
+    entries.push(error instanceof HarnessError ? { harness: `${variant.label}: ${error.message}` } : { show: [variant.label, `does not apply or load: ${error.message}`] })
   }
 }
 
-// A child runs a group of the baseline (`--baseline --checks=key,key`) or some mutations in turn (`--mutants=<i>,<i>`) in a process of its own, so no group or chunk shares the modules, the stores or the reads of another, and prints its entries as JSON on its last line: those of the group, or the list of the entries of each mutation.
+// A child runs a group of the baseline (`--baseline --checks=key,key`) or some variants in turn (`--mutants=<i>,<i>`, places in VARIANTS) in a process of its own, so no group or chunk shares the modules, the stores or the reads of another, and prints its entries as JSON on its last line: those of the group, or the list of the entries of each variant. A defect of the harness ends a chunk where it was met.
 const childMain = async () => {
   const given = ARGS.find((argument) => argument.startsWith('--mutants='))
   const checked = ARGS.find((argument) => argument.startsWith('--checks='))
@@ -2171,8 +2593,12 @@ const childMain = async () => {
       const own = []
 
       console.log = (...parts) => own.push({ log: format(...parts) })
-      await mutationEntries(own, MUTATIONS[Number(index)])
+      await mutationEntries(own, VARIANTS[Number(index)])
       entries.push(own)
+
+      if (own.some((entry) => entry.harness !== undefined)) {
+        break
+      }
     }
   } else {
     await baselineEntries(entries, checked.slice('--checks='.length).split(','))
@@ -2186,17 +2612,34 @@ const main = async () => {
     return childMain()
   }
 
-  const groups = baselineGroups()
-  const mutations = ARGS.includes('--no-mutations') ? [] : MUTATIONS.filter((item) => !ONLY.length || item.fails.some((key) => ONLY.includes(key)))
-  const indexes = mutations.map((_mutation, index) => index)
-  const withReads = indexes.filter((index) => readsBaseline(mutations[index]))
+  const unknown = FAULTS.filter((number) => !Number.isInteger(number) || number < 1 || number > MUTATIONS.length)
+
+  if (unknown.length) {
+    throw new Error(`no mutation is numbered ${unknown.join(', ')} (they are numbered 1 to ${MUTATIONS.length})`)
+  }
+
+  const groups = FOCUSED ? [] : baselineGroups()
+  const variants = ARGS.includes('--no-mutations') ? [] : FOCUSED ? VARIANTS.filter((variant, index) => (variant.mutation.expect ? ARGS.includes('--controls') : FAULTS.includes(index + 1))) : VARIANTS.filter((variant) => !ONLY.length || variant.mutation.fails.some((key) => ONLY.includes(key)))
+  const indexes = variants.map((_variant, index) => index)
+  const withReads = indexes.filter((index) => readsBaseline(variants[index].mutation))
   const rest = indexes.filter((index) => !withReads.includes(index))
   const chunks = [withReads, ...chunksOf(rest.length).map((list) => list.map((index) => rest[index]))].filter((list) => list.length)
   const tasks = [...groups.slice(0, 1).map((_keys, at) => ({ group: at })), ...chunks.slice(0, 1).map((_list, at) => ({ chunk: at })), ...groups.slice(1).map((_keys, at) => ({ group: at + 1 })), ...chunks.slice(1).map((_list, at) => ({ chunk: at + 1 }))]
-  const argsOf = (task) => (task.group !== undefined ? ['--baseline', `--checks=${groups[task.group].join(',')}`, ...ARGS] : [`--mutants=${chunks[task.chunk].map((index) => MUTATIONS.indexOf(mutations[index])).join(',')}`, ...ARGS])
-  const outcomes = await inParallel(tasks, async (task) => lastJson(await runChild(__filename, argsOf(task)), RESULT))
+  const argsOf = (task) => (task.group !== undefined ? ['--baseline', `--checks=${groups[task.group].join(',')}`, ...ARGS] : [`--mutants=${chunks[task.chunk].map((index) => VARIANTS.indexOf(variants[index])).join(',')}`, ...ARGS])
+  const outcomes = await inParallel(tasks, async (task) => lastJson(await runChild(__filename, argsOf(task), { limit: CHILD_LIMIT }), RESULT))
   const groupOutcomes = groups.map((_keys, at) => outcomes[tasks.findIndex((task) => task.group === at)])
-  const replay = (entries) => entries.forEach((entry) => (entry.log !== undefined ? console.log(entry.log) : show(...entry.show)))
+  // A defect of the harness, where a child met one, stops the run there.
+  const replay = (entries) => entries.forEach((entry) => {
+    if (entry.harness !== undefined) {
+      throw new HarnessError(entry.harness)
+    }
+
+    if (entry.log !== undefined) {
+      console.log(entry.log)
+    } else {
+      show(...entry.show)
+    }
+  })
   const failed = groupOutcomes.find((outcome) => outcome instanceof Error)
 
   if (failed) {
@@ -2207,20 +2650,22 @@ const main = async () => {
     console.log('  skip   no save is here, so the reads and the forks are not run')
   }
 
-  console.log('The warning snoozes')
-  replay(groupOutcomes.flat().sort((a, b) => a.at - b.at))
-
-  if (!ARGS.includes('--no-mutations')) {
-    console.log('\nMutations: each must break every check it names')
+  if (groups.length) {
+    console.log('The warning snoozes')
+    replay(groupOutcomes.flat().sort((a, b) => a.at - b.at))
   }
 
-  spread(chunks, chunks.map((_list, at) => outcomes[tasks.findIndex((task) => task.chunk === at)])).forEach((outcome, index) => (outcome instanceof Error ? show(`mutation caught: ${mutations[index].name}`, `does not run: ${outcome.message}`) : replay(outcome)))
+  if (variants.length) {
+    console.log('\nMutations: each must break every check it names by a value the check read, and the controls of the credit rule')
+  }
+
+  spread(chunks, chunks.map((_list, at) => outcomes[tasks.findIndex((task) => task.chunk === at)])).forEach((outcome, index) => (outcome instanceof Error ? show(variants[index].label, `does not run: ${outcome.message}`) : replay(outcome)))
 
   console.log(`\n${total - failures} of ${total} checks passed`)
   process.exit(failures ? 1 : 0)
 }
 
 main().catch((error) => {
-  console.error(error)
+  console.error(error instanceof HarnessError ? `\nThe run stopped on a defect of the harness: ${error.message}` : error)
   process.exit(2)
 })
