@@ -129,7 +129,7 @@ const webAddressChild = (key, folder, keepAlive = false) => {
   }
 
   source = patched(WEB_FILE, source, 'const PORT = Number(process.env.PORT) || 9080', 'const PORT = 0')
-  source = patched(WEB_FILE, source, "cacheDir: path.join(__dirname, '..', 'node_modules', '.vite-web')", `cacheDir: ${JSON.stringify(path.join(folder, 'vite-cache'))}`)
+  source = patched(WEB_FILE, source, "cacheDir: path.join(__dirname, '..', '.vite-web')", `cacheDir: ${JSON.stringify(path.join(folder, 'vite-cache'))}`)
 
   if (key === 'dependency-504') {
     source = patched(WEB_FILE, source, 'server.middlewares.use(guardHost)', "server.middlewares.use((request, response, next) => {\n        if (request.url.split('?')[0].endsWith('/deps/vue.js')) {\n          response.statusCode = 504\n          response.end('planted dependency failure')\n          return\n        }\n        next()\n      })\n      server.middlewares.use(guardHost)")

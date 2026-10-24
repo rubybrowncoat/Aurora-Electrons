@@ -47,8 +47,8 @@ const main = async () => {
     },
     configFile: false,
     mode: 'development',
-    // Its own cache, so `bun run web` and `bun run dev` can run side by side.
-    cacheDir: path.join(__dirname, '..', 'node_modules', '.vite-web'),
+    // Its own cache inside the checkout, outside the node_modules junction a lane shares with the main repo, so `bun run web` and `bun run dev` can run side by side and no lane writes another checkout's cache.
+    cacheDir: path.join(__dirname, '..', '.vite-web'),
     server: { port: PORT, host: HOST },
   })
 
