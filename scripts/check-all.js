@@ -5,7 +5,7 @@
 
   --jobs=N is the budget of workers for the whole run (default: the physical cores, half the logical processors, scripts/lib/check-pool.js); --scripts=N runs N scripts side by side (default 3, never more than the budget) and gives each an equal share of the budget through CHECK_JOBS, which its mutant pool reads, so the run never starts more workers than the budget. Both take a positive whole number. --quick passes --no-mutations to the scripts that take it. --browser also runs check-typography.js, which needs the web mode running (`bun run web`; BASE_URL says where when it is not http://127.0.0.1:9080). --only runs the named scripts (without the check- prefix or .js).
 
-  Left out: check-engines.js (the install hook that refuses a package manager other than bun), check-harvesters.js (a report on one save, given on its command line). check-design-rules.js runs its --fixtures mode, which needs no save. check-save-switching.js runs after the others, alone and with the whole budget (its cases wait on watchers and timers within fixed limits).
+  Left out: check-engines.js (the install hook that refuses a package manager other than bun), check-harvesters.js (a report on one save, given on its command line). check-design-rules.js runs its --fixtures mode, which needs no save. check-save-switching.js and check-peeks.js run after the others, alone and with the whole budget (the cases of the first wait on watchers and timers within fixed limits, the second times its reads against a budget in wall time).
 */
 const fs = require('fs')
 const path = require('path')
@@ -13,8 +13,8 @@ const { cores, inParallel, runChild } = require('./lib/check-pool')
 
 const SKIPPED = new Set(['check-engines.js', 'check-harvesters.js'])
 const BROWSER = new Set(['check-typography.js'])
-// Scripts whose cases wait on watchers and timers within fixed limits: they run after the others, one at a time with the whole budget, because a machine saturated by the other scripts' mutants can starve those waits past their limits.
-const ALONE = new Set(['check-save-switching.js'])
+// Scripts whose cases wait on watchers and timers within fixed limits, or time their work against a budget in wall time: they run after the others, one at a time with the whole budget, because a machine saturated by the other scripts' mutants can starve those waits past their limits and stretch those timings several times over (check-peeks: 36 ms where it measures 4.6 ms alone).
+const ALONE = new Set(['check-save-switching.js', 'check-peeks.js'])
 // The slowest scripts start first, so the longest one does not begin last and run on alone.
 const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-history-backup.js', 'check-map-hierarchy.js', 'check-warning-snoozes.js', 'check-legacy-consumption.js']
 const ARGS = { 'check-design-rules.js': ['--fixtures'] }

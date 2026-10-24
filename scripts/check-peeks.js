@@ -7,6 +7,8 @@
 
   With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them, that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
 
+  The timings are wall time, so they run on a machine with no other heavy job (scripts/check-all.js runs this script after the others, alone, and the lane brief names it a run-alone suite); a run beside one fails the budget with medians several times the quiet ones (36 ms against 4.6 ms). Each timing therefore states, whether it passes or fails, the machine's condition over the time since the timings began (scripts/lib/machine-load.js): the share of all the processors that was busy, this check's own part of it and that of every other process. The condition is only reported, never used to skip or relax the budget.
+
   --no-mutations leaves the mutations out. --only=<text>[|<text>...] runs only the synthetic checks and the mutations whose names hold one of the texts, and reads no save: a focused run while working (the run that counts has neither).
 */
 const fs = require('fs')
@@ -14,6 +16,7 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { watchLoad, loadShare, describeLoad, processorTimes } = require('./lib/machine-load')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -648,8 +651,8 @@ const compareSave = async (label, [file, GameID, RaceID], m, planner) => {
   await database.close()
 }
 
-// The cold and warm cost of each line on the save, measured before the heavier reads of `compareSave` so that their garbage does not weigh on the timings.
-const measureSave = async (label, [file, GameID, RaceID], options, m) => {
+// The cold and warm cost of each line on the save, measured before the heavier reads of `compareSave` so that their garbage does not weigh on the timings. `load` is the window of the machine's condition (scripts/lib/machine-load.js) since the timings began, read as each line's cold laps end and reported with their result: a median over the budget with another heavy job running is that job's, not the code's.
+const measureSave = async (label, [file, GameID, RaceID], options, m, load) => {
   const { peeks } = m.peeks
 
   if (!fs.existsSync(path.resolve(root, file))) {
@@ -676,6 +679,8 @@ const measureSave = async (label, [file, GameID, RaceID], options, m) => {
       }
     }
 
+    const condition = load.read().text
+
     const cached = await openSave(file)
 
     m['query-cache'].cacheQueries(cached)
@@ -690,7 +695,7 @@ const measureSave = async (label, [file, GameID, RaceID], options, m) => {
       warms.push(await timed(() => peeks[route](context(cached, GameID, RaceID))))
     }
 
-    check(`${label}: ${route} cold cost is within ${options.budget} ms`, median(colds) <= options.budget ? true : `median ${median(colds).toFixed(1)} ms in every one of ${rounds} rounds`, `cold median ${median(colds).toFixed(1)} ms, min ${Math.min(...colds).toFixed(1)}, max ${Math.max(...colds).toFixed(1)} over ${options.laps} fresh connections${rounds > 1 ? ` (round ${rounds}; the earlier rounds ran over the budget on a busy machine)` : ''}; first on one kept connection ${first.toFixed(1)} ms; warm median ${median(warms).toFixed(2)} ms; ${sent} statements, ${cached.log.length - sent} on the warm laps`)
+    check(`${label}: ${route} cold cost is within ${options.budget} ms`, median(colds) <= options.budget ? true : `median ${median(colds).toFixed(1)} ms in every one of ${rounds} rounds; ${condition}`, `cold median ${median(colds).toFixed(1)} ms, min ${Math.min(...colds).toFixed(1)}, max ${Math.max(...colds).toFixed(1)} over ${options.laps} fresh connections${rounds > 1 ? ` (round ${rounds}; the earlier rounds ran over the budget on a busy machine)` : ''}; first on one kept connection ${first.toFixed(1)} ms; warm median ${median(warms).toFixed(2)} ms; ${sent} statements, ${cached.log.length - sent} on the warm laps; ${condition}`)
     check(`${label}: ${route} shown again reaches the database not at all`, cached.log.length === sent ? true : `${cached.log.length - sent} statements on warm laps`)
 
     await cached.close()
@@ -704,6 +709,32 @@ const run = async () => {
 
   for (const [name, result] of await runChecks(modules, selected)) {
     check(name, result)
+  }
+
+  // The machine-load report is itself a measurement, so it is checked on windows of known processor times (50% of the processors busy, 10% of them by this process) and on a real window in which this process spins.
+  if (selected('machine load')) {
+    const share = loadShare({ at: 1000, processors: 4, busy: 100, total: 400, own: 10 }, { at: 3000, processors: 4, busy: 300, total: 800, own: 50 })
+
+    check('machine load: a window of known processor times gives its machine, own and other shares', same(share, { seconds: 2, processors: 4, machine: 50, own: 10, others: 40 }))
+    check('machine load: the interrupt time is counted once on Windows, where kernel time holds it, and on its own elsewhere', same([processorTimes(Array(2).fill({ times: { user: 200, nice: 0, sys: 300, irq: 100, idle: 500 } }), 'win32'), processorTimes(Array(2).fill({ times: { user: 200, nice: 0, sys: 300, irq: 100, idle: 500 } }), 'linux')], [{ busy: 1000, total: 2000 }, { busy: 1200, total: 2200 }]))
+    check('machine load: a window that tells the machine less busy than this process is never negative', same(loadShare({ at: 0, processors: 2, busy: 0, total: 0, own: 0 }, { at: 1000, processors: 2, busy: 10, total: 200, own: 30 }), { seconds: 1, processors: 2, machine: 5, own: 5, others: 0 }))
+    check('machine load: a window with no processor time says so', loadShare({ at: 0, processors: 2, busy: 5, total: 50, own: 0 }, { at: 1, processors: 2, busy: 5, total: 50, own: 0 }) === null && describeLoad(null).includes('not readable'))
+    check('machine load: the text names the figures of the window', ['50%', '2.0 s', '4 logical', '10%', '40%'].every((text) => describeLoad(share).includes(text)) ? true : describeLoad(share))
+
+    const before = process.cpuUsage()
+    const spinning = watchLoad()
+
+    for (const until = Date.now() + 300; Date.now() < until;) {
+      Math.sqrt(Math.random())
+    }
+
+    const spun = spinning.read().share
+    const used = process.cpuUsage(before)
+
+    // The expectation is this process's CPU time over the wall time of the window on every processor, which the report takes from the system's processor times instead.
+    const expected = spun === null ? 0 : ((used.user + used.system) / 1000 / (spun.seconds * 1000 * spun.processors)) * 100
+
+    check('machine load: a window in which this process spins reads it as its own', spun !== null && spun.own > 0 && Math.abs(spun.own - expected) <= 0.35 * expected + 1.5 && spun.machine >= spun.own && spun.others >= 0 && spun.machine <= 100 ? true : `${JSON.stringify(spun)}, expected own ${expected.toFixed(1)}%`)
   }
 
   const mutations = options.mutations ? MUTATIONS.filter(([label]) => selected(label)) : []
@@ -733,8 +764,10 @@ const run = async () => {
   if (options.only.length === 0) {
     const planner = (await loadUtilities(['colonization-data'], { stubs: STUBS }))['colonization-data']
 
-    await measureSave('modded', options.modded, options, modules)
-    await measureSave('stock', options.stock, options, modules)
+    const load = watchLoad()
+
+    await measureSave('modded', options.modded, options, modules, load)
+    await measureSave('stock', options.stock, options, modules, load)
     await compareSave('modded', options.modded, modules, planner)
     await compareSave('stock', options.stock, modules, planner)
   }
