@@ -46,7 +46,7 @@ const OPTIONAL = Object.freeze({
   '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
   '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'positionFacts' || key === 'orbitFacts',
-  '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
+  '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
   '/map': (key) => key === 'groundFormations',
   // The formations read for the observation (`observationRead`) are an opt-in feature of Survey Progress and of the recorder behind History: a save without a column of that read leaves the observation unavailable (Survey Progress says so in place of the switch, and the recorder notes the failed read in the record), and nothing else of either page.
   '/survey-progress': (key) => ['formations', 'ruinSites', 'constructSites', 'troopBays', 'observationRead'].includes(key),

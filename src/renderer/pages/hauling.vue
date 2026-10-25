@@ -172,9 +172,10 @@
                 </div>
                 <div v-else class="caption warning--text">{{ item.route.problem }}</div>
                 <div v-if="item.year" class="caption text--secondary mt-2" data-cycle-parts>Each cycle: <span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving{{ item.waitText || item.delayHours > 0 ? ',' : ' and' }} <span data-part="handling">{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading<template v-if="item.delayHours > 0">{{ item.waitText ? ',' : ' and' }} <span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays</template><template v-if="item.waitText"> and <span data-part="wait">{{ item.waitText }}</span> waiting for the jump shock<provenance-mark v-if="item.results.wait" :result="item.results.wait" /></template>.<span v-if="item.limiting"> The slowest stop is {{ item.limiting.place }}, set by {{ item.limiting.ship.ShipName }} at a loading strength of {{ fixed(item.limiting.strength, 1) }}.</span></div>
-                <handling-breakdown :rows="item.handlingRows" class="mt-2" />
+                <handling-breakdown v-if="item.cargo.settled" :rows="item.handlingRows" class="mt-2" />
+                <div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ cargoUnsettled }}</div>
                 <fleet-profile :participants="item.participantRows" :speeds="item.speeds" :reasons="[]" :conditions="item.profileNotes" class="mt-2" />
-                <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2">The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold (a tonne of mineral takes two tonnes of cargo space): {{ item.tripText }} a trip.</div>
+                <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2" data-hold-share>The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold (a tonne of mineral takes two tonnes of cargo space): {{ item.tripText }} a trip.</div>
               </td>
             </template>
           </v-data-table>
@@ -191,6 +192,10 @@
             A cycle is flown for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading and order delays as waits, so the next leg leaves from where the fleet arrived. The cycle and the yearly figures are the propagated ones, with the cycle on the saved positions beside them; an order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
           </div>
         </v-card>
+
+        <route-groups :audit="routeAudit" :state="routeQueuesState" :separator="separator" :finder-link="groupFinder" :fleet-link="fleetPlace" @retry="retryRouteQueues" />
+
+        <route-desires :state="desireState" :read="desireRead" :covers="routeAudit.desires" :repository="desireRepository" :repository-error="desireRepositoryError" :scope="desireScope" :context="desireContext" :choices="desireChoices" :separator="separator" @retry="retryDesires" @changed="desiresChanged" />
 
         <v-row>
           <v-col cols="12" xl="6">
@@ -239,6 +244,8 @@ import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import RoutePositions from '../components/page/RoutePositions.vue'
 import ResourceReserves from '../components/logistics/ResourceReserves.vue'
+import RouteDesires from '../components/hauling/RouteDesires.vue'
+import RouteGroups from '../components/hauling/RouteGroups.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import avoidRoutes from '../mixins/avoid-routes'
 import capabilityGates from '../mixins/capability-gates'
@@ -246,10 +253,11 @@ import handlingSupport from '../mixins/handling-support'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
+import routeDesires, { DESIRE_INPUTS, DESIRE_LABELS } from '../mixins/route-desires'
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
-import { CARGO_POINTS, classYear, cycleCargo, cycleHandling, cycleWalk, propagatedRoute, routeResults, routeYear, walkRoute } from '../utilities/hauling'
+import { CARGO_POINTS, CARGO_UNSETTLED, classYear, cycleCargo, cycleHandling, cycleWalk, propagatedRoute, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { fleetProfile, hauledFleet, loadFleetShips, participantRows } from '../utilities/fleet-profile'
 import { loadJumpPoints, pathKey, reverseSteps, routeLegs, routeResults as routeFigures, searchRoutes } from '../utilities/jump-graph'
 import { loadHandlingSupport } from '../utilities/handling-support'
@@ -264,6 +272,9 @@ import { distanceResult, simulateCycles } from '../utilities/route-plan'
 import { cachedPropagation } from '../utilities/orbit-propagation'
 import { ADAPTERS, CONDITIONS, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
 import { fleetTimingOf, flightOnly, loadSystemDust } from '../utilities/route-time'
+import { auditOf, colonyChoices, desiresOf } from '../utilities/route-audit'
+import { loadRouteQueues } from '../utilities/route-queues'
+import { cycleStopsOf } from '../utilities/route-signatures'
 import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, handlingRows, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -281,9 +292,11 @@ const INPUT_LABELS = {
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
   ...POSITION_LABELS,
+  routeQueues: 'the saved queues',
+  ...DESIRE_LABELS,
 }
 // The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read).
-const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', ...POSITION_INPUTS]
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'routeQueues', ...DESIRE_INPUTS, ...POSITION_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
@@ -324,20 +337,17 @@ const placeOf = (order) => {
   return at > 0 ? description.slice(0, at) : description || order.ActionName
 }
 
-// The places a cycle visits, in order: where each order goes, leaving out transits (they only cross a jump point or Lagrange point), unnamed places and repeats, and the last when it is the first again.
-const cycleStops = (orders, raceId) => {
-  const stops = orders.filter((order) => !order.Jumps).map((order) => orderPlaceKey(order, raceId)).filter(Boolean).filter((key, index, keys) => key !== keys[index - 1])
-
-  return stops.length > 1 && stops[stops.length - 1] === stops[0] ? stops.slice(0, -1) : stops
-}
+// The places a cycle visits, in order: where each order goes, leaving out transits (they only cross a jump point or Lagrange point), unnamed places and repeats, and the last when it is the first again (`cycleStopsOf`).
+const cycleStops = (orders, raceId) => cycleStopsOf(orders.filter((order) => !order.Jumps).map((order) => orderPlaceKey(order, raceId)))
 
 export default {
   name: 'HaulingPage',
-  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, ResourceReserves, RoutePositions, StatTiles },
+  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, ResourceReserves, RouteDesires, RouteGroups, RoutePositions, StatTiles },
   mixins: [
     avoidRoutes,
     capabilityGates,
     handlingSupport,
+    routeDesires,
     routePosition,
     loadState(INPUT_LABELS),
     persistedView({
@@ -351,6 +361,7 @@ export default {
   ],
   data() {
     return {
+      cargoUnsettled: CARGO_UNSETTLED,
       expanded: [],
       planExpanded: [],
       ungatedTitle: 'Jump points on the route that are not stabilised on both sides: freighters without a jump drive need a jump-capable ship with them.',
@@ -384,6 +395,31 @@ export default {
       })
 
       return byFleet
+    },
+
+    // The state of the saved queues' read for the route coverage panel.
+    routeQueuesState() {
+      const error = this.loadErrors.routeQueues
+
+      return { loading: error === undefined, failed: error ? INPUT_LABELS.routeQueues : '', error: error || '' }
+    },
+
+    // The route rows by fleet, for the coverage of each route.
+    routeRowsByFleet() {
+      return Object.fromEntries(this.routeRows.map((row) => [row.FleetID, row]))
+    },
+
+    colonyNames() {
+      return Object.fromEntries(this.colonies.map((colony) => [place.colony(colony.PopulationID), colony.PopName]))
+    },
+
+    // The routes the saved orders make, grouped, with the fleets on each and the player's desired routes set against them (utilities/route-audit.js). The queues count only while their latest read has succeeded (`loadErrors.routeQueues` is null): the plugin keeps the last value while a re-read is pending or has failed, and that value belongs to the save read before.
+    routeAudit() {
+      return auditOf({ queues: this.loadErrors.routeQueues === null ? this.routeQueues : null, raceId: this.RaceID, ships: this.shipsByFleet, rows: this.routeRowsByFleet, colonyNames: this.colonyNames, desires: desiresOf(this.desireRead.entries) })
+    },
+
+    desireChoices() {
+      return colonyChoices(this.desireContext ? this.desireContext.objects : null)
     },
 
     // The formula version the save's schema stands for, in words for a panel foot.
@@ -744,6 +780,18 @@ export default {
 
       return stops.length ? { to: linkTo.routes({ stops, cycle: true, fleet: fleet.FleetID }), name: `${fleet.FleetName}'s cycle` } : { to: linkTo.routes({ from: place.fleet(fleet.FleetID) }), name: fleet.FleetName }
     },
+    // Route Finder with a route group's places as its stops and the first fleet's own speed and movement settings.
+    groupFinder(group) {
+      const stops = cycleStopsOf(group.stops.filter((stop) => !/^(survey|type\d+):/.test(stop)))
+
+      return stops.length ? linkTo.routes({ stops, cycle: true, fleet: group.fleets[0].FleetID }) : null
+    },
+    fleetPlace(fleetId) {
+      return linkTo.routes({ from: place.fleet(fleetId) })
+    },
+    retryRouteQueues() {
+      this.$asyncComputed.routeQueues.update()
+    },
     count(value) {
       return known(value) ? separatedNumber(roundToDecimal(value, 0), this.separator) : '—'
     },
@@ -883,7 +931,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.WarpPointID when 12 then VIR_LagrangeOut.LagrangePointID else FCT_MoveOrders.DestinationID end as ExitDestinationID, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.DestinationItemID, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.WarpPointID when 12 then VIR_LagrangeOut.LagrangePointID else FCT_MoveOrders.DestinationID end as ExitDestinationID, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },
@@ -994,6 +1042,17 @@ export default {
         return await loadSystemDust(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: () => ({}),
+    },
+    // The stored queues of the race's fleets (`loadRouteQueues`): optional, so the page renders without them and the coverage panel has its own loading and failure note. Null until read.
+    routeQueues: {
+      get: tracked('routeQueues', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return await loadRouteQueues(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: null,
     },
   },
 }
