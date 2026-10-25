@@ -1,7 +1,7 @@
 // What Settings resets: the views the pages remember, in the settings store. A campaign's empire keeps its values under `campaign.<campaign id>.race.<RaceID>` (see utilities/campaign.js); the `game` subtree is a history of the app before campaigns, kept as the original of the migration, and no reset reads or changes it.
 
-// What an empire's pages keep that isn't a view: the Warnings mutes and snoozes and what each check listed at the last visit, the Game Log's last event seen, its event archive choice and pinned events, the Galaxy Map's pinned systems and clusters, and the colonies the History page follows. A reset keeps them too.
-export const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsSnoozed', 'warningsLastLook', 'logLastSeen', 'logArchive', 'logPins', 'mapPinned', 'mapGroups', 'historyColonies']
+// What an empire's pages keep that isn't a view: the Warnings mutes and snoozes and what each check listed at the last visit, the Game Log's last event seen, its event archive choice and pinned events, the Galaxy Map's pinned systems and clusters, the colonies the History page follows and the kinds of object whose observation is kept. A reset keeps them too.
+export const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsSnoozed', 'warningsLastLook', 'logLastSeen', 'logArchive', 'logPins', 'mapPinned', 'mapGroups', 'historyColonies', 'observe']
 
 // The app-wide settings that are a budget and not a view: the cap on the events the event archive keeps for a race. A reset that dropped it to the default could cut an archive at its next capture, which no later choice restores.
 export const KEPT_APP_KEYS = ['historyEventCap']

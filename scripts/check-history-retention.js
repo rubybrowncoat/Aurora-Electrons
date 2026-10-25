@@ -25,12 +25,13 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { readFigure } = require('./lib/browser-observe')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
 const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013')
-const NAMES = ['history', 'history-backup', 'campaign', 'campaign-attach', 'recording-owner']
+const NAMES = ['history', 'history-backup', 'campaign', 'campaign-attach', 'recording-owner', 'observations']
 const START_YEAR = 2050
 const DAY = 86400
 const YEAR = 31536000
@@ -38,7 +39,7 @@ const YEAR = 31536000
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
 const STUBS = {
-  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
+  'electron-store': 'export default class Config { constructor(options = {}) { this.name = options.name } get store() { const held = globalThis.__heldStores; if (globalThis.__storeReads) { globalThis.__storeReads.push(this.name) } return held && held.has(this.name) ? JSON.parse(JSON.stringify(held.get(this.name))) : {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs')}`,
   'dayjs/plugin/utc.js': `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs/plugin/utc.js')}`,
   romanum: 'export default { toNumeral: String }',
@@ -1144,6 +1145,13 @@ class MemoryConfig {
   }
 }
 
+// The settings as the store nests them, for a page that reads `config.store` (the choice of what a race observes).
+class ObservingConfig extends MemoryConfig {
+  get store () {
+    return nested(this)
+  }
+}
+
 // The settings a page wrote, as the store nests them: a dotted key is a path.
 const nested = (config) => {
   const store = {}
@@ -1252,7 +1260,7 @@ const loadPanel = async ({ mutate = null, change = null } = {}) => {
 
 const KEY = 'campaign.c1.race.7'
 
-const pageSuite = async ({ history }, variant = {}) => {
+const pageSuite = async ({ history, observations }, variant = {}) => {
   const loaded = await loadPanel(variant)
   const { options, render, staticRenderFns, declared } = loaded
   const mounted = []
@@ -1537,6 +1545,153 @@ const pageSuite = async ({ history }, variant = {}) => {
     assert.equal(vm.retentionProfile, 'standard')
   })
 
+  // The observation record of the shown branch is read through the stub store of the page's own module: the files held by name in `__heldStores` (the stub reads it at each access).
+  const observed = async (file, config, record, work) => {
+    globalThis.__heldStores = new Map(file === undefined ? [] : [['campaign-c1-b1-observations', file]])
+    globalThis.__storeReads = []
+
+    try {
+      return await work({ ...mount({ file: record, config }), reads: () => globalThis.__storeReads.filter((name) => name.endsWith('-observations')) })
+    } finally {
+      delete globalThis.__heldStores
+      delete globalThis.__storeReads
+    }
+  }
+
+  const observationHex = (id) => id.toString(16).padStart(16, '0')
+
+  const OBSERVED_LABEL = observations.OBSERVED_KINDS.formation.label.toLowerCase()
+
+  const observationRace = (ids, captures = [[100, 1], [200, 2]]) => ({ kinds: { formation: { captures, objects: Object.fromEntries(ids.map((id) => [id, [100, 200, observationHex(id)]])) } } })
+
+  const observationFile = (races) => ({ version: 1, races })
+
+  const observing = () => new ObservingConfig([['campaign.c1.race.7.observe', '["formation"]']])
+
+  const rowText = (tree) => textOf(find(tree, 'data-retention-observations'))
+
+  const numbersOf = (text) => (text.match(/\d+/g) || []).map(Number)
+  const stateOf = (text) => (/\b(On|Off)\b/.exec(text) || [])[1] || null
+
+  // The figures written as a whole token (a sign, digits, a decimal part, nothing else beside them) directly before a unit word, in the order they appear: `3 objects`, `500 captures`. A token that is not a whole figure (a minus before it, a point inside it, a letter beside it) reads as null, so a malformed count is a wrong value and never the number of a part of it. The counts here are below a thousand, so none is grouped. The figure of one unit is told from another by the unit it stands before, not by its place in the sentence.
+  const countOf = (text, unit) => [...text.matchAll(new RegExp(`(?:^|\\s)([-+\\u2212]?\\d\\S*)\\s+${unit}\\b`, 'g'))].map((found) => readFigure(found[1], 'None'))
+
+  // The captures a clause states (a clause ends at a semicolon or a full stop), by the clause the role names: the captures held stand in the clause that counts the objects held (a figure before `objects`), the captures a full list holds in the clause that predicts the size. Whatever the order of the clauses and the words around the figure, a held count and a cap that change places read as each other's value.
+  const HELD = /\d\s+objects?\b/
+  const CAP = /\bpredicted\b/
+  const capturesOf = (text, role) => countOf(text.split(/;|\.(?=\s|$)/).find((part) => role.test(part)) || '', 'captures?')
+
+  // Whether a size is stated as the one measured or the one predicted: by the one of the two words the clause of the sentence it stands in holds (a clause ends at a semicolon or a full stop), whatever the wording around them and the side of the figure the word stands on.
+  const roleOf = (text, figure) => {
+    const clause = text.split(/;|\.(?=\s|$)/).find((part) => part.includes(figure))
+    const words = clause ? ['measured', 'predicted'].filter((word) => new RegExp(`\\b${word}\\b`).test(clause)) : []
+
+    return words.length === 1 ? words[0] : null
+  }
+
+  check('page: the Retention panel states the observation record of the shown race: on for the race, the objects and captures held, the size measured as compact JSON of its own record and the size predicted for a full capture list, and nothing of another race\'s', () => {
+    const mine = observationRace([1, 2, 3])
+    const other = observationRace([11, 12, 13, 14, 15], [[100, 1], [200, 2], [300, 3]])
+    const full = observationRace([1, 2, 3], Array.from({ length: 500 }, (_, index) => [index + 1, index + 1]))
+    const predicted = observations.observationEstimate({ objects: 3, captures: 500 })
+
+    return observed(observationFile({ 6: other, 7: mine, 8: other }), observing(), longFile, ({ vm, tree }) => {
+      const text = rowText(tree())
+      const budget = vm.observationBudget
+
+      assert.deepEqual({ kinds: budget.kinds, player: budget.player, objects: budget.objects, captures: budget.captures, measured: budget.measured, predicted: budget.predicted, failures: budget.failures, error: budget.error }, { kinds: ['formation'], player: true, objects: 3, captures: 2, measured: bytesOf(mine), predicted: observations.observationEstimate({ objects: 3, captures: 500 }), failures: 0, error: '' })
+      assert.equal(stateOf(text), 'On')
+      assert.ok(text.includes(OBSERVED_LABEL), 'the kind observed is named')
+      assert.deepEqual(countOf(text, 'objects?'), [3], 'the objects held')
+      assert.deepEqual({ held: capturesOf(text, HELD), cap: capturesOf(text, CAP) }, { held: [2], cap: [500] }, 'the captures held and the captures a full list holds, each by the clause that says it')
+      assert.equal(roleOf(text, history.bytesText(bytesOf(mine))), 'measured', 'the size of the race\'s own record is the measured one')
+      assert.equal(roleOf(text, history.bytesText(predicted)), 'predicted', 'the size for a full capture list is the predicted one')
+      assert.ok(predicted >= bytesOf(full) && predicted <= 2 * bytesOf(full), 'the prediction is at least what the record takes with 500 captures and at most twice it')
+      assert.ok(!numbersOf(text).includes(5) && !numbersOf(text).includes(15), 'no other race is counted')
+      assert.doesNotMatch(text, /\b(I|you|your|we|our)\b/i)
+      assert.match(text, /Survey Progress/, 'it says where the choice is made')
+    })
+  })
+
+  check('page: the Retention panel states the observation record of a race that does not observe: off, with what is held kept and counted', () => observed(observationFile({ 7: observationRace([1, 2, 3]) }), new ObservingConfig([['campaign.c1.race.7.observe', '[]']]), longFile, ({ vm, tree }) => {
+    const text = rowText(tree())
+
+    assert.deepEqual({ kinds: vm.observationBudget.kinds, objects: vm.observationBudget.objects, captures: vm.observationBudget.captures }, { kinds: [], objects: 3, captures: 2 })
+    assert.equal(stateOf(text), 'Off')
+    assert.ok(!text.includes(OBSERVED_LABEL), 'no kind is named as observed')
+    assert.deepEqual(countOf(text, 'objects?'), [3], 'what is held is still counted')
+    assert.deepEqual(capturesOf(text, HELD), [2], 'the captures held are still counted')
+  }))
+
+  check('page: the Retention panel states the observation record of a branch that holds none: none kept yet and none recorded, never 0, and no prediction', () => observed(undefined, observing(), longFile, ({ vm, tree }) => {
+    const text = rowText(tree())
+
+    assert.deepEqual({ objects: vm.observationBudget.objects, captures: vm.observationBudget.captures, measured: vm.observationBudget.measured, predicted: vm.observationBudget.predicted }, { objects: null, captures: null, measured: null, predicted: null })
+    assert.equal(stateOf(text), 'On')
+    assert.deepEqual(countOf(text, 'captures?'), [500], 'the captures the record can hold are stated')
+    assert.doesNotMatch(text, /\b0 objects|predicted/)
+  }))
+
+  check('page: the Retention panel counts one object and one capture in the singular, and says how many captures failed', () => {
+    const one = observationRace([1], [[100, 1]])
+
+    one.kinds.formation.objects[1] = [100, 100, observationHex(1)]
+    one.kinds.formation.failures = [{ at: 1, t: 150, reason: 'x' }]
+
+    return observed(observationFile({ 7: one }), observing(), longFile, ({ vm, tree }) => {
+      const text = rowText(tree())
+
+      assert.deepEqual({ objects: vm.observationBudget.objects, captures: vm.observationBudget.captures, failures: vm.observationBudget.failures }, { objects: 1, captures: 1, failures: 1 })
+      assert.doesNotMatch(text, /\b1 (objects|captures)\b/, 'a count of one is not in the plural')
+      assert.match(text, /\b1 capture failed\b/)
+    })
+  })
+
+  check('page: the Retention panel says how many captures failed: several are counted over the kinds and a race with none says nothing of it', async () => {
+    const failing = observationRace([1, 2])
+
+    failing.kinds.formation.failures = [{ at: 1, t: 150, reason: 'x' }, { at: 2, t: 160, reason: 'y' }]
+
+    await observed(observationFile({ 7: failing }), observing(), longFile, ({ vm, tree }) => {
+      assert.equal(vm.observationBudget.failures, 2)
+      assert.match(rowText(tree()), /\b2 captures failed\b/)
+    })
+    await observed(observationFile({ 7: observationRace([1, 2]) }), observing(), longFile, ({ vm, tree }) => {
+      assert.equal(vm.observationBudget.failures, 0)
+      assert.doesNotMatch(rowText(tree()), /failed/)
+    })
+  })
+
+  check('page: the Retention panel names an observation file this version cannot read instead of showing it as empty', async () => {
+    for (const file of [{ version: 1, races: 5 }, { version: 2, races: {} }, { version: 1, races: { 7: { kinds: { formation: { captures: 'none', objects: {} } } } } }]) {
+      await observed(file, observing(), longFile, ({ vm, tree }) => {
+        const text = rowText(tree())
+
+        assert.ok(vm.observationBudget.error.length > 0 && vm.observationBudget.objects === null, JSON.stringify(file))
+        assert.ok(text.includes(vm.observationBudget.error), JSON.stringify(file))
+        assert.doesNotMatch(text, /\b0 objects|none kept yet/, JSON.stringify(file))
+      })
+    }
+  })
+
+  check('page: the Retention panel says the observation record is for player races only when the shown race is not a player, and reads no file for it', () => observed(observationFile({ 7: observationRace([1, 2, 3]) }), observing(), { gameName: 'Game', races: { 7: { raceName: 'Rival', npr: true, snapshots: irregular(50, 3) } } }, ({ vm, tree, reads }) => {
+    const text = rowText(tree())
+
+    assert.equal(vm.observationBudget.player, false)
+    assert.equal(stateOf(text), null, 'a race that is not a player is not said to observe or not')
+    assert.deepEqual(countOf(text, 'objects?'), [], 'what the file holds is not counted')
+    assert.match(text, /Survey Progress/, 'it says where the choice is made')
+    assert.deepEqual(reads(), [], 'the file of the branch is not opened')
+  }))
+
+  check('page: the Retention panel opens no observation file for a race never chosen, and opens one for a race that chose and turned it off', async () => {
+    await observed(observationFile({ 7: observationRace([1, 2, 3]) }), new MemoryConfig(), longFile, ({ vm, tree, reads }) => {
+      assert.deepEqual({ kinds: vm.observationBudget.kinds, objects: vm.observationBudget.objects, reads: reads() }, { kinds: [], objects: null, reads: [] })
+      assert.equal(stateOf(rowText(tree())), 'Off')
+    })
+    await observed(observationFile({ 7: observationRace([1, 2, 3]) }), new ObservingConfig([['campaign.c1.race.7.observe', '[]']]), longFile, ({ vm, reads }) => assert.deepEqual({ objects: vm.observationBudget.objects, opened: reads().length > 0 }, { objects: 3, opened: true }))
+  })
+
   check('page: a smaller cap on the event archive waits for confirmation even when the shown branch holds no archive, the confirmation says the cap applies to every campaign, race and branch at their next capture, and a larger cap is kept at once', async () => {
     const config = new MemoryConfig()
     const { vm, tree } = mount({ file: longFile, config })
@@ -1771,6 +1926,28 @@ const PAGE_MUTATIONS = [
   { name: 'the allowance worded as the samples a save removes', mutate: replacing(' to what thinning alone would discard.', ' of the samples counted above can be those.'), fails: ['page: the confirmation counts the sample an unchanged observation removes', 'page: the confirmation words the allowance'] },
   { name: 'a smaller event cap waits only when the shown branch would lose events', mutate: replacing('} else if (cap < this.eventCap) {\n        this.eventCapPick = cap', '} else if (this.eventRecord.file && Object.values(this.eventRecord.file.races).some((record) => capRecord(record, cap).dropped)) {\n        this.eventCapPick = cap'), fails: ['page: a smaller cap on the event archive waits'] },
   { name: 'the event cap confirmation leaves out that the cap applies to every campaign', mutate: replacing('The cap applies to every campaign, race and branch of this installation, and takes effect at the next capture of each.', 'The cap applies to this branch.'), fails: ['page: a smaller cap on the event archive waits'] },
+  { name: 'the objects of the shown race are taken from the first race of the file', mutate: replacing('const race = file ? file.races[this.RaceID] || null : null\n        const records = race ? Object.values(race.kinds) : []\n        const objects = race ? raceObservations(race) : null', 'const race = file ? Object.values(file.races)[0] || null : null\n        const records = race ? Object.values(race.kinds) : []\n        const objects = race ? raceObservations(race) : null'), fails: ['page: the Retention panel states the observation record of the shown race'] },
+  { name: 'the measured size of the observation record is that of the whole file', mutate: replacing('measured: race ? measuredBytes(race) : null, predicted: race ? observationEstimate', 'measured: race ? measuredBytes(file) : null, predicted: race ? observationEstimate'), fails: ['page: the Retention panel states the observation record of the shown race'] },
+  { name: 'the size predicted for the observation record allows for the captures held only', mutate: replacing('captures: CAPTURES_KEPT * records.length }) : null', 'captures: records.length }) : null'), fails: ['page: the Retention panel states the observation record of the shown race'] },
+  { name: 'the captures held and the captures a full list holds said each in the other\'s place', mutate: (text) => replacing(unhashed('#{this.count(budget.captures, 0)} #{budget.captures === 1 ? \'capture\' : \'captures\'} kept'), unhashed('#{this.count(CAPTURES_KEPT, 0)} captures kept'))(replacing(unhashed('predicted once #{this.count(CAPTURES_KEPT, 0)} captures are held'), unhashed('predicted once #{this.count(budget.captures, 0)} captures are held'))(text)), fails: ['page: the Retention panel states the observation record of the shown race', 'page: the Retention panel states the observation record of a race that does not observe'] },
+  { name: 'a race that is not a player is described as one that observes', mutate: replacing('if (!budget.player) {\n        return \'Not kept: the observation record is for player races only.\'', 'if (false) {\n        return \'Not kept: the observation record is for player races only.\''), fails: ['page: the Retention panel says the observation record is for player races only'] },
+  { name: 'a race that does not observe is described as one that does', mutate: replacing('const state = budget.kinds.length ? ', 'const state = true ? '), fails: ['page: the Retention panel states the observation record of a race that does not observe'] },
+  { name: 'a file this version cannot read is shown as an empty record', mutate: replacing('return problem ? { file: null, error: `the observation record', 'return false ? { file: null, error: `the observation record'), fails: ['page: the Retention panel names an observation file this version cannot read'] },
+  { name: 'one object is counted as objects', mutate: replacing('budget.objects === 1 ? \'object\' : \'objects\'', '\'objects\''), fails: ['page: the Retention panel counts one object and one capture in the singular'] },
+  { name: 'a branch with no observation record is shown as holding none counted as 0', mutate: replacing('const kept = budget.objects === null ?', 'const kept = false ?'), fails: ['page: the Retention panel states the observation record of a branch that holds none'] },
+  { name: 'a failed capture is not counted in the observation line', mutate: replacing('failures: race ? records.reduce((sum, record) => sum + (record.failures ? record.failures.length : 0), 0) : null', 'failures: null'), fails: ['page: the Retention panel says how many captures failed'] },
+  { name: 'the observation file opened for a race that never chose', mutate: replacing(' || !observationEverChosen(campaignStorage(this.config).settings.store, this.resolved.campaignId, this.RaceID)', ''), fails: ['page: the Retention panel opens no observation file'] },
+  { name: 'the observation file opened for a race that is not a player', mutate: replacing('if ((this.record && this.record.npr) || ', 'if ('), fails: ['page: the Retention panel says the observation record is for player races only'] },
+  { name: 'the object count and the capture count of the observation line taken from each other', mutate: replacing('this.count(budget.objects, 0)', 'this.count(budget.captures, 0)'), fails: ['page: the Retention panel states the observation record of the shown race'] },
+  { name: 'the object count of the observation line shown negative', mutate: replacing('this.count(budget.objects, 0)', '-this.count(budget.objects, 0)'), fails: ['page: the Retention panel states the observation record of the shown race'] },
+  { name: 'the object count of the observation line shown with a decimal prefix', mutate: replacing('this.count(budget.objects, 0)', '(\'1.\' + this.count(budget.objects, 0))'), fails: ['page: the Retention panel states the observation record of the shown race'] },
+]
+
+// A rewrite of the observation line that says the same with other words or in another order: no check of the Retention panel may fail by it. The checks read the figures by the unit they stand before and the size by the word of its clause.
+const PAGE_BENIGN = [
+  { name: 'the predicted size introduced by other words', from: 'predicted once ', to: 'predicted when ', watch: ['page: the Retention panel'] },
+  { name: 'the predicted clause put before the measured one', from: '#{state}; #{kept}; #{measured}#{predicted}. Only', to: '#{state}; #{kept}#{predicted}; #{measured}. Only', watch: ['page: the Retention panel'] },
+  { name: 'the objects and captures kept put after the predicted clause', from: '#{state}; #{kept}; #{measured}#{predicted}. Only', to: '#{state}#{predicted}; #{kept}; #{measured}. Only', watch: ['page: the Retention panel'] },
 ]
 
 // A mutant's text is written with `#{` where the module has a template placeholder, so no quoted string here holds one.
@@ -1795,7 +1972,7 @@ const texts = new Map()
 const loadModules = async (sources = {}) => {
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory: utilitiesDirectory, sources, texts })
 
-  return { history: loaded.history, backup: loaded['history-backup'], campaign: loaded.campaign, attach: loaded['campaign-attach'], owner: loaded['recording-owner'] }
+  return { history: loaded.history, backup: loaded['history-backup'], campaign: loaded.campaign, attach: loaded['campaign-attach'], owner: loaded['recording-owner'], observations: loaded.observations }
 }
 
 let failures = 0
@@ -1829,7 +2006,7 @@ const runChecks = async (list) => {
 }
 
 const RESULT = 'RESULT '
-const MUTANTS = [...UTILITY_MUTATIONS.map((mutation) => ({ ...mutation, page: false })), ...PAGE_MUTATIONS.map((mutation) => ({ ...mutation, page: true }))]
+const MUTANTS = [...UTILITY_MUTATIONS.map((mutation) => ({ ...mutation, page: false })), ...PAGE_MUTATIONS.map((mutation) => ({ ...mutation, page: true })), ...PAGE_BENIGN.map((rewrite) => ({ name: rewrite.name, mutate: replacing(unhashed(rewrite.from), unhashed(rewrite.to)), fails: rewrite.watch, page: true, benign: true }))]
 
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs), or the arguments of `show`.
 const baselineEntries = async (entries) => {
@@ -1867,7 +2044,7 @@ const utilityEntries = async (entries, { name, file, find, replace, fails }) => 
   }
 }
 
-const pageEntries = async (entries, { name, mutate, change, fails }) => {
+const pageEntries = async (entries, { name, mutate, change, fails, benign = false }) => {
   const began = Date.now()
 
   try {
@@ -1887,10 +2064,12 @@ const pageEntries = async (entries, { name, mutate, change, fails }) => {
     warnings.length = warned
 
     const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
+    const label = benign ? 'page rewrite harmless' : 'page mutation caught'
+    const verdict = absent.length ? `no statement begins ${absent.join('; ')}` : benign ? (failed.length ? `these statements failed: ${failed.join('; ')}` : true) : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true
 
-    entries.push({ show: [`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} fail, ${((Date.now() - began) / 1000).toFixed(1)} s`] })
+    entries.push({ show: [`${label}: ${name}`, verdict, `${failed.length} fail, ${((Date.now() - began) / 1000).toFixed(1)} s`] })
   } catch (error) {
-    entries.push({ show: [`page mutation caught: ${name}`, `does not load: ${error.message}`] })
+    entries.push({ show: [`${benign ? 'page rewrite harmless' : 'page mutation caught'}: ${name}`, `does not load: ${error.message}`] })
   }
 }
 

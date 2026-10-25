@@ -235,7 +235,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map. Each formation can also be compared, element by element, with its original or replacement template, which shows what it is short of or holds over, its mass and the troop bay it needs." elevation="1">
+        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map. Each formation can also be compared, element by element, with its original or replacement template, which shows what it is short of or holds over, its mass and the troop bay it needs. When observation is switched on, each row also says since when the formation has been seen where it is and as it is." elevation="1">
           <div class="panel-head">
             <span>Ground formations</span>
             <span v-if="formationModel" class="d-flex align-center">
@@ -253,6 +253,12 @@
               <v-btn-toggle v-model="formationBasis" mandatory dense class="mb-2" aria-label="Template compared with" data-compare="basis">
                 <v-btn v-for="basis in bases" :key="basis.value" :value="basis.value" small :data-compare-basis="basis.value">{{ basis.text }}</v-btn>
               </v-btn-toggle>
+              <div v-if="canObserve" class="d-flex align-center flex-wrap mb-2" data-observe="control">
+                <v-switch :input-value="observeChoice" label="Observe formations" dense hide-details class="mt-0 mr-4" data-observe="switch" @change="setObserve" />
+                <span class="caption text--secondary" data-observe="purpose">{{ observationPurpose }} About {{ observationSize }} as stored for the formations now (an estimate).</span>
+                <div v-if="observeMessage" class="caption error--text" role="alert" data-observe="message">{{ observeMessage }}</div>
+              </div>
+              <div v-else-if="observable" class="caption text--secondary mb-2" data-observe="unavailable">Observing the formations is unavailable: the save lacks {{ observationGaps.join(', ') }}.</div>
             </div>
             <v-data-table :headers="formationHeaders" :items="formationList" item-key="id" show-expand single-expand :expanded.sync="formationExpanded" :sort-by.sync="formationsTable.sortBy" :sort-desc.sync="formationsTable.sortDesc" :items-per-page.sync="formationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and the scope chosen" @click:row="openFormation">
               <template #[`item.name`]="{ item }">
@@ -281,8 +287,18 @@
               <template #[`item.gapOrder`]="{ item }">
                 <span :class="['text-no-wrap', { 'text--secondary': item.gapOrder >= 3 }]" :data-compare-gap="item.id" :data-compare-order="item.gapOrder"><span v-for="(part, index) in item.gapParts" :key="index" :data-figure="part.role">{{ part.text }}</span></span>
               </template>
+              <template #[`item.observedSort`]="{ item }">
+                <div :data-observed="item.id" :data-observed-state="item.observed.state">
+                  <div class="font-weight-medium" data-observed-headline>{{ item.observed.headline }}</div>
+                  <div class="caption text--secondary" data-observed-summary>{{ item.observed.summary }}</div>
+                </div>
+              </template>
               <template #expanded-item="{ headers, item }">
                 <td :colspan="headers.length" class="py-3" data-compare="detail" :data-compare-formation="item.id">
+                  <div v-if="item.observed" class="mb-2" data-observed-detail :data-observed-formation="item.id" :data-observed-state="item.observed.state">
+                    <div class="font-weight-medium" data-observed-headline>{{ item.observed.headline }}</div>
+                    <div v-for="(line, index) in item.observed.details" :key="index" class="caption text--secondary" data-observed-line>{{ line }}</div>
+                  </div>
                   <div class="font-weight-medium" data-compare-template :data-compare-template-id="compareOf(item).template.id">{{ basisText(compareOf(item).which) }}: <span v-for="(part, index) in templateOf(compareOf(item).template)" :key="index" :data-figure="part.role">{{ part.text }}</span></div>
                   <div class="caption text--secondary mb-2" data-compare-identity :data-compare-same="String(compareOf(item).identity.sameTemplate)">{{ identityLabel(compareOf(item)) }}</div>
                   <div v-if="compareOf(item).state !== 'compared'" class="mb-2" data-compare-none :data-compare-state="compareOf(item).state">{{ noComparison(compareOf(item)) }}</div>
@@ -325,6 +341,9 @@
               {{ remoteDefinition }}
               Of {{ count(formationTotals.formations) }} {{ remoteOnly ? (formationTotals.formations === 1 ? 'formation in scope (remote, or at a colony the save does not hold)' : 'formations in scope (remote, or at a colony the save does not hold)') : (formationTotals.formations === 1 ? 'formation' : 'formations') }}, {{ count(formationTotals.placed) }} {{ formationTotals.placed === 1 ? 'is' : 'are' }} in a system the race has named and {{ count(formationTotals.unplaced) }} {{ formationTotals.unplaced === 1 ? 'has' : 'have' }} none (the row says why; no place is guessed). {{ count(formationTotals.geo) }} geological and {{ count(formationTotals.xeno) }} xenoarchaeology, {{ count(formationTotals.both) }} of them both and listed once, {{ count(formationTotals.other) }} other{{ formationTotals.unknown ? `, ${count(formationTotals.unknown)} with a role not known` : '' }}. In the whole race {{ count(formationTotals.remote) }} {{ formationTotals.remote === 1 ? 'is' : 'are' }} remote, {{ count(formationTotals.atColonies) }} at colonies{{ formationTotals.remoteUnknown ? ` and ${count(formationTotals.remoteUnknown)} at a colony the save does not hold` : '' }}.
               Each row expands to the formation's actual elements against the template chosen above, class by class: the units short and over, the mass actual and intended, and whether the formation fits one troop bay now and at the intended mass. A template's obsolescence is its own flag and is separate from whether the replacement template differs from the original; an obsolete template with an STO class is a replacement review, never a direct upgrade. A formation with no usable template, or with no element rows, is not compared and no deficit is worked out for it.
+              <div v-if="observationKey" class="mt-2" data-observe="note">
+                {{ observationRule }} <span data-observe="record">{{ observationNote }}</span>
+              </div>
             </div>
           </template>
         </v-card>
@@ -359,6 +378,10 @@ import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surv
 import { surveyDays } from '../utilities/survey-eta'
 import { formationRows, remoteOnlyView, REMOTE_DEFINITION, ROLE_OPTIONS, rolesView, rowTotals, selectRows } from '../utilities/remote-formations'
 import { loadGroundFormations } from '../utilities/ground-formations'
+import { durationText, bytesText } from '../utilities/history'
+import { gameDateText } from '../utilities/history-milestones'
+import { observationEstimate, observedKinds, readObservations, readOpenSave, saveObservationChoice } from '../utilities/observations'
+import { OBSERVATION_PURPOSE, OBSERVATION_RULE, observationRows, observationText, readObservationRecord, recordNote } from '../utilities/observation-view'
 import { BASES, basisView, carryParts, compareFormation, gapOf, identityText, noComparisonText, obsolescenceText, templateParts } from '../utilities/formation-composition'
 import { loadBootstrapFreight } from '../utilities/mine-bootstrap-data'
 import { candidatesOf, candidateText, colonyGeoTeams, constructBodies, deploymentTotals, liftText, loadConstructSites, loadRuinSites, rolesView as deployRolesView, ROLE_CHOICES, ruinTargets, selectDeployments, specialistRows, STATE_CHOICES, statesView as deployStatesView, targetRows, geoTargets } from '../utilities/specialist-deployments'
@@ -379,6 +402,7 @@ const INPUT_LABELS = {
   constructSites: 'the ancient constructs',
   troopBays: 'the troop ships',
   navalAdmins: 'naval admin commands',
+  observationRead: 'the formations observed',
   formulaVersion: 'the save\'s schema',
 }
 // FCT_SystemBody.GroundMineralSurvey, as the Minerals page labels it.
@@ -417,6 +441,10 @@ export default {
   ],
   data() {
     return {
+      observeChoice: false,
+      observeMessage: '',
+      observationRule: OBSERVATION_RULE,
+      observationPurpose: OBSERVATION_PURPOSE,
       pageSizes: PAGE_SIZES,
       expanded: [],
       page: 1,
@@ -432,7 +460,7 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['database', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'racePrefix', 'campaignId']),
 
     // The survey rates rest on the Survey bonus (2) of the officers and of the naval admin chain; they are not given while the save's lookup row for it is not confirmed.
     surveyBlocked() {
@@ -685,7 +713,81 @@ export default {
     formationList() {
       const rows = selectRows(this.formationAll, { roles: this.remoteRoles, remoteOnly: this.remoteOnly })
 
-      return (this.formationSystem === null ? rows : rows.filter((row) => row.system && row.system.id === this.formationSystem)).map((row) => ({ ...row, gapParts: this.formationCompared.get(row.id).gap.parts, gapOrder: this.formationCompared.get(row.id).gap.order }))
+      return (this.formationSystem === null ? rows : rows.filter((row) => row.system && row.system.id === this.formationSystem)).map((row) => ({ ...row, gapParts: this.formationCompared.get(row.id).gap.parts, gapOrder: this.formationCompared.get(row.id).gap.order, ...(this.observationKey ? this.observedFields(row.id) : {}) }))
+    },
+
+    // The observation of a formation is offered for a player race of a settled campaign and branch.
+    observable() {
+      return !!this.campaignId && !!this.branchId && !!this.RaceID && !this.$store.state.RaceNPR
+    },
+
+    // The columns of the read for the observation that the save lacks (the capability report's optional input `observationRead`): the page and the recorder go on without the observation, so only the observation is left out.
+    observationGaps() {
+      const report = this.$store.getters['capabilities/report']('/survey-progress')
+      const entry = report && report.degraded.find((degraded) => degraded.key === 'observationRead')
+
+      return entry ? entry.fields : []
+    },
+
+    // The observation can be chosen when it is offered and the save holds what its read takes.
+    canObserve() {
+      return this.observable && this.observationGaps.length === 0
+    },
+
+    branchId() {
+      const settled = this.$store.getters['history/campaign']
+
+      return settled ? settled.branchId : null
+    },
+
+    // Whether the race is observed: a player race of a settled branch with the choice on.
+    observing() {
+      return this.canObserve && !!this.observeChoice
+    },
+
+    // What changes the record the page reads: the choice, the branch, the race, and the recorder having written (its pass is asked for at the switch). Null while the race is not observed.
+    observationKey() {
+      return this.observing ? `${this.campaignId}|${this.branchId}|${this.RaceID}|${this.$store.state.history.revision}` : null
+    },
+
+    // The branch's file as it stands: { status: 'ok', record } (record null while the race has none), { status: 'unavailable', reason }, or null while the race is not observed. Derived, never copied, so it is the file the recorder last wrote.
+    observationFile() {
+      return this.observationKey ? readObservationRecord(this.campaignId, this.branchId, this.RaceID, 'formation') : null
+    },
+
+    // What the record says of each formation of the open save, by id; a formation is unread while the record or the open save could not be read.
+    observationStates() {
+      const usable = this.observationFile && this.observationFile.status === 'ok' && this.observationRead && this.observationRead.objects
+
+      return observationRows(usable ? this.observationFile.record : null, usable ? this.observationRead.objects : null, usable ? this.observationRead.open : null)
+    },
+
+    // Why the record or the open save cannot be compared, or the account of the record.
+    observationNote() {
+      const file = this.observationFile
+
+      if (!file) {
+        return ''
+      }
+
+      if (file.status !== 'ok') {
+        return `The observation record cannot be read (${file.reason}), so no span is shown and nothing is written to it.`
+      }
+
+      if (this.observationRead && this.observationRead.failed) {
+        return `The open save could not be read for the observation (${this.observationRead.failed.message}).`
+      }
+
+      if (this.observationRead && this.observationRead.objects && !this.observationRead.open) {
+        return 'The game time of the open save could not be read for the observation, so nothing is compared.'
+      }
+
+      return recordNote(file.record, { date: this.observedDate, duration: durationText })
+    },
+
+    // The size the record would take for the formations the open save holds now: every formation of the race, since the recorder reads them all whatever the table shows (`remoteOnly`, the roles and the system).
+    observationSize() {
+      return bytesText(observationEstimate({ objects: this.formationAll.length }))
     },
 
     // Every formation's comparison with the template chosen (`formationBasis`) and the short statement the table gives it, by formation id.
@@ -732,6 +834,7 @@ export default {
         { text: 'Geological', value: 'geo', align: 'end' },
         { text: 'Xenoarchaeology', value: 'xeno', align: 'end' },
         { text: 'Against template', value: 'gapOrder' },
+        ...(this.observationKey ? [{ text: 'Observed', value: 'observedSort' }] : []),
         { text: '', value: 'data-table-expand', sortable: false },
       ]
     },
@@ -832,6 +935,14 @@ export default {
     // The panel is drawn only once every input has arrived: a link that named a system's formations is retried then.
     ready() {
       this.revealFormations()
+    },
+    // The choice follows the race and campaign the page shows.
+    racePrefix: {
+      immediate: true,
+      handler(prefix) {
+        this.observeMessage = ''
+        this.observeChoice = prefix ? observedKinds(this.config.store, this.campaignId, this.RaceID).includes('formation') : false
+      },
     },
   },
   methods: {
@@ -1029,6 +1140,39 @@ export default {
     fixed(value, decimals) {
       return roundToDecimal(value, decimals).toFixed(decimals)
     },
+
+    // ---- Observation ----
+
+    // The choice is kept per race and campaign; switching on asks the recorder for a pass on the open save, so what it holds is captured at once. Switching off keeps what was recorded.
+    setObserve(on) {
+      this.observeMessage = ''
+
+      try {
+        saveObservationChoice(this.config, this.campaignId, this.RaceID, 'formation', !!on)
+      } catch (error) {
+        this.observeMessage = `The choice could not be saved: ${error.message}`
+
+        return
+      }
+
+      this.observeChoice = !!on
+
+      if (on) {
+        this.$store.commit('history/capture')
+      }
+    },
+
+    observedDate(seconds) {
+      return this.StartYear ? gameDateText(this.StartYear, seconds).slice(0, 10) : `${roundToDecimal(seconds / 31536000, 2)} y elapsed`
+    },
+
+    // What one formation's row says of its observation: the state, the words and the figure the column sorts by (a formation with no span sorts last).
+    observedFields(id) {
+      const found = this.observationStates.get(id) || { state: 'unread', span: null }
+      const text = observationText(found, { date: this.observedDate, duration: durationText })
+
+      return { observed: { state: found.state, ...text }, observedSort: found.span ? found.span.first : Number.MAX_SAFE_INTEGER }
+    },
   },
   asyncComputed: {
     game: {
@@ -1169,6 +1313,19 @@ export default {
         }
 
         return Object.freeze(await loadGroundFormations(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
+    },
+    // What the open save holds of the race's ground formations for an observation, read only while the race is observed: { kind, objects: [[id, digest]] } or { kind, failed }.
+    observationRead: {
+      get: tracked('observationRead', async function () {
+        if (!this.observing || !this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        const read = await readObservations(this.database, 'formation', { GameID: this.GameID, RaceID: this.RaceID })
+
+        return Object.freeze({ ...read, open: read.objects ? await readOpenSave(this.database, { GameID: this.GameID }) : null })
       }),
       default: null,
     },

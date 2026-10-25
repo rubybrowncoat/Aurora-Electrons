@@ -303,10 +303,23 @@ const fileOf = (absolute, models) => {
   return info
 }
 
-// The reads of the declaration `name` of `info`, followed through everything it refers to.
-const readsOfDeclaration = (info, name, seen, models) => {
+// The readers that fail into a report of their own, so that no page rests on what they read: each is followed from no page, and the page that reaches one has an input of its own for it (`inputsOfPage`). { [file relative to the renderer]: { [declaration]: { key, label } } }.
+const SEPARATE = {
+  'utilities/ground-formations.js': { readFormationObservations: { key: 'observationRead', label: 'the formations observed' } },
+}
+const SEPARATE_KEYS = new Map(Object.entries(SEPARATE).flatMap(([file, names]) => Object.entries(names).map(([name, entry]) => [`${path.join(root, file)}::${name}`, entry])))
+const reached = new Set()
+
+// The reads of the declaration `name` of `info`, followed through everything it refers to. `entered` follows a separate reader itself.
+const readsOfDeclaration = (info, name, seen, models, entered = false) => {
   const key = `${info.absolute}::${name}`
   const reads = new Map()
+
+  if (!entered && SEPARATE_KEYS.has(key)) {
+    reached.add(key)
+
+    return reads
+  }
 
   if (seen.has(key)) {
     return reads
@@ -424,6 +437,8 @@ const inputsOfPage = (pageFile, models) => {
     }
   }
 
+  reached.clear()
+
   page.inputs.forEach(({ key, node }) => add(key, page, node))
 
   page.imports.forEach((imported) => {
@@ -459,6 +474,16 @@ const inputsOfPage = (pageFile, models) => {
   if (own.size) {
     inputs.page = { label: "the page's other reads", reads: flatten(own) }
   }
+
+  reached.forEach((key) => {
+    const { key: input, label } = SEPARATE_KEYS.get(key)
+    const [file, name] = key.split('::')
+    const separate = flatten(readsOfDeclaration(fileOf(file, models), name, new Set(), models, true))
+    const kept = inputs[input] ? inputs[input].reads : {}
+    const tables = [...new Set([...Object.keys(kept), ...Object.keys(separate)])].sort()
+
+    inputs[input] = { label: inputs[input] ? inputs[input].label : label, reads: Object.fromEntries(tables.map((table) => [table, [...new Set([...(kept[table] || []), ...(separate[table] || [])])].sort()])) }
+  })
 
   return inputs
 }

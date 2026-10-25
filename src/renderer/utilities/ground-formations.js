@@ -716,3 +716,39 @@ export const loadGroundFormationPosts = async (database, { GameID, RaceID }) => 
 
   return { supported: true, ...buildGroundFormations(rows, { GameID, RaceID }), holders: { read: !holderGaps.length, missing: holderGaps } }
 }
+
+// The statements that read what an observation of a race's formations compares: each formation's place (colony, ship and the system of either) and its elements counted by class. Read apart from the model so that the recorder reads two small statements and no template, class or commander table.
+export const formationObservationSql = ({ GameID, RaceID }) => {
+  requireIds({ GameID, RaceID })
+
+  return {
+    formations: `select FCT_GroundUnitFormation.FormationID, FCT_GroundUnitFormation.PopulationID, FCT_GroundUnitFormation.ShipID, FCT_Population.SystemID as PopulationSystemID, coalesce(FCT_Fleet.SystemID, CarrierFleet.SystemID) as FleetSystemID from FCT_GroundUnitFormation left join FCT_Population on FCT_Population.PopulationID = FCT_GroundUnitFormation.PopulationID left join FCT_Ship on FCT_Ship.ShipID = FCT_GroundUnitFormation.ShipID left join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_Ship as Carrier on Carrier.ShipID = FCT_Ship.MothershipID left join FCT_Fleet as CarrierFleet on CarrierFleet.FleetID = Carrier.FleetID where FCT_GroundUnitFormation.GameID = ${GameID} and FCT_GroundUnitFormation.RaceID = ${RaceID} order by FCT_GroundUnitFormation.FormationID`,
+    elements: `select FCT_GroundUnitFormationElement.FormationID, FCT_GroundUnitFormationElement.ClassID, count(*) as Elements, sum(FCT_GroundUnitFormationElement.Units) as Units from FCT_GroundUnitFormationElement where FCT_GroundUnitFormationElement.FormationID in (${OWN(GameID, RaceID)}) group by FCT_GroundUnitFormationElement.FormationID, FCT_GroundUnitFormationElement.ClassID order by FCT_GroundUnitFormationElement.FormationID, FCT_GroundUnitFormationElement.ClassID`,
+  }
+}
+
+const orZero = (value) => (isNumber(value) ? value : 0)
+
+// What an observation of a formation compares, as one text: where it is (colony, ship, and the system of the colony or of the ship's fleet) and what it holds (each class's elements and units). It says nothing of a name, a parent link or a template: renaming or regrouping a formation is not a move and does not restart its span. The text is the signature the recorder hashes; `[[FormationID, signature]]` in the order of the ids.
+export const formationSignatures = ({ formations, elements }) => {
+  const held = new Map()
+
+  elements.forEach((row) => {
+    if (!held.has(row.FormationID)) {
+      held.set(row.FormationID, [])
+    }
+
+    held.get(row.FormationID).push(`${row.ClassID}x${orZero(row.Elements)}u${orZero(row.Units)}`)
+  })
+
+  return formations.map((row) => [row.FormationID, `${orZero(row.PopulationID)}/${orZero(row.ShipID)}/${orZero(row.PopulationSystemID)}/${orZero(row.FleetSystemID)}|${(held.get(row.FormationID) || []).join(',')}`])
+}
+
+// The formations of a race at the open save for an observation: `[[FormationID, signature]]`, read with `options` (the recorder's transaction). A save that lacks a table or column the statements read makes the statement fail, so the recorder notes a failed read and not an empty one.
+export const readFormationObservations = async (database, { GameID, RaceID }, options = undefined) => {
+  const statements = formationObservationSql({ GameID, RaceID })
+  const [formations] = await database.query(statements.formations, options)
+  const [elements] = await database.query(statements.elements, options)
+
+  return formationSignatures({ formations, elements })
+}

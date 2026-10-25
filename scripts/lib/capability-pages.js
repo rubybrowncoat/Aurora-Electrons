@@ -1,10 +1,11 @@
 /*
   The pages' own wiring of the capability result, for scripts/check-capabilities.js.
 
-  The consumer checks of that script run on the utilities, mixins and store, which would pass with a page that never asks them. These run the real code of three pages (scripts/lib/page-loader.js: the page's script on a pseudo instance) over the capability results of real saves and altered copies:
+  The consumer checks of that script run on the utilities, mixins and store, which would pass with a page that never asks them. These run the real code of these pages (scripts/lib/page-loader.js: the page's script on a pseudo instance) over the capability results of real saves and altered copies:
   - /lagrange: the unconfirmed lookup rows and the missing ship columns withhold the stabilisation ships and the best ship, and the map's own computed values still evaluate;
   - /commanders: the roster's bonuses of a blocked ID are unknown, its text for one reads as unknown, and the roster queries wait for the check and take the parts for the columns the save has;
   - /production: the research read leaves a scientist's bonus figures unknown when the Research bonus is blocked and leaves the other projects alone, and the colony capacities of the mixin name a blocked Production bonus.
+  - /survey-progress: the columns of the observation read that the save lacks leave the observation unavailable, whether or not it is chosen, and the read of the open save is not made; a save that has them, and the race before the check answers, offer it and read as before.
   The terraforming rate of a colony (bonus 9) is built in a computed value of the page that rests on every terraform and naval admin read, and is not driven here.
 
   Each statement is a check line. Cutting one gate out of one page's script (`MUTATIONS`, a replacement that must apply) must fail at least one statement of that page.
@@ -25,6 +26,8 @@ const MUTATIONS = [
   ['logistics', 'its fuel balance ignores an unknown harvested total', 'const fuelNet = fuel.production === null ? null : fuel.production - fuel.high', 'const fuelNet = fuel.refineries === null ? null : (fuel.refineries + fuel.harvestersKnown) - fuel.high'],
   ['logistics', 'its harvester rows are not gated by the blocked Mining bonus', '.then(([items]) => gateHarvesterRows(items, blocked))', '.then(([items]) => items)'],
   ['production', 'its research read leaves the blocked Research bonus alone', 'blocked.has(RESEARCH_BONUS) ? projects.map(', 'false ? projects.map('],
+  ['survey-progress', 'its observation ignores the columns of the capability report that the save lacks', 'return this.observable && this.observationGaps.length === 0', 'return this.observable'],
+  ['survey-progress', 'its observation gaps are read from an input of another name', "report.degraded.find((degraded) => degraded.key === 'observationRead')", "report.degraded.find((degraded) => degraded.key === 'observationReads')"],
 ]
 
 // The getters of store/capabilities.js over `result` as a page reads them ('capabilities/gates', ...), and a dispatch that records the actions and answers a check with `answer`.
@@ -219,7 +222,49 @@ const logisticsResults = async (context, fixtures, mutate) => {
   return results
 }
 
-const PAGE_RESULTS = { lagrange: lagrangeResults, commanders: commandersResults, production: productionResults, logistics: logisticsResults }
+const surveyResults = async (context, fixtures, mutate) => {
+  const options = await loadPage('pages/survey-progress', { stubs: context.stubs, mutate })
+  const results = []
+  const holds = (statement, condition) => results.push([statement, Boolean(condition)])
+  const page = (result, { database = null, data = {}, npr = false } = {}) => {
+    const store = storeOver(context.store, result)
+
+    Object.defineProperty(store.getters, 'campaignId', { value: 'campaign-1', enumerable: true })
+    Object.defineProperty(store.getters, 'history/campaign', { value: { branchId: 'branch-1' }, enumerable: true })
+
+    return instantiate(options, { $store: { ...store, state: { RaceNPR: npr, history: { revision: 0 } } }, database, GameID: 1, RaceID: 2, data })
+  }
+
+  const none = page(null, { data: { observeChoice: true } })
+
+  holds('with no assessment yet the observation is offered, chosen and observing, with no gap named', none.observable && none.canObserve && none.observationGaps.length === 0 && none.observing)
+
+  const clean = page(fixtures.clean, { data: { observeChoice: true } })
+
+  holds('on a save with every column the observation is offered, chosen and observing, with no gap named', clean.observable && clean.canObserve && clean.observationGaps.length === 0 && clean.observing)
+
+  const whole = cannedDatabase(() => [])
+  const read = await page(fixtures.clean, { database: whole, data: { observeChoice: true } }).runAsync('observationRead')
+
+  holds('on a save with every column the chosen observation reads the formations and the open save', read !== null && whole.queries.length > 0)
+
+  const npr = page(fixtures.clean, { npr: true, data: { observeChoice: true } })
+
+  holds('an NPR race is not offered the observation, whether or not the save lacks a column', !npr.observable && !npr.canObserve && !page(fixtures.noUnits, { npr: true }).observable)
+
+  for (const choice of [false, true]) {
+    const database = cannedDatabase(() => [])
+    const vm = page(fixtures.noUnits, { database, data: { observeChoice: choice } })
+    const asked = await vm.runAsync('observationRead')
+
+    holds(`on a save without FCT_GroundUnitFormationElement.Units the observation ${choice ? 'chosen' : 'not chosen'} is offered as unavailable, naming the column, and is not observing`, vm.observable && !vm.canObserve && !vm.observing && vm.observationGaps.includes('FCT_GroundUnitFormationElement.Units'))
+    holds(`on a save without FCT_GroundUnitFormationElement.Units the observation ${choice ? 'chosen' : 'not chosen'} reads nothing of the save`, asked === null && database.queries.length === 0)
+  }
+
+  return results
+}
+
+const PAGE_RESULTS = { lagrange: lagrangeResults, commanders: commandersResults, production: productionResults, logistics: logisticsResults, 'survey-progress': surveyResults }
 
 // The pages' wiring on the real page code (every statement a check line) and, with one gate cut out of a page's script, on mutants that must fail. `context`: { mods: the utilities the script loaded, stubs, source, check, alteredCopy, preflightOf, capabilities }.
 const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf }) => {
@@ -236,6 +281,7 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
   try {
     const fixtures = {
       clean: (await preflightOf(mods.capabilities, source)).result,
+      noUnits: await copy('units', ['alter table FCT_GroundUnitFormationElement drop column Units']),
       renamed5: await copy('bonus5', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5"]),
       renamed3: await copy('bonus3', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 3"]),
       retyped29: await copy('component29', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"]),
