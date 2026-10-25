@@ -347,6 +347,11 @@ export default {
       type: String,
       default: DEFAULT_HIERARCHY,
     },
+    // The jump point (WarpPointID) a link selected: drawn with a halo. Null for none.
+    jumpPointId: {
+      type: [String, Number],
+      default: null,
+    },
   },
   data() {
     return {
@@ -369,6 +374,7 @@ export default {
     'appearance.key': 'scheduleInitPixi',
     typeface: 'scheduleInitPixi',
     hierarchy: 'scheduleInitPixi',
+    jumpPointId: 'scheduleInitPixi',
   },
   mounted() {
     window.addEventListener('resize', this._onResize, { passive: true })
@@ -1692,6 +1698,16 @@ export default {
         core.width = core.height = diameter
         core.tint = tint
         marker.addChild(core)
+
+        // halo behind a point a link selected, in the point's own tint
+        if (this.jumpPointId !== null && Number(jp.WarpPointID) === Number(this.jumpPointId)) {
+          const halo = new PIXI.Sprite(circleTex)
+          halo.anchor.set(0.5)
+          halo.width = halo.height = diameter * 3.4
+          halo.tint = tint
+          halo.alpha = 0.5
+          marker.addChildAt(halo, 0)
+        }
 
         // optional square outline (gate present)
         if (hasGate) {

@@ -67,9 +67,8 @@ export const fleetPlaces = (fleets, systemName, count) => fleets.map((fleet) => 
   fleet,
 }))
 
-// The game numbers a system's jump points JP1, JP2, … by their distance from the star, and names one by the system beyond it, or "Unex" while it is unexplored. A stabilised one carries "(S)". `jumpPoints`: loadJumpPoints rows.
-export const jumpPointPlaces = (jumpPoints, systemName) => {
-  const byId = Object.fromEntries(jumpPoints.map((jumpPoint) => [jumpPoint.WarpPointID, jumpPoint]))
+// The game numbers a system's jump points JP1, JP2, … by their distance from the star: { [WarpPointID]: number }. `jumpPoints`: loadJumpPoints rows.
+export const jumpPointNumbers = (jumpPoints) => {
   const numbers = {}
   const bySystem = {}
 
@@ -80,15 +79,34 @@ export const jumpPointPlaces = (jumpPoints, systemName) => {
     numbers[jumpPoint.WarpPointID] = index + 1
   }))
 
+  return numbers
+}
+
+// What the game calls a jump point by its number: JP1, JP2, …
+export const jumpPointLabel = (number) => `JP${number}`
+
+// What stands for the system beyond a jump point that is not explored.
+export const FAR_UNKNOWN_TEXT = 'Unex'
+
+// The game names a jump point by the system beyond it, or "Unex" while it is unexplored. A stabilised one carries "(S)". `jumpPoints`: loadJumpPoints rows.
+export const jumpPointPlaces = (jumpPoints, systemName) => {
+  const byId = Object.fromEntries(jumpPoints.map((jumpPoint) => [jumpPoint.WarpPointID, jumpPoint]))
+  const numbers = jumpPointNumbers(jumpPoints)
+
   return jumpPoints.map((jumpPoint) => {
     const partner = jumpPoint.Explored ? byId[jumpPoint.WPLink] : null
-    const beyond = partner ? systemName(partner.SystemID) : 'Unex'
+    const far = partner ? systemName(partner.SystemID) : FAR_UNKNOWN_TEXT
+    const label = jumpPointLabel(numbers[jumpPoint.WarpPointID])
+    const mark = jumpPoint.JumpGateStrength > 0 ? ' (S)' : ''
 
     return {
       key: place.jump(jumpPoint.WarpPointID),
       kind: 'jump',
       group: 'jump',
-      name: `JP${numbers[jumpPoint.WarpPointID]}: ${beyond}${jumpPoint.JumpGateStrength > 0 ? ' (S)' : ''}`,
+      name: `${label}: ${far}${mark}`,
+      label,
+      far,
+      mark,
       subtitle: `Jump point in ${systemName(jumpPoint.SystemID)}${jumpPoint.JumpGateStrength > 0 ? ', stabilised' : ''}`,
       icon: GROUP_ICON.jump,
       SystemID: jumpPoint.SystemID,

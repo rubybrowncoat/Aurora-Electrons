@@ -100,6 +100,48 @@
             </template>
           </v-data-table>
         </v-card>
+
+        <v-card v-if="infrastructureRows.length" class="panel" data-jump-infrastructure data-summary="Each jump point the race has charted, with whether it is a gate, the stabilisation orders of its fleets and the mines, buoys and detected objects at it. Use it to see where the race holds and watches its jump points, and to open a point on the map." elevation="1">
+          <div class="panel-head">
+            <span>Jump point infrastructure<provenance-mark rule="jumpInfrastructure.stabilisation" label /></span>
+            <span class="d-flex align-center flex-wrap controls">
+              <v-chip v-if="selectedSystem" small close @click:close="selectedSystemId = null">{{ selectedSystem.Name }}</v-chip>
+            </span>
+          </div>
+          <v-data-table data-jump-table :headers="infrastructureHeaders" :items="visibleInfrastructure" item-key="WarpPointID" :custom-sort="sortNullLast" :sort-by.sync="infrastructureTable.sortBy" :sort-desc.sync="infrastructureTable.sortDesc" :items-per-page.sync="infrastructureTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: bodyPageSizes }">
+            <template #[`item.sortName`]="{ item }">
+              <div class="py-2 d-flex align-center">
+                <div class="flex-grow-1">
+                  <div class="font-weight-medium" data-jump-cell="name" :data-jump="item.WarpPointID">{{ item.name }}</div>
+                  <div class="caption text--secondary" data-jump-cell="beyond" :data-jump="item.WarpPointID"><template v-if="item.beyondName">Beyond: <span data-jump-name>{{ item.beyondName }}</span></template><template v-else>{{ item.beyond }}</template></div>
+                </div>
+                <page-link data-jump-cell="map" :data-jump="item.WarpPointID" :to="linkTo.map(item.SystemID, item.WarpPointID)" :name="`${item.name} in ${item.systemName}`" />
+              </div>
+            </template>
+            <template #[`item.systemName`]="{ item }"><span data-jump-cell="system" :data-jump="item.WarpPointID">{{ item.systemName }}</span></template>
+            <template #[`item.gateSort`]="{ item }"><span class="text-no-wrap" data-jump-cell="gate" :data-jump="item.WarpPointID">{{ item.gateText }}</span></template>
+            <template #[`item.stabilisationSort`]="{ item }">
+              <span v-if="item.stabilisationText" class="text-no-wrap" data-jump-cell="stabilisation" :data-jump="item.WarpPointID">{{ item.stabilisationText }}<provenance-mark :result="item.stabilisation" /></span>
+              <span v-else class="text--secondary text-no-wrap" data-jump-cell="stabilisation" :data-jump="item.WarpPointID">{{ unknownText }}<provenance-mark :result="item.stabilisation" /></span>
+              <div v-if="item.fleetsText" class="caption text--secondary" data-jump-cell="fleets" :data-jump="item.WarpPointID">{{ item.fleetsText }}</div>
+            </template>
+            <template #[`item.minefieldsSort`]="{ item }">
+              <span :class="{ 'text--secondary': item.minefieldsSort === null }" data-jump-cell="minefields" :data-jump="item.WarpPointID">{{ item.minefieldsText }}<provenance-mark :result="item.minefields" /></span>
+            </template>
+            <template #[`item.buoysSort`]="{ item }">
+              <span :class="{ 'text--secondary': item.buoysSort === null }" data-jump-cell="buoys" :data-jump="item.WarpPointID">{{ item.buoysText }}<provenance-mark :result="item.buoys" /></span>
+            </template>
+            <template #[`item.probesSort`]="{ item }"><span class="text--secondary" data-jump-cell="probes" :data-jump="item.WarpPointID">{{ item.probesText }}<provenance-mark :result="item.probes" /></span></template>
+            <template #[`item.detectedSort`]="{ item }">
+              <span :class="{ 'text--secondary': item.detectedSort === null || item.detectedSort === 0 }" data-jump-cell="detected" :data-jump="item.WarpPointID">{{ item.detectedText }}<provenance-mark :result="item.detected" /></span>
+              <div v-if="item.earlierFigure" class="caption text--secondary" data-jump-cell="earlier" :data-jump="item.WarpPointID"><span data-jump-figure>{{ item.earlierFigure }}</span> earlier {{ item.earlierNoun }}</div>
+            </template>
+            <template #[`footer.page-text`]="{ pageStart, pageStop, itemsLength }">{{ pageStart }}-{{ pageStop }} of <span data-jump-total>{{ itemsLength }}</span></template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            Every jump point the race has charted in a system it knows. A stabilised jump point is a gate: the save records no other state, so the Gate column shows both, and a builder of none, or one the save does not give, is not recorded. Stabilisation shows only the orders of the race's own fleets; another race's work is not known, and no time left is given because the order's time has no known unit. Minefields and Buoys count the race's own stationary missile salvos within 1 km of the point, one for each salvo and not for the missiles in it; a salvo of a design with a second stage is taken as a mine. Another race's stationary salvos are known only as contacts: Detected counts those detected now, once each, and neither their kind nor any that went undetected is known, so none detected is not none there. Probes are ordinary ships that the save does not mark, so no probe count is given. {{ unknownText }} is never 0.
+          </div>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -123,9 +165,11 @@ import { systemBodyName } from '../utilities/aurora'
 import { crewFraction } from '../utilities/crew'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
+import { DETECTED_ZERO_TEXT, FAR_SIDE_TEXT, GATE_TEXT, infrastructureRows as readInfrastructure, loadJumpBuilders, loadJumpInfrastructure, STABILISATION_TEXT, UNKNOWN_TEXT } from '../utilities/jump-infrastructure'
 import { bestStabilisation, stabilisationDays, stabilisationMultiplier, timeLeft } from '../utilities/lagrange'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
+import { jumpPointLabel } from '../utilities/places'
 import { describeResult, describeRule, unavailable, valueOrNull } from '../utilities/provenance'
 import { gateGaps, loadFormulaVersion } from '../utilities/capabilities'
 
@@ -135,6 +179,8 @@ const INPUT_LABELS = {
   colonies: 'the colonies',
   bodies: 'the planets and moons',
   ships: 'the stabilisation ships',
+  jumpInfrastructure: 'the jump point infrastructure',
+  jumpBuilders: 'the gate builders',
   orders: 'stabilisation orders',
   formulaVersion: 'the save\'s schema',
 }
@@ -164,6 +210,7 @@ export default {
       search: { key: 'lagrangeSearch', default: '', scope: 'race' },
       bodiesTable: tableView('lagrangeBodiesTable', { sortBy: ['daysSort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: BODY_PAGE_SIZES }),
       shipsTable: tableView('lagrangeShipsTable', {}),
+      infrastructureTable: tableView('lagrangeInfrastructureTable', { sortBy: ['sortName'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: BODY_PAGE_SIZES }),
     }),
   ],
   data() {
@@ -173,6 +220,7 @@ export default {
       stateTexts: STATE_TEXTS,
       bodyPageSizes: BODY_PAGE_SIZES,
       linkTo,
+      unknownText: UNKNOWN_TEXT,
       place,
     }
   },
@@ -410,6 +458,87 @@ export default {
         { text: 'Doing', value: 'activity', sortable: false },
       ]
     },
+
+    infrastructureHeaders() {
+      return [
+        { text: 'Jump point', value: 'sortName' },
+        { text: 'System', value: 'systemName' },
+        { text: 'Gate (stabilised)', value: 'gateSort' },
+        { text: 'Stabilisation', value: 'stabilisationSort' },
+        { text: 'Minefields', value: 'minefieldsSort', align: 'end' },
+        { text: 'Buoys', value: 'buoysSort', align: 'end' },
+        { text: 'Probes', value: 'probesSort', align: 'end' },
+        { text: 'Detected (other races)', value: 'detectedSort', align: 'end' },
+      ]
+    },
+
+    // The columns of the infrastructure reads the save lacks (the report's optional 'jumpInfrastructure' and 'jumpBuilders' inputs): the jump points and the rest of the page do not need them.
+    missingInfrastructureFields() {
+      const report = this.$store.getters['capabilities/report']('/lagrange')
+      const entry = report && report.degraded.find((degraded) => degraded.key === 'jumpInfrastructure')
+
+      return entry ? entry.fields : []
+    },
+
+    missingBuilderFields() {
+      const report = this.$store.getters['capabilities/report']('/lagrange')
+      const entry = report && report.degraded.find((degraded) => degraded.key === 'jumpBuilders')
+
+      return entry ? entry.fields : []
+    },
+
+    infrastructureMissing() {
+      return this.missingInfrastructureFields.map((field) => `the save lacks ${field}`)
+    },
+
+    // The charted jump points with what the save says of each (utilities/jump-infrastructure.js) and the words of the table: a figure the save cannot give reads Unknown and sorts last.
+    infrastructureRows() {
+      const names = Object.fromEntries(this.systems.map((system) => [system.SystemID, system.Name]))
+      const systemName = (id) => names[id] || `System #${id}`
+      const gateOrder = Object.keys(GATE_TEXT)
+      const stateOrder = Object.keys(STABILISATION_TEXT)
+      const figure = (result, known) => {
+        const value = valueOrNull(result)
+
+        return { value, text: value === null ? this.unknownText : known(value) }
+      }
+
+      return readInfrastructure(this.jumpPoints, this.jumpInfrastructure, { RaceID: this.RaceID, missing: this.infrastructureMissing, builders: this.jumpBuilders }).map((row) => {
+        const state = figure(row.stabilisation, (value) => STABILISATION_TEXT[value])
+        const mines = figure(row.minefields, (value) => this.count(value))
+        const buoys = figure(row.buoys, (value) => this.count(value))
+        const probes = figure(row.probes, (value) => this.count(value))
+        const detected = figure(row.detected, (value) => (value === 0 ? DETECTED_ZERO_TEXT : this.count(value)))
+
+        return {
+          ...row,
+          name: jumpPointLabel(row.number),
+          systemName: systemName(row.SystemID),
+          sortName: `${systemName(row.SystemID)} ${String(row.number).padStart(4, '0')}`,
+          beyondName: row.beyondSystemID ? systemName(row.beyondSystemID) : '',
+          beyond: row.beyondSystemID ? '' : FAR_SIDE_TEXT[row.explored ? 'uncharted' : 'unexplored'],
+          gateText: GATE_TEXT[row.gate],
+          gateSort: gateOrder.indexOf(row.gate),
+          stabilisationText: state.value === null ? '' : state.text,
+          stabilisationSort: state.value === null ? null : stateOrder.indexOf(state.value),
+          fleetsText: state.value === null ? '' : row.fleets.map((fleet) => fleet.FleetName || `Fleet #${fleet.FleetID}`).join(', '),
+          minefieldsText: mines.text,
+          minefieldsSort: mines.value,
+          buoysText: buoys.text,
+          buoysSort: buoys.value,
+          probesText: probes.text,
+          probesSort: probes.value,
+          detectedText: detected.text,
+          detectedSort: detected.value,
+          earlierFigure: row.earlier > 0 ? this.count(row.earlier) : '',
+          earlierNoun: row.earlier === 1 ? 'contact' : 'contacts',
+        }
+      })
+    },
+
+    visibleInfrastructure() {
+      return this.infrastructureRows.filter((row) => !this.selectedSystemId || row.SystemID === this.selectedSystemId)
+    },
   },
   watch: {
     // A system picked on the map belongs to the race that was showing.
@@ -543,6 +672,28 @@ export default {
         return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_Fleet.FleetName, FCT_MoveOrders.DestinationID as SystemBodyID, FCT_MoveOrders.Arrived, FCT_MoveOrders.TimeRequired from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.MoveActionID = ${STABILISE_ACTION} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
+    },
+    // The builder of each gate (`loadJumpBuilders`): null while the save lacks the column, so every gate reads as built by an unrecorded race and the rest of the page stands.
+    jumpBuilders: {
+      get: tracked('jumpBuilders', async function () {
+        if (!this.database || !this.GameID || this.missingBuilderFields.length) {
+          return null
+        }
+
+        return await loadJumpBuilders(this.database, { GameID: this.GameID })
+      }),
+      default: null,
+    },
+    // The race's own stabilisation orders of jump points, stationary salvos and contacts, and the game time (`loadJumpInfrastructure`): null while the save lacks a column of the read, so the figures that rest on it are unknown and the rest of the page stands.
+    jumpInfrastructure: {
+      get: tracked('jumpInfrastructure', async function () {
+        if (!this.database || !this.GameID || !this.RaceID || this.infrastructureMissing.length) {
+          return null
+        }
+
+        return await loadJumpInfrastructure(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: null,
     },
     // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {

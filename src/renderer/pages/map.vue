@@ -134,7 +134,7 @@
           <aside v-if="panelSystem" class="map-side">
             <div class="side-head">
               <div class="min-width-0">
-                <div class="subtitle-1 font-weight-medium text-truncate">{{ panelSystem.Name }}</div>
+                <div class="subtitle-1 font-weight-medium text-truncate" data-map-system-name>{{ panelSystem.Name }}</div>
                 <div class="caption text--secondary">{{ panelSubtitle }}</div>
               </div>
               <v-btn icon small aria-label="Close" title="Close" @click="clearSelection"><v-icon small>mdi-close</v-icon></v-btn>
@@ -149,6 +149,16 @@
                 </dd>
               </template>
             </dl>
+            <div v-if="selectedPoint" class="selected-point" data-map-point>
+              <div class="caption text--secondary mt-3 mb-1">Selected jump point</div>
+              <div class="body-2 font-weight-medium" data-map-point-name><span data-map-point-label>{{ selectedPoint.label }}</span>: <span data-map-point-far>{{ selectedPoint.far }}</span><span data-map-point-mark>{{ selectedPoint.mark }}</span></div>
+              <div class="caption text--secondary" data-map-point-detail>{{ selectedPoint.subtitle }}</div>
+              <div class="side-actions">
+                <v-btn small outlined @click="openSystemView(panelSystem.id)">Show in System view</v-btn>
+                <v-btn small outlined :to="linkTo.lagrange(panelSystem.SystemID)">Jump point infrastructure</v-btn>
+                <v-btn small text data-map-point-clear @click="pointId = null">Clear</v-btn>
+              </div>
+            </div>
             <template v-if="panelNeighbours.length">
               <div class="caption text--secondary mt-3 mb-1">Linked systems</div>
               <div class="chips">
@@ -256,10 +266,10 @@
           <v-btn icon dark aria-label="Close" @click="systemDialog = false">
             <v-icon>mdi-close</v-icon>
           </v-btn>
-          <v-toolbar-title>{{ systemDialogTitle }}</v-toolbar-title>
+          <v-toolbar-title data-system-title><span data-system-name>{{ systemDialogName }}</span><template v-if="viewedPoint"> · <span data-system-point-label>{{ viewedPoint.label }}</span>: <span data-system-point-far>{{ viewedPoint.far }}</span><span data-system-point-mark>{{ viewedPoint.mark }}</span></template></v-toolbar-title>
         </v-toolbar>
         <v-card-text v-if="systemDialog">
-          <system-view v-if="systemViewId" :system-id="systemViewId" :hierarchy="hierarchy" @jump="(id) => (systemViewId = String(id))" />
+          <system-view v-if="systemViewId" :system-id="systemViewId" :hierarchy="hierarchy" :jump-point-id="viewedPoint ? viewedPoint.jumpPoint.WarpPointID : null" @jump="(id) => (systemViewId = String(id))" />
         </v-card-text>
       </v-card>
     </v-dialog>
@@ -301,6 +311,7 @@ import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, li
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
+import { jumpPointPlaces } from '../utilities/places'
 import { isAvailable, valueOrNull } from '../utilities/provenance'
 import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
 import { ALL_TAGS } from '../utilities/world-tags'
@@ -666,6 +677,8 @@ export default {
       selectedIds: [],
       // The SystemID, as a string, of the system a link names, selected once the map has built it.
       pendingFocus: null,
+      // The WarpPointID of the jump point a link selected in the system of the panel, or null; it counts only once the panel's system has that point charted (`selectedPoint`).
+      pointId: null,
       arrangeMenu: false,
 
       busy: null,
@@ -1453,7 +1466,29 @@ export default {
     },
 
     linkQuery() {
-      return this.pendingFocus ? null : linkTo.map(this.panelSystem ? this.panelSystem.SystemID : null).query
+      return this.pendingFocus ? null : linkTo.map(this.panelSystem ? this.panelSystem.SystemID : null, this.ready ? (this.selectedPoint ? this.selectedPoint.jumpPoint.WarpPointID : null) : this.pointId).query
+    },
+
+    // The race's charted jump points as the game names them (JP2: Alpha), for the one a link selects.
+    pointPlaces() {
+      return jumpPointPlaces(this.jumpPoints, (id) => (this.rowById[id] || {}).Name || `System #${id}`)
+    },
+
+    // The jump point the link selected: one of the panel's system that the race has charted, as a place of utilities/places.js, or null.
+    selectedPoint() {
+      const system = this.panelSystem
+
+      return system && this.pointId !== null ? this.pointPlaces.find((entry) => entry.jumpPoint.WarpPointID === this.pointId && entry.jumpPoint.SystemID === system.SystemID) || null : null
+    },
+
+    // The selected point while the System view shows its system, so it is drawn there.
+    viewedPoint() {
+      return this.selectedPoint && this.systemDialog && String(this.systemViewId) === String(this.selectedPoint.jumpPoint.SystemID) ? this.selectedPoint : null
+    },
+
+    // A point a link named that the settled map cannot show: the map has applied the link's system (`pendingFocus` is done) and has its jump points, and the panel's system, if any, does not have that point charted.
+    pointRejected() {
+      return this.ready && !this.pendingFocus && this.pointId !== null && !this.selectedPoint
     },
 
     linkLabel() {
@@ -1756,7 +1791,7 @@ export default {
       ].join(' · ')
     },
 
-    systemDialogTitle() {
+    systemDialogName() {
       return (this.rowById[this.systemViewId] || {}).Name || 'System'
     },
 
@@ -1779,6 +1814,13 @@ export default {
     settingsPrefix(prefix) {
       if (prefix !== null && prefix !== this.mapKey) {
         this.retargetKept()
+      }
+    },
+
+    // A point stays selected only while the panel shows its system: once the link has settled and the panel's system does not hold it charted, the point goes, so it cannot reappear when that system is selected later.
+    pointRejected(rejected) {
+      if (rejected) {
+        this.pointId = null
       }
     },
 
@@ -2914,6 +2956,7 @@ export default {
       }
 
       this.selectedIds = []
+      this.pointId = null
       this.foundId = null
     },
 
@@ -2931,9 +2974,11 @@ export default {
       this.graph.animate({ center: { eles: node }, zoom: Math.max(this.graph.zoom(), 1) }, { duration: 400 })
     },
 
-    // The map shows the system the link names, or none.
+    // The map shows the system the link names, or none, and selects the jump point it names in that system.
     applyLink(query) {
       const id = queryId(query.system)
+
+      this.pointId = id === null ? null : queryId(query.point)
 
       if (id === null) {
         this.pendingFocus = null

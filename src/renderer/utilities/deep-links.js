@@ -2,7 +2,7 @@
 //
 // | Page               | Query                                                                    |
 // |--------------------|--------------------------------------------------------------------------|
-// | `/map`             | `system=<SystemID>`                                                      |
+// | `/map`             | `system=<SystemID>`, and `point=<WarpPointID>` to select one jump point of that system (a point of another system, or one the race has not charted, selects none) |
 // | `/minerals`        | `mineral=<mineral id>`, and `systems=<SystemID,…>` or `bodies=<bodies>`  |
 // | `/habitability`    | `systems=<SystemID,…>` or `bodies=<bodies>`                              |
 // | `/mineral-outlook` | `mineral=<mineral id>`                                                   |
@@ -226,7 +226,7 @@ const link = (path, values) => ({ path, query: cleanQuery(values) })
 
 // Router locations for `:to` and `$router.push`.
 export const linkTo = Object.freeze({
-  map: (systemId) => link('/map', { system: systemId }),
+  map: (systemId, pointId) => link('/map', { system: systemId, point: systemId ? pointId : undefined }),
   minerals: ({ mineral, systems, bodies: picked } = {}) => link('/minerals', { mineral, systems: ids(systems), bodies: bodies(picked) }),
   planner: ({ systems, bodies: picked } = {}) => link('/habitability', { systems: ids(systems), bodies: bodies(picked) }),
   mineralOutlook: (mineralId) => link('/mineral-outlook', { mineral: mineralId }),
