@@ -97,6 +97,54 @@
             </div>
           </v-card>
 
+          <v-card class="panel" data-summary="Tanker ships with the fuel each holds, its class minimum, local reserve and servable surplus, or why it cannot serve. Use it to tell stored fuel from fuel free to give." elevation="1" data-donor-panel>
+            <div class="panel-head">
+              <span>Tankers and fuel service<provenance-mark rule="fuelService.eligibleSurplus" label /></span>
+              <v-chip v-if="donorReport" small data-donor-chip><span data-donor-value="ships">{{ donorReport.totals.ships }}</span> {{ donorReport.totals.ships === 1 ? 'tanker' : 'tankers' }} · <span data-donor-value="chip">{{ litres(donorReport.totals.stored.value) }}</span> stored</v-chip>
+            </div>
+            <load-state v-if="!donorReport" :failed="donorState.failed" :error="donorState.error" :loading="donorState.loading" class="ma-3" @retry="retryDonors" />
+            <template v-else>
+              <div class="panel-body caption" data-donor-totals>
+                <span data-donor-total="stored">Stored fuel <span data-donor-value="stored">{{ exactLitres(donorReport.totals.stored.value) }}</span><provenance-mark :result="donorReport.totals.stored.result" /></span>
+                <span data-donor-total="surplus"> · Eligible surplus <span data-donor-value="eligible">{{ exactLitres(donorReport.totals.eligible) }}</span><template v-if="donorReport.totals.eligibleUnknown"> ({{ donorReport.totals.eligibleUnknown }} not known)</template></span>
+                <span data-donor-total="permissions"> · <span data-donor-value="allowed">{{ donorReport.totals.permissions.allowed }}</span> can serve, <span data-donor-value="blocked">{{ donorReport.totals.permissions.blocked }}</span> cannot, <span data-donor-value="unknown">{{ donorReport.totals.permissions.unknown }}</span> not known</span>
+                <span data-donor-total="empty"> · <span data-donor-value="empty">{{ donorReport.totals.empty }}</span> empty</span>
+              </div>
+              <v-data-table :headers="tankerHeaders" :items="tankerRows" item-key="ShipID" :custom-sort="sortNullLast" :sort-by.sync="tankersTable.sortBy" :sort-desc.sync="tankersTable.sortDesc" :items-per-page.sync="tankersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No tanker ships.">
+                <template #[`item.ShipName`]="{ item }">
+                  <div class="py-2" :data-donor-ship="item.ShipID">
+                    <div class="font-weight-medium" data-donor-cell="name">{{ item.ShipName }}</div>
+                    <div class="caption text--secondary">{{ item.FleetName }}<template v-if="item.SystemName"> · {{ item.SystemName }}</template></div>
+                  </div>
+                </template>
+                <template #[`item.role`]="{ item }">
+                  <div :data-service-site="item.site ? 'yes' : 'no'" data-donor-cell="role">{{ item.role }}</div>
+                  <div class="caption text--secondary"><span data-donor-cell="class">{{ item.ClassName }}</span><template v-if="!item.counted"> · <span data-donor-cell="uncounted">not in the tanker stock</span></template></div>
+                </template>
+                <template #[`item.Fuel`]="{ item }">
+                  <span v-if="item.Fuel === null" class="text--secondary">—</span>
+                  <template v-else>
+                    <div class="text-no-wrap" data-donor-cell="stored">{{ donorText(item).stored }}</div>
+                    <div v-if="item.Fuel === 0" class="caption text--secondary" data-donor-cell="empty">Empty</div>
+                  </template>
+                </template>
+                <template #[`item.MinimumFuel`]="{ item }"><span class="text-no-wrap" data-donor-cell="minimum">{{ donorText(item).minimum }}</span></template>
+                <template #[`item.reserve`]="{ item }"><span class="text-no-wrap text--secondary" data-donor-cell="reserve">{{ donorText(item).reserve }}</span></template>
+                <template #[`item.eligibleSurplus`]="{ item }">
+                  <span class="text-no-wrap" :class="item.donor.permission === 'allowed' ? '' : 'text--secondary'" data-donor-cell="surplus">{{ donorText(item).surplus }}<provenance-mark :result="item.donor.results.eligibleSurplus" /></span>
+                </template>
+                <template #[`item.service`]="{ item }">
+                  <div :class="item.donor.permission === 'allowed' ? 'success--text' : item.donor.permission === 'blocked' ? 'warning--text' : 'text--secondary'" data-donor-cell="permission">{{ donorText(item).permission }}<provenance-mark :result="item.donor.results.permission" /></div>
+                  <div v-if="donorText(item).reason" class="caption text--secondary" data-donor-cell="reason">{{ donorText(item).reason }}</div>
+                  <div v-if="donorText(item).limit" class="caption text--secondary" data-donor-cell="limit">{{ donorText(item).limit }}</div>
+                </template>
+              </v-data-table>
+              <div class="panel-foot caption text--secondary">
+                Stored fuel is the fuel aboard now and no restriction lowers it. The class minimum is the fuel the game keeps in a donor, and the local reserve a level the player keeps aboard; no reserve can be set on a ship yet, so it reads as none set. The eligible surplus is the whole litres above the larger of the two, given only when the ship has the Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0 and fuel above the class minimum, and a rate under 20,000 LPH serves recipients of 20 HS or less only. A ship that cannot serve is shown with the reason, not as empty. A ship with no engines is a service site and has no range of its own. The damaged systems are read from the ship; no saved game has one yet. The ship's refuel mode is not read. {{ versionNote }}
+              </div>
+            </template>
+          </v-card>
+
           <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with the rate each works at, the fuel that fits into its tanks and the deposit over a chosen period, and how soon its tanks fill or its deposit runs out. Use it to judge which harvesters are worth keeping where they are." elevation="1">
             <div class="panel-head">
               <span>Sorium harvesters<provenance-mark rule="logistics.harvesterOutput" label /><provenance-mark rule="logistics.harvesterObtainable" /></span>
@@ -110,9 +158,10 @@
             </div>
             <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :sort-by.sync="harvestersTable.sortBy" :sort-desc.sync="harvestersTable.sortDesc" :items-per-page.sync="harvestersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.ShipName`]="{ item }">
-                <div class="py-2">
-                  <div class="font-weight-medium">{{ item.ShipName }}</div>
+                <div class="py-2" :data-harvester-ship="item.ShipID">
+                  <div class="font-weight-medium" data-harvester-name>{{ item.ShipName }}</div>
                   <div class="caption text--secondary">{{ item.FleetName }}</div>
+                  <div v-if="item.fuelRole" class="caption text--secondary" data-harvester-role>{{ item.fuelRole }}</div>
                 </div>
               </template>
               <template #[`item.modules`]="{ item }">
@@ -145,6 +194,10 @@
               <template #[`item.fillYears`]="{ item }">{{ item.fillYears === null ? '—' : item.fillYears === 0 ? 'Full' : years(item.fillYears) }}</template>
               <template #[`item.SoriumAmount`]="{ item }">{{ item.SoriumAmount === null ? '—' : tons(item.SoriumAmount) }}</template>
               <template #[`item.depositYears`]="{ item }">{{ item.depositYears === null ? '—' : years(item.depositYears) }}</template>
+              <template #[`item.service`]="{ item }">
+                <fuel-figures v-if="item.fuelDonor" :donor="item.fuelDonor" />
+                <span v-else class="text--secondary">—</span>
+              </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
               Rate is what a harvester makes while it works: each undamaged module at the racial Fuel Production rate, times the commander's and naval admin Mining bonuses (a fleet with no command takes the race's root command), the deposit's accessibility and the share of crew aboard when short-crewed. It is not fuel that fits. The fuel that fits over the chosen period is held to the Sorium in the deposit and to the room in the undamaged tanks, and a ship with any room left keeps harvesting. The deposit is the gas giant or super-Jovian at the fleet's coordinates; where the race has not surveyed it the output is unknown (—), not 0. Ships over one deposit share it, and the fall in accessibility once less than half of it is left is not applied. {{ versionNote }}
@@ -253,6 +306,7 @@ import { chartTheme } from '../components/charts/theme'
 import MspSupply from '../components/logistics/MspSupply.vue'
 import FleetStations from '../components/fleets/FleetStations.vue'
 import ResourceReserves from '../components/logistics/ResourceReserves.vue'
+import FuelFigures from '../components/logistics/FuelFigures.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -268,6 +322,7 @@ import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
+import { donorTexts, loadFuelDonors, tankerReport } from '../utilities/fuel-donors'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sortNullLast, totalOf } from '../utilities/production'
@@ -285,10 +340,13 @@ const INPUT_LABELS = {
   populationProductionModifiers: 'production modifiers',
   formulaVersion: 'the save\'s schema',
   mspSupply: 'the incoming minerals',
+  fuelDonors: 'the fuel service of the ships',
   ...STATION_LABELS,
 }
-// The read of the incoming minerals feeds the supplied-output panel alone: the rest of the page never waits for it, and a failure of it is shown on that panel.
-const OPTIONAL_INPUTS = ['mspSupply']
+// The read of the incoming minerals feeds the supplied-output panel alone, and the read of the ships' fuel service the tanker panel and the fuel service column of the harvesters: the rest of the page never waits for them, and a failure of one is shown on its own panel.
+const MSP_INPUTS = ['mspSupply']
+const DONOR_INPUTS = ['fuelDonors']
+const OPTIONAL_INPUTS = [...MSP_INPUTS, ...DONOR_INPUTS]
 // The reads behind the fleet stations panel feed that panel alone, each with its own loading, failure and Retry there.
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key) && !STATION_INPUTS.includes(key))
 // Classes shown in the burn chart; the rest are folded into "Other classes".
@@ -308,7 +366,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, FleetStations, LoadState, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
+  components: { ChartCanvas, FleetStations, FuelFigures, LoadState, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -322,6 +380,7 @@ export default {
       mspHorizon: { key: 'logisticsMspHorizon', default: 1, valid: oneOf(MSP_HORIZONS.map((option) => option.years)) },
       refineriesTable: tableView('logisticsRefineriesTable', { sortBy: ['FuelStockpile'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       harvestersTable: tableView('logisticsHarvestersTable', { itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      tankersTable: tableView('logisticsTankersTable', { sortBy: ['Fuel'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       locationsTable: tableView('logisticsLocationsTable', { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       supplyTable: tableView('logisticsSupplyTable', {}),
     }),
@@ -368,9 +427,31 @@ export default {
 
     // The read of the incoming minerals: loading until it has settled, else the words naming it with its message. The panel shows no figures from a read that is in flight or failed.
     mspSupplyState() {
-      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+      return this.optionalState(MSP_INPUTS)
+    },
 
-      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    // The read of the ships' fuel service, in the same way: the tanker panel and the fuel service of the harvesters show no figure from a read that is in flight or failed.
+    donorState() {
+      return this.optionalState(DONOR_INPUTS)
+    },
+
+    // The ships that can serve fuel with their donor results and totals, null until the read is in.
+    donorReport() {
+      if (!this.fuelDonors || this.donorState.loading || this.donorState.failed) {
+        return null
+      }
+
+      return tankerReport(this.fuelDonors, { version: this.formulaVersion })
+    },
+
+    // The tanker table lists every ship that is designated a tanker, has a refuelling rate or mounts a transfer system.
+    tankerRows() {
+      return this.donorReport ? this.donorReport.rows.filter((row) => row.listed) : []
+    },
+
+    // The donor result of each ship by its ID, for the harvesters.
+    donorByShip() {
+      return new Map((this.donorReport ? this.donorReport.rows : []).map((row) => [row.ShipID, row]))
     },
 
     // The supplied maintenance output of each colony over the chosen period, null until the read is in.
@@ -418,6 +499,8 @@ export default {
         ...row,
         body: row.SystemBodyID ? (row.SystemBodyName ? `${row.SystemName} · ${row.SystemBodyName}` : systemBodyName(row, { Name: row.SystemName })) : `${row.SystemName}, deep space`,
         tanks: row.capacity > 0 ? row.Fuel / row.capacity : 0,
+        fuelDonor: this.donorByShip.has(row.ShipID) ? this.donorByShip.get(row.ShipID).donor : null,
+        fuelRole: this.donorByShip.has(row.ShipID) ? this.donorByShip.get(row.ShipID).role : null,
       }))
     },
 
@@ -585,6 +668,7 @@ export default {
       return [
         {
           label: 'Fuel stock',
+          hook: 'fuelStock',
           value: this.litres(valueOrNull(fuel.stockResult)),
           note: `Colonies ${this.litres(fuel.colonies)}, tankers ${this.litres(fuel.tankers)}, other ships ${this.litres(fuel.ships)}${fuel.stockUnknown ? `; ${fuel.stockUnknown} stocks not counted` : ''}`,
           title: describeResult(fuel.stockResult),
@@ -639,6 +723,19 @@ export default {
         { text: 'Tanks fill in', value: 'fillYears', align: 'end' },
         { text: 'Sorium left (t)', value: 'SoriumAmount', align: 'end' },
         { text: 'Deposit lasts', value: 'depositYears', align: 'end' },
+        { text: 'Fuel service', value: 'service', sortable: false },
+      ]
+    },
+
+    tankerHeaders() {
+      return [
+        { text: 'Ship', value: 'ShipName' },
+        { text: 'Role', value: 'role' },
+        { text: 'Stored fuel', value: 'Fuel', align: 'end' },
+        { text: 'Class minimum', value: 'MinimumFuel', align: 'end' },
+        { text: 'Local reserve', value: 'reserve', align: 'end', sortable: false },
+        { text: 'Eligible surplus', value: 'eligibleSurplus', align: 'end' },
+        { text: 'Service', value: 'service', sortable: false },
       ]
     },
 
@@ -730,9 +827,30 @@ export default {
       return `${separatedNumber(roundToDecimal(value, value < 100 ? 1 : 0), this.separator)} y`
     },
 
+    // The words of the failed reads among `keys`, or the loading state until they have all settled.
+    optionalState(keys) {
+      const failed = keys.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, keys), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    },
+
+    // A figure of litres written whole, a dash when it is not known.
+    exactLitres(value) {
+      return isKnownNumber(value) ? `${this.count(value)} L` : UNKNOWN_TEXT
+    },
+
+    // The words of a ship's donor result.
+    donorText(row) {
+      return donorTexts(row.donor, (value) => this.exactLitres(value))
+    },
+
     // Reads again the read of the incoming minerals, whether it failed whole or settled with sources it could not read.
     retryMspSupply() {
-      OPTIONAL_INPUTS.forEach((key) => this.$asyncComputed[key].update())
+      MSP_INPUTS.forEach((key) => this.$asyncComputed[key].update())
+    },
+
+    retryDonors() {
+      DONOR_INPUTS.forEach((key) => this.$asyncComputed[key].update())
     },
   },
   asyncComputed: {
@@ -804,6 +922,17 @@ export default {
         return await this.database.query(`select FCT_ShipClass.FuelTanker, count(*) as Ships, sum(FCT_Ship.Fuel) as Fuel, sum(case when FCT_Ship.Fuel is null then 1 else 0 end) as FuelUnknown from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.FuelCapacity > 0 group by FCT_ShipClass.FuelTanker`).then(([items]) => items)
       }),
       default: [],
+    },
+    // The ships that can serve fuel (tankers, ships with a refuelling rate or a transfer system, harvesters) with their class minimum, rate and designation and the transfer systems they have left after damage; read for the tanker panel and the harvesters' fuel service alone.
+    fuelDonors: {
+      get: tracked('fuelDonors', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return await loadFuelDonors(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: null,
     },
     // Naval admin commands with their Mining bonus, for harvesters.
     navalAdmins: {

@@ -1871,6 +1871,40 @@ const defineCases = (modules) => {
     assert.equal(logistics.columnTotal('logistics.fuelStock', [{ Fuel: null, FuelUnknown: 3 }], 'Fuel', 'the fuel aboard', 'ships', [], 'FuelUnknown').unknown, 3)
     assert.equal(logistics.columnTotal('logistics.fuelStock', [{ Fuel: 7, FuelUnknown: 0 }], 'Fuel', 'the fuel aboard', 'ships', [], 'FuelUnknown').unknown, 0)
   })
+
+  const donors = modules['fuel-donors']
+  const donorShip = (extra = {}) => ({ ShipID: 1, Fuel: 1000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 30000, EnginePower: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0, HubEra: 0, ...extra })
+
+  invariant('logistics', 'the fuel service rules are registered with their units, and the donor result names allowed, blocked or unknown with the first gate that decides it', () => {
+    ;['stored', 'gameMinimum', 'playerReserve', 'eligibleSurplus', 'donor'].forEach((key) => assert.ok(provenance.getRule(`fuelService.${key}`), key))
+    assert.equal(provenance.getRule('fuelService.playerReserve').verification, 'assumed')
+    assert.equal(donors.fuelDonor(donorShip()).permission, 'allowed')
+    assert.equal(donors.fuelDonor(donorShip({ FuelTanker: 0 })).gate, 'designation')
+    assert.equal(donors.fuelDonor(donorShip({ TransferSystems: 0, UndamagedTransfer: 0 })).gate, 'system')
+    assert.equal(donors.fuelDonor(donorShip({ UndamagedTransfer: null })).permission, 'unknown')
+    assert.equal(donors.fuelDonor(donorShip({ RefuellingRate: 0 })).gate, 'rate')
+    assert.equal(donors.fuelDonor(donorShip({ Fuel: 100000 })).gate, 'litres')
+    assert.equal(donors.fuelDonor(donorShip({ RefuellingRate: 15000 }), { recipient: { size: 20.001 } }).gate, 'recipient')
+    assert.equal(donors.fuelDonor(donorShip({ RefuellingRate: 15000 }), { recipient: { size: 20 } }).permission, 'allowed')
+  })
+
+  invariant('logistics', 'a ship that cannot serve keeps every stored litre, the tanker total reconciles to the fuel aboard when no ship has a surplus, and a local reserve never changes the class minimum', () => {
+    const ships = [donorShip({ ShipID: 1, Fuel: 90000 }), donorShip({ ShipID: 2, Fuel: 50000.5, UndamagedTransfer: 0 }), donorShip({ ShipID: 3, Fuel: 20, MinimumFuel: 0, FuelTanker: 0, RefuellingRate: 90000 })]
+    const report = donors.tankerReport(ships)
+
+    assert.equal(report.totals.stored.value, 140000.5)
+    assert.equal(report.totals.eligible, 0)
+    assert.equal(report.totals.ships, 2)
+    assert.equal(report.rows[2].donor.stored, 20)
+    assert.equal(report.rows[1].donor.stored, 50000.5)
+    assert.equal(logistics.columnTotal('logistics.fuelStock', ships.filter((ship) => ship.FuelTanker), 'Fuel', 'the fuel aboard', 'tankers').value, report.totals.stored.value)
+
+    const reserved = donors.fuelDonor(donorShip(), { playerReserve: 400000 })
+
+    assert.equal(reserved.minimum, 100000)
+    assert.equal(reserved.stored, 1000000)
+    assert.equal(reserved.eligibleSurplus, 600000)
+  })
   // ---- Warnings ----
   const warnings = modules['warnings/index']
   const warningsCommon = modules['warnings/common']
@@ -2086,6 +2120,7 @@ const main = async () => {
     'production',
     'terraform-capacity',
     'logistics',
+    'fuel-donors',
     'warnings/common',
     'warnings/index',
   ], { stubs: STUBS })

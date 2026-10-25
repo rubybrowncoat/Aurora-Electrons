@@ -13,6 +13,7 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { fuelServiceTruth } = require('./lib/fuel-service-oracle')
 
 // Game constants of the rule: component type ids (harvester, fuel storage), the Sorium material id, the commander's Mining bonus id, the ship command type, body types that can be harvested, the race type of the Ancients, litres per tonne of Sorium and seconds per year, and the racial rate a race has before it researches a better one.
 const HARVESTER_TYPE = 32
@@ -79,9 +80,9 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
 })
 
 const loadApp = async () => {
-  const { logistics, minerals, crew, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules } = await loadUtilities(['logistics', 'minerals', 'crew', 'naval-admins', 'provenance', 'design-rules'])
+  const { logistics, minerals, crew, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules, 'fuel-donors': fuelDonors } = await loadUtilities(['logistics', 'minerals', 'crew', 'naval-admins', 'provenance', 'design-rules', 'fuel-donors'])
 
-  return { ...logistics, crewFraction: crew.crewFraction, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven }
+  return { ...logistics, crewFraction: crew.crewFraction, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven, fuelDonors }
 }
 
 // The page's own harvesters query, read from its source so the check compares what the page runs, not a copy of it.
@@ -619,6 +620,45 @@ const observe = async (database, olderDatabase, world, app, options) => {
   return { available: counts.clean > 0, reason, lines, counts }
 }
 
+// The fuel service of the race's ships as the Logistics page reads it (utilities/fuel-donors.js loadFuelDonors, fed by the page's own database call shape), against SQL written here: the fuel aboard and the class minimum of every ship, the Transfer - Fuel systems each class mounts and each ship has left after damage, the tanker total against the sum the Fuel stock figure takes, every harvester ship among the rows, and the permission each ship gets against the gates read straight from the rows.
+const checkFuelService = async (database, world, app) => {
+  const report = new Report('fuel service on the page', ['fuelService.stored', 'fuelService.gameMinimum', 'fuelService.eligibleSurplus', 'fuelService.donor'])
+  const { GameID, RaceID } = world.race
+  const adapter = { query: async (sql) => [await all(database, sql)] }
+  const rows = await app.fuelDonors.loadFuelDonors(adapter, { GameID, RaceID })
+  const byShip = await fuelServiceTruth((sql) => all(database, sql), { GameID, RaceID })
+  // A figure that may be unknown is compared exactly when either side is null: a tolerance would read nothing as 0.
+  const kindOf = (stored, computed) => (stored === null || computed === null ? 'exact' : 'decimal')
+  const tankers = [...byShip.values()].filter((row) => row.tanker === 1 && row.capacity > 0)
+  const known = tankers.filter((row) => row.fuel !== null)
+  // The sum of the fuel the save states: 0 with no counted tanker, unknown when counted tankers exist and none states any.
+  const tankerSum = tankers.length === 0 ? 0 : known.length ? known.reduce((sum, row) => sum + row.fuel, 0) : null
+  const donorReport = app.fuelDonors.tankerReport(rows, { version: world.shape === '2.7' ? FORMULA_VERSION : null })
+
+  report.compare({ id: 'all', name: 'every tanker' }, 'the tanker total against the sum of the fuel aboard', donorReport.totals.stored.value, tankerSum, kindOf(donorReport.totals.stored.value, tankerSum))
+  report.compare({ id: 'all', name: 'every tanker' }, 'the number of counted tankers', donorReport.totals.ships, tankers.length, 'exact')
+
+  for (const ship of world.ships) {
+    report.compare({ id: ship.ShipID, name: ship.ShipName }, 'the harvester has a row of the fuel service', rows.some((row) => row.ShipID === ship.ShipID && row.Harvester === 1), true, 'exact')
+  }
+
+  for (const row of rows) {
+    const expected = byShip.get(row.ShipID)
+    const id = { id: row.ShipID, name: row.ShipName }
+    const donor = app.fuelDonors.fuelDonor(row)
+
+    report.compare(id, 'the fuel aboard', row.Fuel, expected.fuel, kindOf(row.Fuel, expected.fuel))
+    report.compare(id, 'the class minimum', row.MinimumFuel, expected.minimum, kindOf(row.MinimumFuel, expected.minimum))
+    report.compare(id, 'the Transfer - Fuel systems of the class', row.TransferSystems, expected.systems, 'exact')
+    report.compare(id, 'the Transfer - Fuel systems left', row.UndamagedTransfer, expected.left, 'exact')
+    report.compare(id, 'the stored fuel of the result', donor.stored, expected.fuel, kindOf(donor.stored, expected.fuel))
+    report.compare(id, 'the permission', donor.permission, expected.permission, 'exact')
+    report.compare(id, 'the eligible surplus', donor.eligibleSurplus, expected.surplus, kindOf(donor.eligibleSurplus, expected.surplus))
+  }
+
+  return report
+}
+
 const main = async () => {
   const options = parseArguments(process.argv.slice(2))
   const database = await open(path.resolve(options.save)).catch((error) => fail(`Cannot open the save: ${error.message}`))
@@ -649,6 +689,7 @@ const main = async () => {
   }
 
   reconcileShips(world, read, app, reports, options.years)
+  reports.fuelService = await checkFuelService(database, world, app).catch((error) => fail(`The fuel service read fails on this save: ${error.message}`))
 
   console.log('\nstored inputs against the rule (rule verification against what the game wrote):')
   stored.forEach((report) => report.print(app.registry))
@@ -698,7 +739,11 @@ const main = async () => {
   process.exit(mismatches ? 1 : 0)
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(2)
-})
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error)
+    process.exit(2)
+  })
+}
+
+module.exports = { checkFuelService }

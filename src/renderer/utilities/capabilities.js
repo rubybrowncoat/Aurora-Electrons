@@ -36,14 +36,14 @@ registerRule({
   note: 'Component type 29 is Jump Point Stabilisation in the 2.6, 2.7 and 2.7.1 saves examined, and Jump Gate Construction in the pre-2.6 ones, so a save whose type differs is not mapped.',
 })
 
-// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
+// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the ships' fuel service of the Logistics page (the tanker panel and the harvesters' fuel service column name what they could not read, with a Retry; the stock figures do not rest on it), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
 const OPTIONAL = Object.freeze({
   '/warnings': (key) => key.startsWith('check:'),
   '/lagrange': (key) => key === 'ships',
   '/colony-outlook': (key) => key === 'bootstrapSources' || key === 'colonistSources',
   '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
   '/finances': (key) => key === 'shippingTax',
-  '/logistics': (key) => key === 'mspSupply' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves',
+  '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
   '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'positionFacts' || key === 'orbitFacts',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
@@ -122,6 +122,17 @@ const RESERVE_PANEL_READS = [
   'FCT_SystemBodyName(Name RaceID SystemBodyID)',
 ].join(' ')
 
+// What the tanker panel reads through `loadFuelDonors` (utilities/fuel-donors.js), whose class columns are built by name: the ships with the class's minimum fuel, rate, designation and engines, its Transfer - Fuel and harvester components, and the damage rows of the ship's own components.
+const FUEL_DONOR_READS = [
+  'FCT_ClassComponent(ClassID ComponentID NumComponent)',
+  'FCT_DamagedComponent(ComponentID GameID Number ShipID)',
+  'FCT_Fleet(FleetID FleetName SystemID)',
+  'FCT_RaceSysSurvey(GameID Name RaceID SystemID)',
+  'FCT_Ship(Fuel FleetID GameID RaceID ShipClassID ShipID ShipName ShippingLineID)',
+  'FCT_ShipClass(ClassName EnginePower FuelCapacity FuelTanker Harvesters MinimumFuel RefuellingRate ShipClassID Size)',
+  'FCT_ShipDesignComponents(ComponentTypeID SDComponentID)',
+].join(' ')
+
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
@@ -140,7 +151,7 @@ const EXTRA_READS = Object.freeze({
     gases: 'DIM_Gases(GasID Name BoilingPoint GHGas AntiGHGas Dangerous DangerousLevel)',
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
   }),
-  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', ResourceReserves: RESERVE_PANEL_READS }),
+  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS }),
   '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS }),
   '/information': Object.freeze({ shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)' }),
   '/designed-tech': Object.freeze({
