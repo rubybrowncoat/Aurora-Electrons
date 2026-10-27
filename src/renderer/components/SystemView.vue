@@ -23,6 +23,7 @@ import { color, hsl } from 'd3-color'
 import Quadtree from '@timohausmann/quadtree-js'
 import { Viewport } from 'pixi-viewport'
 import { mapGetters } from 'vuex'
+import { jumpPointLook, loadSystemJumpPoints } from '../utilities/system-jump-points'
 import { mapFont } from '~/components/charts/theme'
 import { activeAppearance } from '~/utilities/appearance'
 import { whenFontsReady } from '~/utilities/appearance-font'
@@ -1683,8 +1684,9 @@ export default {
         const gp = orbitContainer.toGlobal(anchor.position)
         const wp = this.viewport.toWorld(gp.x, gp.y)
 
-        const explored = toNumber(jp.Explored, 0) === 1
-        const hasGate = toNumber(jp.JumpGateStrength, 0) >= 1000
+        const look = jumpPointLook(jp)
+        const explored = look.explored
+        const hasGate = look.gate
         const tint = explored ? COLOR_ORANGE : COLOR_RED
 
         // marker is a Container so we can stack shapes
@@ -1739,8 +1741,8 @@ export default {
             const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
             this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
           } else if (e.data.button === 2) {
-            if (jp.Explored && jp.DestinationID) {
-              this.$emit('jump', jp.DestinationID)
+            if (look.destinationId) {
+              this.$emit('jump', look.destinationId)
             }
           }
         })
@@ -1749,9 +1751,9 @@ export default {
         marker.zIndex = this._annotationPriority(550) // Custom: 550
         this.markerLayer.addChild(marker)
 
-        // label (optional; uses Name if present)
+        // label: the far system's name once the point is explored, else the word for a far side not known
         let label = null
-        const labelText = (jp.DestinationName && String(jp.DestinationName).trim()) || 'Unexplored'
+        const labelText = look.label
         label = new PIXI.Text(labelText, this._textStyles.body)
         label.anchor.set(0, 0.5)
         label._baseWpx = label.width
@@ -2047,19 +2049,7 @@ export default {
           }))
         })
 
-        const jumpPoints = await this.database.query(`
-          select FCT_JumpPoint.*, FCT_RaceSysSurvey.Name as SourceName, VIR_Destination.SystemID as DestinationID, VIR_Destination.Name as DestinationName, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint 
-          
-          inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
-          left join (
-            select * from FCT_JumpPoint
-            left join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
-          ) as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID 
-          left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID 
-          left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID
-          
-          where FCT_JumpPoint.SystemID = ${this.$props.systemId} and FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
-        `).then(([items]) => {
+        const jumpPoints = await loadSystemJumpPoints(this.database, { GameID: this.GameID, RaceID: this.RaceID, SystemID: this.$props.systemId }).then((items) => {
           console.log('Loaded jump points:', items)
           return items
         })
