@@ -22,6 +22,7 @@ This repository has no CI and the owner lands commits on the working branch. Ope
 ## Lanes and review (FU-50, owner decisions of 2026-10-22)
 
 - Builder lanes get the lane brief `docs/plans/backlog/LANE-BRIEF.md` as their mandatory brief. Rules learnt in a lane go into that file, not into a session-local copy.
+- Open and close every lane with `node docs/plans/backlog/lane.mjs open <ID> [base]` and `close <ID>`, never by hand (FU-69). `open` adds the worktree on `lane/<ID>`, links `node_modules`, `saves`, `artifacts` and `.github/exports` into the main checkout and copies the root `AuroraDB.db`, which the browser parts of the suites read. `close` refuses a lane that is not clean, keeps its `.check-runs` in `P:/Scratch/aurora-electrons/<ID>/retired`, unlinks every junction before it removes the worktree, and fails if the main checkout changed.
 - Open a lane only on files no lane in review owns, and order the queue by file ownership. When a hold cannot be avoided, the independent part may land as its own commit, and the item stays `in-progress` until the held part lands as a second commit.
 - Review loop:
   - Spawn one `reviewer-interim` per change and wake that same agent with `write agent://<id>` for every recheck.
