@@ -60,6 +60,9 @@ export const isOptional = (route, key) => Boolean(OPTIONAL[route] && OPTIONAL[ro
 // The ranks of the naval admin commanders decide whether a command's bonus applies down its chain, so a report that reads them keeps its stock figures and leaves only the rates that need the chain unknown (`loadNavalAdmins` takes `ranks`).
 const navalRank = (affects) => Object.freeze({ key: 'navalRank', label: 'Naval admin ranks', affects, fields: Object.freeze(['FCT_Commander.RankID', 'FCT_Ranks.*']) })
 
+// The aether gates' table came with 2.6; a report that reads it for the place of an order keeps every other place and leaves only the place of an order to a gate unknown (the page leaves the table out of its query).
+const aetherGates = (affects) => Object.freeze({ key: 'aetherGates', label: 'Aether gates', affects, fields: Object.freeze(['FCT_AetherGates.*']) })
+
 // The column groups a report can lose without the rest of it. `fields` are 'Table.Column', or 'Table.*' for a whole table that only the group reads. A group's columns still count as missing for the report's inputs, but degrade the report instead of making it unsupported, and the page leaves them out of its queries (`groupsOf`).
 export const SOFT = Object.freeze({
   '/commanders': Object.freeze([
@@ -71,7 +74,7 @@ export const SOFT = Object.freeze({
   '/habitability': Object.freeze([navalRank('the mining outlook of the mass-driver colonies, which rests on the ranks of the naval admin commanders')]),
   '/logistics': Object.freeze([navalRank('the fuel output of the Sorium harvesters, which rests on the ranks of the naval admin commanders')]),
   '/survey-progress': Object.freeze([navalRank('the survey rates of the fleets, which rest on the ranks of the naval admin commanders')]),
-  '/hauling': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
+  '/hauling': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders'), aetherGates('the place of an order to an aether gate, which rests on the gates of the save')]),
   '/information': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
 })
 

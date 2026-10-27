@@ -275,12 +275,13 @@ const alteredChecks = async (capabilities, source) => {
     const noOrbit = await alteredCopy(source, 'orbit', ['alter table FCT_SystemBody drop column Bearing'])
     const noConstructColumn = await alteredCopy(source, 'constructcolumn', ['alter table FCT_AncientConstruct drop column Active'])
     const noConstructTable = await alteredCopy(source, 'constructtable', ['drop table FCT_AncientConstruct'])
+    const noGates = await alteredCopy(source, 'gates', ['drop table FCT_AetherGates'])
     const noRuinTable = await alteredCopy(source, 'ruintable', ['drop table FCT_KnownRuinRace'])
     const noTroopColumn = await alteredCopy(source, 'troopcolumn', ['alter table FCT_ShipClass drop column TroopCapacity'])
     const noPanelReads = await alteredCopy(source, 'panel', ['alter table FCT_ShipClass drop column MinimumFuel', 'alter table FCT_Race drop column MSPProduction'])
     const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, productionRenamed)
+    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, productionRenamed, noGates)
     copies.push(noUnits, noFormationShip)
 
     const baseline = (await preflightOf(capabilities, source)).result
@@ -291,6 +292,7 @@ const alteredChecks = async (capabilities, source) => {
     const rename = (await preflightOf(capabilities, renamed)).result
     const terraform = (await preflightOf(capabilities, terraformRenamed)).result
     const production = (await preflightOf(capabilities, productionRenamed)).result
+    const gateless = (await preflightOf(capabilities, noGates)).result
     // The Production bonus (5) renamed: the gate, the routes it blocks and the effect the registry declares for /hauling, which the report must carry as it is declared (read from the module, not written here). A rewrite of the effect's prose alone must keep this passing; a module that does not carry the route's own effect must fail it.
     const productionRead = (registry, result) => failedGates(result).join() === 'bonus 5' && [...registry.blockedBonuses(result.gates)].join() === '5' && Object.values(result.reports).filter((report) => report.status !== 'supported').map((report) => report.route).sort().join() === [...registry.BONUS_NAMES[5].routes].sort().join() && result.reports['/hauling'].status === 'degraded' && result.reports['/hauling'].degraded.every((entry) => entry.gate) && typeof registry.BONUS_NAMES[5].effect['/hauling'] === 'string' && registry.BONUS_NAMES[5].effect['/hauling'] !== '' && registry.BONUS_NAMES[5].effect['/hauling'] !== registry.BONUS_NAMES[5].effect.default && result.reports['/hauling'].degraded.some((entry) => entry.gate && entry.affects === registry.BONUS_NAMES[5].effect['/hauling'])
     const registryText = fs.readFileSync(path.join(repo, 'src', 'renderer', 'utilities', 'capabilities.js'), 'utf8')
@@ -417,6 +419,23 @@ const alteredChecks = async (capabilities, source) => {
 
     check('altered: FCT_SystemBody.Bearing dropped degrades /routes, /information and /hauling by their orbit facts alone, and leaves none unsupported', byOrbitOnly(orbit), JSON.stringify(ROUTE_PAGES.map((route) => orbit.reports[route])))
     check('altered: FCT_SystemBody.Bearing dropped makes no other report unsupported', Object.values(orbit.reports).filter((report) => !ROUTE_PAGES.includes(report.route)).every((report) => report.status !== 'unsupported' || report.missing.some((entry) => entry.fields.includes('FCT_SystemBody.Bearing'))), notSupported(orbit).map((report) => report.route + ' ' + report.status).join(', '))
+
+    const gateReaders = Object.keys(capabilities.INPUTS).filter((route) => route !== '/hauling' && capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates))
+
+    check('altered: FCT_AetherGates dropped degrades /hauling by the gates alone, naming the table, and leaves it in service', gateless.reports['/hauling'].status === 'degraded' && gateless.reports['/hauling'].missing.length === 0 && gateless.reports['/hauling'].groups.aetherGates === false && gateless.reports['/hauling'].degraded.some((entry) => entry.group && entry.key === 'aetherGates' && entry.fields.includes('FCT_AetherGates (table)')) && baseline.reports['/hauling'].groups.aetherGates === true, JSON.stringify(gateless.reports['/hauling']))
+    check('altered: the same copy leaves unsupported only the reports whose own required inputs read the table', gateReaders.length > 0 && Object.values(gateless.reports).filter((report) => report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)'))).map((report) => report.route).sort().join() === gateReaders.sort().join() && Object.values(gateless.reports).filter((report) => !gateReaders.includes(report.route) && report.status === 'unsupported').every((report) => baseline.reports[report.route].status === 'unsupported'), notSupported(gateless).map((report) => `${report.route} ${report.status}`).join(', '))
+
+    const gateGroup = ", aetherGates('the place of an order to an aether gate, which rests on the gates of the save')"
+    const noGroup = mutatedCopy('utilities/capabilities.js', gateGroup, '')
+
+    try {
+      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(noGroup, 'utilities') })).capabilities
+      const report = (await preflightOf(mutant, noGates)).result.reports['/hauling']
+
+      check('altered: a copy of the code in which /hauling does not hold the gates as a part it can lose makes it unsupported on a save without the table, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')), report.status)
+    } finally {
+      fs.rmSync(noGroup, { recursive: true, force: true })
+    }
 
     for (const route of ROUTE_PAGES) {
       const entry = route === '/routes' ? "'/routes': (key) => key === 'positionFacts' || key === 'orbitFacts'," : route === '/information' ? "key === 'positionFacts' || key === 'orbitFacts',\n  '/hauling'" : "key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',\n  '/map'"
