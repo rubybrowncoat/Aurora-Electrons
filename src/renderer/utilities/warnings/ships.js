@@ -3,7 +3,7 @@ import { linkTo, place } from '../deep-links'
 import { roundHalfEven } from '../design-rules'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { loadFormulaVersion } from '../capabilities'
-import { QUARTER, allOf, amount, anyOf, bandOf, bandWords, categoriesOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, countWords, figure, lacking, levelTone, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
+import { QUARTER, TRAINING_COMMAND, TRAINING_JOINS, allOf, amount, anyOf, bandOf, bandWords, categoriesOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, countWords, figure, lacking, levelTone, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'ships', title: 'Ships', summary: 'Ships and ship classes with crew, damage, maintenance, training or design problems, so they can be repaired or refit before they matter.' }
 
@@ -88,8 +88,6 @@ const supplyGaps = (ship) => [
   ...(ship.SupplyShip === 1 && !isKnownNumber(ship.MinimumSupplies) ? ['the minimum supplies of the ship class'] : []),
   ...(!(ship.SupplyShip === 1 && ship.MinimumSupplies > 0) && !isKnownNumber(ship.MaintSupplies) ? ['the maintenance supplies the ship class carries'] : []),
 ]
-
-const TRAINING_COMMAND = '(case when FCT_Fleet.ParentCommandID is null then null when FCT_Fleet.ParentCommandID = 0 then 0 else (DIM_NavalAdminCommandType.Description = \'Training\') end)'
 
 const CAPACITY_LABELS = [['CargoCapacity', 'tons'], ['ColonistCapacity', 'colonists'], ['TroopCapacity', 'tons of troops']]
 
@@ -383,7 +381,7 @@ export const checks = checksOf([
       const { GameID, RaceID } = ctx
       const TRAINED = `(FCT_Ship.TFPoints = 500 and ${TRAINING_COMMAND})`
 
-      const ships = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.TFPoints, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID, FCT_NavalAdminCommand.AdminCommandName, DIM_NavalAdminCommandType.Description as CommandType, ${TRAINED} as Verdict from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_NavalAdminCommand on FCT_Fleet.ParentCommandID = FCT_NavalAdminCommand.NavalAdminCommandID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${TRAINED} is not 0 ORDER BY FCT_Fleet.FleetName ASC`)
+      const ships = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.TFPoints, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID, FCT_NavalAdminCommand.AdminCommandName, DIM_NavalAdminCommandType.Description as CommandType, ${TRAINED} as Verdict from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID ${TRAINING_JOINS} where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${TRAINED} is not 0 ORDER BY FCT_Fleet.FleetName ASC`)
 
       return verdictRows(ctx, ships, {
         missing: (ship) => [...lacking(ship, { TFPoints: 'the task force training points of the ship' }), ...(!isKnownNumber(ship.ParentCommandID) || !ship.CommandType ? ['the type of the naval administration the fleet sits under'] : [])],

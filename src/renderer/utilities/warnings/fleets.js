@@ -1,20 +1,27 @@
 import { linkTo, place } from '../deep-links'
-import { amount, bodyText, checksOf, figure, lacking, needInputs, needsCell, needsSignature, needWords, readMiningSites, rowsOf, systemText, verdictRows } from './common'
+import { isKnownNumber } from '../math'
+import { TRAINING_COMMAND, TRAINING_JOINS, allOf, amount, anyOf, bodyText, checksOf, figure, lacking, needInputs, needsCell, needsSignature, needWords, readMiningSites, rowsOf, systemText, verdictRows } from './common'
 
 export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so they can be given something to do.' }
 
 export const IDLE_FLEETS_KEY = 'idle-fleets'
 
+// The words that open the line under an idle fleet, before the name of the place.
+export const LOCATION_WORDS = Object.freeze({ parked: 'At', orbiting: 'Orbiting', jumpPoint: 'At a jump point in', deepSpace: 'Deep space in' })
+
+// The places whose parked fleets the warning leaves out: the title and the option name them.
+export const PARKED_PLACES = 'colonies and anchorages'
+
 const idleFleetLocation = (fleet) => {
-  if (fleet.ColonyName) {
-    return `At ${fleet.ColonyName}`
+  if (fleet.ParkedName) {
+    return `${LOCATION_WORDS.parked} ${fleet.ParkedName}`
   } else if (fleet.OrbitBodyID > 0) {
-    return `Orbiting ${bodyText(fleet)}`
+    return `${LOCATION_WORDS.orbiting} ${bodyText(fleet)}`
   } else if (fleet.JumpPointID) {
-    return `At a jump point in ${systemText(fleet)}`
+    return `${LOCATION_WORDS.jumpPoint} ${systemText(fleet)}`
   }
 
-  return `Deep space in ${systemText(fleet)}`
+  return `${LOCATION_WORDS.deepSpace} ${systemText(fleet)}`
 }
 
 const idleFleetOrders = (fleet) => [fleet.StandingOrders ? 'Standing orders' : null, fleet.ConditionalOrders ? 'Conditional orders' : null].filter(Boolean).join(', ') || '—'
@@ -39,17 +46,107 @@ const LOADED = '(case when sum(case when FCT_ShipCargo.Amount > 0 then 1 else 0 
 
 const ORPHANED = '((FCT_Fleet.AssignedPopulationID <> 0) and FCT_Population.PopulationID is null)'
 
+// The component types of a station: a Maintenance Module and a Recreational Module.
+const MAINTENANCE_MODULE = 48
+const RECREATIONAL_MODULE = 57
+
+// The game's own distance of a ship at a colony or at a fleet with recreational modules: the same system and less than this many km apart on each axis.
+const NEAR = 1
+const AXES = ['Xcor', 'Ycor']
+
+const UNNAMED = { colony: 'an unnamed colony', fleet: 'an unnamed fleet' }
+
+export const PARKED_GAPS = {
+  fleet: 'the system and position of the fleet',
+  colony: 'the system and position of the body of a colony',
+  station: 'the system and position of a fleet that may hold recreational or maintenance modules',
+  componentType: 'the type of a component a ship of a fleet that may hold recreational or maintenance modules carries',
+  shipClass: 'the class of a ship of a fleet that may hold recreational or maintenance modules',
+  modules: 'the number of recreational or maintenance modules a ship holds or has damaged',
+  command: 'the type of the naval administration the fleet sits under',
+}
+
+// The populations of the race with the position of their bodies.
+const populationsQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} order by FCT_Population.PopulationID`
+
+// The damaged modules of a ship's component line, and whether one of them has no stored number.
+const DAMAGED_MODULES = 'coalesce((select sum(FCT_DamagedComponent.Number) from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID), 0)'
+
+const DAMAGE_UNKNOWN = 'exists (select 1 from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID and FCT_DamagedComponent.Number is null)'
+
+// The undamaged modules of a ship's component line: the class's count less the ship's damaged ones, null while the count or a damaged number is not stored.
+const UNDAMAGED_MODULES = `(case when FCT_ClassComponent.NumComponent is null or ${DAMAGE_UNKNOWN} then null else max(FCT_ClassComponent.NumComponent - ${DAMAGED_MODULES}, 0) end)`
+
+// The ships that count for a station: those not carried in a hangar.
+const UNDOCKED = 'coalesce(FCT_Ship.MothershipID, 0) = 0'
+
+// The inputs between a ship and a module that are not stored, each counted by ship whatever the types of the ship's other component lines: no stored class or one that names no class row, and a component line present for the class (told from an absent one by the joined key, `ClassID`) whose component is not stored, has no definition row or has no stored type.
+const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null or FCT_ShipClass.ShipClassID is null)'
+
+const COMPONENT_TYPE_UNKNOWN = '(FCT_ClassComponent.ClassID is not null and FCT_ShipDesignComponents.ComponentTypeID is null)'
+
+// The undamaged modules of one type in a fleet's ship lines, and how many lines of it have no stored count.
+const moduleColumns = (type, name) => `sum(case when FCT_ShipDesignComponents.ComponentTypeID = ${type} then ${UNDAMAGED_MODULES} end) as ${name}Working, sum(case when FCT_ShipDesignComponents.ComponentTypeID = ${type} and ${UNDAMAGED_MODULES} is null then 1 else 0 end) as ${name}Gaps`
+
+// The race's fleets with the undamaged modules of both types on the ships not docked in a hangar, how many lines of each have no stored count, and how many ships have an input to a module that is not stored; only the lines that bear on a station are read.
+const stationsQuery = ({ GameID, RaceID }) => `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, ${moduleColumns(MAINTENANCE_MODULE, 'Maintenance')}, ${moduleColumns(RECREATIONAL_MODULE, 'Recreational')}, count(distinct case when ${COMPONENT_TYPE_UNKNOWN} then FCT_Ship.ShipID end) as Untyped, count(distinct case when ${SHIP_CLASS_UNKNOWN} then FCT_Ship.ShipID end) as Unclassed from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and ${UNDOCKED} and (FCT_ShipDesignComponents.ComponentTypeID in (${MAINTENANCE_MODULE}, ${RECREATIONAL_MODULE}) or ${SHIP_CLASS_UNKNOWN} or ${COMPONENT_TYPE_UNKNOWN}) group by FCT_Fleet.FleetID order by FCT_Fleet.FleetName, FCT_Fleet.FleetID`
+
+// The fleets of those rows, each with its modules by type, in the order of the rows.
+const stationsOf = (rows) => rows.map((row) => ({ FleetID: row.FleetID, FleetName: row.FleetName, SystemID: row.SystemID, Xcor: row.Xcor, Ycor: row.Ycor, Modules: { [MAINTENANCE_MODULE]: { Working: row.MaintenanceWorking, Gaps: row.MaintenanceGaps }, [RECREATIONAL_MODULE]: { Working: row.RecreationalWorking, Gaps: row.RecreationalGaps } }, Untyped: row.Untyped, Unclassed: row.Unclassed }))
+
+const placeKnown = (row) => ['SystemID', ...AXES].every((column) => isKnownNumber(row[column]))
+
+// Whether `other` lies at the fleet's place by the game's test: the same system and within 1 km on both axes (1, 0, or null while a position it needs is not stored; one axis that settles it is enough).
+const atPlace = (fleet, other) => allOf(isKnownNumber(fleet.SystemID) && isKnownNumber(other.SystemID) ? Number(fleet.SystemID) === Number(other.SystemID) : null, ...AXES.map((axis) => (isKnownNumber(fleet[axis]) && isKnownNumber(other[axis]) ? Math.abs(Number(fleet[axis]) - Number(other[axis])) < NEAR : null)))
+
+// Whether a station has an undamaged module of the type: 1, 0, or null while a line of it has no stored count and none known to work is left, or while a component line of the station has no stored type or a ship of it no stored class (it could be a module of this type).
+const holds = (station, type) => {
+  const modules = station.Modules[type]
+
+  return modules && modules.Working > 0 ? 1 : (modules && modules.Gaps > 0) || station.Untyped > 0 || station.Unclassed > 0 ? null : 0
+}
+
+// Whether a module line of a type has no stored count and none of the type is known to work.
+const countUnknown = (station, type) => Boolean(station.Modules[type]) && !(station.Modules[type].Working > 0) && station.Modules[type].Gaps > 0
+
+// Whether a station can support the fleet: a maintenance module any fleet takes, a recreational one every fleet but one under a Training command, which the game gives no shore leave.
+const supports = (station, fleet) => anyOf(holds(station, MAINTENANCE_MODULE), allOf(holds(station, RECREATIONAL_MODULE), isKnownNumber(fleet.Training) ? Number(!fleet.Training) : null))
+
+const positionGaps = (fleet, other, name) => [...(placeKnown(fleet) ? [] : [PARKED_GAPS.fleet]), ...(placeKnown(other) ? [] : [name])]
+
+const stationGaps = (fleet, station) => [
+  ...(atPlace(fleet, station) === null ? positionGaps(fleet, station, PARKED_GAPS.station) : []),
+  ...(supports(station, fleet) === null && station.Untyped > 0 ? [PARKED_GAPS.componentType] : []),
+  ...(supports(station, fleet) === null && station.Unclassed > 0 ? [PARKED_GAPS.shipClass] : []),
+  ...(supports(station, fleet) === null && (countUnknown(station, MAINTENANCE_MODULE) || countUnknown(station, RECREATIONAL_MODULE)) ? [PARKED_GAPS.modules] : []),
+  ...(supports(station, fleet) === null && !isKnownNumber(fleet.Training) && holds(station, RECREATIONAL_MODULE) !== 0 ? [PARKED_GAPS.command] : []),
+]
+
+// Where a fleet is parked: `Parked` (1 at a population of the race or at another fleet that supports it, 0, or null while the fleet's own system or position, a position, a module count or component type, or its command's type that could decide it is not stored), `ParkedName` (the population whose body the fleet orbits, else the largest there, else the first station by name) and `ParkedGaps`, the inputs a null leaves out.
+const parkedAt = (fleet, populations, stations) => {
+  const colonies = populations.map((population) => ({ population, verdict: atPlace(fleet, population) }))
+  const anchorages = stations.filter((station) => station.FleetID !== fleet.FleetID).map((station) => ({ station, verdict: allOf(atPlace(fleet, station), supports(station, fleet)) }))
+  const colony = colonies.filter((entry) => entry.verdict === 1).map((entry) => entry.population).sort((a, b) => Number(b.SystemBodyID === fleet.OrbitBodyID) - Number(a.SystemBodyID === fleet.OrbitBodyID) || (b.Population || 0) - (a.Population || 0))[0]
+  const anchorage = anchorages.find((entry) => entry.verdict === 1)
+
+  return {
+    Parked: placeKnown(fleet) ? anyOf(...colonies.map((entry) => entry.verdict), ...anchorages.map((entry) => entry.verdict)) : null,
+    ParkedName: colony ? colony.PopName || UNNAMED.colony : anchorage ? anchorage.station.FleetName || UNNAMED.fleet : null,
+    ParkedGaps: [...new Set([...(placeKnown(fleet) ? [] : [PARKED_GAPS.fleet]), ...colonies.filter((entry) => entry.verdict === null).flatMap((entry) => positionGaps(fleet, entry.population, PARKED_GAPS.colony)), ...anchorages.filter((entry) => entry.verdict === null).flatMap((entry) => stationGaps(fleet, entry.station))])],
+  }
+}
+
 export const checks = checksOf([
   {
     key: IDLE_FLEETS_KEY,
     group: group.key,
     severity: 'attention',
-    title: (count, options = {}) => `${amount(count, 'idle fleet')}${options.idleFleetsAtColonies ? '' : ' away from the colonies'}`,
-    rule: 'A mobile military fleet with no orders and at least one ship that is neither overhauling nor docked; fleets following another fleet are left out, and so are fleets parked at the colonies unless the option is on.',
+    title: (count, options = {}) => `${amount(count, 'idle fleet')}${options.idleFleetsAtColonies ? '' : ` away from the ${PARKED_PLACES}`}`,
+    rule: 'A mobile military fleet with no orders and at least one ship that is neither overhauling nor docked; fleets following another fleet are left out, and so are fleets parked at a colony or an anchorage unless the option is on. A fleet is parked when it lies within 1 km, on both axes, of a colony (a deep space population included) or of another fleet with an undamaged recreational or maintenance module aboard a ship that is not docked in a hangar; a fleet under a Training command counts only at a colony or at a maintenance module.',
     evidence: {
       verification: 'confirmed',
-      structure: ['FCT_Fleet.ShippingLine, CivilianFunction, Speed, AnchorFleetID', 'FCT_Ship.MaintenanceState, MothershipID', 'FCT_MoveOrders'],
-      note: 'A presence check on stored rows: a fleet that is mobile (speed above 1), military and not following another, with no move orders and a ship that is neither in maintenance nor carried by a mothership. A fleet with a flag, its speed or a ship\'s state not stored is listed apart, as not evaluated.',
+      structure: ['FCT_Fleet.ShippingLine, CivilianFunction, Speed, AnchorFleetID, SystemID, Xcor, Ycor, ParentCommandID', 'FCT_Ship.MaintenanceState, MothershipID, ShipClassID', 'FCT_ShipClass.ShipClassID', 'FCT_MoveOrders', 'FCT_Population.SystemID, SystemBodyID, Population', 'FCT_SystemBody.Xcor, Ycor', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent.Number', 'FCT_NavalAdminCommand.AdminCommandTypeID', 'DIM_NavalAdminCommandType.Description'],
+      note: 'A presence check on stored rows: a fleet that is mobile (speed above 1), military and not following another, with no move orders and a ship that is neither in maintenance nor carried by a mothership. It is parked, and left out, when a population of the race in its system has its body within 1 km of the fleet on both axes (the game\'s own test of a ship at a colony for shore leave and maintenance), or another fleet of the race in its system lies within 1 km of it with an undamaged recreational or maintenance module (component types 57 and 48) on a ship that is not docked in a hangar; a module ship docked in a hangar does not count. A fleet under a Training command is parked only at a population or at a maintenance module, as the game gives it no shore leave; parked means at a place that can support the fleet, not that the game is maintaining it now. It is the same place at the time of the save, and the capacity of a maintenance module and the speed or orders of its fleet are not tested. A fleet with a flag, its speed, its position, a ship\'s state, a module count, a ship\'s class, a component\'s type, a damaged count or its command\'s type not stored is listed apart, as not evaluated.',
     },
     columns: [
       { key: 'fleet', text: 'Fleet' },
@@ -60,10 +157,18 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
 
-      const fleets = await rowsOf(ctx, `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.ShippingLine, FCT_Fleet.CivilianFunction, FCT_Fleet.Speed, FCT_Fleet.AnchorFleetID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, VIR_Ships.Ships, VIR_Ships.Available, VIR_Ships.Undecided, ${IDLE_FLEET} as Verdict, (select FCT_Population.PopName from FCT_Population where FCT_Population.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_Population.RaceID = FCT_Fleet.RaceID and FCT_Population.GameID = FCT_Fleet.GameID and FCT_Fleet.OrbitBodyID > 0 limit 1) as ColonyName, (select FCT_JumpPoint.WarpPointID from FCT_JumpPoint where FCT_JumpPoint.SystemID = FCT_Fleet.SystemID and FCT_JumpPoint.GameID = FCT_Fleet.GameID and FCT_JumpPoint.Xcor = FCT_Fleet.Xcor and FCT_JumpPoint.Ycor = FCT_Fleet.Ycor limit 1) as JumpPointID, (select count(*) from FCT_FleetStandingOrder where FCT_FleetStandingOrder.FleetID = FCT_Fleet.FleetID) as StandingOrders, (select count(*) from FCT_FleetConditionalOrder where FCT_FleetConditionalOrder.FleetID = FCT_Fleet.FleetID and FCT_FleetConditionalOrder.GameID = FCT_Fleet.GameID) as ConditionalOrders from FCT_Fleet inner join (select FCT_Ship.FleetID, count(*) as Ships, sum(case when FCT_Ship.MaintenanceState <> 2 and FCT_Ship.MothershipID = 0 then 1 else 0 end) as Available, sum(case when (FCT_Ship.MaintenanceState <> 2 and FCT_Ship.MothershipID = 0) is null then 1 else 0 end) as Undecided from FCT_Ship where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} group by FCT_Ship.FleetID) as VIR_Ships on VIR_Ships.FleetID = FCT_Fleet.FleetID and (VIR_Ships.Available > 0 or VIR_Ships.Undecided > 0) left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and ${IDLE_FLEET} is not 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) order by FCT_Fleet.FleetName`)
+      const [fleets, populations, stations] = await Promise.all([
+        rowsOf(ctx, `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.ParentCommandID, FCT_Fleet.ShippingLine, FCT_Fleet.CivilianFunction, FCT_Fleet.Speed, FCT_Fleet.AnchorFleetID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, VIR_Ships.Ships, VIR_Ships.Available, VIR_Ships.Undecided, ${IDLE_FLEET} as Verdict, ${TRAINING_COMMAND} as Training, (select FCT_JumpPoint.WarpPointID from FCT_JumpPoint where FCT_JumpPoint.SystemID = FCT_Fleet.SystemID and FCT_JumpPoint.GameID = FCT_Fleet.GameID and FCT_JumpPoint.Xcor = FCT_Fleet.Xcor and FCT_JumpPoint.Ycor = FCT_Fleet.Ycor limit 1) as JumpPointID, (select count(*) from FCT_FleetStandingOrder where FCT_FleetStandingOrder.FleetID = FCT_Fleet.FleetID) as StandingOrders, (select count(*) from FCT_FleetConditionalOrder where FCT_FleetConditionalOrder.FleetID = FCT_Fleet.FleetID and FCT_FleetConditionalOrder.GameID = FCT_Fleet.GameID) as ConditionalOrders from FCT_Fleet inner join (select FCT_Ship.FleetID, count(*) as Ships, sum(case when FCT_Ship.MaintenanceState <> 2 and FCT_Ship.MothershipID = 0 then 1 else 0 end) as Available, sum(case when (FCT_Ship.MaintenanceState <> 2 and FCT_Ship.MothershipID = 0) is null then 1 else 0 end) as Undecided from FCT_Ship where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} group by FCT_Ship.FleetID) as VIR_Ships on VIR_Ships.FleetID = FCT_Fleet.FleetID and (VIR_Ships.Available > 0 or VIR_Ships.Undecided > 0) left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID ${TRAINING_JOINS} where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and ${IDLE_FLEET} is not 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) order by FCT_Fleet.FleetName`),
+        rowsOf(ctx, populationsQuery(ctx)),
+        rowsOf(ctx, stationsQuery(ctx)),
+      ])
 
-      return verdictRows(ctx, fleets.filter((fleet) => ctx.options.idleFleetsAtColonies || !fleet.ColonyName), {
-        missing: (fleet) => [...lacking(fleet, { ...FLEET_INPUTS, AnchorFleetID: 'the fleet it follows' }), ...(fleet.Available > 0 || !(fleet.Undecided > 0) ? [] : ['the maintenance state or the mothership of a ship'])],
+      const anchorages = stationsOf(stations)
+      const parked = fleets.map((fleet) => ({ ...fleet, ...parkedAt(fleet, populations, anchorages) }))
+
+      return verdictRows(ctx, parked, {
+        verdict: (fleet) => (ctx.options.idleFleetsAtColonies ? fleet.Verdict : allOf(fleet.Verdict, fleet.Parked === null ? null : Number(!fleet.Parked))),
+        missing: (fleet) => [...lacking(fleet, { ...FLEET_INPUTS, AnchorFleetID: 'the fleet it follows' }), ...(fleet.Available > 0 || !(fleet.Undecided > 0) ? [] : ['the maintenance state or the mothership of a ship']), ...(ctx.options.idleFleetsAtColonies || fleet.Parked !== null ? [] : fleet.ParkedGaps)],
         build: (fleet) => ({
           id: `fleet:${fleet.FleetID}`,
           cells: { fleet: fleet.FleetName, ships: ctx.count(fleet.Ships), orders: idleFleetOrders(fleet) },

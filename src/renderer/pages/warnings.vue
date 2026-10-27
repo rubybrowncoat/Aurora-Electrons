@@ -23,7 +23,7 @@
             <div class="caption text--secondary mt-1">A snoozed warning is kept out of the tiles and the lists until the game date chosen, or until it clears or changes materially. A permanent mute outranks a snooze, and a snooze belongs to one branch of the campaign.</div>
 
             <div class="subtitle-2 mt-4">Idle fleets</div>
-            <v-switch :input-value="idleFleetsAtColonies" label="Include fleets parked at the colonies" dense inset hide-details @change="(value) => setOption('idleFleetsAtColonies', !!value)" />
+            <v-switch :input-value="idleFleetsAtColonies" :label="idleFleetsLabel" dense inset hide-details @change="(value) => setOption('idleFleetsAtColonies', !!value)" />
 
             <div class="subtitle-2 mt-4">Maintenance supplies</div>
             <v-slider :value="maintenanceThreshold" min="10" max="100" :hint="`List ships under ${maintenanceThreshold}% maintenance`" thumb-label persistent-hint class="mt-6" @change="(value) => setOption('maintenanceThreshold', value)" />
@@ -186,7 +186,7 @@ import { branchLineage, gameDateText, gameSecondsOf } from '../utilities/history
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { isKnownNumber } from '../utilities/math'
 import { describeRule } from '../utilities/provenance'
-import { CHECKS, GROUPS, IDLE_FLEETS_KEY, SEPARATOR_WORDS, SEVERITIES, checkByKey, checkLabel, describeSignature, normalizeRows } from '../utilities/warnings'
+import { CHECKS, GROUPS, IDLE_FLEETS_KEY, PARKED_PLACES, SEPARATOR_WORDS, SEVERITIES, checkByKey, checkLabel, describeSignature, normalizeRows } from '../utilities/warnings'
 import { ENDED, REASON_LENGTH, addRecord, emptyStore, endRecords, evaluate, forBranch, makeRecord, pruned, readStamps, readStore, seeded, untilText } from '../utilities/warnings/snoozes'
 
 // Rows a check shows before "Show all".
@@ -260,6 +260,7 @@ export default {
       endedNotes: {},
       snoozing: null,
       snoozePresets: SNOOZE_PRESETS,
+      idleFleetsLabel: `Include fleets parked at the ${PARKED_PLACES}`,
       reasonLength: REASON_LENGTH,
       lastLook: null,
       settledContext: null,
