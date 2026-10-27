@@ -375,9 +375,9 @@ export const readReserves = (repository, scope, context = null) => {
 // The records of colonies that apply to the open save, as the ledger takes them: a record made at or before the save's time whose colony is held by evidence or by the player's confirmation. A record under review, a record whose colony is gone and a record made after the save apply to nothing. A record of a ship or a ship class is not the ledger's: it keeps no stock of a colony, and its ID may be that of a colony.
 export const entriesForLedger = (entries) => entries.filter((entry) => entry.applied && entry.source.type === 'colony').map((entry) => ({ uuid: entry.uuid, scenario: entry.scenario, sourceId: entry.source.id, reserves: entry.reserves, plans: entry.plans }))
 
-// The fuel a ship or a ship class keeps aboard, from the records that apply: `{ ship: Map(id -> { amount, scenarios }), class: Map }`. `scenarios` are the scenarios chosen (none chosen is all of them); of the records of one source in the scenarios chosen the largest amount holds, 0 being a reserve of nothing.
+// The fuel a colony, a ship or a ship class keeps, from the records that apply: `{ colony: Map(id -> { amount, scenarios }), ship: Map, class: Map }`. `scenarios` are the scenarios chosen (none chosen is all of them); of the records of one source in the scenarios chosen the largest amount holds, 0 being a reserve of nothing.
 export const fuelReserves = (entries, scenarios = []) => {
-  const table = { ship: new Map(), class: new Map() }
+  const table = { colony: new Map(), ship: new Map(), class: new Map() }
 
   entries.filter((entry) => entry.applied && hasOwn(table, entry.source.type) && hasOwn(entry.reserves, FUEL) && (!scenarios.length || scenarios.includes(entry.scenario))).forEach((entry) => {
     const kept = table[entry.source.type]

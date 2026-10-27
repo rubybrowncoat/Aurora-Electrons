@@ -45,7 +45,7 @@ const OPTIONAL = Object.freeze({
   '/finances': (key) => key === 'shippingTax',
   '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves' || key === 'FuelReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
-  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'positionFacts' || key === 'orbitFacts',
+  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'fuelSites' || key === 'FuelReserveReader' || key === 'positionFacts' || key === 'orbitFacts',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
   '/map': (key) => key === 'groundFormations' || key === 'recoveryObjects' || key === 'observationRead',
   // The life pods and wrecks of the recovery ledger of the Galaxy Map (`recoveryObjects`) are read only when the ledger is opened: a save that lacks a table or column of them leaves the ledger without them, and the ledger says so in place. The formations read for an observation (`observationRead`) are reached through the choice of the ledger's observation, which names every observed kind; the map reads no formation for it.
@@ -141,6 +141,19 @@ const FUEL_DONOR_READS = [
   'FCT_ShipDesignComponents(ComponentTypeID SDComponentID)',
 ].join(' ')
 
+// What the fuel service of the Transport page reads through `loadFuelSites` (utilities/fuel-ledger.js) beside the tanker rows of `loadFuelDonors`: the colonies' refuelling points and refineries, the fleets' position, last move and first order, and the race's refuelling rates and the game clock.
+const FUEL_SITE_READS = [
+  FUEL_DONOR_READS,
+  'DIM_MoveAction(MoveActionID StationaryAction)',
+  'DIM_PlanetaryInstallation(MassRefuelling PlanetaryInstallationID RefineryProductionValue)',
+  'FCT_Fleet(GameID LastMoveTime OrbitBodyID Xcor Ycor)',
+  'FCT_Game(GameID GameTime)',
+  'FCT_MoveOrders(FleetID GameID MoveActionID MoveOrder MoveOrderID)',
+  'FCT_Population(FuelProdStatus FuelStockpile GameID PopName Population PopulationID RaceID SystemBodyID SystemID)',
+  'FCT_PopulationInstallations(Amount GameID PlanetaryInstallationID PopID)',
+  'FCT_Race(GameID MaxRefuellingRate RaceID UnderwayReplenishmentRate)',
+].join(' ')
+
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
@@ -161,7 +174,7 @@ const EXTRA_READS = Object.freeze({
   }),
   '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS }),
   '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS }),
-  '/information': Object.freeze({ shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)' }),
+  '/information': Object.freeze({ shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
     classUsage: 'FCT_Ship(ShipClassID GameID RaceID Destroyed)',

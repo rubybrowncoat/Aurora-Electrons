@@ -423,32 +423,37 @@ const STOPS = [
 const timingProblemOf = (timed, timing) => (timed.flightHi === null ? { where: 'fleet', status: 'unknown', code: 'dust', text: nebulaGapOf(timing) } : { where: 'fleet', status: 'unknown', code: 'shock', text: timingGaps({ speed: 1, shock: timing.shock, shockMissing: timing.shockMissing }, { cyclic: true }).join(', ') })
 
 // One cycle of a route as the events a fleet goes through: loading at the origin, the route flown, unloading at the destination and the route back, walked as a repeating cycle so the shock of the last jump runs down over the stops. `timing` is { steps (`routeLegs`), flights ({ out, back }, optional: the km of each flight of the way out and of the way back as the simulation of the year flew them, in the order of the steps, which keeps a flight between two jump points at its own distance), dust, armour, shock ({ lo, hi } or null), shockMissing }; without `flights` each flight is the step's own.
-const cycleOf = (timing, speed, stops) => {
+const cycleOf = (timing, speed, stops, service) => {
   const clock = { speed, speedIn: speedIn({ speed, dust: timing.dust, armour: timing.armour }) }
-  const handling = (where) => stops.filter((stop) => stop.where === where).reduce((total, stop) => total + stop.seconds, 0)
+  const handling = (where) => stops.filter((stop) => stop.where === where).reduce((total, stop) => total + stop.seconds, 0) + service[where]
   const flights = timing.flights || {}
 
   return walkEvents([handleEvent('origin', handling('origin')), ...routeEvents(timing.steps, clock, flights.out), handleEvent('destination', handling('destination')), ...routeEvents(reverseSteps(timing.steps), clock, flights.back)], timing.shock, { cyclic: true, retry: timing.retry })
 }
 
+// The hours a service at the stops adds to a cycle, in seconds: none unless a host passes them (`service` of `roundTrip`).
+const NO_SERVICE = Object.freeze({ origin: 0, destination: 0 })
+
 const stopVerb = (where) => (where === 'origin' ? 'loading at the origin' : 'unloading at the destination')
 
 // One group of ships (one class in one fleet) on a route of `km` one way: the round trip is 2 x km at top speed plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking the slowest ship's time (`stopHandling`); `colonists: false` times the cargo alone. Ships are [{ ShipName, ClassName, CargoCapacity, ColonistCapacity, Size, ShuttleStrength, DesignedShuttleStrength, CurrentCrew, ClassCrew, MaxSpeed, EnginePower, FuelEfficiency, FuelCapacity }], the first one standing for the group's speed and fuel. `endpoints`: { origin, destination }, each a `colonyEndpoint` or `bareEndpoint`. `version`: the formula version (`loadFormulaVersion`), null when the save's is not known.
 // `timing` (`fleetTimingOf` of utilities/route-time.js with the route's `steps`): the fleet's crew, which adds the waits for the jump shock to the cycle; `jumps` is the transits one way of a class timed alone, which the result then names as left out.
+// `service` ({ origin, destination } in seconds, none by default): the time a refuelling at each end takes, which joins the stop's own handling in the cycle and in the trip's time; `serviceSeconds` and `service` are returned, and `handlingSeconds` stays the loading and unloading alone.
 // Returns `status`: 'ok', 'blocked' (a ship can't load or unload, `problems` says which ship and where), 'unknown' (a needed input is missing or the landing rule is not verified for the version: `problems` says which), 'immobile' (the class has no speed), 'range' (the round trip needs more fuel than the tank holds) or 'none' (nothing to time); `problems`, each { where, status: 'blocked' | 'unsupported', code, text }; `stops`, each stop's `where`, `seconds`, `limiting` ship, its `strength` and `via` (what lets the ships load there); `limiting`, the longest stop's { where, ship, strength } (null when nothing is moved); and the times and fuel, null where they cannot be given: a trip that cannot run has no time of its own.
-export const roundTrip = (ships, km, endpoints, shuttleTechnology, { colonists = true, version = null, support = null, timing = null, jumps = 0 } = {}) => {
+export const roundTrip = (ships, km, endpoints, shuttleTechnology, { colonists = true, version = null, support = null, timing = null, jumps = 0, service = NO_SERVICE } = {}) => {
   const [shipClass] = ships
   const stops = STOPS.filter((stop) => colonists || !stop.colonists).map((stop) => ({ ...stop, ...stopHandling({ MoveActionID: stop.order, endpoint: endpoints[stop.where] }, ships, shuttleTechnology, 1, { version, support }) }))
   const problems = stops.flatMap((stop) => stop.eligibility.reasons.map((reason) => ({ where: stop.where, status: reason.status, code: reason.code, text: `${stopVerb(stop.where)}: ${reason.text}` }))).filter((problem, index, all) => all.findIndex((other) => other.text === problem.text) === index)
   const blocked = problems.some((problem) => problem.status === 'blocked')
   const moves = shipClass.MaxSpeed > 0
   const handlingSeconds = problems.length ? null : stops.reduce((total, stop) => total + stop.seconds, 0)
-  const timed = moves && timing && handlingSeconds !== null ? cycleOf(timing, shipClass.MaxSpeed, stops) : null
+  const timed = moves && timing && handlingSeconds !== null ? cycleOf(timing, shipClass.MaxSpeed, stops, service) : null
   const timingProblems = timed && !timed.total ? [timingProblemOf(timed, timing)] : []
   const travelSeconds = timed ? timed.flightHi : moves ? (2 * km) / shipClass.MaxSpeed : null
   // Fuel follows the distance at the set speed: a nebula that holds the fleet at a lower speed lowers its engine power in step, so the longer flight burns what the same distance burns at the set speed.
   const fuelSeconds = timed ? (timed.km === null ? null : timed.km / shipClass.MaxSpeed) : travelSeconds
-  const tripSecondsAt = (key) => (!moves || handlingSeconds === null ? null : timed ? (timed.total ? timed.total[key] : null) : travelSeconds + handlingSeconds)
+  const serviceSeconds = service.origin + service.destination
+  const tripSecondsAt = (key) => (!moves || handlingSeconds === null ? null : timed ? (timed.total ? timed.total[key] : null) : travelSeconds + handlingSeconds + serviceSeconds)
   const tripSeconds = tripSecondsAt('hi')
   const fuelPerShip = moves && fuelSeconds !== null ? shipClass.EnginePower * shipClass.FuelEfficiency * (fuelSeconds / 3600) : null
   const slowest = stops.reduce((longest, stop) => (stop.limiting && (!longest || stop.seconds > longest.seconds) ? stop : longest), null)
@@ -467,6 +472,8 @@ export const roundTrip = (ships, km, endpoints, shuttleTechnology, { colonists =
     travelSeconds,
     fuelSeconds,
     handlingSeconds,
+    serviceSeconds,
+    service,
     jumps,
     waitCounted: Boolean(timed),
     waitSeconds: timed ? timed.wait : null,

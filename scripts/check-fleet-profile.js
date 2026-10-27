@@ -908,7 +908,10 @@ const routeOf = (km) => {
   return { km, jumps: 2, end: { kind: 'fly', at: point(5, 3), previous: beyond, origin, legKm: km / 3, via: null } }
 }
 const REACH = { route: routeOf(KM), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
-const transportVmOf = (page, state, data = {}) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(state), handlingSupport: FULL_OFFICERS, formulaVersion: VERSION, origin: PLACE, destination: TARGET, reachOf: () => REACH, fleetShips: [ship({ FleetSpeed: 300, UseMaximumSpeed: 0 }), slowShip({ FleetSpeed: 300, UseMaximumSpeed: 0 }), craft({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
+// The refuelling sites and fuel reserves of a save with no colony or tanker fleet that serves and no fuel kept back, read: the fleets' runs are decided by their tanks alone.
+const NO_SITES = { gameTime: 1, hubEra: 0, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies: [], fleets: [] }
+const NO_RESERVES = { ready: true, reader: { colony: () => null, ship: () => null } }
+const transportVmOf = (page, state, data = {}) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(state), handlingSupport: FULL_OFFICERS, formulaVersion: VERSION, origin: PLACE, destination: TARGET, reachOf: () => REACH, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship({ FleetSpeed: 300, UseMaximumSpeed: 0 }), slowShip({ FleetSpeed: 300, UseMaximumSpeed: 0 }), craft({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
 
 check('pages', 'the pages take speed, burn and counted cargo from the profile, say why a fleet is left out and track the optional read under the key they label it with', async (w) => {
   const hauling = await w.hauling()
@@ -1321,7 +1324,7 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
 
   assert.ok(captioned >= 4, 'the speeds are shown')
 
-  const ready = { FleetName: 'Cycle', ships: 3, independent: 2, cargo: 1000, colonists: 200, speed: 500, savedSpeed: 300, effectiveMax: 400, tripSeconds: 86400, jumps: 2, km: 5, status: 'ok', provenance: { status: 'estimated' }, pathResult: { status: 'estimated' }, trips: 3, tonsYear: 3000, colonistsYear: 600, fuel: 12, fuelShare: 0.1, fuelLimiting: 'Hauler', results: { trips: { status: 'estimated' }, tonsYear: { status: 'estimated' }, colonistsYear: { status: 'estimated' }, fuel: { status: 'estimated' }, fuelShare: { status: 'estimated' } } }
+  const ready = { FleetName: 'Cycle', ships: 3, independent: 2, cargo: 1000, colonists: 200, speed: 500, savedSpeed: 300, effectiveMax: 400, tripSeconds: 86400, timingKnown: true, jumps: 2, km: 5, status: 'ok', provenance: { status: 'estimated' }, pathResult: { status: 'estimated' }, trips: 3, tonsYear: 3000, colonistsYear: 600, fuel: 12, fuelShare: 0.1, fuelLimiting: 'Hauler', results: { trips: { status: 'estimated' }, tonsYear: { status: 'estimated' }, colonistsYear: { status: 'estimated' }, fuel: { status: 'estimated' }, fuelShare: { status: 'estimated' } } }
   const bare = { FleetName: 'Cycle', ships: 0, independent: 0, cargo: null, colonists: null, speed: null, savedSpeed: null, effectiveMax: null, tripSeconds: null, jumps: 0, km: 0, status: 'unknown', provenance: null, pathResult: null, trips: null, tonsYear: null, colonistsYear: null, fuel: null, fuelShare: null, fuelLimiting: '' }
 
   // The rows the page itself makes, with no avoid setting on (its distance has the route finder's own result) and for each way a run can come out.
@@ -1331,7 +1334,7 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
 
   assert.ok(made.some((row) => row.status === 'ok') && made.some((row) => row.status === 'range') && made.some((row) => row.status === 'noroute') && made.some((row) => row.status === 'unsupported') && made.some((row) => row.status === 'immobile'), 'the pages\' own rows cover each way a run comes out')
 
-  const RESULT_RULES = { trips: { trips: 'transport.fleetTrip' }, tonsYear: { tonsYear: 'transport.fleetTrip' }, colonistsYear: { colonistsYear: 'transport.fleetTrip' }, fuel: { fuel: 'transport.fleetBurn', fuelShare: 'transport.fleetBurn' } }
+  const RESULT_RULES = { trips: { trips: 'transport.fleetTrip' }, tonsYear: { tonsYear: 'transport.fleetTrip' }, colonistsYear: { colonistsYear: 'transport.fleetTrip' }, fuel: { fuel: 'transport.fleetBurn', fuelShare: 'transport.fleetBurn', fuelReturn: 'fuelService.ledger' } }
 
   for (const slot of ['FleetName', 'ships', 'cargo', 'colonists', 'speed', 'tripDays', 'trips', 'tonsYear', 'colonistsYear', 'fuel']) {
     const node = inside.find((one) => typeof one.slotTarget === 'string' && one.slotTarget.replace(/[`'"]/g, '') === `item.${slot}`)
@@ -1414,9 +1417,9 @@ const FAULTS = [
   ['a ship with no tank has no limit', 'profile', '(capacity > 0 ? perTrip / capacity : perTrip > 0 ? Infinity : 0)', '(capacity > 0 ? perTrip / capacity : 0)', ['fuel-range']],
   ['the stops are timed on the first ship alone', 'profile', 'const trip = roundTrip([{ ...head, MaxSpeed: profile.cruise, EnginePower: 0 }, ...rest]', 'const trip = roundTrip([{ ...head, MaxSpeed: profile.cruise, EnginePower: 0 }]', ['stop-bottleneck']],
   ['the trip flies at the speed of the first ship\'s class', 'profile', 'MaxSpeed: profile.cruise,', 'MaxSpeed: head.MaxSpeed,', ['shared-cycle']],
-  ['the wait row states the shortest wait', 'transportPage', 'result: waitResult(trip.waitSeconds, [])', 'result: waitResult({ lo: trip.waitSeconds.lo, hi: trip.waitSeconds.lo }, [])', ['cycle-rows']],
-  ['the round trip row shows the lower case alone', 'transportPage', 'text: range(trip.tripSecondsLow, trip.tripSeconds) }', 'text: this.span(trip.tripSecondsLow) }', ['cycle-rows']],
-  ['the flying row is the whole round trip', 'transportPage', 'text: this.span(trip.travelSeconds) }', 'text: this.span(trip.tripSeconds) }', ['cycle-rows']],
+  ['the wait row states the shortest wait', 'transportPage', 'result: known ? waitResult(trip.waitSeconds, []) : null', 'result: known ? waitResult({ lo: trip.waitSeconds.lo, hi: trip.waitSeconds.lo }, []) : null', ['cycle-rows']],
+  ['the round trip row shows the lower case alone', 'transportPage', 'text: known ? range(trip.tripSecondsLow, trip.tripSeconds) : \'Not known\' }', 'text: known ? this.span(trip.tripSecondsLow) : \'Not known\' }', ['cycle-rows']],
+  ['the flying row is the whole round trip', 'transportPage', 'text: known ? this.span(trip.travelSeconds) : \'Not known\' }', 'text: known ? this.span(trip.tripSeconds) : \'Not known\' }', ['cycle-rows']],
   ['Hauling moves a fleet that cannot be profiled', 'profile', 'Speed: profile.status === \'ok\' ? profile.cruise : 0,', 'Speed: profile.cruise,', ['unsupported', 'no-propulsion', 'hauling-fleet', 'pages']],
   ['Hauling burns fuel for a fleet that cannot be profiled', 'profile', 'FuelPerHour: profile.status === \'ok\' ? profile.fuelPerHour : 0,', 'FuelPerHour: profile.fuelPerHour,', ['hauling-fleet']],
   // eslint-disable-next-line no-template-curly-in-string

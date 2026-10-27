@@ -2,6 +2,7 @@
   <div>
     <v-container fluid class="transport-page">
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
+      <fuel-reserve-reader :key="`${GameID}-${RaceID}`" @reserves="fuelReserveRead = $event" />
 
       <template v-if="ready">
         <div class="toolbar">
@@ -139,19 +140,20 @@
           <div v-if="payoutNote" class="panel-foot caption text--secondary"><span class="font-weight-medium">Shipping-line payout</span><provenance-mark :result="payoutNote.result" label /> {{ payoutNote.text }}</div>
         </v-card>
 
-        <v-card class="panel" data-summary="How long each fleet would take to sail the chosen run as one, with every ship at the speed of the slowest, and what it could carry. Use it to see what a mixed fleet really does beside the classes timed alone." data-fleet-panel elevation="1">
+        <v-card class="panel" data-summary="How long each fleet would take to sail the chosen run as one, with every ship at the speed of the slowest, what it could carry and whether its fuel lasts with the refuelling at the colonies and tankers on the way. Use it to see what a mixed fleet really does beside the classes timed alone." data-fleet-panel elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Fleets sailing together<provenance-mark rule="transport.fleetTrip" label /></span>
               <v-chip v-if="destination" small class="ml-3">{{ origin.name }} → {{ destination.name }}</v-chip>
             </span>
           </div>
+          <div v-for="note in fuelNotes" :key="note.key" class="panel-body py-2 caption" :class="note.tone" data-fuel-note :data-fuel-input="note.key">{{ note.text }}<v-btn v-if="note.retry" x-small text class="ml-2" @click="note.retry()">Retry</v-btn></div>
           <div v-if="fleetShipsState.loading" class="panel-body py-2 caption text--secondary" data-fleet-note>Reading the ships of the fleets.</div>
           <div v-else-if="fleetShipsState.failed" class="panel-body py-2 caption warning--text" data-fleet-note>The ships of the fleets could not be read: {{ fleetShipsState.error }}<v-btn x-small text class="ml-2" @click="retryFleetShips">Retry</v-btn></div>
           <v-data-table v-else :headers="fleetHeaders" :items="fleetRuns" item-key="key" :expanded.sync="fleetsExpanded" show-expand single-expand :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" :items-per-page.sync="fleetsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="destination ? 'No fleet carries cargo or colonists' : 'Pick a destination above'" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium" data-fleet-name>{{ item.FleetName }}</div>
+                <div class="font-weight-medium" data-fleet-name :data-fleet-id="item.FleetID">{{ item.FleetName }}</div>
                 <div class="caption text--secondary">{{ item.independent }} of {{ item.ships }} under their own power<provenance-mark rule="transport.fleetSpeed" /></div>
               </div>
             </template>
@@ -166,7 +168,7 @@
               <span v-else class="text--secondary">—</span>
             </template>
             <template #[`item.tripDays`]="{ item }">
-              <div v-if="item.status === 'ok' || item.status === 'range'" class="py-2 text-no-wrap" :title="tripTitle(item)">
+              <div v-if="(item.status === 'ok' || item.status === 'range') && item.timingKnown" class="py-2 text-no-wrap" :title="tripTitle(item)">
                 <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}<provenance-mark v-if="item.provenance" :result="item.provenance" /></div>
                 <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
                 <div v-if="item.propagation" class="caption text--secondary" data-propagation :title="propagationText(item)">{{ propagationText(item) }}</div>
@@ -180,16 +182,18 @@
               <div v-if="item.fuel !== null" class="py-2 text-no-wrap">
                 <div>{{ count(item.fuel) }} L<provenance-mark :result="item.results.fuel" /></div>
                 <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of the tank of {{ item.fuelLimiting }}<provenance-mark :result="item.results.fuelShare" /></div>
+                <div v-if="item.ledger && item.returnShare !== null" class="caption text--secondary" data-fuel-return>returns with {{ count(item.returnShare * 100) }}% of the tank of {{ item.returnLimiting }}<provenance-mark :result="item.results.fuelReturn" /></div>
               </div>
               <span v-else class="text--secondary">—</span>
             </template>
+            <template #[`item.draw`]="{ item }"><span v-if="item.draw !== null" class="text-no-wrap" :title="item.drawTitle" data-fleet-draw>{{ item.draw }} of {{ item.drawOf }}</span><span v-else class="text--secondary">—</span></template>
             <template #[`item.statusSort`]="{ item }">
               <div class="py-2">
-                <div class="text-no-wrap">
+                <div class="text-no-wrap" data-fleet-status>
                   <v-icon small :color="STATUS[item.status].color" class="mr-1">{{ STATUS[item.status].icon }}</v-icon>
-                  <span>{{ STATUS[item.status].label }}</span>
+                  <span>{{ STATUS[item.status].label }}</span><provenance-mark v-if="item.ledger" :result="item.ledger.results.ledger" />
                 </div>
-                <div v-if="item.note && item.status !== 'noroute'" class="caption text--secondary">{{ item.note }}</div>
+                <div v-if="item.note && item.status !== 'noroute'" class="caption text--secondary" data-fleet-note-text>{{ item.note }}</div>
               </div>
             </template>
             <template #expanded-item="{ headers, item }">
@@ -205,11 +209,49 @@
                     </tbody>
                   </v-simple-table>
                 </div>
+                <div v-if="item.ledgerView" class="mb-3" data-fuel-ledger>
+                  <div class="text-subtitle-2">Fuel on the run<provenance-mark :result="item.ledgerView.result" /></div>
+                  <v-simple-table dense>
+                    <thead>
+                      <tr>
+                        <th>Ship</th>
+                        <th v-for="column in item.ledgerView.columns" :key="column.key" class="text-right">{{ column.label }}</th>
+                        <th class="text-right">Returns with</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="ship in item.ledgerView.ships" :key="ship.id" :data-ledger-ship="ship.id">
+                        <td>{{ ship.name }}</td>
+                        <td v-for="cell in ship.cells" :key="cell.key" class="text-right text-no-wrap">
+                          <span :data-ledger-value="cell.kind" :data-ledger-key="cell.key">{{ cell.litres }}</span>
+                          <span v-if="cell.share" class="caption text--secondary ml-1">{{ cell.share }}</span>
+                        </td>
+                        <td class="text-right text-no-wrap">
+                          <span data-ledger-value="return">{{ ship.returned }}</span>
+                          <span v-if="ship.returnedShare" class="caption text--secondary ml-1">{{ ship.returnedShare }}</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-simple-table>
+                  <div v-for="stop in item.ledgerView.stops" :key="stop.key" class="caption mt-2" :data-service-stop="stop.key">
+                    <div class="font-weight-medium">{{ stop.title }}</div>
+                    <div v-if="!stop.parts.length" class="text--secondary">{{ stop.verdict }}</div>
+                    <div v-for="part in stop.parts" :key="part.key" class="mb-1" :data-service-source="part.key">
+                      <div>{{ part.kind }}<span v-if="part.source">, {{ part.source }}</span>: {{ part.verdict }}</div>
+                      <div v-for="figure in part.figures" :key="figure.key" class="text--secondary"><span>{{ figure.label }}: </span><span :data-service-value="figure.key">{{ figure.text }}</span></div>
+                      <div v-for="tanker in part.tankers" :key="tanker.key" class="text--secondary" data-service-tanker>{{ tanker.text }}</div>
+                    </div>
+                    <div v-for="need in stop.needs" :key="need.id" class="text--secondary" :data-service-need="need.id"><span>{{ need.name }} needs </span><span data-service-need-value>{{ need.text }}</span><span> to reach the next stop that serves</span></div>
+                  </div>
+                  <div v-if="item.ledgerView.limiting" class="caption mt-2" data-ledger-limiting>{{ item.ledgerView.limiting }}</div>
+                  <div v-for="text in item.ledgerView.notes" :key="text" class="caption text--secondary" data-ledger-note>{{ text }}</div>
+                </div>
                 <fleet-profile :participants="item.participantRows" :speeds="item.speeds" :reasons="item.reasons" :conditions="item.conditions" :handling-rows="item.handlingRows" />
               </td>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">A fleet sails at one speed: that of its slowest ship under its own power, from the engines it has undamaged, its overhaul and the mass of a ship it tows, which can be lower than the speed saved for the fleet and than the class's rating. Every ship shares that one travel time and burns fuel at its own engine power, scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none of its own and its holds are not counted, as loading by such a craft is not validated for this game version; a fleet with every hold in tow is not supported. A ship with no working engines that nothing carries or tows keeps the fleet from moving. Loading and unloading are timed as for the classes above, each stop taking its slowest counted ship. The classes above are each timed alone, as if every ship of it had its own engines. {{ versionNote }} Every jump is followed by a delay each ship draws from its own crew, the longest of them holding the fleet back; the fleet waits at a jump point only for what the flight and the loading since the last jump have not already used, as a range from the lowest to the highest draws, and the round trip is the upper case. The game retries a blocked transit at the start of each subpulse and the length of the subpulses ahead is not known, so the upper case takes a wait up to two subpulses past the second the delay clears (12 hours at the longest subpulse the game runs, 6 hours) and the lower case the second it clears. A transit takes no time. A jump gives the delay again, so the wait is counted for every jump of the way there and back. Where a ship's crew is not in the save the round trip is not given.</div>
+          <div class="panel-foot caption text--secondary" data-fuel-foot>A colony with a spaceport or refuelling station serves each ship at the race's refuelling rate from the stock above the local reserve. Stationary tankers with an undamaged transfer system serve from the fuel above the class minimum and the local reserve, richest first, and a tanker rated under 20,000 L/h serves recipients of 20 hull spaces or less only. The fleets shown draw on a shared stock one after another in the draw order, which is the order of the Fleets pick, or by fleet name when every fleet is shown, each fleet's whole round trip before the next, and which is not the order in time. Sorting the table changes neither that order nor any figure. {{ fillNote }} The fleet's own tankers are not counted, and a fleet starts with the fuel it has aboard now.</div>
         </v-card>
 
         <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
@@ -255,6 +297,7 @@
 import { mapGetters, mapState } from 'vuex'
 
 import FleetProfile from '../components/page/FleetProfile.vue'
+import FuelReserveReader from '../components/page/FuelReserveReader.vue'
 import HandlingBreakdown from '../components/page/HandlingBreakdown.vue'
 import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
@@ -281,6 +324,7 @@ import { amountText, describeTariffVersion, payoutRows } from '../utilities/civi
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, handlingRows, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 import { fleetProfile, fleetTrip, fleetTripResult, loadFleetShips, participantRows } from '../utilities/fleet-profile'
+import { SERVICE_BOUNDS, SERVICE_KINDS, SERVICE_REASONS, SERVICE_VERDICTS, ledgerNote, ledgerRows, loadFuelSites, netLedgers, serviceSeconds, timingKnown } from '../utilities/fuel-ledger'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
 import { fleetTimingOf, flightOnly, loadSystemDust, waitResult } from '../utilities/route-time'
 import { cachedPropagation } from '../utilities/orbit-propagation'
@@ -298,11 +342,12 @@ const INPUT_LABELS = {
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
   fleetShips: 'the ships of the fleets',
+  fuelSites: 'the refuelling sites',
   systemDust: 'the nebula density of the systems',
   ...POSITION_LABELS,
 }
 // The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read, the ships of the fleets sailing together).
-const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips', ...POSITION_INPUTS]
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips', 'fuelSites', ...POSITION_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
@@ -311,6 +356,7 @@ const OPTIONS = [
   { key: 'gatesOnly', config: 'transportGatesOnly', default: false, label: 'Stabilised jump points only', hint: 'Ships with a jump drive that covers their size use only jump points stabilised on both sides too, as the others always do.' },
   { key: 'useLagrange', config: 'transportUseLagrange', default: true, label: 'Use Lagrange points', hint: 'Jumps between stable Lagrange points inside a system when that is shorter.' },
   { key: 'showIdle', config: 'transportIdleRequests', default: false, label: 'Idle work orders', hint: 'Lists the requests in the civilian work orders that have nothing to supply, ask for or carry.' },
+  { key: 'fillRequired', config: 'transportFillRequired', default: false, label: 'Take only what the run needs', hint: 'Each ship takes the litres the run to the next refuelling stop needs plus its reserve, not a full tank, which leaves more for the fleets behind it.' },
 ]
 // Each option is kept on its own, for every game.
 const OPTION_FIELDS = Object.fromEntries(OPTIONS.map((option) => [option.key, { key: option.config, default: option.default }]))
@@ -331,9 +377,30 @@ const nameList = (names) => (names.length > 3 ? `${names.slice(0, 3).join(', ')}
 
 const unique = (values) => [...new Set(values)]
 
+// The order the fleets draw on a shared stock in: the order of the Fleets pick, and with no pick the fleets by name and then by FleetID. The table's sort never enters it, so no figure depends on how the rows are shown.
+const drawOrderOf = (fleets, picked) => {
+  const rank = new Map(picked.map((fleetId, index) => [fleetId, index]))
+
+  return picked.length ? [...fleets].sort((a, b) => rank.get(a.FleetID) - rank.get(b.FleetID)) : [...fleets].sort((a, b) => a.FleetName.localeCompare(b.FleetName) || a.FleetID - b.FleetID)
+}
+
+// A place of the run as a stop of the ledger: the colony it is, when it is one.
+const stopOf = (place) => ({ name: place.name, PopulationID: place.kind === 'colony' ? place.colony.PopulationID : null, SystemID: place.SystemID, Xcor: place.Xcor, Ycor: place.Ycor })
+
+// The seconds a refuelling adds at each end of a cycle, from the ledger's hours (the opening and the closing fill at the origin together): none where the ledger has no figure.
+const serviceOf = (ledger) => {
+  const seconds = serviceSeconds(ledger)
+
+  return seconds ? { origin: seconds.origin, destination: seconds.destination } : null
+}
+
+const sumOf = (list) => list.reduce((total, value) => total + value, 0)
+
+const capitalised = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
+
 export default {
   name: 'TransportPage',
-  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles },
+  components: { AvoidOptions, FleetProfile, FuelReserveReader, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles },
   mixins: [
     avoidRoutes,
     capabilityGates,
@@ -358,6 +425,7 @@ export default {
     return {
       expanded: [],
       fleetsExpanded: [],
+      fuelReserveRead: null,
       optionList: OPTIONS,
       pageSizes: PAGE_SIZES,
       STATUS,
@@ -607,7 +675,38 @@ export default {
       return { loading: state === undefined, failed: typeof state === 'string', error: typeof state === 'string' ? state : '' }
     },
 
-    // One entry per picked military fleet, sailing as one, on the route: every ship at the fleet's one speed.
+    // The fuel the player keeps at colonies and on ships as the ledger reads it, null while the records are not read.
+    fuelReserveReader() {
+      return this.fuelReserveRead && this.fuelReserveRead.ready ? this.fuelReserveRead.reader : null
+    },
+
+    // What the optional reads behind the ledgers say while they are in flight or failed: a note for each, with the read to try again when it failed.
+    fuelNotes() {
+      const sites = this.loadErrors.fuelSites
+      const reserves = this.fuelReserveRead
+      const notes = []
+
+      if (sites === undefined) {
+        notes.push({ key: 'sites', tone: 'text--secondary', text: 'Reading the refuelling sites.', retry: null })
+      } else if (typeof sites === 'string') {
+        notes.push({ key: 'sites', tone: 'warning--text', text: `The refuelling sites could not be read: ${sites}`, retry: this.retryFuelSites })
+      }
+
+      if (reserves && reserves.failed) {
+        notes.push({ key: 'reserves', tone: 'warning--text', text: `The fuel reserves could not be read: ${reserves.error}`, retry: reserves.retry })
+      } else if (reserves && reserves.loading) {
+        notes.push({ key: 'reserves', tone: 'text--secondary', text: 'Reading the fuel reserves.', retry: null })
+      }
+
+      return notes
+    },
+
+    // What the foot says of the fill target.
+    fillNote() {
+      return this.fillRequired ? 'Each ship takes only what the run to the next refuelling stop needs, with its reserve, as the option is on.' : 'Each ship is filled to a full tank where a stop serves; the option to take only what the run needs draws less and leaves more for the fleets behind.'
+    },
+
+    // One entry per picked military fleet, sailing as one, on the route: every ship at the fleet's one speed. The fleets are planned in the draw order, each one's whole round trip drawing on the stock the fleets before it left: first on the kilometres of the saved positions, which give each fleet's first simulated cycle, then again on the kilometres that cycle flew, so what a fleet draws is what it flies.
     fleetRuns() {
       const { endpoints, destination } = this
       const chosen = new Set(this.chosenFleetIds)
@@ -616,7 +715,12 @@ export default {
         return []
       }
 
-      return this.fleetGroups.filter((fleet) => !chosen.size || chosen.has(fleet.FleetID)).map((fleet) => this.fleetRunOf(fleet, endpoints))
+      const setups = drawOrderOf(this.fleetGroups.filter((fleet) => !chosen.size || chosen.has(fleet.FleetID)), this.chosenFleetIds).map((fleet) => this.fleetSetupOf(fleet))
+      const held = this.fleetLedgers(setups, (setup) => [setup.reach.route.km, setup.reach.route.km])
+      const stages = new Map(setups.filter((setup) => setup.ledgerable).map((setup) => [setup.fleet.FleetID, this.fleetStageOf(setup, endpoints, held.get(setup.fleet.FleetID))]))
+      const flown = this.fleetLedgers(setups, (setup) => this.flownLegs(setup, stages.get(setup.fleet.FleetID)))
+
+      return setups.map((setup) => this.fleetRunOf(setup, endpoints, stages.get(setup.fleet.FleetID), flown.get(setup.fleet.FleetID)))
     },
 
     fleetHeaders() {
@@ -631,6 +735,7 @@ export default {
         { text: 'Tons / yr', value: 'tonsYear', align: 'end' },
         { text: 'Colonists / yr', value: 'colonistsYear', align: 'end' },
         { text: 'Fuel / trip', value: 'fuel', align: 'end' },
+        { text: 'Draw', value: 'draw', align: 'end' },
         { text: 'Status', value: 'statusSort' },
         { text: '', value: 'data-table-expand' },
       ]
@@ -979,10 +1084,58 @@ export default {
       this.$asyncComputed.fleetShips.update()
     },
 
-    // A fleet sailing together on a route: the one speed its ships share, what it carries by the holds that count, how long a round trip takes and whether it can run, with each ship as a participant.
-    fleetRunOf(fleet, endpoints) {
+    retryFuelSites() {
+      this.$asyncComputed.fuelSites.update()
+    },
+
+    // What a fleet needs to be planned on the run: its profile, the reach of its ships, and whether a ledger can be worked out for it (its profile runs and a route exists).
+    fleetSetupOf(fleet) {
       const profile = fleetProfile(fleet.ships, fleet, { basis: 'maximum' })
       const reach = this.reachOf({ FleetID: fleet.FleetID, FleetName: fleet.FleetName, canTransit: fleet.canTransit, civilian: false })
+
+      return { fleet, profile, reach, ledgerable: profile.status === 'ok' && !reach.pending && Boolean(reach.route) }
+    },
+
+    // The ledgers of the fleets that can have one, drawn in the order given: a Map of FleetID to the ledger (`netLedgers`), each over the legs `legsOf(setup)` gives, out and back, with the stops origin, destination and the origin again.
+    fleetLedgers(setups, legsOf) {
+      const members = setups.filter((setup) => setup.ledgerable)
+      const stops = [stopOf(this.origin), stopOf(this.destination), stopOf(this.origin)]
+      const { ledgers } = netLedgers(members.map((setup) => ({ name: setup.fleet.FleetName, profile: setup.profile, legs: legsOf(setup), stops, cycle: true })), { sites: this.loadErrors.fuelSites === null ? this.fuelSites || null : null, reserves: this.fuelReserveReader || null, version: this.formulaVersion, target: this.fillRequired ? 'required' : 'full' })
+
+      return new Map(members.map((setup, index) => [setup.fleet.FleetID, ledgers[index]]))
+    },
+
+    // A fleet's round trip with the time its refuelling takes: the timing of its route, the trip on the saved positions, the first simulated year of it, whether the flights of that year are the ones the trip is timed on (`moved`) and whether those flights are not known because the refuelling hours that move the bodies on are not (`clockUnknown`: the hours are not known and the bodies move, or the year is capped at the hours the ledger counts, which shorter or longer hours may not be).
+    fleetStageOf(setup, endpoints, ledger) {
+      const { profile, reach } = setup
+      const timing = { ...fleetTimingOf(profile.participants, this.systemDust), steps: routeLegs(reach.route) }
+      const heldTrip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport, timing, service: serviceOf(ledger) })
+      const first = this.simulate(reach, profile.cruise, heldTrip)
+      const stage = { timing, heldTrip, first, moved: false }
+      const flown = this.flownTripOf(setup, endpoints, stage, ledger)
+      const moved = Boolean(flown) && flightOnly(flown.cycle, profile.cruise)
+      const capped = Boolean(first) && first.annual.reasons.includes('cycles-capped')
+
+      return { ...stage, moved, clockUnknown: (moved || capped) && !timingKnown(ledger) }
+    },
+
+    // The round trip flown on the kilometres of the first simulated cycle: null when the bodies' movement left the saved positions standing.
+    flownTripOf(setup, endpoints, stage, ledger) {
+      const { first, timing } = stage
+
+      return first && first.annual.status === 'propagated' ? fleetTrip(setup.profile, first.annual.meanKm, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport, timing: { ...timing, flights: { out: first.annual.flights[0], back: first.annual.flights[1] } }, service: serviceOf(ledger) }) : null
+    },
+
+    // The kilometres of the way out and of the way back a fleet's ledger runs on: those of the year's first cycle where the round trip is timed on them, the route's own otherwise, and not known where the bodies move on a refuelling clock that is not known.
+    flownLegs(setup, stage) {
+      const { km } = setup.reach.route
+
+      return stage.clockUnknown ? [null, null] : stage.moved ? [sumOf(stage.first.annual.flights[0]), sumOf(stage.first.annual.flights[1])] : [km, km]
+    },
+
+    // A fleet sailing together on a route: the one speed its ships share, what it carries by the holds that count, how long a round trip takes and whether it can run, with each ship as a participant. `setup` as `fleetSetupOf`, `stage` as `fleetStageOf` and `ledger` the fleet's ledger (`fleetLedgers`): the ledger decides whether the fuel lasts where the round trip itself can run.
+    fleetRunOf(setup, endpoints, stage, ledger) {
+      const { fleet, profile, reach } = setup
       const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
       const ok = profile.status === 'ok'
       const base = {
@@ -1002,12 +1155,20 @@ export default {
         travelSeconds: null,
         handlingSeconds: null,
         tripDays: null,
+        timingKnown: true,
         trips: null,
         tonsYear: null,
         colonistsYear: null,
         fuel: null,
         fuelShare: null,
         fuelLimiting: '',
+        draw: null,
+        drawOf: null,
+        drawTitle: '',
+        ledger: null,
+        ledgerView: null,
+        returnShare: null,
+        returnLimiting: '',
         provenance: null,
         results: null,
         handlingRows: [],
@@ -1029,28 +1190,31 @@ export default {
         return { ...base, note: this.reachNote(fleet, reach) }
       }
 
-      const timing = { ...fleetTimingOf(profile.participants, this.systemDust), steps: routeLegs(reach.route) }
-      const heldTrip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport, timing })
-      const first = this.simulate(reach, profile.cruise, heldTrip)
-      const flownTrip = first && first.annual.status === 'propagated' ? fleetTrip(profile, first.annual.meanKm, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport, timing: { ...timing, flights: { out: first.annual.flights[0], back: first.annual.flights[1] } } }) : null
+      const { heldTrip, first } = stage
+      const flownTrip = this.flownTripOf(setup, endpoints, stage, ledger)
       // The bodies moved on can bring an end of the run nearer, so that a flight no longer runs the delay down: that round trip's time is a range, and it keeps the saved positions (`timed-clock`).
       const simulation = flownTrip && !flightOnly(flownTrip.cycle, profile.cruise) ? this.simulate(reach, profile.cruise, flownTrip) : first
       const trip = flownTrip && simulation === first ? flownTrip : heldTrip
       const positions = simulation ? simulation.annual.positions : this.positionsOf(reach)
       const yearly = (value) => ({ days: value.tripSeconds / SECONDS_PER_DAY, trips: value.trips, tons: value.tonsYear, colonists: value.colonistsYear })
-      const works = trip.status === 'ok'
-      const timed = works || trip.status === 'range'
+      // Where the round trip can run, the ledger says whether the fuel lasts.
+      const runs = trip.status === 'ok' || trip.status === 'range'
+      const status = runs ? ledger.status : trip.status
+      const works = status === 'ok'
+      const timed = runs
       const left = profile.cargo.left.ships.length
-      const run = { ...base, ...this.safeFields(reach), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, cycleRows: timed ? this.cycleRows(trip) : [], provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ? this.propagationOf(simulation, yearly(heldTrip), yearly(trip), works) : null }
+      const known = timingKnown(ledger)
+      const run = { ...base, ...this.safeFields(reach), ...this.ledgerFields(ledger), status, timingKnown: known, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, cycleRows: timed ? this.cycleRows(trip, ledger, known) : [], provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, known ? trip : null), statusSort: works ? 0 : 1, simulation, propagation: timed && known && simulation && simulation.annual.compared ? this.propagationOf(simulation, yearly(heldTrip), yearly(trip), works) : null }
       const problems = trip.problems.map((problem) => capital(problem.text)).join('; ')
+      const ledgerWords = runs ? ledgerNote(ledger, { litres: (value) => `${this.count(value)} L`, hours: (value) => this.span(value * 3600) }) : null
 
       if (works) {
         const figure = (rule, value, units) => figureOf({ rule, results: [run.provenance], value, units })
-        const results = { trips: figure('transport.fleetTrip', trip.trips, 'trips/yr'), tonsYear: figure('transport.fleetTrip', trip.tonsYear, 't/yr'), colonistsYear: figure('transport.fleetTrip', trip.colonistsYear, 'colonists/yr'), fuel: figure('transport.fleetBurn', trip.fuelPerTrip, 'L'), fuelShare: figure('transport.fleetBurn', trip.fuelShare * 100, '%') }
+        const results = { trips: figure('transport.fleetTrip', trip.trips, 'trips/yr'), tonsYear: figure('transport.fleetTrip', trip.tonsYear, 't/yr'), colonistsYear: figure('transport.fleetTrip', trip.colonistsYear, 'colonists/yr'), fuel: figure('transport.fleetBurn', trip.fuelPerTrip, 'L'), fuelShare: figure('transport.fleetBurn', trip.fuelShare * 100, '%'), fuelReturn: figureOf({ rule: 'fuelService.ledger', results: [run.provenance, ledger.results.ledger], value: run.returnShare === null ? null : run.returnShare * 100, units: '%' }) }
 
-        return { ...run, results, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: trip.tonsYear, colonistsYear: trip.colonistsYear, fuel: trip.fuelPerTrip, fuelShare: trip.fuelShare, fuelLimiting: trip.fuelLimiting ? trip.fuelLimiting.ShipName : '', note: left ? `The holds of ${left} carried or towed craft are not counted.` : '' }
-      } else if (trip.status === 'range') {
-        return { ...run, note: `A round trip needs ${this.count(trip.fuelShare * 100)}% of the tank of ${trip.fuelLimiting.ShipName}.` }
+        return { ...run, results, tripDays: known ? trip.tripSeconds / SECONDS_PER_DAY : null, trips: known ? trip.trips : null, tonsYear: known ? trip.tonsYear : null, colonistsYear: known ? trip.colonistsYear : null, fuel: trip.fuelPerTrip, fuelShare: trip.fuelShare, fuelLimiting: trip.fuelLimiting ? trip.fuelLimiting.ShipName : '', note: [ledgerWords, left ? `The holds of ${left} carried or towed craft are not counted.` : ''].filter(Boolean).join('. ') }
+      } else if (runs) {
+        return { ...run, note: [ledgerWords, stage.clockUnknown ? 'The legs are not known: the bodies move while the stops last, and the hours of a refuelling are not known.' : ''].filter(Boolean).join('. ') }
       } else if (trip.status === 'unknown') {
         return { ...run, note: `Not known whether the fleet can run: ${problems}.` }
       }
@@ -1058,17 +1222,88 @@ export default {
       return { ...run, note: problems ? `${problems}.` : '' }
     },
 
-    // The parts of a fleet's round trip that add up to its time, for the expanded row: flying, loading and unloading, the transits (which take none), the wait for the jump shock as a range, the total at the upper case of that wait with the lower case beside it, and the round trips a year that total gives.
-    cycleRows(trip) {
+    // What a fleet's ledger adds to its row: its place in the draw order, the ledger and its view for the expanded row, and how full the fullest-run ship's tank is on return.
+    ledgerFields(ledger) {
+      const { draw } = ledger
+      const stops = [...new Set(ledger.stops.map((stop) => stop.stop.name))]
+      const returned = ledger.returnFuel ? ledger.ships.filter((entry) => entry.role === 'independent' && entry.tank).map((entry) => ({ entry, share: ledger.returnFuel.get(entry.id) / entry.capacity })).reduce((worst, item) => (!worst || item.share < worst.share ? item : worst), null) : null
+
+      return { draw: draw.position, drawOf: draw.of, drawTitle: `Draws on ${joinLabels(stops)}${draw.ahead.length ? ` after ${joinLabels(draw.ahead)}` : ' first'}`, ledger, ledgerView: this.ledgerViewOf(ledger), returnShare: returned ? returned.share : null, returnLimiting: returned ? returned.entry.name : '' }
+    },
+
+    // The ledger as the expanded row shows it: a table of the fuel of each ship stop by stop and leg by leg, what each source at each stop gave, the limiting ship and what is not counted.
+    ledgerViewOf(ledger) {
+      const litres = (value) => (Number.isFinite(value) ? `${this.count(value)} L` : 'Not known')
+      const share = (value) => (Number.isFinite(value) ? `${this.count(value * 100)}%` : '')
+      const columns = [{ key: 'start', kind: 'start', label: 'Aboard' }]
+
+      ledger.stops.forEach((stop, index) => {
+        if (stop.serving) {
+          columns.push({ key: `received-${index}`, kind: 'received', label: `Received at ${stop.stop.name}`, index })
+        }
+
+        if (index < ledger.legs.length) {
+          columns.push({ key: `departure-${index}`, kind: 'departure', label: `Leaves ${stop.stop.name}`, index }, { key: `arrival-${index}`, kind: 'arrival', label: `Reaches ${ledger.legs[index].to.name}`, index })
+        }
+      })
+
+      const cellOf = (row, column) => {
+        if (column.kind === 'start') {
+          return { key: column.key, kind: column.kind, litres: litres(row.start), share: row.capacity > 0 ? share(row.start / row.capacity) : '' }
+        } else if (column.kind === 'received') {
+          return { key: column.key, kind: column.kind, litres: row.received[column.index] === null ? '—' : litres(row.received[column.index]), share: '' }
+        }
+
+        const leg = row.legs[column.index]
+
+        return leg ? { key: column.key, kind: column.kind, litres: litres(leg[column.kind]), share: column.kind === 'arrival' && leg.status === 'dry' ? `runs dry, short by ${litres(leg.shortfall)}` : share(leg[`${column.kind}Share`]) } : { key: column.key, kind: column.kind, litres: '—', share: '' }
+      }
+      const ships = ledgerRows(ledger).map((row) => ({ id: row.id, name: row.name, cells: columns.map((column) => cellOf(row, column)), returned: row.returned === null ? '—' : litres(row.returned), returnedShare: row.returned !== null && row.capacity > 0 ? share(row.returned / row.capacity) : '' }))
+      const stops = ledger.stops.filter((stop) => stop.serving).map((stop) => ({ key: stop.index === 0 ? 'origin' : stop.index === 1 ? 'destination' : 'closing', title: `Refuelling at ${stop.stop.name}`, verdict: stop.service ? '' : SERVICE_REASONS['sites-unread'], parts: stop.service ? stop.service.services.map((part) => this.servicePartOf(part, stop.index, litres)) : [], needs: ledger.required.filter((need) => need.stop === stop.index).map((need) => ({ id: need.id, name: need.name, text: litres(need.litres) })) }))
+      const { limiting } = ledger
+      const conditional = [...new Set(ledger.stops.flatMap((stop) => (stop.service ? stop.service.services.flatMap((part) => part.conditional) : [])))]
+
+      return {
+        result: ledger.results.ledger,
+        columns,
+        ships,
+        stops,
+        limiting: limiting ? `Limiting ship: ${limiting.name}, ${limiting.dry ? `runs dry on the way to ${limiting.stop}, short by ${litres(limiting.shortfall)}` : `arrives at ${limiting.stop} with ${this.count(limiting.share * 100)}%`}` : '',
+        notes: [...conditional, 'The fleet\'s own tankers are not counted', ...ledger.assumptions.map(capitalised)],
+      }
+    },
+
+    // One source at a stop for the ledger view: whether it can serve or why not, and its figures. A colony the stop is not has none.
+    servicePartOf(part, index, litres) {
+      const allowed = part.permission === 'allowed'
+      const reason = part.reason ? SERVICE_REASONS[part.reason] : ''
+      const colony = part.kind === 'colony'
+      const hours = part.hours === null ? 'Not known' : `${part.bound === 'at-least' ? `${SERVICE_BOUNDS['at-least'].before} ` : ''}${this.span(part.hours * 3600)}`
+      const figures = colony && !part.key ? [] : [
+        { key: 'stock', label: colony ? 'Stock now' : 'Eligible surplus now', text: litres(part.stock) },
+        ...(colony ? [{ key: 'reserve', label: 'Local reserve', text: part.reserve === null ? 'Not read' : litres(part.reserve) }] : []),
+        { key: 'ahead', label: 'Taken by the fleets ahead', text: part.takenAhead.length ? part.takenAhead.map((item) => `${item.fleet} ${litres(item.litres)}`).join(', ') : 'None' },
+        { key: 'available', label: 'Available to the fleet at entry', text: litres(part.entry) },
+        ...(allowed ? [{ key: 'received', label: 'Received by the fleet', text: part.received === null ? 'Not known' : litres(part.received) }, { key: 'residual', label: 'Left after the fleet', text: litres(part.residual) }, { key: 'hours', label: 'Hours', text: hours }, ...(part.limiting ? [{ key: 'limiting', label: 'Receives most', text: part.limiting.name }] : [])] : []),
+      ]
+      const tankers = (part.tankers || []).map((tanker) => ({ key: tanker.key, text: `${tanker.name}: ${tanker.permission === 'allowed' && tanker.residual !== null ? `gives from ${litres(tanker.entry)}, ${litres(tanker.residual)} left` : tanker.permission === 'allowed' && tanker.known === false ? `what it gives is not known, ${litres(tanker.entry)} at entry` : tanker.permission === 'allowed' ? `not drawn from, ${litres(tanker.entry)} at entry` : `${tanker.permission === 'blocked' ? 'cannot serve' : 'not known'}: ${SERVICE_REASONS[tanker.reason]}`}` }))
+
+      return { key: `${index}-${part.key || part.kind}`, kind: SERVICE_KINDS[part.kind], source: part.name, verdict: allowed ? SERVICE_VERDICTS.allowed : `${SERVICE_VERDICTS[part.permission]}: ${reason}`, figures, tankers }
+    },
+
+    // The parts of a fleet's round trip that add up to its time, for the expanded row: flying (not known where the run is not), loading and unloading, the refuelling at each end where one is drawn, the transits (which take none), the wait for the jump shock as a range, the total at the upper case of that wait with the lower case beside it, and the round trips a year that total gives.
+    cycleRows(trip, ledger = null, known = true) {
       const range = (low, high) => (low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)
+      const refuelling = (ledger ? ledger.stops.slice(0, 3) : []).filter((stop) => stop.service && stop.service.permission === 'allowed' && stop.hours > 0).map((stop) => ({ key: ['refuel-origin', 'refuel-destination', 'refuel-closing'][stop.index], label: `Refuelling at ${stop.stop.name}${stop.index === 2 ? ' on return' : ''}`, text: `${stop.bound === 'at-least' ? `${SERVICE_BOUNDS['at-least'].before} ` : ''}${this.span(stop.hours * 3600)}` }))
 
       return [
-        { key: 'flight', label: 'Flying', text: this.span(trip.travelSeconds) },
+        { key: 'flight', label: 'Flying', text: known ? this.span(trip.travelSeconds) : 'Not known' },
         { key: 'handling', label: 'Loading and unloading', text: this.span(trip.handlingSeconds) },
+        ...refuelling,
         { key: 'transit', label: 'Transits', text: this.span(trip.transitSeconds) },
-        { key: 'wait', label: 'Waiting for the jump shock', text: range(trip.waitSeconds.lo, trip.waitSeconds.hi), result: waitResult(trip.waitSeconds, []) },
-        { key: 'total', label: 'Round trip', text: range(trip.tripSecondsLow, trip.tripSeconds) },
-        { key: 'year', label: 'Round trips a year', text: this.count(trip.trips, 1) },
+        { key: 'wait', label: 'Waiting for the jump shock', text: known ? range(trip.waitSeconds.lo, trip.waitSeconds.hi) : 'Not known', result: known ? waitResult(trip.waitSeconds, []) : null },
+        { key: 'total', label: 'Round trip', text: known ? range(trip.tripSecondsLow, trip.tripSeconds) : 'Not known' },
+        { key: 'year', label: 'Round trips a year', text: known ? this.count(trip.trips, 1) : 'Not known' },
       ]
     },
 
@@ -1080,7 +1315,7 @@ export default {
         return null
       }
 
-      const wait = (where) => trip.stops.filter((stop) => stop.where === where).reduce((sum, stop) => sum + stop.seconds, 0)
+      const wait = (where) => trip.stops.filter((stop) => stop.where === where).reduce((sum, stop) => sum + stop.seconds, 0) + trip.service[where]
       const steps = routeLegs(reach.route)
       const hops = [{ steps, from: origin, to: destination, wait: wait('destination') }, { steps: reverseSteps(steps), from: destination, to: origin, wait: wait('origin') }]
       const lagrangePoints = this.useLagrange ? this.lagrangePoints : []
@@ -1209,6 +1444,17 @@ export default {
         return await loadFleetShips(this.database, { GameID: this.GameID, RaceID: this.RaceID, fleetWhere: `FCT_Fleet.ShippingLine = 0 and FCT_Fleet.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0 or carrierClass.CargoCapacity is null or carrierClass.ColonistCapacity is null))` })
       }),
       default: [],
+    },
+    // The colonies and the stationary tanker fleets that can serve a ship at a stop, with the race's refuelling rates (`loadFuelSites`): optional, so the page renders without it and a refuelling that cannot be decided reads as not known.
+    fuelSites: {
+      get: tracked('fuelSites', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return await loadFuelSites(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: null,
     },
     // The nebula density of the systems the race has surveyed that have dust (`loadSystemDust`): what caps a fleet's speed in a system. Few saves have any.
     systemDust: {

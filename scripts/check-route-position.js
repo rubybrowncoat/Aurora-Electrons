@@ -1847,6 +1847,10 @@ check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off
   })
 })
 
+// The refuelling sites and fuel reserves of a save with no colony or tanker fleet that serves and no fuel kept back, read: a run is decided by the tanks alone.
+const NO_SITES = { gameTime: 1, hubEra: 0, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies: [], fleets: [] }
+const NO_RESERVES = { ready: true, reader: { colony: () => null, ship: () => null } }
+
 check('pages-transport', 'Transport states a run\'s time and distance with the same positions, the Lagrange points of its route included, for a class and for a fleet, and adds nothing to a route of fixed places', async (w) => {
   const page = await w.transport()
   const modules = await w.modules()
@@ -1858,7 +1862,7 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
   const there = place('fleet', 7, { SystemID: 2, Xcor: 5, Ycor: 5 })
   const route = modules['jump-graph'].searchRoutes(LINKS, [{ SystemID: 1, Xcor: 10, Ycor: 5 }], { order: 'jumps', lagrangePoints: LAGRANGE }).toPlace(there)
   const reach = { route, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
-  const make = (facts, data = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
+  const make = (facts, data = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
   const group = { FleetID: 5, FleetName: 'Convoy', civilian: false }
   const shipClass = { ShipClassID: 1, ClassName: 'Freighter', ships: [HAULER()] }
   const ends = { origin: transport.colonyEndpoint(COLONY()), destination: transport.colonyEndpoint(COLONY({ PopulationID: 8, ShuttleCapacity: 0 })) }
@@ -1869,7 +1873,7 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
   const kept = make(UNSURE, {}, database)
   const viaA = { ...reach, route: ROUTE_BY(there, route.km, [{ out: 1, in: 2, x: 100, y: 0 }]) }
   const viaB = { ...reach, route: ROUTE_BY(there, route.km, [{ out: 3, in: 4, x: 900, y: 400 }]) }
-  const trip = { handlingSeconds: 0, stops: [] }
+  const trip = { handlingSeconds: 0, stops: [], service: { origin: 0, destination: 0 } }
   const flownA = kept.simulate(viaA, 1000, trip)
 
   assert.ok(flownA, 'the run is simulated')
@@ -1926,9 +1930,9 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
   const waitingClass = waiting.runOf(group, shipClass, reach, ends)
   const waitingRun = waiting.fleetRuns[0]
   const pageNodes = elementsOf(templateOf(w.text.transportPage, 'information.vue'))
-  const FIGURES = { trips: ['trips/yr', (row) => row.trips], tonsYear: ['t/yr', (row) => row.tonsYear], colonistsYear: ['colonists/yr', (row) => row.colonistsYear], fuel: ['L', (row) => row.fuel], fuelShare: ['%', (row) => row.fuelShare * 100] }
+  const FIGURES = { trips: ['trips/yr', (row) => row.trips], tonsYear: ['t/yr', (row) => row.tonsYear], colonistsYear: ['colonists/yr', (row) => row.colonistsYear], fuel: ['L', (row) => row.fuel], fuelShare: ['%', (row) => row.fuelShare * 100], fuelReturn: ['%', (row) => row.returnShare * 100] }
   const TABLES = [
-    ['fleetRuns', run, waitingRun, { trips: 'transport.fleetTrip', tonsYear: 'transport.fleetTrip', colonistsYear: 'transport.fleetTrip', fuel: 'transport.fleetBurn', fuelShare: 'transport.fleetBurn' }],
+    ['fleetRuns', run, waitingRun, { trips: 'transport.fleetTrip', tonsYear: 'transport.fleetTrip', colonistsYear: 'transport.fleetTrip', fuel: 'transport.fleetBurn', fuelShare: 'transport.fleetBurn', fuelReturn: 'fuelService.ledger' }],
     ['rows', classRun, waitingClass, { trips: 'transport.freightPerYear', tonsYear: 'transport.freightPerYear', colonistsYear: 'transport.freightPerYear', fuel: 'transport.fuelPerTrip', fuelShare: 'transport.fuelPerTrip' }],
   ]
 
@@ -1938,7 +1942,7 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
 
     assert.ok(known.results && unread.results, `${table}: a run that works has a result for each yearly and fuel figure`)
     marks.forEach((mark) => assert.equal(attrOf(mark, 'rule'), undefined, `${table}: a mark is a result of the row, not the rule alone`))
-    assert.deepEqual([...fields].sort(), Object.keys(FIGURES).sort(), `${table}: each yearly and fuel figure has one mark of the row's result`)
+    assert.deepEqual([...fields].sort(), Object.keys(rules).sort(), `${table}: each yearly and fuel figure has one mark of the row's result`)
     marks.forEach((mark, index) => {
       const [units, shown] = FIGURES[fields[index]]
 
@@ -2179,7 +2183,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const there = place(8, 1)
     const reach = { route: { km: distance, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: distance, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
     const ship = speed === null ? null : HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0, ...(scenario.tank || {}) })
-    const vm = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: ship ? [ship] : [] } })
+    const vm = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: ship ? [ship] : [] } })
     const classRows = ship ? [{ ...vm.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship] }, reach, vm.endpoints), ...vm.safeFields(reach) }] : []
     const rows = [...classRows, ...vm.fleetRuns]
     const label = 'Transport, ' + scenario.name
@@ -2343,7 +2347,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
 
     // Transport: the class row, the fleet row and the strip.
     const ship = HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })
-    const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: kind.origin, destination: kind.destination, reachOf: () => reach, fleetShips: [ship] } })
+    const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: kind.origin, destination: kind.destination, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship] } })
     const classRow = { ...run.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship] }, reach, run.endpoints), ...run.safeFields(reach) }
 
     ;[classRow, ...run.fleetRuns].forEach((row) => {
@@ -2687,7 +2691,7 @@ const FAULTS = [
   ['Hauling states a route\'s distance with the positions of its flights', 'haulingPage', 'withPositions(distanceResult(route.km), savedPositions)', 'withPositions(distanceResult(route.km), positions)', ['pages-saved-distance']],
   ['Hauling\'s plan strip leaves out the saved positions of the distances', 'haulingPage', 'this.planRows.flatMap((row) => row.savedRecords))', '[])', ['pages-saved-distance']],
   ['Hauling\'s route strip leaves out the saved positions of the distances', 'haulingPage', 'this.routeRows.flatMap((row) => row.savedPositions.records))', '[])', ['pages-saved-distance']],
-  ['Transport states a fleet\'s distance with the positions of its flight', 'transportPage', 'const run = { ...base, ...this.safeFields(reach), status: trip.status,', 'const run = { ...base, ...this.safeFields(reach), pathResult: withPositions(pathResult(reach.route, this.avoid), positions), status: trip.status,', ['pages-saved-distance']],
+  ['Transport states a fleet\'s distance with the positions of its flight', 'transportPage', 'const run = { ...base, ...this.safeFields(reach), ...this.ledgerFields(ledger), status,', 'const run = { ...base, ...this.safeFields(reach), ...this.ledgerFields(ledger), pathResult: withPositions(pathResult(reach.route, this.avoid), positions), status,', ['pages-saved-distance']],
   ['Transport\'s strip leaves out the saved positions of the distances', 'transportPage', 'withSavedComparison(flown, [...ends.records, ...saved])', 'withSavedComparison(flown, [...ends.records])', ['pages-position-matrix']],
   ['Hauling\'s plan strip lets a saved distance replace a flown colony', 'haulingPage', 'return withSavedComparison(this.planRows.flatMap((row) => row.positionRecords), this.planRows.flatMap((row) => row.savedRecords))', 'return summarisePositions([...this.planRows.flatMap((row) => row.positionRecords), ...this.planRows.flatMap((row) => row.savedRecords)], { merge: true })', ['pages-saved-distance']],
   ['Hauling\'s route strip lets a saved distance replace a flown stop', 'haulingPage', 'return withSavedComparison(this.routeRows.flatMap((row) => row.positions.records), this.routeRows.flatMap((row) => row.savedPositions.records))', 'return summarisePositions([...this.routeRows.flatMap((row) => row.positions.records), ...this.routeRows.flatMap((row) => row.savedPositions.records)], { merge: true })', ['pages-saved-distance']],
@@ -2699,7 +2703,7 @@ const FAULTS = [
   ['a saved departure counts toward the strip\'s mode', 'position', 'record.moves !== false && !record.departure', 'record.moves !== false', ['pages-routes-matrix']],
   ['a refusal is counted against a saved departure', 'plan', 'const refused = (record) => record.basis !== POSITION_BASIS.PROPAGATED && !record.departure', 'const refused = (record) => record.basis !== POSITION_BASIS.PROPAGATED', ['pages-position-matrix']],
   ['Transport drops the comparison of a class row beyond the tank', 'transportPage', 'const timed = works || status === \'range\'', 'const timed = works', ['pages-position-matrix']],
-  ['Transport drops the comparison of a fleet row beyond the tank', 'transportPage', 'const timed = works || trip.status === \'range\'', 'const timed = works', ['pages-position-matrix']],
+  ['Transport drops the comparison of a fleet row beyond the tank', 'transportPage', '      const timed = runs\n      const left = ', '      const timed = works\n      const left = ', ['pages-position-matrix']],
   ['Transport counts the throughput of a row beyond the tank', 'transportPage', 'const throughput = !found.operational ? \'\'', 'const throughput = false ? \'\'', ['pages-position-matrix']],
   ['Hauling counts the throughput of a row beyond the tank', 'haulingPage', 'const throughput = used.status === \'ok\' ?', 'const throughput = true ?', ['pages-position-matrix']],
   ['Transport\'s strip rebuilds the saved ends by orbit', 'transportPage', 'const ends = routePositions([placeEndpoint(this.origin), placeEndpoint(this.destination)], { facts: this.positionRead })', 'const ends = routePositions([placeEndpoint(this.origin), placeEndpoint(this.destination)], { facts: this.positionRead, adapters: ADAPTERS })', ['pages-position-matrix']],
@@ -2711,7 +2715,7 @@ const FAULTS = [
   ['a place that never moves is a propagated group', 'position', 'supported: supported && found.supported !== false, conditions: lasting, unknown: lasting.length > 0, assumption: base.moves === false ? base.assumption : \'propagated\' })', 'supported: supported && found.supported !== false, conditions: lasting, unknown: lasting.length > 0, assumption: \'propagated\' })', ['pages-endpoint-matrix']],
   ['a place that never moves is a departure group', 'position', 'assumption: base.moves === false ? base.assumption : \'departure\', departure: true })', 'assumption: \'departure\', departure: true })', ['pages-endpoint-matrix']],
   ['Transport states a comparison for a year in which nothing moves (class row)', 'transportPage', '}))), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ?', '}))), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation ?', ['pages-endpoint-matrix']],
-  ['Transport states a comparison for a year in which nothing moves (fleet row)', 'transportPage', 'participantRows(profile, trip), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ?', 'participantRows(profile, trip), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation ?', ['pages-endpoint-matrix']],
+  ['Transport states a comparison for a year in which nothing moves (fleet row)', 'transportPage', 'participantRows(profile, known ? trip : null), statusSort: works ? 0 : 1, simulation, propagation: timed && known && simulation && simulation.annual.compared ?', 'participantRows(profile, known ? trip : null), statusSort: works ? 0 : 1, simulation, propagation: timed && known && simulation ?', ['pages-endpoint-matrix']],
   ['Hauling states a comparison for a haul in which nothing moves', 'haulingPage', 'if (!positionRead || !timed || (flown && !flown.annual.compared)) {', 'if (!positionRead || !timed) {', ['pages-endpoint-matrix']],
   ['Hauling states a comparison for a route in which nothing moves', 'haulingPage', '    routeNote(simulation, year, held) {\n      if (!simulation.annual.compared) {\n        return \'\'\n      } else if (simulation.annual.status !== \'propagated\') {', '    routeNote(simulation, year, held) {\n      if (simulation.annual.status !== \'propagated\') {', ['pages-endpoint-matrix']],
   ['an asteroid with its own switch off is unknown', 'position', 'group === \'asteroid\' ? (rocks === false ? false : both)', 'group === \'asteroid\' ? both', ['motion-matrix', 'motion-switch', 'pages-disabled-asteroid', 'pages-endpoint-matrix']],
