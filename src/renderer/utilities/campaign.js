@@ -751,6 +751,25 @@ export const thinningUpTo = (record, kept, t) => {
   return { ...thinning, witness: witnessOf(kept) }
 }
 
+// A series' record after a clear removed its snapshots before game time `before` (those at or after it stay), or the record itself when it holds none that old, or null when none is left. The thinning record is believed as before: where it was intact (written for exactly the game times the series held) its witness follows the kept times, so the series reads as untouched or thinned as it did and never as partial; where it was not intact it is left as it was and stays as unknown or partial as it was. A clear is not a thinning, so no pass and no dropped snapshot is added.
+export const seriesFrom = (record, before) => {
+  const snapshots = Array.isArray(record.snapshots) ? record.snapshots : []
+  const kept = snapshots.filter((snapshot) => snapshot.t >= before)
+
+  if (kept.length === snapshots.length) {
+    return record
+  }
+
+  if (!kept.length) {
+    return null
+  }
+
+  const thinning = readThinning(record.thinning)
+  const intact = thinning && thinning.witness === witnessOf(snapshots)
+
+  return { ...record, snapshots: kept, ...(intact ? { thinning: { ...thinning, witness: witnessOf(kept) } } : {}) }
+}
+
 // ---- Settling an opened game ---------------------------------------------------------------------------------------
 
 // The seed of a branch forked from `parent` at game time `t`: the parent's records without any snapshot after the fork point, so the branch reads as one timeline. A series' thinning record comes along only where it still holds for the cut (`thinningUpTo`); otherwise the fork's series reads as thinned unknown.

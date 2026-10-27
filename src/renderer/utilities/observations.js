@@ -222,6 +222,34 @@ export const capRecord = (record) => {
   return { ...record, captures: record.captures.slice(dropped.length), cut: Math.max(isKnownNumber(record.cut) ? record.cut : -Infinity, dropped[dropped.length - 1][0]) }
 }
 
+// A kind's record after a clear removed what was observed before game time `before`: the captures before it dropped and `cut` set to the newest of them, as after the cap, and an object whose newest sighting was dropped goes with it, since no capture witnesses it. An object a kept capture saw stays whole: its `first` remains the time it was observed. The record itself when no capture is that old; null when nothing is left, no failure noted either.
+const recordFrom = (record, before) => {
+  const dropped = record.captures.filter(([t]) => t < before)
+
+  if (!dropped.length) {
+    return record
+  }
+
+  const objects = Object.fromEntries(Object.entries(record.objects).filter(([, entry]) => entry[1] >= before))
+  const cut = Math.max(isKnownNumber(record.cut) ? record.cut : -Infinity, ...dropped.map(([t]) => t))
+  const kept = { ...record, captures: record.captures.filter(([t]) => t >= before), objects, cut }
+
+  return kept.captures.length || Object.keys(objects).length || (kept.failures && kept.failures.length) ? kept : null
+}
+
+// A race's observation record after a clear removed what was observed before game time `before` (`recordFrom` for each kind): the race's record itself when no kind holds a capture that old, null when no kind is left.
+export const observationsFrom = (race, before) => {
+  const kinds = Object.entries(race.kinds || {}).map(([kind, record]) => [kind, recordFrom(record, before)])
+
+  if (kinds.every(([kind, record]) => record === race.kinds[kind])) {
+    return race
+  }
+
+  const kept = kinds.filter(([, record]) => record)
+
+  return kept.length ? { ...race, kinds: Object.fromEntries(kept) } : null
+}
+
 // A record with a capture whose read failed noted: { at, t, reason }, the last 50 kept. The objects and captures are unchanged, so the failed save adds nothing and the interval it would have covered stays a gap. The same failure noted again for the same save is not a new one (null, nothing to write).
 export const withFailure = (record, { at, t, reason }) => {
   const failures = record && record.failures ? record.failures : []

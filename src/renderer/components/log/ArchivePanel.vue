@@ -18,7 +18,7 @@
         <div class="archive-tile"><div class="caption text--secondary">Events kept</div><div class="archive-value">{{ count(kept) }} <span class="caption text--secondary">of {{ count(cap) }}</span></div><div class="caption text--secondary">About {{ size }} as stored (an estimate)</div><div v-if="hidden" class="caption text--secondary">{{ count(hidden) }} game-master-only {{ hidden === 1 ? 'event is' : 'events are' }} kept and not listed</div></div>
         <div class="archive-tile"><div class="caption text--secondary">Observed</div><div class="archive-value">{{ spans.length ? `${count(spans.length)} span${spans.length === 1 ? '' : 's'}` : 'Nothing' }}</div><div class="caption text--secondary">{{ observedNote }}</div></div>
         <div class="archive-tile"><div class="caption text--secondary">Conflicts</div><div class="archive-value">{{ count(shownConflicts.length) }}</div><div class="caption text--secondary">{{ shownConflicts.length ? 'Kept, never deleted' : 'No later save contradicted a kept event' }}</div><div v-if="hiddenConflicts" class="caption text--secondary">{{ count(hiddenConflicts) }} more concern game-master-only events and are not listed</div></div>
-        <div v-if="record.cut !== undefined" class="archive-tile"><div class="caption text--secondary">Cut at the cap</div><div class="archive-value">{{ date(record.cut) }}</div><div class="caption text--secondary">Events before this date were dropped</div></div>
+        <div v-if="cutTile" class="archive-tile"><div class="caption text--secondary">{{ cutTile.title }}</div><div class="archive-value">{{ cutTile.date }}</div><div class="caption text--secondary">{{ cutTile.detail }}</div></div>
       </div>
 
       <div class="archive-section">
@@ -112,6 +112,11 @@ export default {
 
     observedNote() {
       return this.spans.length ? `${this.date(this.spans[0][0])} to ${this.date(this.spans[this.spans.length - 1][1])}` : 'No span yet'
+    },
+
+    // The tile for the date the record is complete from: the cap and a clear both cut it, so the words name neither. Null when nothing was cut.
+    cutTile() {
+      return !this.record || this.record.cut === undefined ? null : { title: 'Complete from', date: this.date(this.record.cut), detail: 'Events before this date are no longer kept' }
     },
 
     conflicts() {

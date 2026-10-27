@@ -3,10 +3,10 @@
 import Config from 'electron-store'
 
 import { toBoolean, toNumber } from './aurora'
-import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, readRegistry, readThinning, settle, witnessOf, writeRegistry } from './campaign'
+import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, readRegistry, readThinning, seriesFrom, settle, witnessOf, writeRegistry } from './campaign'
 import { COLONY_COLUMNS, colonyBase, colonyChosen, colonyFileName, colonyForkFile, colonyRows, colonySnapshot, colonyWish, entriesAt, idsToRead, joinColonies, readColonies } from './colony-series'
-import { archiveChosen, archiveKept, archiveWanted, archiveWish, eventBase, eventCapOfSettings, eventFileName, eventFileProblem, eventForkFile, mergeEvents, readLogWindow, readRaceEvents, withFailure } from './event-archive'
-import { mergeObservations, observationBase, observationChosen, observationEverChosenIn, observationFileName, observationFileProblem, observationForkFile, observationKept, observationWanted, observationWish, readObservations } from './observations'
+import { archiveChosen, archiveKept, archiveWanted, archiveWish, eventBase, eventCapOfSettings, eventFileName, eventFileProblem, eventForkFile, eventsFrom, mergeEvents, readLogWindow, readRaceEvents, withFailure } from './event-archive'
+import { mergeObservations, observationBase, observationChosen, observationEverChosenIn, observationFileName, observationFileProblem, observationForkFile, observationKept, observationWanted, observationWish, observationsFrom, readObservations } from './observations'
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
@@ -250,44 +250,49 @@ export const observationStore = (campaignId, branchId) => openStore(HISTORY_FOLD
 // The branch a page of one campaign shows and an answer attaches to: the one the player picked when the campaign has it, else the branch the open save settled to (which stays where the recorder put it).
 export const shownBranch = (branchIds, picked, settled) => (picked && branchIds.includes(picked) ? picked : settled)
 
-// Removes one race's history from one branch file, and its colony series, its event archive and its observation record in the branch's own files, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs. Returns whether anything was removed.
-export const clearRaceHistory = ({ campaignId, branchId, RaceID }) => withRegistry(() => {
-  const store = branchStore(campaignId, branchId)
-  const history = store.store
-  const series = colonyStore(campaignId, branchId)
-  const colonies = series.store
-  const archive = eventStore(campaignId, branchId)
-  const events = archive.store
-  let removed = false
-
-  if (history.races && history.races[RaceID]) {
-    delete history.races[RaceID]
-    store.store = history
-    removed = true
+// Removes one race's history from one branch file, and its colony series, its event archive and its observation record in the branch's own files, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs, and no other branch or file is touched. With `before` (a game time, in seconds) only what was recorded before it goes: the race's snapshots and colony samples older than it (one exactly at it stays), the events and observations older than it, each record cut by its own bookkeeping (`seriesFrom`, `eventsFrom`, `observationsFrom`), so a series reads as untouched or thinned as before and a later save does not bring back what was cleared. A record the race does not keep is left as it is. Returns whether anything was removed.
+export const clearRaceHistory = ({ campaignId, branchId, RaceID, before = null }) => withRegistry(() => {
+  if (before !== null && !Number.isFinite(before)) {
+    throw new Error('The time to clear before is not a number.')
   }
 
-  if (colonies.races && colonies.races[RaceID]) {
-    delete colonies.races[RaceID]
-    series.store = colonies
-    removed = true
+  // The store's file with the race cut, or null when nothing in it changes. Nothing is written here: a read that throws or a cut that fails must leave every file as it was.
+  const planned = (store, cutRecord) => {
+    const stored = store.store
+    const record = stored.races && stored.races[RaceID]
+
+    if (!record) {
+      return null
+    }
+
+    const rest = before === null ? null : cutRecord(record, before)
+
+    if (rest === record) {
+      return null
+    }
+
+    if (rest) {
+      stored.races[RaceID] = rest
+    } else {
+      delete stored.races[RaceID]
+    }
+
+    return { store, stored }
   }
 
-  if (events.races && events.races[RaceID]) {
-    delete events.races[RaceID]
-    archive.store = events
-    removed = true
-  }
+  // Every store is read and cut before the first is written, and none is skipped once another changed.
+  const changes = [
+    planned(branchStore(campaignId, branchId), seriesFrom),
+    planned(colonyStore(campaignId, branchId), seriesFrom),
+    planned(eventStore(campaignId, branchId), eventsFrom),
+    planned(observationStore(campaignId, branchId), observationsFrom),
+  ].filter(Boolean)
 
-  const record = observationStore(campaignId, branchId)
-  const observations = record.store
+  changes.forEach(({ store, stored }) => {
+    store.store = stored
+  })
 
-  if (observations.races && observations.races[RaceID]) {
-    delete observations.races[RaceID]
-    record.store = observations
-    removed = true
-  }
-
-  return removed
+  return changes.length > 0
 })
 
 let appSettings = null
@@ -444,6 +449,24 @@ export const recordedSpan = (snapshots, windowSeconds = 0) => {
 
 const SECONDS_PER_DAY = 86400
 const SECONDS_PER_YEAR = 31536000
+
+// The spans in years before the latest snapshot that the page's span toggle and the Clear dialog offer.
+export const SPAN_YEARS = [10, 20, 50]
+
+// The words of the Clear dialog that name what it does: the option that removes everything, the option that removes what is older than some years, and the two figures it states.
+export const CLEAR_WORDS = { all: 'Everything', older: 'Older than', years: 'years', removed: 'removed', kept: 'kept' }
+
+// What clearing a race's `snapshots` of `years` years does: { before, removed, kept }. 0 years is everything (`before` null, as `clearRaceHistory` takes it). Otherwise `before` is the game time that many years before the race's latest snapshot and a snapshot exactly at it is kept.
+export const clearPlan = (snapshots, years) => {
+  if (!years) {
+    return { before: null, removed: snapshots.length, kept: 0 }
+  }
+
+  const before = Math.max(...snapshots.map((snapshot) => snapshot.t)) - years * SECONDS_PER_YEAR
+  const removed = snapshots.filter((snapshot) => snapshot.t < before).length
+
+  return { before, removed, kept: snapshots.length - removed }
+}
 
 // A span of game time as one figure with its unit (s, min, h, d, y); a dash when it is not known, never 0.
 export const durationText = (seconds) => {

@@ -280,6 +280,13 @@ const gameMasterChecks = [
     assert.equal(panelOn(m, RECORD).hidden, 3)
     assert.equal(panelOn(m, { ...RECORD, increments: [[5, 100, 10, [[...fieldsOf('plain', 0), 2]]]] }).hidden, 0)
   }],
+  ['the tile of the date a record is complete from names the date and does not say the cap cut it, for a record a clear cut well below the cap, and is absent for a record never cut', (m) => {
+    const cleared = panelOn(m, { ...RECORD, cut: 105 })
+
+    assert.equal(cleared.cutTile.date, cleared.date(105))
+    assert.equal(/\bcap\b/i.test(`${cleared.cutTile.title} ${cleared.cutTile.detail}`), false)
+    assert.equal(panelOn(m, RECORD).cutTile, null)
+  }],
   ['failed captures are listed newest first and only when there are some', (m) => {
     assert.deepEqual(panelOn(m, RECORD).failures.map((failure) => failure.reason), ['second failure', 'first failure'])
     assert.deepEqual(panelOn(m, { ...RECORD, failures: undefined }).failures, [])
@@ -335,6 +342,7 @@ const GAME_MASTER_MUTANTS = [
   { name: 'the panel lists the conflicts of the record', load: { panel: { find: 'return this.shownConflicts.slice(-SHOWN).reverse()', replace: 'return this.record.conflicts.slice(-SHOWN).reverse()' } }, fails: ['the conflicts leave out'] },
   { name: 'the panel counts the conflicts of the record', load: { panel: { find: '<div class="archive-value">{{ count(shownConflicts.length) }}</div>', replace: '<div class="archive-value">{{ count(record.conflicts.length) }}</div>' } }, fails: ['the conflicts leave out'] },
   { name: 'the panel does not count the game-master-only events', load: { utility: { file: 'log-archive-view.js', find: 'count + (group[GAME_MASTER] ? group[EVENT_FIELDS.length] : 0)', replace: 'count + 0' } }, fails: ['the panel counts game-master-only'] },
+  { name: 'the tile of the cut worded as the cap having dropped the events', load: { panel: { find: "detail: 'Events before this date are no longer kept'", replace: "detail: 'Events before this date were dropped at the cap'" } }, fails: ['the tile of the date a record is complete from'] },
   { name: 'the failed captures are listed oldest first', load: { panel: { find: 'this.record.failures.slice(-SHOWN).reverse()', replace: 'this.record.failures.slice(-SHOWN)' } }, fails: ['failed captures'] },
   { name: 'the pins on a game-master-only event are listed', load: { page: replacing('const pins = playerPins(this.branchPins)', 'const pins = this.branchPins') }, fails: ['the pins leave out'] },
   { name: 'the pins are not filtered by their fields', load: { utility: { file: 'log-archive-view.js', find: 'pins.filter((pin) => !pin.fields[GAME_MASTER])', replace: 'pins' } }, fails: ['the pins leave out'] },

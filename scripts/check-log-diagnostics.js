@@ -256,6 +256,20 @@ unit('window-cut', 'a window that ends at or before the cap\'s cut is unavailabl
   assert.equal(after.cut, null)
 })
 
+unit('window-cut-clear', 'a window that starts before the cut a clear made of a record well below the cap is partial, and the reason it gives does not say the cap did it', async ({ a, d }) => {
+  const record = await archiveOf(a, databaseOf({ ...SAVED, rows: noise(100, 110) }))
+  const cleared = a.eventsFrom(record, T(106))
+
+  assert.ok(a.recordEvents(cleared) < 20, 'the record is far below the cap')
+  assert.equal(cleared.cut, T(106))
+
+  const across = a.windowState(cleared, T(104), T(109))
+
+  assert.equal(across.state, 'partial')
+  assert.equal(across.cut, T(106))
+  assert.equal(/\bcap\b/i.test(d.REASON_TEXT.cut), false)
+})
+
 unit('window-none', 'no record, or a record with no span, has no window to read', async ({ a }) => {
   assert.equal(a.windowState(null, T(100), T(105)).state, 'unavailable')
   assert.equal(a.windowState(null, T(100), T(105)).observedRows, null)
@@ -592,6 +606,7 @@ const UNIT_FAULTS = [
   { name: 'every type of the log is listed', sources: () => swap('log-diagnostics', 'if (WATCHED_BY_TYPE.has(group[TYPE]) &&', 'if ('), fails: ['events-listed'] },
   { name: 'the archive is changed by the read', sources: () => swap('log-diagnostics', 'return mergeCapture(withoutCut(archive), capture, { now: () => 0 }).record', 'if (archive) {\n      archive.increments = []\n    }\n\n    return mergeCapture(withoutCut(archive), capture, { now: () => 0 }).record'), fails: ['archive-unchanged'] },
   { name: 'the cap\'s cut of the archive is applied to the open save\'s read', sources: () => swap('log-diagnostics', 'return mergeCapture(withoutCut(archive), capture, { now: () => 0 }).record', 'return mergeCapture(archive, capture, { now: () => 0 }).record'), fails: ['capped-archive'] },
+  { name: 'the reason of a cut worded as the cap having dropped the events', sources: () => swap('log-diagnostics', "cut: 'the archive no longer holds the oldest events, and the window starts before the cut',", "cut: 'the archive dropped the oldest events at its cap, and the window starts before the cut',"), fails: ['window-cut-clear'] },
   { name: 'the cut is taken off the archive itself', sources: () => swap('log-diagnostics', 'const withoutCut = (archive) => (archive ? { ...archive, cut: undefined } : archive)', 'const withoutCut = (archive) => {\n  if (archive) {\n    archive.cut = undefined\n  }\n\n  return archive\n}'), fails: ['archive-unchanged', 'capped-archive'] },
   { name: 'the ship and fleet input is read as present', sources: () => swap('log-diagnostics', "fleet: unavailable({ rule: 'logDiagnostic.fleet', missing: ['ship, fleet and boarding-party state'] })", "fleet: envelope({ value: [], status: 'confirmed', rule: 'logDiagnostic.fleet', inputs: { present: ['ships'] } })"), fails: ['fleet-unread'] },
   { name: 'the unknown verdict is worded as the absent one', sources: () => swap('log-diagnostics', "unavailable: 'Unknown. No read of the log covers this window, so nothing can be said of it.',", "unavailable: 'None of the watched event types was found in the observed part of this window. The log keeps only what the game wrote, so this says nothing about the game beyond the log.',"), fails: ['verdict-text'] },

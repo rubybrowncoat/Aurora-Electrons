@@ -60,7 +60,7 @@ export const REASON_TEXT = Object.freeze({
   head: 'the window meets the oldest increment of an observed span, which the load may have cut',
   tail: 'the window meets the newest increment of an observed span, which later events may still join',
   failure: 'a read of the log failed at a time inside the window',
-  cut: 'the archive dropped the oldest events at its cap, and the window starts before the cut',
+  cut: 'the archive no longer holds the oldest events, and the window starts before the cut',
 })
 
 // The words a watched type's line draws where its count is no figure: not known (no read of the log covers the window) or none observed.
@@ -142,7 +142,7 @@ export const readDiagnostic = async (database, { GameID, RaceID, GameTime, windo
 
 // ---- Judging --------------------------------------------------------------------------------------------------------
 
-// The archive as the checklist merges the open save's read into it: the cap's cut says what the archive dropped, not what the save still holds, so it is left out and the read adds every row it has. The archive itself is not changed (a copy is made).
+// The archive as the checklist merges the open save's read into it: the archive's cut says what it no longer holds, not what the save still holds, so it is left out and the read adds every row it has. The archive itself is not changed (a copy is made).
 const withoutCut = (archive) => (archive ? { ...archive, cut: undefined } : archive)
 
 // The record the window is read from: the archive with the open save's read merged in (in memory), the archive with the failed read noted, or the archive as it is when the log holds no row.
@@ -158,7 +158,7 @@ const recordOf = ({ capture, failed, archive, GameTime }) => {
   return archive
 }
 
-// The kinds of reason a coverage names, in order: the window reaches before the first observed span, meets a gap between spans, reaches past the newest span, meets the oldest or the newest increment of a span, meets a failed read, or starts before the cap's cut.
+// The kinds of reason a coverage names, in order: the window reaches before the first observed span, meets a gap between spans, reaches past the newest span, meets the oldest or the newest increment of a span, meets a failed read, or starts before the archive's cut.
 const reasonsOf = (coverage, record) => {
   if (coverage.state === 'unavailable') {
     return []

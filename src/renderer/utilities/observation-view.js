@@ -1,7 +1,7 @@
 // What a page shows of an observation record (utilities/observations.js): reading the branch's file for the race, setting the objects of the open save against it, and the words for what it says. The wording says only what was observed: a span starts at a capture and is known at each of its captures, never "unchanged for" the time between them.
 
 import { observationStore } from './history'
-import { CAPTURES_KEPT, observationFileProblem, observationOf } from './observations'
+import { observationFileProblem, observationOf } from './observations'
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -82,7 +82,7 @@ export const observationText = ({ state, span }, { date, duration }) => {
   return { headline: state === 'changed' ? 'Changed since the last capture' : since, summary: `${counted}${span.failed > 0 ? `, ${span.failed} failed` : ''}${span.inherited ? ', with the stretch before the fork' : ''}`, details }
 }
 
-// The account of a whole record for the foot of a panel: the captures it holds, its widest interval, the failed captures, what was dropped and what lies before the fork.
+// The account of a whole record for the foot of a panel: the captures it holds, its widest interval, the failed captures, what is no longer kept (past the cap or cleared) and what lies before the fork.
 export const recordNote = (record, { date, duration }) => {
   if (!record || !record.captures.length) {
     return 'No capture is recorded on this branch yet.'
@@ -108,7 +108,7 @@ export const recordNote = (record, { date, duration }) => {
   }
 
   if (record.cut !== undefined) {
-    parts.push(`captures before ${date(record.cut)} were dropped past ${CAPTURES_KEPT}`)
+    parts.push(`captures before ${date(record.cut)} are no longer kept`)
   }
 
   if (record.seed !== undefined) {

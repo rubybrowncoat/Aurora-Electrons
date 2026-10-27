@@ -23,7 +23,7 @@
             <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
           </v-btn-toggle>
           <v-btn small text :disabled="!allSnapshots.length" class="ml-2" title="Every retained snapshot and every series, whatever the span and the view, with the figures not recorded and the sampling notes. The CSV under each chart holds only what that chart shows." @click="downloadCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
-          <v-btn small text color="error" :disabled="!allSnapshots.length" @click="confirmClear = true">Clear</v-btn>
+          <v-btn small text color="error" :disabled="!allSnapshots.length" data-clear-open @click="openClear">Clear</v-btn>
         </v-col>
       </v-row>
 
@@ -257,7 +257,7 @@
           <span class="caption text--secondary">{{ retentionView.sampling }}</span>
         </div>
         <div class="panel-body">
-          <div class="history-retention__row"><span class="history-retention__label">Samples</span><span class="history-retention__value" data-retention-samples>{{ count(retentionView.stats.count, 0) }} kept for this race; the {{ retentionView.profile.label }} profile keeps at most {{ count(retentionView.profile.cap, 0) }} per series<template v-if="retentionView.over">. This series is above that, and is thinned when the recorder next saves it</template></span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Samples</span><span class="history-retention__value" data-retention-samples><span data-retention-count>{{ count(retentionView.stats.count, 0) }}</span> kept for this race; the {{ retentionView.profile.label }} profile keeps at most {{ count(retentionView.profile.cap, 0) }} per series<template v-if="retentionView.over">. This series is above that, and is thinned when the recorder next saves it</template></span></div>
           <div class="history-retention__row"><span class="history-retention__label">Time covered</span><span class="history-retention__value">{{ duration(retentionView.stats.seconds) }}<template v-if="retentionView.stats.first !== null"> ({{ date(retentionView.stats.first) }} to {{ date(retentionView.stats.last) }})</template></span></div>
           <div class="history-retention__row"><span class="history-retention__label">Time between samples</span><span class="history-retention__value" data-retention-gaps>largest {{ duration(retentionView.stats.gaps.largest) }}, typical {{ duration(retentionView.stats.gaps.typical) }}</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Thinning</span><span class="history-retention__value" data-retention-thinning :data-status="retentionView.status">{{ retentionView.thinning }}.</span></div>
@@ -286,7 +286,7 @@
             </table>
           </div>
 
-          <div class="caption text--secondary mt-2" data-retention-limits>A profile applies only to samples that are observed or still kept. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed.</div>
+          <div class="caption text--secondary mt-2" data-retention-limits>A profile applies only to samples that are observed or still kept. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed. A backup taken before a clear still holds what the clear removed. A Merge restore brings back the removed snapshots and any event archive or observation record the clear removed whole; a record of either that the clear only cut is kept as it is under Merge and comes back with a Replace restore.</div>
 
           <v-alert v-if="retentionChange" type="warning" outlined dense class="mt-3" data-retention-confirm>
             <div>Change the retention profile from {{ retentionChange.current.label }} ({{ count(retentionChange.current.cap, 0) }}) to {{ retentionChange.picked.label }} ({{ count(retentionChange.picked.cap, 0) }})?</div>
@@ -471,14 +471,23 @@
         </div>
       </v-card>
 
-      <v-dialog v-model="confirmClear" max-width="440">
-        <v-card>
+      <v-dialog v-model="confirmClear" max-width="480">
+        <v-card data-clear-dialog>
           <v-card-title>Clear this race's history?</v-card-title>
-          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race<template v-if="campaignView && campaignView.branches.length > 1"> in branch {{ shownBranchId }}</template>, and the colony series, the event archive and the observation record kept with them. The colonies chosen to follow, the event archive choice and the observation choice stay chosen. The save isn't touched, and recording starts again at the next save.</v-card-text>
+          <v-card-text>
+            <v-radio-group v-model="clearYears" hide-details dense class="mt-0 pt-0">
+              <v-radio v-for="option in clearOptions" :key="option.value" :value="option.value" :label="option.text" :data-clear-option="option.value" />
+            </v-radio-group>
+            <div class="mt-3" data-clear-counts>
+              <div data-clear-figure="removed"><strong data-clear-value>{{ count(clearView.removed, 0) }}</strong> {{ clearView.removed === 1 ? 'snapshot' : 'snapshots' }} {{ clearWords.removed }}<template v-if="campaignView && campaignView.branches.length > 1"> from branch {{ shownBranchId }}</template></div>
+              <div data-clear-figure="kept"><strong data-clear-value>{{ count(clearView.kept, 0) }}</strong> {{ clearView.kept === 1 ? 'snapshot' : 'snapshots' }} {{ clearWords.kept }}</div>
+            </div>
+            <div class="mt-2" data-clear-effect>{{ clearView.effect }} Other races and other branches are untouched. The colonies chosen to follow, the event archive choice and the observation choice stay chosen. The save isn't touched, and recording goes on at the next save. A backup taken before the clear still holds what it removes. A Merge restore brings back the removed snapshots and any event archive or observation record the clear removed whole; a record of either that the clear only cut is kept as it is under Merge and comes back with a Replace restore.</div>
+          </v-card-text>
           <v-card-actions>
             <v-spacer />
-            <v-btn text @click="confirmClear = false">Cancel</v-btn>
-            <v-btn text color="error" @click="clearHistory">Clear</v-btn>
+            <v-btn text data-clear-cancel @click="confirmClear = false">Cancel</v-btn>
+            <v-btn text color="error" :disabled="clearView.removed === 0" data-clear-confirm @click="clearHistory">Clear</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -508,7 +517,7 @@ import { csvCell } from '../utilities/csv-cell'
 import { registerEconomyNotes } from '../utilities/economy-notes'
 import { EVENT_BYTES, EVENT_CAP, EVENT_CAPS, archiveOn, capRecord, eventEstimate, eventFileProblem, gapsOf, recordEvents } from '../utilities/event-archive'
 import { CAPTURES_KEPT, CAPTURE_BYTES, OBJECT_BYTES, OBSERVED_KINDS, observationEstimate, observationEverChosen, observationFileProblem, observedKinds, raceObservations } from '../utilities/observations'
-import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, colonyStore, durationText, eventStore, installationResult, measuredBytes, mineralResult, observationStore, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
+import { CLEAR_WORDS, DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, SPAN_YEARS, branchStore, bytesText, campaignStorage, changeResult, clearPlan, clearRaceHistory, colonyStore, durationText, eventStore, installationResult, measuredBytes, mineralResult, observationStore, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
 import { captionLines, drawExport, exportCsv, exportModel } from '../utilities/history-export'
 import { LINK_STATUS_TEXT, LINK_TYPES, LINK_TYPE_KEYS, MILESTONE_TYPES, TEXT_LENGTH, adoptMilestone, branchLineage, deleteMilestone, gameDateText, gameSecondsOf, incrementsOf, linkChoices, loadObjects, markersOf, moveMilestone, nearestSample, readAttachedMilestones, readMilestones, registerMilestones, saveMilestone, scopeOf as milestoneScopeOf, typeText, withinSamples } from '../utilities/history-milestones'
@@ -521,7 +530,9 @@ import { registerWorldTags } from '../utilities/world-tags'
 
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
-const SPAN_OPTIONS = [10, 20, 50].map((years) => ({ value: years, text: `${years} y`, title: `The last ${years} years` })).concat({ value: 0, text: 'All', title: 'Every snapshot' })
+const SPAN_OPTIONS = SPAN_YEARS.map((years) => ({ value: years, text: `${years} y`, title: `The last ${years} years` })).concat({ value: 0, text: 'All', title: 'Every snapshot' })
+// What the Clear dialog offers to remove, 0 being everything.
+const CLEAR_OPTIONS = [{ value: 0, text: CLEAR_WORDS.all }].concat(SPAN_YEARS.map((years) => ({ value: years, text: `${CLEAR_WORDS.older} ${years} ${CLEAR_WORDS.years}` })))
 const HISTORY_PAGE_SIZES = [25, 100, -1]
 // Installation types charted when the player hasn't picked any: the largest by count.
 const DEFAULT_INSTALLATIONS = 5
@@ -610,6 +621,10 @@ export default {
   data() {
     return {
       confirmClear: false,
+      // The choice in the Clear dialog, in years; 0 is everything. Not remembered: each opening starts at everything.
+      clearYears: 0,
+      clearOptions: CLEAR_OPTIONS,
+      clearWords: CLEAR_WORDS,
       historyPageSizes: HISTORY_PAGE_SIZES,
       measureColumns: MEASURES,
       rivalMetrics: RIVAL_METRICS,
@@ -818,6 +833,14 @@ export default {
     // Every snapshot recorded for the race; the CSV and Clear work on these.
     allSnapshots() {
       return this.record && Array.isArray(this.record.snapshots) ? this.record.snapshots : []
+    },
+
+    // What the Clear dialog says for the chosen option: the snapshots it removes and keeps (`clearPlan`, from the race's latest snapshot) and what happens to the records kept with them.
+    clearView() {
+      const plan = clearPlan(this.allSnapshots, this.clearYears)
+      const effect = this.clearYears ? `The snapshots older than ${this.clearYears} years before the latest one are removed, and the colony series, the event archive and the observation record kept with them are cut at the same date.` : 'Every snapshot is removed, and the colony series, the event archive and the observation record kept with them.'
+
+      return { ...plan, effect: plan.removed || !this.clearYears ? effect : `No snapshot is older than ${this.clearYears} years before the latest one, so nothing is removed.` }
     },
 
     // The first game time shown: `span` years before the latest snapshot, or the start.
@@ -1177,7 +1200,7 @@ export default {
       }
     },
 
-    // The Retention panel's line on the event archive: whether the shown race keeps one, the events kept of the cap, the measured size of its record in the shown branch's file, the predicted size at the cap, the unobserved stretches and the date the cap cut the oldest events from; or why none of it is known.
+    // The Retention panel's line on the event archive: whether the shown race keeps one, the events kept of the cap, the measured size of its record in the shown branch's file, the predicted size at the cap, the unobserved stretches and the date the record is complete from; or why none of it is known.
     eventBudgetText() {
       const budget = this.eventBudget
 
@@ -1197,7 +1220,7 @@ export default {
       const kept = budget.events === null ? `none kept yet, at most ${this.count(budget.cap, 0)}` : `${this.count(budget.events, 0)} events kept of at most ${this.count(budget.cap, 0)}`
       const measured = budget.measured === null ? 'none recorded yet' : `${this.size(budget.measured)} measured as compact JSON`
       const gaps = budget.gaps === null ? '' : ` ${this.count(budget.gaps, 0)} ${budget.gaps === 1 ? 'stretch' : 'stretches'} between captures ${budget.gaps === 1 ? 'was' : 'were'} not observed, as was the time before the first capture.`
-      const cut = budget.cut === null ? '' : ` The cap cut the oldest events: the record is complete from ${this.date(budget.cut)}.`
+      const cut = budget.cut === null ? '' : ` The oldest events are no longer kept: the record is complete from ${this.date(budget.cut)}.`
 
       return `${state}; ${kept}; ${measured}; about ${this.size(budget.predicted)} predicted at the cap, at about ${EVENT_BYTES} bytes an event.${gaps}${cut}`
     },
@@ -1854,9 +1877,14 @@ export default {
     setInstallations(ids) {
       this.installationIds = ids
     },
-    // Remove this race from the shown branch's history file; other races keep theirs. The race and branch are the ones shown when the player confirms, taken before any wait for the registry lock.
+    // Opens the Clear dialog at its default, everything.
+    openClear() {
+      this.clearYears = 0
+      this.confirmClear = true
+    },
+    // Remove this race's history, or what is older than the chosen years, from the shown branch's files; other races keep theirs. The race, the branch and the cut time are the ones shown when the player confirms, taken before any wait for the registry lock.
     async clearHistory() {
-      const target = this.resolved ? { campaignId: this.resolved.campaignId, branchId: this.shownBranchId, RaceID: this.RaceID } : null
+      const target = this.resolved ? { campaignId: this.resolved.campaignId, branchId: this.shownBranchId, RaceID: this.RaceID, before: clearPlan(this.allSnapshots, this.clearYears).before } : null
 
       this.confirmClear = false
 

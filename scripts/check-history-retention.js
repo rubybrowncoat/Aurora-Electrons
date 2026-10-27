@@ -1271,7 +1271,7 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
 
   const recorded = (times, limit) => times.reduce((file, t) => history.mergeGame(file, { gameName: 'Game', races: [{ RaceID: 7, raceName: 'Test Race', npr: false, snapshot: row(t) }] }, { limit, now }), {})
 
-  const mount = ({ file, config = new MemoryConfig() }) => {
+  const mount = ({ file, config = new MemoryConfig(), budget = null }) => {
     const store = Vue.observable({ getters: { racePrefix: KEY, config, database: null, GameID: 1, RaceID: 7, StartYear: START_YEAR, historyRecorded: true, 'history/campaign': { campaignId: 'c1', branchId: 'b1', generation: 1 } }, state: { history: { revision: 0, failures: [] } } })
     const Component = Vue.extend({
       mixins: [options],
@@ -1281,6 +1281,7 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
           return this.held
         },
         theme: () => ({ categorical: [] }),
+        ...(budget ? { eventBudget: () => budget } : {}),
       },
       beforeCreate () {
         this.$store = store
@@ -1692,6 +1693,17 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
     await observed(observationFile({ 7: observationRace([1, 2, 3]) }), new ObservingConfig([['campaign.c1.race.7.observe', '[]']]), longFile, ({ vm, reads }) => assert.deepEqual({ objects: vm.observationBudget.objects, opened: reads().length > 0 }, { objects: 3, opened: true }))
   })
 
+  check('page: the Retention line on the event archive gives the date the record is complete from and does not say the cap cut it, for a record a clear cut well below the cap, and says nothing of a cut for a record never cut', () => {
+    const budget = { on: true, player: true, cap: 50000, events: 3, measured: 900, predicted: 1000000, gaps: 0, cut: 9000000, error: '' }
+    const { vm } = mount({ file: longFile, budget })
+    const sentence = vm.eventBudgetText.split(/\.(?=\s|$)/).find((part) => part.includes(vm.date(budget.cut))) || ''
+    const never = mount({ file: longFile, budget: { ...budget, cut: null } }).vm.eventBudgetText
+
+    assert.ok(sentence.length > 0, 'a sentence gives the date')
+    assert.equal(/\bcap\b/i.test(sentence), false)
+    assert.equal(never.includes(vm.date(budget.cut)), false)
+  })
+
   check('page: a smaller cap on the event archive waits for confirmation even when the shown branch holds no archive, the confirmation says the cap applies to every campaign, race and branch at their next capture, and a larger cap is kept at once', async () => {
     const config = new MemoryConfig()
     const { vm, tree } = mount({ file: longFile, config })
@@ -1924,6 +1936,7 @@ const PAGE_MUTATIONS = [
   { name: 'the confirmation leaves out the samples an observation replaces', mutate: replacing('const replaced = held.next.replaced ? ', 'const replaced = false ? '), fails: ['page: the confirmation counts the sample an unchanged observation removes'] },
   { name: 'the confirmation gives the whole discard as the allowance', mutate: replacing('count(held.next.replaced, 0)} to what thinning', 'count(held.next.dropped, 0)} to what thinning'), fails: ['page: the confirmation counts the sample an unchanged observation removes', 'page: the confirmation words the allowance'] },
   { name: 'the allowance worded as the samples a save removes', mutate: replacing(' to what thinning alone would discard.', ' of the samples counted above can be those.'), fails: ['page: the confirmation counts the sample an unchanged observation removes', 'page: the confirmation words the allowance'] },
+  { name: 'the Retention line on the event archive saying the cap cut the oldest events', mutate: replacing('The oldest events are no longer kept: the record is complete from', 'The cap cut the oldest events: the record is complete from'), fails: ['page: the Retention line on the event archive gives the date'] },
   { name: 'a smaller event cap waits only when the shown branch would lose events', mutate: replacing('} else if (cap < this.eventCap) {\n        this.eventCapPick = cap', '} else if (this.eventRecord.file && Object.values(this.eventRecord.file.races).some((record) => capRecord(record, cap).dropped)) {\n        this.eventCapPick = cap'), fails: ['page: a smaller cap on the event archive waits'] },
   { name: 'the event cap confirmation leaves out that the cap applies to every campaign', mutate: replacing('The cap applies to every campaign, race and branch of this installation, and takes effect at the next capture of each.', 'The cap applies to this branch.'), fails: ['page: a smaller cap on the event archive waits'] },
   { name: 'the objects of the shown race are taken from the first race of the file', mutate: replacing('const race = file ? file.races[this.RaceID] || null : null\n        const records = race ? Object.values(race.kinds) : []\n        const objects = race ? raceObservations(race) : null', 'const race = file ? Object.values(file.races)[0] || null : null\n        const records = race ? Object.values(race.kinds) : []\n        const objects = race ? raceObservations(race) : null'), fails: ['page: the Retention panel states the observation record of the shown race'] },

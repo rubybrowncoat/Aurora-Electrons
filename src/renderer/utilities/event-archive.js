@@ -238,7 +238,7 @@ export const mergeCapture = (stored, capture, { now = Date.now } = {}) => {
   const observedEnd = record.spans.length ? Math.max(...record.spans.map(([, end]) => end)) : null
   const newestStored = tip ? tip[0] : lastStored && (observedEnd === null || endOf(lastStored) >= observedEnd) ? lastStored[0] : null
   const openIds = new Set([capture.from[0], newestStored])
-  // What the cap dropped stays dropped: the read's increments that ended by `cut` are neither added nor counted, so a race at its cap whose save still holds those rows is not rewritten at every pass.
+  // What a cut (the cap or a clear) removed stays removed: the read's increments that ended by `cut` are neither added nor counted, so a race at its cap whose save still holds those rows is not rewritten at every pass.
   const cut = isKnownNumber(record.cut) ? record.cut : null
   const windowStart = cut === null ? capture.from[1] : Math.max(capture.from[1], cut)
   const windowEnd = endOf(capture.to)
@@ -346,6 +346,9 @@ export const mergeCapture = (stored, capture, { now = Date.now } = {}) => {
   return { record, added, amended, conflicts: found.length, changed: Boolean(added || amended || found.length || spansChanged || tipChanged || !stored) }
 }
 
+// The spans that outlast `cut`, a span that crosses it starting there: what a cut of the archive, by the cap or by a clear, leaves of the observed spans.
+const spansFrom = (spans, cut) => spans.filter(([, end]) => end > cut).map(([start, end]) => [Math.max(start, cut), end])
+
 // A record cut to at most `cap` events: whole increments go, the oldest first, and `cut` says from when the record holds everything it kept. A span before the cut is clipped to start there.
 export const capRecord = (record, cap) => {
   let total = recordEvents(record)
@@ -367,9 +370,23 @@ export const capRecord = (record, cap) => {
     cut = Math.max(isKnownNumber(cut) ? cut : -Infinity, endOf(oldest))
   }
 
-  const spans = record.spans.filter(([, end]) => end > cut).map(([start, end]) => [Math.max(start, cut), end])
+  const spans = spansFrom(record.spans, cut)
 
   return { record: { ...record, increments, spans, cut, conflicts: record.conflicts.filter((conflict) => endOf(conflict.increment) > cut) }, dropped }
+}
+
+// A race's record after a clear removed what was observed before game time `before`: the bookkeeping the cap does, with `before` as the least cut. Whole increments that start before it go, and `cut` is the latest of the old cut, `before` and the end of the newest increment dropped, so that no capture of a later save brings back what was cleared (an increment the cut covers is not added again). Spans and conflicts that end by the cut go, a span that crosses it starts there, and the captures, failures and tip are as they were. The record itself when it holds no increment and no span that old; never null, since the cut must outlive the rows.
+export const eventsFrom = (record, before) => {
+  const dropped = record.increments.filter((increment) => increment[1] < before)
+
+  if (!dropped.length && !record.spans.some(([start]) => start < before)) {
+    return record
+  }
+
+  const cut = Math.max(isKnownNumber(record.cut) ? record.cut : -Infinity, before, ...dropped.map(endOf))
+  const spans = spansFrom(record.spans, cut)
+
+  return { ...record, increments: record.increments.filter((increment) => increment[1] >= before), spans, cut, conflicts: record.conflicts.filter((conflict) => endOf(conflict.increment) > cut) }
 }
 
 // Merges a pass's captures into an archive file ({ races: [{ RaceID, capture }] }), each race's record then cut to `cap`: { file, changed }. A race missing from this pass keeps its record.
