@@ -15,7 +15,7 @@
   - picker and reads: the choices of the form, and every query the notebook sends is a select, so editing a note never writes the save;
   - saves: on the owner's saves (opened read only, skipped when they are not here) the objects load with the real queries, the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and never as linked, the catalogue is the same in two campaigns, and the renames of a line of saves keep the links;
   - backup: notes round-trip through the backup's annotation adapter;
-  - page: the panels name what they are for in the page's voice, a note is kept from the form, listed, filtered, isolated by race and branch, a draft is dropped and refused when what is shown changes, and the backup registers the adapter.
+  - page: the panels name what they are for in the page's voice, a note is kept from the form, listed, filtered, isolated by race and branch, a draft is dropped and refused when what is shown changes (the backup's registration of the notes' adapter is checked with every other kind by scripts/check-history-restore.js).
 
   Everything runs on in-memory stores, the real scenario repository and a fake save that records the SQL it is sent. Each mutation of the utility or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
@@ -33,7 +33,6 @@ const { chunksOf, spread } = require('./lib/mutant-chunks')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'notebook.vue')
-const historyPageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
 const navigationFile = path.join(utilitiesDirectory, 'navigation.js')
 const FALRYX = process.env.NOTES_FALRYX || path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const BOSCO = process.env.NOTES_BOSCO || path.join(root, 'artifacts', 'boscodiogigia-sequential-saves')
@@ -1551,15 +1550,10 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     assert.doesNotMatch(text.slice(0, text.indexOf('<script>')).replace(/<[^>]+>/g, ' '), /\b(I|me|my|we|our|you|your)\b/)
   })
 
-  check('the notebook is a page of the Economy section, and the backup registers its adapter', () => {
+  check('the notebook is a page of the Economy section', () => {
     const navigation = fs.readFileSync(navigationFile, 'utf8')
-    const history = fs.readFileSync(historyPageFile, 'utf8').replace(/\r\n/g, '\n')
-    const start = history.indexOf('The adapter the backup reads and restores')
-    const end = history.indexOf('annotationsOf(', start)
 
     assert.match(navigation, /route: '\/notebook', section: 'economy'/)
-    assert.ok(start > 0 && end > start)
-    assert.match(history.slice(start, end), /registerEconomyNotes\(records\.registerAdapter\)/)
   })
 
   check('a note made through the form is kept, listed with its status, next action and link, and the form is emptied', async () => {

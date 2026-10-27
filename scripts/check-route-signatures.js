@@ -1217,7 +1217,7 @@ const MUTATIONS = [
   { name: 'the match of a template is the match of any of them', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.some((record) => matched.some((template) => template.pacingKey === record.route.pacingKey))', fails: ['names'] },
   { name: 'the match of a template is the match of the last of them', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.some((record) => record.route.pacingKey === matched[matched.length - 1].pacingKey)', fails: ['names'] },
   { name: 'the match of a template needs every fleet at its pacing', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.every((record) => record.route.pacingKey === matched[0].pacingKey)', fails: ['names'] },
-  { name: 'the History page\'s backup leaves the desired routes unregistered', file: H, find: '        desires.registerRouteDesires(records.registerAdapter)\n', to: '', fails: ['backup'] },
+  { name: 'the History page\'s backup leaves the adapters, the desired routes among them, unregistered', file: H, find: '        adapters.registerScenarioAdapters(records.registerAdapter)\n', to: '', fails: ['backup'] },
 ]
 
 // Rewrites that say the same thing: each must leave every statement green. `family` names the kind of rewrite.

@@ -14,7 +14,7 @@
   - attached: after an attach (merged into the same branch, or as a branch of its own) the milestones of the attached campaign are listed apart, never drawn, never merged on a read, and adopted only on request, once; a source file that cannot be read is named; a milestone adopted onto one branch reads as adopted on every branch of the campaign and names the branch that holds the copy;
   - saves: on the owner's consecutive saves of artifacts/boscodiogigia-sequential-saves (opened read only, skipped when they are not here) the objects load with the real queries, the objects both saves hold keep their fingerprint, the log rows shared by two saves keep their increment and content and lose their row number, and a link to an event made in the earlier save resolves in the later one;
   - backup: milestones round-trip through the backup's annotation adapter with their exact time, link and policy, a kind the installation has no adapter for is refused, and a backup without milestones leaves them as they are;
-  - page: the Milestones panel names what it is for in the page's voice, every chart carries the markers at the exact time, also on the percent scale and in another span, the form keeps the exact time of a milestone it edits, a stale edit is not written over silently, a draft is dropped and refused when the campaign, race or branch shown changes, objects read for another save or race are not used, the attached campaigns' milestones are listed apart and adopted on request, and the backup registers the adapter.
+  - page: the Milestones panel names what it is for in the page's voice, every chart carries the markers at the exact time, also on the percent scale and in another span, the form keeps the exact time of a milestone it edits, a stale edit is not written over silently, a draft is dropped and refused when the campaign, race or branch shown changes, objects read for another save or race are not used, and the attached campaigns' milestones are listed apart and adopted on request (the backup's registration of the milestone adapter is checked with every other kind by scripts/check-history-restore.js).
 
   Everything runs on in-memory stores and the real scenario repository. Each mutation of the utility or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
@@ -1854,15 +1854,6 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     assert.equal(vm.milestoneEntries.find((entry) => entry.text === 'fleet').unresolved, false)
   })
 
-  check('the backup registers the milestone adapter with the records it exports and restores', () => {
-    const text = mutate ? mutate(pageSource()) : pageSource()
-    const start = text.indexOf('async backupAnnotations()')
-    const end = text.indexOf('stamp(milliseconds)', start)
-
-    assert.ok(start > 0 && end > start)
-    assert.match(text.slice(start, end), /registerMilestones\(records\.registerAdapter\)/)
-  })
-
   return checks
 }
 
@@ -1930,7 +1921,6 @@ const PAGE_MUTATIONS = [
   { name: 'the objects read for another save, game or race are used', mutate: replacing('return bundle && bundle.database === this.database && bundle.GameID === this.GameID && bundle.RaceID === this.RaceID ? bundle : null', 'return bundle'), fails: ['page: the objects read for another save'] },
   { name: 'the read of the objects does not say which save it was for', mutate: replacing('increments: this.milestoneIncrements })), database })', 'increments: this.milestoneIncrements })) })'), fails: ['page: the read of the objects carries'] },
   { name: 'the milestones of attached campaigns are drawn with the campaign\'s own', mutate: replacing('markersOf(this.milestoneRead.entries, this.snapshots,', 'markersOf([...this.milestoneRead.entries, ...this.milestoneAttached.entries], this.snapshots,'), fails: ['page: the milestones of an attached campaign'] },
-  { name: 'the backup does not register the adapter', mutate: replacing('        registerMilestones(records.registerAdapter)\n        registerEconomyNotes(records.registerAdapter)\n        registerWorldTags(records.registerAdapter)\n\n        return { adapter', '        registerEconomyNotes(records.registerAdapter)\n        registerWorldTags(records.registerAdapter)\n\n        return { adapter'), fails: ['page: the backup registers the milestone adapter'] },
   { name: 'the page reads the adoption of the shown branch only', mutate: replacing('Object.keys(this.milestoneBranches || {})', '[]'), fails: ['page: an attached milestone adopted onto one branch'] },
   { name: 'the page does not hand the lineage to the links', mutate: replacing('branchId: open.branchId, branches: this.milestoneBranches }', 'branchId: open.branchId }'), fails: ['page: a link made on another branch'] },
   { name: 'a copy kept for another branch is described as kept for the shown one', mutate: replacing('copy.branchId === this.shownBranchId ?', 'true ?'), fails: ['page: an attached milestone adopted onto one branch'] },

@@ -514,7 +514,6 @@ import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { COLONY_BYTES, chosenNow, colonyEstimate, colonyWish } from '../utilities/colony-series'
 import { csvCell } from '../utilities/csv-cell'
-import { registerEconomyNotes } from '../utilities/economy-notes'
 import { EVENT_BYTES, EVENT_CAP, EVENT_CAPS, archiveOn, capRecord, eventEstimate, eventFileProblem, gapsOf, recordEvents } from '../utilities/event-archive'
 import { CAPTURES_KEPT, CAPTURE_BYTES, OBJECT_BYTES, OBSERVED_KINDS, observationEstimate, observationEverChosen, observationFileProblem, observedKinds, raceObservations } from '../utilities/observations'
 import { CLEAR_WORDS, DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, SPAN_YEARS, branchStore, bytesText, campaignStorage, changeResult, clearPlan, clearRaceHistory, colonyStore, durationText, eventStore, installationResult, measuredBytes, mineralResult, observationStore, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
@@ -526,7 +525,6 @@ import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '..
 import { MINERALS } from '../utilities/minerals'
 import { describeResult, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
 import { withRegistry } from '../utilities/recording-owner'
-import { registerWorldTags } from '../utilities/world-tags'
 
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
@@ -2168,18 +2166,12 @@ export default {
 
       this.retentionPick = null
     },
-    // The adapter the backup reads and restores the planners' annotations through: { adapter, error }, the adapter null with the reason when the records cannot be opened here. The modules load when a backup is made or read, so the page doesn't carry them otherwise.
+    // The adapter the backup reads and restores the planners' annotations through: { adapter, error }, the adapter null with the reason when the records cannot be opened here. The modules load when a backup is made or read, so the page doesn't carry them otherwise. Every kind of record the app defines is registered (utilities/scenario-adapters.js), whichever planner page was opened in this session.
     async backupAnnotations() {
       try {
-        const [records, tech, briefs, reserves, desires] = await Promise.all([import('../utilities/scenario-records'), import('../utilities/tech-scenarios'), import('../utilities/mission-briefs'), import('../utilities/resource-reserves'), import('../utilities/route-desires')])
+        const [records, adapters] = await Promise.all([import('../utilities/scenario-records'), import('../utilities/scenario-adapters')])
 
-        tech.registerTechScenarios(records.registerAdapter)
-        briefs.registerBriefs(records.registerAdapter)
-        reserves.registerResourceReserves(records.registerAdapter)
-        desires.registerRouteDesires(records.registerAdapter)
-        registerMilestones(records.registerAdapter)
-        registerEconomyNotes(records.registerAdapter)
-        registerWorldTags(records.registerAdapter)
+        adapters.registerScenarioAdapters(records.registerAdapter)
 
         return { adapter: annotationsOf(records.openScenarioRecords(), records.scenarioStorage()), error: null }
       } catch (error) {

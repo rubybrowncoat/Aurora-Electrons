@@ -2451,7 +2451,7 @@ const pages = (ctx) => {
     await kept(m, warm, scope(), await open(m, SAVE()), { reserves: { Duranium: 0 }, plans: [plan('p1', 'Build', 5, 3)] })
 
     const bundle = warm.repo.exportRecords(scope())
-    const options = await loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': texts.history.replace(/^ *reserves\.registerResourceReserves\(.*\)\n/m, ''), ...ctx.pageUtilities, ...recordsOf(`without ${ctx.serial}`) } })
+    const options = await loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': texts.history.replace(/^ *adapters\.registerScenarioAdapters\(.*\)\n/m, ''), ...ctx.pageUtilities, ...recordsOf(`without ${ctx.serial}`) } })
     const { adapter, error } = await instantiate(options, { boundary, $store: PAGE_STORE, database: null, GameID: GAME, RaceID: RACE, data: {} }).backupAnnotations()
     const preview = adapter && adapter.preview(bundle, { campaignId: 'c2', RaceID: RACE, branch: 'b1' }, { restore: true })
 
@@ -2671,11 +2671,11 @@ const MUTATIONS = [
   { name: 'a record widened to the campaign that skips the check of the other branches', file: 'reserves', find: "if (policy === 'campaign' && (!entry || entry.policy !== 'campaign')) {", replace: "if (policy === 'campaign' && !entry) {", fails: ['record'] },
   { name: 'two records of one colony and scenario that both apply', file: 'reserves', find: 'if (entry.overlap > 0) {', replace: 'if (false) {', fails: ['record'] },
   { name: 'a panel that leaves out what a haul delivered less than planned', file: 'component', find: "...(item.cut.length ? [{ key: 'cut',", replace: "...(false ? [{ key: 'cut',", fails: ['component'] },
-  { name: 'a backup that leaves the reserve adapter unregistered', file: 'history', find: '        reserves.registerResourceReserves(records.registerAdapter)\n', replace: '', fails: ['history'] },
+  { name: 'a backup that leaves the adapters unregistered', file: 'history', find: '        adapters.registerScenarioAdapters(records.registerAdapter)\n', replace: '', fails: ['history'] },
   { name: 'a row with an untimed flow that reads as covered', file: 'component', find: 'item.active && item.run.untimed.length', replace: 'false', fails: ['browser'], parts: ['cells'] },
   { name: 'a Hauling page that times the hauls without the shuttle technology', file: 'hauling', find: 'timeHauls({ plan, freighters, shuttleTechnology, formulaVersion })', replace: 'timeHauls({ plan, freighters, shuttleTechnology: { extra: 0 }, formulaVersion })', fails: ['page'] },
   { name: 'a Logistics page that shows the panel in the wrong view', file: 'logistics', find: '<template v-else-if="view === \'reserves\'">', replace: '<template v-else-if="view === \'stations\'">', fails: ['browser'] },
-  { name: 'a backup that registers the reserve adapter through a wrapper', file: 'history', find: 'reserves.registerResourceReserves(records.registerAdapter)', replace: 'reserves.registerResourceReserves((adapter) => records.registerAdapter(adapter))', fails: ['history'], benign: true },
+  { name: 'a backup that registers the adapters through a wrapper', file: 'history', find: 'adapters.registerScenarioAdapters(records.registerAdapter)', replace: 'adapters.registerScenarioAdapters((adapter) => records.registerAdapter(adapter))', fails: ['history'], benign: true },
   { name: 'a panel that speaks in the second person', file: 'component', find: 'No source has a record or a plan. Keep a record, or show every source.', replace: 'You have no record or plan. Keep a record, or show every source.', fails: ['voice'] },
   { name: 'a fuel reserve panel that speaks in the second person', file: 'fuelComponent', find: 'The campaign of this save is not settled yet, so reserves wait for it.', replace: 'The campaign of your save is not settled yet, so reserves wait for it.', fails: ['voice'] },
   { name: 'a fuel output held to the Sorium the colony has now, so a refinery that starts empty never refines', file: 'feeds', find: 'const fuel = isNumber(colony.Sorium) ? capacity : refineryYield(colony, modifier)', replace: 'const fuel = refineryYield(colony, modifier)', fails: ['feeds', 'combined'] },
