@@ -1,6 +1,7 @@
-// How fast a survey fleet works and how many points a body takes: the rules behind the Survey Progress page. A fleet's points a day are its undamaged sensors' rating, times the officer factor, the crew morale and the crew aboard, times the naval admin Survey share in range and the game's survey speed. Evidence and checks against saved progress: docs/plans/backlog/evidence/AE-110-01.md (AE-110-02).
+// How fast a survey fleet works and how many points a body takes: the rules behind the Survey Progress page. A fleet's points a day are its undamaged sensors' rating, times the officer factor, the crew morale and the crew aboard, times the naval admin Survey share in range and the game's survey speed. A colony's ground survey is its geosurvey formations' rating times the square of their commanders' effective Survey multiplier, times the survey speed. Evidence and checks against saved progress: docs/plans/backlog/evidence/AE-110-01.md (AE-110-02).
 
 import { crewFraction } from './crew'
+import { columnsOf, gaps } from './mine-bootstrap-data'
 import { envelope, getRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const HOURS_PER_DAY = 24
@@ -14,6 +15,8 @@ const SCIENCE_DEPARTMENT = 65739
 const SMALL_CLASS_SIZE = 20
 // FCT_CommanderBonuses.BonusID of the Survey bonus.
 const SURVEY_BONUS = 2
+// FCT_Commander.CommandType of a commander who serves in a ground formation.
+const GROUND_POST = 5
 const SURVEY_VERSIONS = ['2.7.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
@@ -60,8 +63,8 @@ registerRule({
   versions: SURVEY_VERSIONS,
   units: 'points/day',
   verification: 'estimated',
-  structure: ['FCT_GroundUnitFormationElement.Units', 'DIM_GroundComponentType.Geosurvey', 'FCT_CommanderBonuses.BonusValue', 'FCT_Game.SurveySpeed'],
-  note: 'Points a day of a colony\'s geosurvey units: each unit\'s equipment rating times the formation commander\'s Survey bonus, times the game\'s survey speed. The game applies a capacity-modified bonus up the commander\'s chain, which the save cannot reproduce; no save has a ground survey underway.',
+  structure: ['FCT_GroundUnitFormationElement.Units', 'DIM_GroundComponentType.Geosurvey', 'FCT_CommanderBonuses.BonusValue', 'FCT_GroundUnitFormation.ParentFormationID, PopulationID', 'FCT_GroundUnitClass.Size, HQCapacity', 'FCT_Game.SurveySpeed'],
+  note: 'Points a day of a colony\'s geosurvey units: the rating of each formation (its units\' equipment rating) times the square of its commander\'s effective Survey multiplier, added over the formations at the colony, times the game\'s survey speed. The game scales the rating by the multiplier when it reads it and again when it adds the day\'s points, so the multiplier counts twice. The multiplier is the commander\'s Survey bonus, cut to 1 + (bonus - 1) × share when the formation and the formations beneath it outgrow its largest headquarters (the share is 1 up to the capacity and 0 beyond it, a whole-number division), times, for each superior formation at the same colony that has a commander, 1 + (the superior\'s bonus - 1) × 0.25 × its share. The capacity cut matches the saved progress of 3 colonies to the second (a formation over its headquarters capacity works at its rating alone, whatever its commander\'s bonus; one colony in a 2.7 save, two in an earlier one). The save has no colony that separates the second application of the multiplier from the first (the one colony within capacity fits both), so the rule rests on the game\'s own and is an estimate.',
 })
 
 // The points one body takes for a geological or ground survey, as an SQL expression over `alias`, a table with Radius and BodyTypeID. The floor is per body.
@@ -200,11 +203,121 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null
   })
 }
 
-// The points a day of a colony's geosurvey units, as a provenance result of 'survey.groundRate': `perDay`, the units' rating times their commander's Survey bonus, times the game's survey speed (`speed`, percent). Unavailable without the speed, and without the units' rating (null when a formation at the colony has a geosurvey rating the save does not give).
-export const groundSurveyRate = (perDay, speed) => {
-  if (!Number.isFinite(speed) || !Number.isFinite(perDay)) {
-    return unavailable({ rule: 'survey.groundRate', missing: [...(Number.isFinite(speed) ? [] : ['the game\'s survey speed']), ...(Number.isFinite(perDay) ? [] : ['the geosurvey rating of the formations at the colony'])], present: ['the geosurvey units'] })
+// The points a day of a colony's geosurvey formations, as a provenance result of 'survey.groundRate': `formations`, a list of { base, multiplier } (a formation's geosurvey rating and its commander's effective Survey multiplier, `groundCommandMultipliers`; 1 for a formation with no commander, null when the save does not give it), times the game's survey speed (`speed`, percent). The game multiplies the rating by the multiplier twice, so a formation gives base × multiplier². Unavailable without the speed, without the formations' rating (`formations` null when a formation at the colony has a geosurvey rating the save does not give) and without a multiplier.
+export const groundSurveyRate = (formations, speed) => {
+  const missing = []
+
+  if (!Number.isFinite(speed)) {
+    missing.push('the game\'s survey speed')
   }
 
-  return envelope({ value: perDay * (speed / 100), status: 'estimated', rule: 'survey.groundRate', inputs: { present: ['the geosurvey units', 'the formation commander', 'the survey speed'] }, assumptions: ['Estimate: the commander\'s Survey bonus is taken as it is, not as the game scales it up the chain.'] })
+  if (!Array.isArray(formations) || formations.some((formation) => !Number.isFinite(formation.base))) {
+    missing.push('the geosurvey rating of the formations at the colony')
+  } else if (formations.some((formation) => !Number.isFinite(formation.multiplier))) {
+    missing.push('the command capacity and Survey bonus of a formation commander')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule: 'survey.groundRate', missing, present: ['the geosurvey units'] })
+  }
+
+  return envelope({ value: formations.reduce((total, { base, multiplier }) => total + base * multiplier * multiplier, 0) * (speed / 100), status: 'estimated', rule: 'survey.groundRate', inputs: { present: ['the geosurvey units', 'the formation commanders', 'the survey speed'] }, assumptions: ['Estimate: the game counts the commander\'s Survey multiplier twice by its rule; no save separates two applications from one.'] })
+}
+
+// The share of a superior formation commander's bonus that reaches each formation beneath it.
+const SUPERIOR_SHARE = 0.25
+
+// The columns the ground command read needs; a save that lacks one has no ground survey rate, and the read says which.
+const GROUND_COMMAND_COLUMNS = {
+  FCT_GroundUnitFormation: ['FormationID', 'ParentFormationID', 'PopulationID', 'GameID', 'RaceID'],
+  FCT_GroundUnitFormationElement: ['FormationID', 'ClassID', 'Units'],
+  FCT_GroundUnitClass: ['GroundUnitClassID', 'Size', 'HQCapacity'],
+  FCT_Commander: ['CommanderID', 'CommandID', 'CommandType', 'GameID', 'RaceID'],
+  FCT_CommanderBonuses: ['CommanderID', 'BonusID', 'BonusValue'],
+}
+
+// The race's ground formations with what the multiplier of a commander rests on, the rows `groundCommandMultipliers` takes: { supported: true, rows } or { supported: false, missing } for a save without a column the read needs. A row is a formation (id, parent, colony), whether a commander serves it (`HasCommander`) and that commander's Survey bonus, the size of the formation's own elements (`Size`), how many elements there are (`Elements`), how many of them give a class size and a unit count (`Known`) and how many give a headquarters capacity (`Capable`), and the largest headquarters capacity of their classes.
+export const loadGroundCommand = async (database, { GameID, RaceID }) => {
+  const missing = []
+
+  for (const [table, wanted] of Object.entries(GROUND_COMMAND_COLUMNS)) {
+    missing.push(...gaps(table, await columnsOf(database, table), wanted))
+  }
+
+  if (missing.length) {
+    return { supported: false, missing }
+  }
+
+  const [rows] = await database.query(`select FCT_GroundUnitFormation.FormationID, FCT_GroundUnitFormation.ParentFormationID, FCT_GroundUnitFormation.PopulationID, case when FCT_Commander.CommanderID is null then 0 else 1 end as HasCommander, FCT_CommanderBonuses.BonusValue, VIR_Elements.Size, VIR_Elements.Elements, VIR_Elements.Known, VIR_Elements.Capable, VIR_Elements.HQCapacity from FCT_GroundUnitFormation left join FCT_Commander on FCT_Commander.CommandID = FCT_GroundUnitFormation.FormationID and FCT_Commander.CommandType = ${GROUND_POST} and FCT_Commander.GameID = FCT_GroundUnitFormation.GameID and FCT_Commander.RaceID = FCT_GroundUnitFormation.RaceID left join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = ${SURVEY_BONUS} left join (select FCT_GroundUnitFormationElement.FormationID, count(*) as Elements, sum(case when FCT_GroundUnitClass.Size is not null and FCT_GroundUnitFormationElement.Units is not null then 1 else 0 end) as Known, sum(case when FCT_GroundUnitClass.HQCapacity is not null then 1 else 0 end) as Capable, sum(FCT_GroundUnitClass.Size * FCT_GroundUnitFormationElement.Units) as Size, max(FCT_GroundUnitClass.HQCapacity) as HQCapacity from FCT_GroundUnitFormationElement left join FCT_GroundUnitClass on FCT_GroundUnitClass.GroundUnitClassID = FCT_GroundUnitFormationElement.ClassID where FCT_GroundUnitFormationElement.FormationID in (select FCT_GroundUnitFormation.FormationID from FCT_GroundUnitFormation where FCT_GroundUnitFormation.GameID = ${GameID} and FCT_GroundUnitFormation.RaceID = ${RaceID}) group by FCT_GroundUnitFormationElement.FormationID) VIR_Elements on VIR_Elements.FormationID = FCT_GroundUnitFormation.FormationID where FCT_GroundUnitFormation.GameID = ${GameID} and FCT_GroundUnitFormation.RaceID = ${RaceID}`)
+
+  return { supported: true, rows }
+}
+
+// The effective Survey multiplier of each formation that has a commander, as a map from the formation's id to a number, or to null when a figure it rests on is missing. `rows`: one per formation of the race { FormationID, ParentFormationID, PopulationID, HasCommander, BonusValue (null when the commander has no Survey bonus, which counts as 1), Size (the sum of the class size times the units), Elements (the formation's element rows), Known (those whose class gives a size and whose units are stored), Capable (those whose class gives a headquarters capacity) and HQCapacity (the largest of the elements' classes) }. A formation with no commander is not in the map and counts as 1.
+// The game's rule: a commander's own multiplier is the bonus, cut to 1 + (bonus - 1) × share when the share is below 1. The share is the largest headquarters capacity among the formation's own elements against the size of the formation with every formation beneath it (each formation's own size cut to a whole number first), in whole numbers: 1 up to that capacity and 0 beyond it. The superiors add their part: each parent at the same colony that has a commander gives 1 + (its bonus - 1) × 0.25 × its own share, and the parent's parents follow while each link holds.
+export const groundCommandMultipliers = (rows) => {
+  const byId = new Map(rows.map((row) => [row.FormationID, row]))
+  const formations = [...byId.values()]
+  const children = new Map()
+
+  formations.forEach((row) => {
+    if (byId.has(row.ParentFormationID) && row.ParentFormationID !== row.FormationID) {
+      children.set(row.ParentFormationID, [...(children.get(row.ParentFormationID) || []), row.FormationID])
+    }
+  })
+
+  const ownSize = (row) => (!(row.Elements > 0) ? 0 : row.Elements > row.Known || !Number.isFinite(row.Size) ? null : Math.trunc(row.Size))
+  const sizes = new Map()
+  const sizeOf = (id, path = new Set()) => {
+    if (sizes.has(id)) {
+      return sizes.get(id)
+    } else if (path.has(id)) {
+      return null
+    }
+
+    path.add(id)
+
+    const total = (children.get(id) || []).reduce((sum, child) => {
+      const part = sizeOf(child, path)
+
+      return sum === null || part === null ? null : sum + part
+    }, ownSize(byId.get(id)))
+
+    path.delete(id)
+    sizes.set(id, total)
+
+    return total
+  }
+
+  const bonusOf = (row) => (row.BonusValue === null || row.BonusValue === undefined ? 1 : Number.isFinite(row.BonusValue) ? row.BonusValue : null)
+  const shareOf = (row) => {
+    const size = sizeOf(row.FormationID)
+    const capacity = row.Elements > 0 ? (row.Elements > row.Capable ? null : row.HQCapacity) : 0
+
+    return size === null || !Number.isFinite(capacity) ? null : size > capacity ? 0 : 1
+  }
+
+  const superiors = (row, path) => {
+    const parent = byId.get(row.ParentFormationID)
+
+    if (!parent || !(parent.PopulationID > 0) || parent.PopulationID !== row.PopulationID || !parent.HasCommander) {
+      return 1
+    } else if (path.has(parent.FormationID)) {
+      return null
+    }
+
+    const bonus = bonusOf(parent)
+    const share = shareOf(parent)
+    const above = superiors(parent, new Set([...path, parent.FormationID]))
+
+    return bonus === null || share === null || above === null ? null : (1 + (bonus - 1) * SUPERIOR_SHARE * share) * above
+  }
+
+  return new Map(formations.filter((row) => row.HasCommander).map((row) => {
+    const bonus = bonusOf(row)
+    const share = shareOf(row)
+    const above = superiors(row, new Set([row.FormationID]))
+
+    return [row.FormationID, bonus === null || share === null || above === null ? null : (share < 1 ? 1 + (bonus - 1) * share : bonus) * above]
+  }))
 }

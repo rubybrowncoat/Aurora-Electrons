@@ -33,6 +33,7 @@ const pageLoading = require('./page-loading')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const SPEC_FILE = path.join(utilitiesDirectory, 'specialist-deployments.js')
+const SURVEY_UTILITY_FILE = path.join(utilitiesDirectory, 'survey.js')
 const SURVEY_FILE = path.join(root, 'src', 'renderer', 'pages', 'survey-progress.vue')
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
@@ -182,6 +183,24 @@ const constructedRows = () => {
   }
 }
 
+// The formation commanders of the constructed race, as rows of the page's ground command read ([formation, colony, parent, Survey bonus, own size, headquarters capacity]; a commander with no Survey bonus has a bonus of null). Worked by hand: 1 stands over its capacity with the formation 10 beneath it (20 + 15 against 25), so its multiplier is 1 and the colony 1 gives 0.4 × 1 × 1; 2 is no survey formation and stands over its capacity with 12 beneath it (10 + 25 against 20), so its parent share is 0 and 12, within its own 30, keeps its bonus 2; 4 has an own size of 10.6 (cut to 10, within a capacity of 10) and keeps 1.5; 14 holds 150 with 11 and 18 beneath it (190 against 200, within), so 11 has its own 1.6 times 1 + (2 - 1) × 0.25 = 2.0, and 18, of another colony, does not take the share and has its own 2; 13 holds 5 against a capacity of 3 and has a multiplier of 1; 19 has an element whose class gives no size, so its multiplier is not known.
+const commandRow = (FormationID, PopulationID, ParentFormationID, BonusValue, Size, HQCapacity, over = {}) => ({ FormationID, ParentFormationID, PopulationID, HasCommander: 1, BonusValue, Size, Elements: 1, Known: 1, Capable: 1, HQCapacity, ...over })
+const COMMAND_ROWS = [
+  commandRow(1, 1, 0, 2, 20, 25),
+  commandRow(10, 1, 1, null, 15, 0, { HasCommander: 0 }),
+  commandRow(2, 6, 0, 3, 10, 20),
+  commandRow(12, 6, 2, 2, 25, 30),
+  commandRow(4, 7, 0, 1.5, 10.6, 10),
+  commandRow(11, 7, 14, 1.6, 30, 30),
+  commandRow(14, 7, 0, 2, 150, 200),
+  commandRow(18, 4, 14, 2, 10, 10),
+  commandRow(13, 3, 0, 1.5, 5, 3),
+  commandRow(19, 5, 0, 1.5, null, 5, { Known: 0 }),
+]
+// The effective multiplier of each geosurvey formation of the constructed race by those rows (null: not known), and the points a day of each colony whose rate is known, with a survey speed of 100 % (the rating times the multiplier, twice).
+const MULTIPLIERS = { 1: 1, 12: 2, 4: 1.5, 11: 2, 14: 2, 15: 1, 18: 2, 13: 1, 19: null }
+const DAILY = { 1: 0.4, 3: 0.1, 4: 0.8, 6: 4, 7: 21.05 }
+
 // The states and masses the constructed race must show, by hand. Formation 4 names a template of 100 geo units and holds 18; 21 is aboard a ship the save lacks; 10, 16 and 20 are no specialists (no survey rating, no elements, a rating the save leaves unknown). A xenoarchaeology formation on a ruin outside the known targets may be at work, since the game works a ruin whatever the survey: 22 (the body not surveyed), 23 (the system not known) and 24 (no installations count) are of unknown activity, 12 too (the rating of its xenoarchaeology is not stored, where a target is); 25 (builders identified) and 26 (a used up ruin) are idle, and so is 27, a geological formation on a body the race has not surveyed, which the game does not work. The game also works a xenoarchaeology formation at a colony on an ancient construct that is not active, with no ruin and whatever the survey: 28 is busy on one (the body not surveyed by the race), 29 is of unknown activity on a construct with no stored state and 30, whose xenoarchaeology rating is not stored, on the first; 5, at a colony on an active construct, is idle.
 const STATES = { busy: [1, 2, 3, 13, 18, 19, 28], idle: [4, 5, 11, 14, 15, 17, 25, 26, 27], embarked: [6], unresolved: [7, 8, 9, 21], unknown: [12, 22, 23, 24, 29, 30] }
 const LISTED = sorted(Object.values(STATES).flat())
@@ -300,7 +319,27 @@ const oracle = async (database, GameID, RaceID) => {
   const ruinsAll = await q(`select b.SystemBodyID as id, b.AbandonedFactories as factories, b.RuinRaceID as builders, ${known} as seen, exists (select 1 from FCT_Population p where p.SystemBodyID = b.SystemBodyID and p.RaceID = ${RaceID} and p.GameID = ${GameID}) as colony, exists (select 1 from FCT_KnownRuinRace k where k.RuinRaceID = b.RuinRaceID and k.RaceID = ${RaceID} and k.GameID = ${GameID}) as identified from FCT_SystemBody b where b.GameID = ${GameID} and b.RuinID > 0`)
   const ships = await q(`select s.ShipID as id, coalesce(fl.SystemID, fm.SystemID) as system from FCT_Ship s left join FCT_Fleet fl on fl.FleetID = s.FleetID left join FCT_Ship ms on ms.ShipID = s.MothershipID left join FCT_Fleet fm on fm.FleetID = ms.FleetID where s.ShipID in (select ShipID from FCT_GroundUnitFormation where GameID = ${GameID} and RaceID = ${RaceID} and ShipID > 0)`)
   const surveyed = await q(`select b.SystemID as system, count(*) as bodies from FCT_SystemBody b where b.GameID = ${GameID} and exists (select 1 from FCT_SystemBodySurveys s where s.SystemBodyID = b.SystemBodyID and s.RaceID = ${RaceID} and s.GameID = ${GameID}) group by b.SystemID`)
-  const teams = await q(`select p.PopulationID as pop, sum(case when ${['a', 'b', 'c', 'd'].map((slot) => sum(slot, 'Geosurvey')).join(' + ')} > 0 then e.Units else 0 end) as units, sum(e.Units * (${['a', 'b', 'c', 'd'].map((slot) => sum(slot, 'Geosurvey')).join(' + ')})) as base, sum(e.Units * (${['a', 'b', 'c', 'd'].map((slot) => sum(slot, 'Geosurvey')).join(' + ')}) * coalesce(bonus.BonusValue, 1)) as perDay from FCT_GroundUnitFormation f join FCT_Population p on p.PopulationID = f.PopulationID join FCT_GroundUnitFormationElement e on e.FormationID = f.FormationID join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID left join DIM_GroundComponentType a on a.ComponentTypeID = k.ComponentA left join DIM_GroundComponentType b on b.ComponentTypeID = k.ComponentB left join DIM_GroundComponentType c on c.ComponentTypeID = k.ComponentC left join DIM_GroundComponentType d on d.ComponentTypeID = k.ComponentD left join (select m.CommandID as formation, cb.BonusValue from FCT_Commander m join FCT_CommanderBonuses cb on cb.CommanderID = m.CommanderID and cb.BonusID = 2 where m.GameID = ${GameID} and m.RaceID = ${RaceID} and m.CommandType = 5) bonus on bonus.formation = f.FormationID where f.GameID = ${GameID} and f.RaceID = ${RaceID} and p.RaceID = ${RaceID} group by p.PopulationID`)
+  const geoSum = ['a', 'b', 'c', 'd'].map((slot) => sum(slot, 'Geosurvey')).join(' + ')
+  const ratings = await q(`select p.PopulationID as pop, sum(case when ${geoSum} > 0 then e.Units else 0 end) as units, sum(e.Units * (${geoSum})) as base from FCT_GroundUnitFormation f join FCT_Population p on p.PopulationID = f.PopulationID join FCT_GroundUnitFormationElement e on e.FormationID = f.FormationID join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID left join DIM_GroundComponentType a on a.ComponentTypeID = k.ComponentA left join DIM_GroundComponentType b on b.ComponentTypeID = k.ComponentB left join DIM_GroundComponentType c on c.ComponentTypeID = k.ComponentC left join DIM_GroundComponentType d on d.ComponentTypeID = k.ComponentD where f.GameID = ${GameID} and f.RaceID = ${RaceID} and p.RaceID = ${RaceID} group by p.PopulationID`)
+  // What the game's multiplier of a formation's commander rests on, per formation: the commanders, the Survey bonus of the first, the size of its own elements and the largest headquarters capacity of their classes.
+  const commands = await q(`select f.FormationID as id, f.ParentFormationID as parent, f.PopulationID as pop, (select count(*) from FCT_Commander m where m.CommandID = f.FormationID and m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID}) as commanders, (select cb.BonusValue from FCT_Commander m join FCT_CommanderBonuses cb on cb.CommanderID = m.CommanderID and cb.BonusID = 2 where m.CommandID = f.FormationID and m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID} order by m.CommanderID limit 1) as bonus, (select coalesce(sum(e.Units * k.Size), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as size, (select coalesce(max(k.HQCapacity), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as capacity from FCT_GroundUnitFormation f where f.GameID = ${GameID} and f.RaceID = ${RaceID}`)
+  const commandOf = new Map(commands.map((row) => [row.id, { ...row, size: Math.trunc(row.size) }]))
+  const totalSize = (id) => commandOf.get(id).size + commands.filter((row) => row.parent === id && row.id !== id).reduce((all, row) => all + totalSize(row.id), 0)
+  // The headquarters capacity against the whole size, an integer division as in the game: 0 beyond the capacity, 1 within it.
+  const capacityShare = (row) => (totalSize(row.id) > 0 ? Math.min(1, Math.floor(row.capacity / totalSize(row.id))) : 1)
+  const ownMultiplier = (row) => (capacityShare(row) < 1 ? 1 + ((row.bonus === null ? 1 : row.bonus) - 1) * capacityShare(row) : row.bonus === null ? 1 : row.bonus)
+  const parentFactor = (row) => {
+    const parent = commandOf.get(row.parent)
+
+    return parent && parent.pop > 0 && parent.pop === row.pop && parent.commanders > 0 ? (1 + ((parent.bonus === null ? 1 : parent.bonus) - 1) * 0.25 * capacityShare(parent)) * parentFactor(parent) : 1
+  }
+  const multiplierOf = new Map(commands.map((row) => [row.id, row.commanders > 0 ? ownMultiplier(commandOf.get(row.id)) * parentFactor(row) : 1]))
+  // The ground survey a day of a colony: each geosurvey formation's rating times the multiplier of its commander, twice (the game applies it where the points of the formation are summed and again where they are added to the colony).
+  const teams = ratings.map((row) => {
+    const here = formations.filter((item) => item.pop === row.pop && item.geo > 0).map((item) => ({ id: item.id, base: item.geo, multiplier: multiplierOf.get(item.id) }))
+
+    return { ...row, formations: here, perDay: here.reduce((all, item) => all + item.base * item.multiplier * item.multiplier, 0) }
+  })
   const found = new Set(ruinsAll.filter((row) => row.seen && row.factories > 0 && !row.identified).map((row) => row.id))
   // Where the game may work a xenoarchaeology formation with no known target: a ruin on a colony body of the race that it has not surveyed (or in a system it does not know) with builders not identified, and a ruin whose installations left are not stored.
   const unseen = new Set(ruinsAll.filter((row) => row.colony && ((!row.seen && (row.factories === null || (row.factories > 0 && !row.identified))) || (row.seen && row.factories === null))).map((row) => row.id))
@@ -378,7 +417,7 @@ const surveyView = (ctx, data = {}) => instantiate(ctx.pages.survey, {
     groundSurveys: ctx.memory.groundSurveys,
     ruinSites: ctx.memory.ruinSites,
     constructSites: ctx.memory.constructSites,
-    groundCommanders: [{ FormationID: 4, BonusValue: 1.5 }, { FormationID: 1, BonusValue: 2 }],
+    groundCommanders: { supported: true, rows: COMMAND_ROWS },
     troopBays: { troops: TROOPS },
     formations: ctx.models.supportedConstructed,
     ...data,
@@ -602,38 +641,62 @@ add('select', 'the role and state filters keep the rows in a chosen role (both o
   assert.equal(ALL_STATES.reduce((sum, state) => sum + deployTotals.states[state], 0), deployTotals.formations)
 })
 
-add('rates', 'the ground survey of a colony is the model\'s per-colony rating times the commander bonus, and a colony with a formation of unknown rating has an unavailable rate', (ctx) => {
+add('rates', 'the ground survey of a colony is the rating of each formation times the multiplier of its commander (the bonus cut to the command capacity, with the share of the superiors at the colony), counted twice, a colony with a formation of unknown rating, or a multiplier not known, has an unavailable rate', (ctx) => {
   const vm = surveyView(ctx)
   const teams = vm.colonyTeams
   const rows = new Map(vm.groundRows.map((row) => [row.PopulationID || -row.SystemBodyID, row]))
+  const multipliers = (team) => Object.fromEntries(team.formations.map((item) => [item.id, item.multiplier]))
 
   assert.deepEqual(teams.get(1).unknown, [])
   assert.equal(teams.get(1).units, 4)
   near(teams.get(1).base, 0.4)
-  near(teams.get(1).perDay, 0.8)
+  assert.deepEqual(multipliers(teams.get(1)), { 1: MULTIPLIERS[1] }, 'over its capacity with the formation beneath it')
   assert.deepEqual(teams.get(2).unknown, [20])
   assert.equal(teams.get(2).units, 2)
   assert.equal(teams.get(7).units, 56)
   near(teams.get(7).base, 6.2)
-  near(teams.get(7).perDay, 7.1)
+  assert.deepEqual(multipliers(teams.get(7)), { 4: MULTIPLIERS[4], 11: MULTIPLIERS[11], 14: MULTIPLIERS[14], 15: MULTIPLIERS[15] }, 'a size cut to a whole number, a parent at the colony, within its capacity, and no commander')
+  assert.deepEqual(Object.fromEntries(teams.get(7).formations.map((item) => [item.id, Math.round(item.base * 100) / 100])), { 4: 1.8, 11: 1.2, 14: 3, 15: 0.2 })
   assert.equal(teams.has(6), true)
   assert.equal(teams.has(9), true)
   assert.equal(teams.get(6).units, 5)
+  assert.deepEqual(multipliers(teams.get(6)), { 12: MULTIPLIERS[12] }, 'the parent is over its capacity and gives no share')
+  assert.deepEqual(multipliers(teams.get(4)), { 18: MULTIPLIERS[18] }, 'a parent at another colony gives no share')
+  assert.deepEqual(multipliers(teams.get(3)), { 13: MULTIPLIERS[13] }, 'over its capacity by its own size')
+  assert.equal(teams.get(5).formations[0].multiplier, null)
   assert.equal(rows.get(1).Units, 4)
-  near(rows.get(1).PointsPerDay, 0.8)
-  near(rows.get(3).PointsPerDay, 0.1)
-  near(rows.get(4).PointsPerDay, 0.2)
+  near(rows.get(1).PointsPerDay, DAILY[1])
+  near(rows.get(3).PointsPerDay, DAILY[3])
+  near(rows.get(4).PointsPerDay, DAILY[4])
+  // The colony 7 has no ground survey body of its own: the row of the colony 5 is read as its row, and the formation 16 with no element (a rating the save leaves unknown) is left out of its model.
+  const model = { ...ctx.models.supportedConstructed, formations: ctx.models.supportedConstructed.formations.filter((node) => node.id !== 16) }
+  const atSeven = (speed) => surveyView(ctx, { game: { SurveySpeed: speed }, formations: model, groundSurveys: ctx.memory.groundSurveys.map((row) => (row.PopulationID === 5 ? { ...row, PopulationID: 7 } : row)) }).groundRows.find((row) => row.PopulationID === 7)
+
+  near(atSeven(100).PointsPerDay, DAILY[7])
+  near(atSeven(50).PointsPerDay, DAILY[7] / 2)
+  assert.equal(rows.get(1).rate.status, 'estimated')
   assert.equal(rows.get(2).rate.status, 'unavailable')
   assert.equal(rows.get(2).PointsPerDay, null)
   assert.equal(rows.get(2).rateUnknown, true)
+  assert.equal(rows.get(5).rate.status, 'unavailable')
+  assert.equal(rows.get(5).PointsPerDay, null)
+  assert.equal(rows.get(5).rateUnknown, true)
   assert.equal(rows.get(1).rateUnknown, false)
   assert.equal(rows.get(-106).Units, 0)
   assert.equal(rows.get(-106).PointsPerDay, 0)
   assert.equal(rows.get(-106).rateUnknown, false)
   assert.equal(surveyView(ctx, { game: null }).groundRows.every((row) => row.rate.status === 'unavailable'), true)
   assert.equal(rows.get(2).rate.inputs.missing.length, 1)
+  assert.equal(rows.get(5).rate.inputs.missing.length, 1)
   assert.equal(rows.get(1).rate.inputs.missing.length, 0)
   assert.equal(surveyView(ctx, { formations: { supported: false, missing: ['x'] } }).groundRows.filter((row) => row.PopulationID).every((row) => row.rate.status === 'unavailable'), true)
+  assert.equal(surveyView(ctx, { groundCommanders: { supported: false, missing: ['x'] } }).groundRows.filter((row) => row.PopulationID && row.Units > 0).every((row) => row.rate.status === 'unavailable'), true, 'commanders that were not read leave the rate unknown')
+  assert.equal(surveyView(ctx, { groundCommanders: { supported: false, missing: ['x'] } }).groundRows.find((row) => row.PopulationID === 1).rateUnknown, true)
+  // The rate and the multipliers called as they are, with figures the page never hands them: a rating that is not known is no rating of nothing, and a descendant whose class gives a size but no headquarters capacity leaves its commander's multiplier as it is.
+  assert.equal(ctx.survey.groundSurveyRate([{ base: null, multiplier: 2 }], 100).status, 'unavailable')
+  assert.equal(ctx.survey.groundSurveyRate([{ base: undefined, multiplier: 2 }], 100).status, 'unavailable')
+  near(ctx.survey.groundSurveyRate([{ base: 0.5, multiplier: 2 }, { base: 1, multiplier: 1 }], 50).value, 1.5)
+  assert.equal(ctx.survey.groundCommandMultipliers([commandRow(1, 1, 0, 2, 10, 50), commandRow(2, 1, 1, null, 20, null, { HasCommander: 0, Capable: 0 })]).get(1), 2)
 })
 
 add('headers', 'every sortable column of both tables sorts by a value its rows carry', (ctx) => {
@@ -865,7 +928,7 @@ FIXTURES.forEach((fixture, index) => {
     rows.filter((row) => row.state === 'embarked').forEach((row) => assert.equal(row.lift.kind, 'aboard'))
   })
 
-  add(`save-${index}-rates`, `${label}: the ground survey rate of each colony is the per-colony units, rating and commander bonus of the old SQL read`, (ctx) => {
+  add(`save-${index}-rates`, `${label}: the ground survey rate of each colony is the sum, over its geosurvey formations, of the rating times the multiplier of the commander twice, by SQL and the game's rule written here`, (ctx) => {
     const { vm, truth } = state(ctx)
 
     vm.groundRows.filter((row) => row.PopulationID).forEach((row) => {
@@ -882,7 +945,7 @@ FIXTURES.forEach((fixture, index) => {
     vm.groundRows.filter((row) => !row.PopulationID).forEach((row) => assert.deepEqual([row.Units, row.PointsPerDay], [0, 0]))
   })
 
-  add(`save-${index}-all-rates`, `${label}: the ground survey of every one of its ${fixture.colonies} colonies, with ground survey work or not, is the units, rating and commander bonus of the old SQL read, in both directions`, (ctx) => {
+  add(`save-${index}-all-rates`, `${label}: the geosurvey formations of every one of its ${fixture.colonies} colonies, with ground survey work or not, are those of the SQL read, each with its rating and the multiplier of its commander (the capacity and the superiors by the game's rule written here), in both directions`, (ctx) => {
     const { vm, truth } = state(ctx)
     const teams = vm.colonyTeams
 
@@ -890,15 +953,19 @@ FIXTURES.forEach((fixture, index) => {
     assert.ok([...teams.keys()].every((id) => truth.populations.has(id)), 'a team at a colony the SQL does not know')
     assert.ok([...truth.teams.keys()].every((id) => teams.has(id)), 'a colony with a ground survey team the module does not know')
     truth.populations.forEach((_colony, id) => {
-      const team = teams.get(id) || { units: 0, base: 0, perDay: 0, unknown: [] }
+      const team = teams.get(id) || { units: 0, base: 0, formations: [], unknown: [] }
       const known = truth.teams.get(id)
 
       assert.equal(team.units, known ? known.units : 0, `colony ${id} units`)
       near(team.base, known ? known.base : 0, `colony ${id} base`)
 
-      if (!team.unknown.length) {
-        near(team.perDay, known ? known.perDay : 0, `colony ${id} points a day`)
-      }
+      const wanted = known ? known.formations : []
+
+      assert.deepEqual(team.formations.map((item) => item.id), wanted.map((item) => item.id), `colony ${id} formations`)
+      team.formations.forEach((item, at) => {
+        near(item.base, wanted[at].base, `formation ${item.id} base`)
+        near(item.multiplier, wanted[at].multiplier, `formation ${item.id} multiplier`)
+      })
     })
   })
 })
@@ -1301,6 +1368,7 @@ add('browser-unread', 'a save without what an optional read of the page needs le
 
 // A fault or a benign rewrite: [name, from, to, file, expected ids (a fault; the check ids one of which must fail), browser (the page is served to the browser and driven), { throws } (a fault whose catch is a throw of the code under test, which credits it; scripts/lib/fault-credit.js `caughtBy`)].
 const SPEC_RELATIVE = 'utilities/specialist-deployments'
+const SURVEY_RELATIVE = 'utilities/survey'
 
 /* eslint-disable no-template-curly-in-string */
 const MUTANTS = [
@@ -1322,7 +1390,7 @@ const MUTANTS = [
   ['every formation is packed with the idle ones', '(row) => row.state === \'idle\')', '() => true)', SPEC_FILE, ['lifts', 'save-0-lifts']],
   ['the base rating of a colony is not summed', 'team.base += node.geo.value\n', 'team.base += 0\n', SPEC_FILE, ['save-0-all-rates', 'save-1-all-rates', 'save-2-all-rates']],
   ['a colony with a team of one formation only keeps the last', 'team.units += node.geo.from.reduce((sum, item) => sum + item.units, 0)', 'team.units = node.geo.from.reduce((sum, item) => sum + item.units, 0)', SPEC_FILE, ['rates', 'save-0-all-rates', 'save-1-all-rates', 'save-2-all-rates']],
-  ['a commander bonus is ignored', '* (bonuses.get(node.id) ?? 1)', '* 1', SPEC_FILE, ['rates']],
+  ['the multiplier of a formation is not taken from its commander', 'multiplier: multipliers === null ? null : multipliers.has(node.id) ? multipliers.get(node.id) : 1', 'multiplier: 1', SPEC_FILE, ['rates', 'save-2-all-rates']],
   ['a formation of unknown rating counts as unrated', 'if (node.geo.value === null) {', 'if (node.geo.value === null && false) {', SPEC_FILE, ['rates']],
   ['the state filter is ignored', 'states.includes(row.state))', 'true)', SPEC_FILE, ['select']],
   ['a formation with two ratings is counted once as geo only', 'xeno += row.roleKeys.includes(\'xeno\') ? 1 : 0', 'xeno += row.roleKeys.includes(\'xeno\') && !row.roleKeys.includes(\'geo\') ? 1 : 0', SPEC_FILE, ['rows-once', 'select']],
@@ -1333,7 +1401,21 @@ const MUTANTS = [
   ['the persisted filter shares the key of the other', "key: 'deployStates', scope: 'race'", "key: 'deployRoles', scope: 'race'", SPEC_FILE, ['views']],
   ['a body the race has not surveyed is a ground survey target', 'inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', 'left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', SURVEY_FILE, ['targets-eligible', 'save-1-targets']],
   ['a body in a system the race does not know is a target', 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', SURVEY_FILE, ['targets-eligible', 'ruins-unsupported']],
-  ['the ground rate ignores a formation of unknown rating', 'groundSurveyRate(teamUnknown ? null : team.perDay, this.surveySpeed)', 'groundSurveyRate(team ? team.perDay : 0, this.surveySpeed)', SURVEY_FILE, ['rates']],
+  ['the ground rate ignores a formation of unknown rating', 'groundSurveyRate(teamUnknown ? null : team.formations, this.surveySpeed)', 'groundSurveyRate(team ? team.formations : [], this.surveySpeed)', SURVEY_FILE, ['rates']],
+  ['the commanders are not given to the colony teams', 'colonyGeoTeams(this.formationModel, this.commanderMultipliers)', 'colonyGeoTeams(this.formationModel, new Map())', SURVEY_FILE, ['rates', 'save-2-all-rates']],
+  ['commanders that were not read count as none', 'groundCommandMultipliers(this.groundCommanders.rows) : null', 'groundCommandMultipliers(this.groundCommanders.rows) : new Map()', SURVEY_FILE, ['rates']],
+  ['a multiplier counts once in the rate of a formation', 'total + base * multiplier * multiplier', 'total + base * multiplier', SURVEY_UTILITY_FILE, ['rates']],
+  ['a multiplier that is not known counts as a rate of nothing', '} else if (formations.some((formation) => !Number.isFinite(formation.multiplier))) {', '} else if (false) {', SURVEY_UTILITY_FILE, ['rates']],
+  ['the command capacity cuts nothing', '(share < 1 ? 1 + (bonus - 1) * share : bonus) * above', 'bonus * above', SURVEY_UTILITY_FILE, ['rates']],
+  ['a size that is not known is taken as within the capacity', '? null : size > capacity ? 0 : 1', '? 1 : size > capacity ? 0 : 1', SURVEY_UTILITY_FILE, ['rates']],
+  ['the own size of a formation is not cut to a whole number', 'Math.trunc(row.Size)', 'row.Size', SURVEY_UTILITY_FILE, ['rates']],
+  ['the formations beneath a formation add nothing to its size', 'const total = (children.get(id) || []).reduce(', 'const total = [].reduce(', SURVEY_UTILITY_FILE, ['rates']],
+  ['the commanders above a formation give nothing', 'const above = superiors(row, new Set([row.FormationID]))', 'const above = 1', SURVEY_UTILITY_FILE, ['rates']],
+  ['a superior gives its whole bonus, not its share', '(1 + (bonus - 1) * SUPERIOR_SHARE * share) * above', '(1 + (bonus - 1) * share) * above', SURVEY_UTILITY_FILE, ['rates']],
+  ['a superior over its capacity still gives its share', '(1 + (bonus - 1) * SUPERIOR_SHARE * share) * above', '(1 + (bonus - 1) * SUPERIOR_SHARE) * above', SURVEY_UTILITY_FILE, ['rates']],
+  ['a superior at another colony gives its share', '|| parent.PopulationID !== row.PopulationID ', '', SURVEY_UTILITY_FILE, ['rates']],
+  ['a rating that is not known is taken as a rating of nothing', ' || formations.some((formation) => !Number.isFinite(formation.base))', '', SURVEY_UTILITY_FILE, ['rates']],
+  ['a descendant whose class has no headquarters capacity leaves its size unknown', 'row.Elements > row.Known || !Number.isFinite(row.Size)', 'row.Elements > row.Known || row.Elements > row.Capable || !Number.isFinite(row.Size)', SURVEY_UTILITY_FILE, ['rates']],
   ['a body with no colony is of unknown rate', 'teams.get(row.PopulationID) || NO_TEAM : null) : NO_TEAM', 'teams.get(row.PopulationID) || NO_TEAM : null) : null', SURVEY_FILE, ['save-1-rates']],
   ['the unstaffed switch does nothing', "(!this.deployUnstaffed || row.status !== 'worked')", 'true', SURVEY_FILE, ['target-rows']],
   ['the Candidates column sorts by a value the rows do not carry', "{ text: 'Candidates', value: 'candidateSort' }", "{ text: 'Candidates', value: 'candidateCount' }", SURVEY_FILE, ['headers']],
@@ -1374,6 +1456,10 @@ const BENIGN = [
   ['a qualifier moved from the front to the back in a sentence', 'No troop bay holds it (the largest takes ${count(lift.largest)} t)', 'Held by no troop bay (the largest takes ${count(lift.largest)} t)', SPEC_FILE],
   ['a synonym in generated prose', "'Location not resolved'", "'Place not resolved'", SPEC_FILE],
   ['a parenthesised condition', 'if (roles.geo !== true && roles.xeno !== true) {', 'if ((roles.geo !== true) && (roles.xeno !== true)) {', SPEC_FILE],
+  ['the multiplier of a formation squared with a power', 'total + base * multiplier * multiplier', 'total + base * (multiplier ** 2)', SURVEY_UTILITY_FILE],
+  ['the share of the capacity written as a comparison with the capacity first', 'size > capacity ? 0 : 1', 'capacity >= size ? 1 : 0', SURVEY_UTILITY_FILE],
+  ['the own size cut with floor, as the size is never negative', 'Math.trunc(row.Size)', 'Math.floor(row.Size)', SURVEY_UTILITY_FILE],
+  ['a superior of another colony told apart with a parenthesised condition', '!(parent.PopulationID > 0) || parent.PopulationID !== row.PopulationID || !parent.HasCommander', '(!(parent.PopulationID > 0)) || (parent.PopulationID !== row.PopulationID) || (!parent.HasCommander)', SURVEY_UTILITY_FILE],
   ['the roles chip group registered under its PascalCase name', '<v-chip-group v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">\n              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>\n            </v-chip-group>', '<VChipGroup v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">\n              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>\n            </VChipGroup>', SURVEY_FILE, [], true],
   ['a native listener that does nothing on each role chip', ':data-count="deployTotals[choice.value]" filter', ':data-count="deployTotals[choice.value]" @click.native="void 0" filter', SURVEY_FILE, [], true],
   ['the figure of each role chip written with its places named', '{{ choice.text }} ({{ count(deployTotals[choice.value]) }})', '{{ choice.text }} ({{ count(deployTotals[choice.value], 0) }})', SURVEY_FILE, [], true],
@@ -1537,19 +1623,19 @@ const setUp = async () => {
   const recordsFile = flagOf('records')
   const records = recordsFile ? JSON.parse(fs.readFileSync(recordsFile, 'utf8')) : null
 
-  const sources = { spec: fs.readFileSync(SPEC_FILE, 'utf8'), survey: fs.readFileSync(SURVEY_FILE, 'utf8') }
+  const sources = { spec: fs.readFileSync(SPEC_FILE, 'utf8'), survey: fs.readFileSync(SURVEY_FILE, 'utf8'), utility: fs.readFileSync(SURVEY_UTILITY_FILE, 'utf8') }
   const texts = new Map()
 
   // The page, loaded with the utility text it is given: a fault planted in the utility reaches it through its import.
   const pagesOf = async (given) => {
-    const survey = await loadPage('pages/survey-progress', { sources: { [SPEC_RELATIVE]: given.spec, 'pages/survey-progress': given.survey }, stubs: STUBS, modules: { 'mixins/load-state': null, 'mixins/persisted-view': VIEW_MODULE }, texts })
+    const survey = await loadPage('pages/survey-progress', { sources: { [SPEC_RELATIVE]: given.spec, [SURVEY_RELATIVE]: given.utility, 'pages/survey-progress': given.survey }, stubs: STUBS, modules: { 'mixins/load-state': null, 'mixins/persisted-view': VIEW_MODULE }, texts })
 
     return { pages: { survey }, fields: survey.mixins.find((mixin) => mixin.fields).fields }
   }
   const utilitiesOf = async (given) => {
-    const loaded = await loadUtilities(['specialist-deployments', 'ground-formations'], { stubs: STUBS, sources: { 'specialist-deployments': given.spec } })
+    const loaded = await loadUtilities(['specialist-deployments', 'ground-formations', 'survey'], { stubs: STUBS, sources: { 'specialist-deployments': given.spec, survey: given.utility } })
 
-    return { mod: loaded['specialist-deployments'], ground: loaded['ground-formations'] }
+    return { mod: loaded['specialist-deployments'], ground: loaded['ground-formations'], survey: loaded.survey }
   }
 
   const base = await utilitiesOf(sources)
@@ -1641,8 +1727,9 @@ const setUp = async () => {
   const unreadDatabases = {}
   const contextOf = async (given, seen = env.baselineSeen, unreadSeen = env.baselineUnread) => {
     const { pages, fields } = await pagesOf(given)
-    const mod = subjectModule((await utilitiesOf(given)).mod)
-    const ctx = { mod, pages, fields: subjectFields(fields), models, browser: seen, expected, labels, memory: null, saves: [], unreadSeen, unreadRows: null }
+    const utilities = await utilitiesOf(given)
+    const mod = subjectModule(utilities.mod)
+    const ctx = { mod, survey: subjectModule(utilities.survey), pages, fields: subjectFields(fields), models, browser: seen, expected, labels, memory: null, saves: [], unreadSeen, unreadRows: null }
 
     // A read is kept for the text that makes it (the page for the ground surveys, the utility for the ruins), so a variant that changes neither does not read the saves again.
     const read = async (kind, text, label, database, ids) => {
@@ -1789,7 +1876,7 @@ const setUp = async () => {
   // The sources with the one change of a fault or a rewrite ([name, from, to, file, ...]).
   env.variantOf = ([, from, to, file]) => {
     const given = { ...sources }
-    const key = file === SPEC_FILE ? 'spec' : 'survey'
+    const key = file === SPEC_FILE ? 'spec' : file === SURVEY_UTILITY_FILE ? 'utility' : 'survey'
 
     given[key] = patched(file, sources[key], from, to)
 

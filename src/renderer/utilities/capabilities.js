@@ -49,7 +49,7 @@ const OPTIONAL = Object.freeze({
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
   '/map': (key) => key === 'groundFormations',
   // The formations read for the observation (`observationRead`) are an opt-in feature of Survey Progress and of the recorder behind History: a save without a column of that read leaves the observation unavailable (Survey Progress says so in place of the switch, and the recorder notes the failed read in the record), and nothing else of either page.
-  '/survey-progress': (key) => ['formations', 'ruinSites', 'constructSites', 'troopBays', 'observationRead'].includes(key),
+  '/survey-progress': (key) => ['formations', 'groundCommanders', 'ruinSites', 'constructSites', 'troopBays', 'observationRead'].includes(key),
   '/history': (key) => key === 'observationRead',
   // The command structure panel of the Commanders page reads the naval admin commands, fleets and ships and the ground formations with their commanders, each loader checking its own columns; the roster does not rest on them, and the panel names what could not be read.
   '/commanders': (key) => key === 'navalTree' || key === 'groundTree',

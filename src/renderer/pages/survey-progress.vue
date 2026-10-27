@@ -143,7 +143,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times its commander's Survey bonus and the game's survey speed. It can raise the body's mineral deposits; the potential is what the geological survey found.
+            A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times the square of its commander's Survey multiplier (the game applies the multiplier twice) and the game's survey speed. The multiplier is the commander's bonus, which counts for nothing when the formation with its subordinates is larger than its headquarters can command, and each commander above at the same colony raises it by a quarter of the bonus beyond 1. It can raise the body's mineral deposits; the potential is what the geological survey found.
           </div>
         </v-card>
 
@@ -375,7 +375,7 @@ import { roundToDecimal } from '../utilities/math'
 import { navalAdminChain } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sumResults, unavailable, valueOrNull } from '../utilities/provenance'
-import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surveyShipSql } from '../utilities/survey'
+import { bodyPointsSql, fleetSurveyRate, groundCommandMultipliers, groundSurveyRate, loadGroundCommand, loadSurveyShips, surveyShipSql } from '../utilities/survey'
 import { surveyDays } from '../utilities/survey-eta'
 import { formationRows, remoteOnlyView, REMOTE_DEFINITION, ROLE_OPTIONS, rolesView, rowTotals, selectRows } from '../utilities/remote-formations'
 import { loadGroundFormations } from '../utilities/ground-formations'
@@ -411,7 +411,7 @@ const POTENTIAL = { 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent'
 const SURVEY_ORDERS = new Set([9, 12])
 const PAGE_SIZES = [15, 30, -1]
 // The ground survey of a colony with no formation of the race.
-const NO_TEAM = Object.freeze({ units: 0, base: 0, perDay: 0, unknown: Object.freeze([]) })
+const NO_TEAM = Object.freeze({ units: 0, base: 0, formations: Object.freeze([]), unknown: Object.freeze([]) })
 const STATE_STYLE = { idle: { icon: 'mdi-sleep', color: 'warning' }, busy: { icon: 'mdi-hammer-wrench', color: 'success' }, embarked: { icon: 'mdi-ferry', color: '' }, unresolved: { icon: 'mdi-help-circle-outline', color: '' }, unknown: { icon: 'mdi-help-rhombus-outline', color: '' } }
 const TARGET_STATUS = { worked: 'A formation is working here', unstaffed: 'No formation here', 'no-colony': 'No colony yet' }
 
@@ -589,14 +589,14 @@ export default {
       }).sort((a, b) => a.remaining - b.remaining)
     },
 
-    // The Survey bonus of each formation's commander as a map from the formation's id; a formation with no commander or no bonus has none, which counts as 1.
-    commanderBonuses() {
-      return new Map(this.groundCommanders.map((row) => [row.FormationID, row.BonusValue]))
+    // The effective Survey multiplier of each formation that has a commander (`groundCommandMultipliers`), as a map from the formation's id: the commander's bonus cut to the capacity of the formation's headquarters, times what the commanders above at the same colony pass down. A formation with no commander is not in it and counts as 1; one whose multiplier the save does not settle is null. Null while the save lacks what the read needs.
+    commanderMultipliers() {
+      return this.groundCommanders && this.groundCommanders.supported ? groundCommandMultipliers(this.groundCommanders.rows) : null
     },
 
-    // The geosurvey units, rating and rate of the formations at each colony, from the model's formations (`colonyGeoTeams`), so a colony's ground survey rate and the specialist list use the same ratings; null while the save lacks what the model reads.
+    // The geosurvey units, rating and formations of each colony, from the model's formations (`colonyGeoTeams`), so a colony's ground survey rate and the specialist list use the same ratings; null while the save lacks what the model reads.
     colonyTeams() {
-      return this.formationModel ? colonyGeoTeams(this.formationModel, this.commanderBonuses) : null
+      return this.formationModel ? colonyGeoTeams(this.formationModel, this.commanderMultipliers) : null
     },
 
     groundRows() {
@@ -605,7 +605,7 @@ export default {
       return this.groundSurveys.map((row) => {
         const team = row.PopulationID ? (teams ? teams.get(row.PopulationID) || NO_TEAM : null) : NO_TEAM
         const teamUnknown = team === null || team.unknown.length > 0
-        const rate = groundSurveyRate(teamUnknown ? null : team.perDay, this.surveySpeed)
+        const rate = groundSurveyRate(teamUnknown ? null : team.formations, this.surveySpeed)
         const perDay = valueOrNull(rate)
         const remaining = Math.max(0, row.PointsRequired - row.PointsDone)
         const eta = perDay > 0 ? remaining / perDay : null
@@ -1260,16 +1260,16 @@ export default {
       }),
       default: [],
     },
-    // The Survey bonus of each ground formation's commander (formation id and bonus), which the ground survey rate of a colony multiplies the formations' rating by.
+    // The race's ground formations with what the multiplier of a commander rests on (`loadGroundCommand`), which the ground survey rate of a colony reads through `groundCommandMultipliers`, or { supported: false, missing } for a save without what it reads.
     groundCommanders: {
       get: tracked('groundCommanders', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return []
+          return null
         }
 
-        return await this.database.query(`select FCT_Commander.CommandID as FormationID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 5`).then(([items]) => Object.freeze(items))
+        return Object.freeze(await loadGroundCommand(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
-      default: [],
+      default: null,
     },
     // The ruins on the bodies the race has surveyed (`loadRuinSites`), or { supported: false, missing } for a save without what it reads.
     ruinSites: {

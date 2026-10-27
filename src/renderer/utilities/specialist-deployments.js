@@ -456,8 +456,8 @@ export const deploymentTotals = (rows, others, index) => {
   return { formations: rows.length, geo, xeno, both, states, others, targets: { geo: { bodies: index.bodies.geo, colonies: index.colonies.geo, systems: index.systems.geo }, xeno: { bodies: index.bodies.xeno, colonies: index.colonies.xeno, systems: index.systems.xeno } } }
 }
 
-// The ground survey of each colony from the model's formations at it, the base of the Ground surveys table: a map from a colony's PopulationID to { units, base, perDay, unknown }. `units` adds the units of the elements with geosurvey equipment of the formations stationed there, `base` their geosurvey rating, `perDay` the rating times each formation's commander Survey bonus (`bonuses`: a map from a formation id to the bonus; 1 for none) and `unknown` lists the formations whose rating the save does not give (their units and rating are not in the sums). A formation aboard a ship is at no colony.
-export const colonyGeoTeams = (model, bonuses) => {
+// The ground survey of each colony from the model's formations at it, the base of the Ground surveys table: a map from a colony's PopulationID to { units, base, formations, unknown }. `units` adds the units of the elements with geosurvey equipment of the formations stationed there, `base` their geosurvey rating, `formations` each of those formations as { id, base, multiplier } for `groundSurveyRate` to turn into points a day, and `unknown` lists the formations whose rating the save does not give (their units and rating are not in the sums). `multipliers` maps a formation's id to its commander's effective Survey multiplier, as `groundCommandMultipliers` gives it: a formation not in it has no commander and counts as 1, one mapped to null has a multiplier the save does not settle, and with `multipliers` itself null (the read was not possible) no formation's multiplier is known. A formation aboard a ship is at no colony.
+export const colonyGeoTeams = (model, multipliers) => {
   const teams = new Map()
 
   model.formations.forEach((node) => {
@@ -467,14 +467,14 @@ export const colonyGeoTeams = (model, bonuses) => {
       return
     }
 
-    const team = teams.get(location.population.id) || teams.set(location.population.id, { units: 0, base: 0, perDay: 0, unknown: [] }).get(location.population.id)
+    const team = teams.get(location.population.id) || teams.set(location.population.id, { units: 0, base: 0, formations: [], unknown: [] }).get(location.population.id)
 
     if (node.geo.value === null) {
       team.unknown.push(node.id)
     } else if (node.geo.value > 0) {
       team.units += node.geo.from.reduce((sum, item) => sum + item.units, 0)
       team.base += node.geo.value
-      team.perDay += node.geo.value * (bonuses.get(node.id) ?? 1)
+      team.formations.push({ id: node.id, base: node.geo.value, multiplier: multipliers === null ? null : multipliers.has(node.id) ? multipliers.get(node.id) : 1 })
     }
   })
 
