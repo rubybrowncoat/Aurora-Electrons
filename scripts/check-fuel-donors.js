@@ -27,6 +27,7 @@ const MODULE = 'fuel-donors'
 const MODULE_FILE = `src/renderer/utilities/${MODULE}.js`
 const PAGE_FILE = 'src/renderer/pages/logistics.vue'
 const FIGURES_FILE = 'src/renderer/components/logistics/FuelFigures.vue'
+const RESERVES_FILE = 'src/renderer/components/logistics/FuelReserves.vue'
 const SAVE = 'saves/AuroraDB_270_Falryx_date_issue.db'
 const IDS = { GameID: 141, RaceID: 785 }
 const NAMES = { game: 'Orphean Concord', race: 'Meacham Clan' }
@@ -245,6 +246,39 @@ const reportChecks = {
     assert.equal(reserved.rows.find((row) => row.ShipID === 7).donor.stored, 300, 'and leaves its stored fuel')
     assert.equal(reserved.rows.find((row) => row.ShipID === 2).donor.playerReserve, null, 'a ship without one has none')
 
+    const zeroed = mod.tankerReport(REPORT_SHIPS, { reserveOf: (row) => (row.ShipID === 7 ? 0 : null) })
+
+    assert.equal(zeroed.rows.find((row) => row.ShipID === 7).donor.playerReserve, 0, 'a reserve of 0 is a reserve that is set, not none')
+    assert.equal(zeroed.rows.find((row) => row.ShipID === 7).donor.eligibleSurplus, 200, 'and leaves the whole surplus above the minimum')
+
+    const unread = mod.tankerReport(REPORT_SHIPS, { reserveRead: false, reserveOf: (row) => (row.ShipID === 7 ? 250 : null) })
+    const unreadSeven = unread.rows.find((row) => row.ShipID === 7)
+
+    assert.equal(unreadSeven.donor.eligibleSurplus, null, 'a ship that may serve has no surplus while its reserve is not read, though a reserve is handed in')
+    assert.equal(unreadSeven.donor.playerReserve, null, 'and no reserve')
+    assert.equal(unreadSeven.donor.reserveRead, false, 'and says that the reserve is not read')
+    assert.equal(unreadSeven.donor.stored, 300, 'its stored fuel stays')
+    assert.equal(unreadSeven.donor.permission, 'allowed', 'and its permission stays')
+    assert.deepEqual(unread.rows.filter((row) => row.counted && row.donor.permission === 'blocked').map((row) => row.donor.eligibleSurplus), [0, 0, 0], 'a ship the game does not let serve keeps its surplus of 0, whatever the reserve')
+    assert.equal(unread.totals.eligible, null, 'the eligible total is not worked out while a reserve is not read')
+    assert.equal(unread.totals.eligibleUnknown, 1, 'the one counted ship that may serve is among those with no surplus')
+    assert.equal(unread.totals.stored.value, 3800.5, 'the stored total stays')
+    assert.deepEqual(unread.totals.permissions, { allowed: 1, blocked: 3, unknown: 0 }, 'and so do the permissions')
+    assert.equal(report.rows.every((row) => row.donor.reserveRead === true), true, 'a report made with the reserves read says so')
+
+    const unreadTexts = mod.donorTexts(unreadSeven.donor, (value) => `<${value}>`)
+
+    assert.equal(unreadTexts.reserve, 'Not read', 'the reserve of a ship is worded as not read, never as none set')
+    assert.equal(unreadTexts.surplus, 'Not read', 'and so is the surplus of a ship that may serve')
+    assert.equal(unreadTexts.stored, '<300>', 'the stored fuel is drawn as it is')
+
+    const aboard = ship({ Fuel: 1000, MinimumFuel: 100 })
+
+    assert.equal(mod.fuelDonor(aboard, { playerReserve: 900 }).eligibleSurplus, 100, 'with the reserve read, 900 L of reserve leaves 100 L above it')
+    assert.deepEqual([mod.fuelDonor(aboard, { playerReserve: 900, reserveRead: false }).eligibleSurplus, mod.fuelDonor(aboard, { playerReserve: 900, reserveRead: false }).aboveFloors, mod.fuelDonor(aboard, { playerReserve: 900, reserveRead: false }).heldByReserve], [null, null, null], 'with it not read, no figure above the floors is worked out as if no reserve existed')
+    assert.equal(mod.donorTexts(mod.fuelDonor(ship({ UndamagedTransfer: null }), { reserveRead: false }), (value) => `<${value}>`).surplus === 'Not read', false, 'a permission that cannot be decided stays unknown, not not read')
+    assert.equal(mod.donorTexts(mod.fuelDonor(ship({ UndamagedTransfer: 0 }), { reserveRead: false }), (value) => `<${value}>`).surplus, mod.donorTexts(mod.fuelDonor(ship({ UndamagedTransfer: 0 })), (value) => `<${value}>`).surplus, 'and a blocked ship reads as it does with the reserve read')
+
     const sortable = mod.tankerReport([ship({ ShipID: 1, Fuel: 1000, MinimumFuel: 5000 }), ship({ ShipID: 2 }), ship({ ShipID: 3, UndamagedTransfer: null }), ship({ ShipID: 4, FuelTanker: 0 })])
 
     assert.deepEqual(sortable.rows.map((row) => row.eligibleSurplus), [0, 900000, null, 0], 'each row carries its surplus as a value of its own for a table to sort by: the whole litres, 0 where the ship cannot serve, nothing where it is not known')
@@ -461,7 +495,14 @@ const PURE_FAULTS = [
   { name: 'a low rate names no recipient limit', change: swap('recipientLimit: isLowRate(ship.RefuellingRate) ? LOW_RATE_RECIPIENT_HS : null,', 'recipientLimit: null,'), fails: ['recipient'] },
   { name: 'the loader leaves out the ships of a class with no tanks', change: swap('FCT_Ship.ShippingLineID = 0 and (${ofClass(\'FuelTanker\')}', 'FCT_Ship.ShippingLineID = 0 and ${ofClass(\'FuelCapacity\')} > 0 and (${ofClass(\'FuelTanker\')}'), fails: ['sql'] },
   { name: 'the sort value of a report row reads an unknown surplus as 0', change: swap('eligibleSurplus: donor.eligibleSurplus, role', 'eligibleSurplus: donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus, role'), fails: ['report'] },
+  { name: 'a player reserve of 0 litres is taken for no reserve in the donor result', change: swap('isNumber(playerReserve) && playerReserve >= 0 ? playerReserve : null', 'isNumber(playerReserve) && playerReserve > 0 ? playerReserve : null'), fails: ['report'] },
   { name: 'the stored total of tankers that state no fuel is 0', change: (text) => swap('\'the fuel aboard\', \'tankers\')', '\'the fuel aboard\', \'tankers\'))')(swap('const stored = columnTotal(', 'const zeroed = (total) => ({ ...total, value: total.value === null ? 0 : total.value }); const stored = zeroed(columnTotal(')(text)), fails: ['sql'] },
+  { name: 'a reserve that is not read is taken for none set in the donor result', change: swap('const unread = reserveRead === false', 'const unread = false'), fails: ['report'] },
+  { name: 'the surplus above the floors is worked out while the reserve is not read', change: swap('gameAvailable === null || unread ? null : Math.max(0, Math.floor(stored)', 'gameAvailable === null ? null : Math.max(0, Math.floor(stored)'), fails: ['report'] },
+  { name: 'the eligible total is summed whether or not the reserve is read', change: swap('known.length && reserveRead !== false ?', 'known.length ?'), fails: ['report'] },
+  { name: 'the tanker report does not hand on whether the reserve is read', change: swap('reserveOf(ship), reserveRead, version', 'reserveOf(ship), version'), fails: ['report'] },
+  { name: 'the words of the reserve ignore that it is not read', change: swap('donor.reserveRead === false ? NOT_READ_TEXT : donor.playerReserve === null', 'donor.playerReserve === null'), fails: ['report'] },
+  { name: 'the surplus of a ship that may serve is worded as 0 litres while the reserve is not read', change: swap('donor.eligibleSurplus === null ? NOT_READ_TEXT : litres(donor.eligibleSurplus)', 'litres(donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus)'), fails: ['report'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -553,7 +594,10 @@ const saveCopy = async () => {
     // The ships the page lists, the tankers it counts and the harvesters, from the tables as they stand: a ship is listed when its class is a tanker or has a rate or mounts a transfer system, counted when it is a tanker with tanks, whatever the tanks of a harvester.
     const ships = await all(raw, `select s.ShipID as id, s.ShipName as name, s.Fuel as fuel, c.MinimumFuel as minimum, c.FuelTanker as tanker, c.FuelCapacity as capacity, c.RefuellingRate as rate, c.Harvesters as harvesters, c.EnginePower as engines, (select count(*) from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = c.ShipClassID and d.ComponentTypeID = 61) as transfers from FCT_Ship s inner join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${IDS.GameID} and s.RaceID = ${IDS.RaceID} and s.ShippingLineID = 0`)
 
-    return { folder, file, kinds: planted.kinds, ships }
+    // The class each ship is of, from the same tables.
+    const classes = new Map((await all(raw, `select s.ShipID as id, s.ShipClassID as classId, c.ClassName as className from FCT_Ship s inner join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${IDS.GameID} and s.RaceID = ${IDS.RaceID}`)).map((row) => [row.id, row]))
+
+    return { folder, file, kinds: planted.kinds, ships: ships.map((row) => ({ ...row, classId: classes.get(row.id).classId, className: classes.get(row.id).className })) }
   } finally {
     await close(raw)
   }
@@ -567,7 +611,7 @@ const oracleOf = (copy) => copy.ships.map((row) => {
   const listed = kind ? kind.listed : row.tanker === 1 || row.rate > 0 || row.transfers > 0
   const counted = kind ? kind.counted : row.tanker === 1 && row.capacity > 0
 
-  return { id: row.id, name: row.name, listed, counted, tanker: row.tanker === 1, harvester: row.harvesters > 0, permission: base.permission, reason: base.reason, surplus: base.surplus, litres: base.surplus === 'number' ? litres : null, fuel: row.fuel, minimum: row.minimum, service: Boolean(base.service) || row.engines === 0, empty: row.fuel === 0 }
+  return { id: row.id, name: row.name, classId: row.classId, className: row.className, listed, counted, tanker: row.tanker === 1, harvester: row.harvesters > 0, permission: base.permission, reason: base.reason, surplus: base.surplus, litres: base.surplus === 'number' ? litres : null, fuel: row.fuel, minimum: row.minimum, service: Boolean(base.service) || row.engines === 0, empty: row.fuel === 0 }
 })
 
 // What the page on screen shows; runs in the page through the readers of scripts/lib/browser-observe.js (`installScreen`). Hooks the template carries say what an element is; each part is read with the text it draws and whether it is on screen. Nothing is judged here.
@@ -599,6 +643,9 @@ const readScreen = () => {
   })
   const harvesters = [...document.querySelectorAll('tr')].filter((row) => row.querySelector('[data-harvester-ship]')).map((row) => ({ ship: row.querySelector('[data-harvester-ship]').getAttribute('data-harvester-ship'), on: visible(row), name: hooked(row, 'data-harvester-name'), role: hooked(row, 'data-harvester-role'), permission: hooked(row, 'data-fuel-text'), figures: figuresOf(row) }))
 
+  const recordsRoot = document.querySelector('[data-fuel-records]')
+  const fuelRecords = () => ({ none: recordsRoot ? hooked(recordsRoot, 'data-fuel-no-records') : [], lines: recordsRoot ? [...recordsRoot.querySelectorAll('[data-fuel-record]')].map((line) => ({ on: visible(line), applied: line.getAttribute('data-fuel-applied'), type: hooked(line, 'data-fuel-record-type'), name: hooked(line, 'data-fuel-record-name'), amount: hooked(line, 'data-fuel-record-amount') })) : [] })
+
   return {
     panel: panel ? visible(panel) : false,
     chip: hooked(document.body, 'data-donor-chip'),
@@ -608,6 +655,7 @@ const readScreen = () => {
     rows: rowsOf(panel, 'data-donor-ship', 'data-donor-cell'),
     sites: panel ? hooked(panel, 'data-service-site') : [],
     harvesters,
+    fuelRecords: fuelRecords(),
     tile: hooked(document.body, 'data-tile-note'),
   }
 }
@@ -638,10 +686,10 @@ const prepare = async (page, url, step) => {
     }
   })
 
-  const settle = async () => {
+  const settle = async (quiet = 1500) => {
     const started = Date.now()
 
-    while (state.inFlight > 0 || Date.now() - state.last < 1500 || await page.evaluate(pageLoading)) {
+    while (state.inFlight > 0 || Date.now() - state.last < quiet || await page.evaluate(pageLoading)) {
       if (Date.now() - started > TIMEOUT) {
         throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
       }
@@ -684,6 +732,8 @@ const prepare = async (page, url, step) => {
   await page.waitForFunction(`document.querySelector('[data-donor-panel] [data-donor-ship]') !== null || !(${pageLoading})()`, null, { timeout: TIMEOUT }).catch(() => {})
   step('waiting for the page to settle')
   await settle()
+
+  return settle
 }
 
 // The tanker table sorted by its Eligible surplus column as a player does it: the header above the surplus cells clicked once (ascending) and again (descending), the rows read after each. Empty lists when the table has no surplus cell.
@@ -712,14 +762,124 @@ const sortBySurplus = async (page, step) => {
   return { ascending, descending: await sorted('descending') }
 }
 
+const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// The wait after a step of the reserve form: the screen has drawn what the step changed and the reads that follow it are in.
+const settleAfter = async (page, settle) => {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await settle(600)
+}
+
+const recordLine = (page, name) => page.locator('[data-fuel-record]').filter({ has: page.locator('[data-fuel-record-name]').filter({ hasText: new RegExp(`^\\s*${escapePattern(name)}\\s*$`) }) })
+
+// The form is closed, or says why it is not: a step that waits on a text a fault could suppress would stop the run instead of judging it.
+const formDone = (page) => page.waitForFunction(() => document.querySelector('[data-fuel-form]') === null || document.querySelector('[data-fuel-message]') !== null, null, { timeout: TIMEOUT })
+
+// A reserve kept as a player does it: the record form opened, the kind of source chosen, the source picked from the list by what it is called, the scenario typed, the litres entered and the record kept.
+const keepReserve = async (page, settle, step, { type, search, pattern, scenario, amount }) => {
+  step(`keeping a reserve of ${amount} L for a ${type}`)
+  await page.locator('[data-fuel-new]').click({ timeout: TIMEOUT })
+  await page.locator(`[data-fuel-type-option="${type}"]`).click({ timeout: TIMEOUT })
+  await page.locator('input[data-fuel-pick]').fill(search, { timeout: TIMEOUT })
+  await page.locator('.menuable__content__active .v-list-item').filter({ hasText: pattern }).first().click({ timeout: TIMEOUT })
+  await page.locator('input[data-fuel-scenario-pick]').fill(scenario, { timeout: TIMEOUT })
+  await page.locator('input[data-fuel-scenario-pick]').press('Enter', { timeout: TIMEOUT })
+  await page.locator('input[data-fuel-input]').fill(String(amount), { timeout: TIMEOUT })
+  await page.locator('[data-fuel-save]').click({ timeout: TIMEOUT })
+  await formDone(page)
+  await settleAfter(page, settle)
+}
+
+const editReserve = async (page, settle, step, name, amount) => {
+  step(`editing the reserve of ${name} to ${amount} L`)
+  await recordLine(page, name).locator('[data-fuel-edit]').click({ timeout: TIMEOUT })
+  await page.locator('input[data-fuel-input]').fill(String(amount), { timeout: TIMEOUT })
+  await page.locator('[data-fuel-save]').click({ timeout: TIMEOUT })
+  await formDone(page)
+  await settleAfter(page, settle)
+}
+
+const clearReserve = async (page, settle, step, name) => {
+  step(`clearing the reserve of ${name}`)
+
+  const line = recordLine(page, name)
+
+  await line.locator('[data-fuel-clear]').click({ timeout: TIMEOUT })
+  await line.locator('[data-fuel-clear-confirm]').click({ timeout: TIMEOUT })
+  await page.waitForFunction(() => document.querySelector('[data-fuel-clear-confirm]') === null, null, { timeout: TIMEOUT })
+  await settleAfter(page, settle)
+}
+
+// The screen while the reserve records are not read, then the records put back: `loading` is the page before the Fuel panel has reported (the page holds none), `failed` the Fuel panel with a read that failed, set through the panel's own record of failed reads so its readiness and its report follow from it.
+const unreadStage = async (page, settle, step, how) => {
+  step(`reading the screen while the reserve records are ${how}`)
+  await page.evaluate((mode) => {
+    const panel = document.querySelector('[data-fuel-reserves]').__vue__
+    let vm = panel.$parent
+
+    while (vm && !('fuelReserves' in vm.$data)) {
+      vm = vm.$parent
+    }
+
+    window.__unread = { panel, vm, loadErrors: panel.loadErrors }
+
+    if (mode === 'loading') {
+      vm.fuelReserves = null
+    } else {
+      panel.loadErrors = { ...panel.loadErrors, reserveObjects: 'planted failure' }
+    }
+  }, how)
+  await settleAfter(page, settle)
+
+  const { rows, values, harvesters } = await page.evaluate(readScreen)
+
+  await page.evaluate(() => {
+    const held = window.__unread
+
+    held.panel.loadErrors = held.loadErrors
+    held.vm.fuelReserves = held.panel.reserves
+  })
+  await settleAfter(page, settle)
+
+  return { rows, values, harvesters }
+}
+
+// The page as it opens, sorted both ways, then the reserves kept, edited and cleared as a player does it, the screen read after each step: `stages` holds the tanker rows, the totals and the records of each.
 const observePage = (browser, url) => observe(browser, async ({ page, step }) => {
-  await prepare(page, url, step)
+  const settle = await prepare(page, url, step)
   step('reading the screen')
 
   const screen = await page.evaluate(readScreen)
+  const sorts = await sortBySurplus(page, step)
+  const plan = ENV.truth.reserves
+  const stages = [screen]
+  const read = async () => stages.push(await page.evaluate(readScreen))
 
-  return { ...screen, sorts: await sortBySurplus(page, step) }
+  await keepReserve(page, settle, step, { type: 'class', search: plan.className, pattern: new RegExp(`^\\s*${escapePattern(plan.className)}\\s*$`), scenario: plan.scenario, amount: plan.first })
+  await read()
+  const unread = { loading: await unreadStage(page, settle, step, 'loading'), failed: await unreadStage(page, settle, step, 'failed') }
+  await editReserve(page, settle, step, plan.className, plan.second)
+  await read()
+  await keepReserve(page, settle, step, { type: 'ship', search: plan.shipName, pattern: new RegExp(`^\\s*${escapePattern(plan.shipName)} ·`), scenario: plan.scenario, amount: plan.override })
+  await read()
+  await clearReserve(page, settle, step, plan.shipName)
+  await read()
+  await clearReserve(page, settle, step, plan.className)
+  await read()
+
+  return { ...screen, sorts, unread, stages: stages.map(({ rows, values, fuelRecords }) => ({ rows, values, fuelRecords })) }
 })
+
+// What the reserves of the plan say of one ship at one step: its own reserve holds over its class's, even when it is 0.
+const reserveFor = (plan, state, row) => {
+  const own = row.id === plan.shipId ? state.ship : null
+  const inherited = row.classId === plan.classId ? state.class : null
+
+  return { amount: own !== null ? own : inherited, source: own !== null ? 'ship' : inherited !== null ? 'class' : null }
+}
+
+// The surplus the page should draw for a ship under a reserve: the whole litres above the larger of the class minimum and the reserve, 0 where only the minimum stops it, no figure where the permission is not known.
+const surplusFor = (row, amount) => (row.surplus === 'number' ? Math.max(0, Math.floor(row.fuel) - Math.max(row.minimum, amount === null ? 0 : amount)) : row.surplus === 'zero' ? 0 : null)
 
 // ---------- the checks of one observation ----------
 
@@ -922,6 +1082,126 @@ const CHECKS = [
 
     return verdict(ascending.problems.length === 0 && descending.problems.length === 0 && kinds.size >= 3 && ascending.keys.includes(null) && ordered(ascending.keys, 1) && ordered(descending.keys, -1), { ascending: ascending.keys, descending: descending.keys, problems: [...ascending.problems, ...descending.problems].slice(0, 3) })
   }],
+  ['reserves', 'a reserve kept for a ship class shows on every ship of the class and lowers the surplus each can give, a reserve of a ship itself holds over its class\'s even when it is 0, and a reserve cleared returns the ship to none set, each read from the tanker table and the list of records after every step', (o, t) => {
+    const plan = t.reserves
+    const listed = t.oracle.filter((row) => row.listed)
+    const wrong = []
+    const problems = []
+
+    if (o.stages.length !== plan.stages.length) {
+      return verdict(false, { stages: o.stages.length, wanted: plan.stages.length })
+    }
+
+    o.stages.forEach((stage, index) => {
+      const state = plan.stages[index]
+      const { pairs, problems: unpaired } = paired('the tanker table', stage.rows, listed)
+
+      problems.push(...unpaired.map((problem) => [index, problem]))
+      pairs.forEach(([row, line]) => {
+        const { amount, source } = reserveFor(plan, state, row)
+        const reserve = cell(line, 'reserve')
+        const caption = cell(line, 'reserve-source')
+        const named = caption !== null && caption.includes(plan.scenario) && (source === 'ship' ? /\bship\b/i.test(caption) && !/\bclass\b/i.test(caption) : /\bclass\b/i.test(caption))
+        const surplus = surplusFor(row, amount)
+        const found = [
+          amount === null ? (reserve === t.words.noReserve ? null : ['reserve', reserve, t.words.noReserve]) : (litresOf(reserve) === amount ? null : ['reserve', reserve, amount]),
+          litresOf(cell(line, 'surplus')) === surplus ? null : ['surplus', cell(line, 'surplus'), surplus],
+          source === null ? (caption === null ? null : ['source', caption, 'none']) : (named ? null : ['source', caption, `${source}, ${plan.scenario}`]),
+        ].filter(Boolean)
+
+        wrong.push(...found.map((entry) => [index, row.name, ...entry]))
+      })
+
+      const eligible = oneOf(stage.values.filter((entry) => entry.role === 'eligible'))
+      const wantedTotal = t.oracle.filter((row) => row.counted).reduce((sum, row) => sum + (surplusFor(row, reserveFor(plan, state, row).amount) || 0), 0)
+
+      if (!eligible || litresOf(eligible.text) !== wantedTotal) {
+        wrong.push([index, 'the eligible total', eligible && eligible.text, wantedTotal])
+      }
+
+      const wanted = [state.class === null ? null : { type: 'class', name: plan.className, amount: state.class }, state.ship === null ? null : { type: 'ship', name: plan.shipName, amount: state.ship }].filter(Boolean)
+      const lines = stage.fuelRecords.lines.filter((line) => line.on).map((line) => {
+        const type = oneOf(line.type)
+        const name = oneOf(line.name)
+        const amountText = oneOf(line.amount)
+
+        return { type: type === null ? null : /\bclass\b/i.test(type.text) ? 'class' : 'ship', name: name && name.text, amount: amountText && litresOf(amountText.text), applied: line.applied }
+      }).sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      const expected = wanted.map((entry) => ({ ...entry, applied: 'yes' })).sort((a, b) => a.name.localeCompare(b.name))
+
+      if (JSON.stringify(lines) !== JSON.stringify(expected)) {
+        wrong.push([index, 'the records', lines, expected])
+      }
+
+      if ((oneOf(stage.fuelRecords.none) !== null) !== (wanted.length === 0)) {
+        wrong.push([index, 'the empty note of the records', oneOf(stage.fuelRecords.none) !== null, wanted.length === 0])
+      }
+    })
+
+    return verdict(problems.length === 0 && wrong.length === 0, { problems: problems.slice(0, 3), wrong: wrong.slice(0, 4) })
+  }],
+  ['unread', 'while the reserve records are loading and while their read has failed, the surplus of a tanker that may serve, the eligible total and the reserve of tankers and harvesters read as not read and never as if no reserve existed, and the stored fuel, the class minimum and the permission stay', (o, t) => {
+    const listed = t.oracle.filter((row) => row.listed)
+    const harvesters = t.oracle.filter((row) => row.harvester)
+    const stored = t.oracle.filter((row) => row.counted).reduce((sum, row) => sum + row.fuel, 0)
+    const surplusRead = (row, text) => (row.surplus === 'number' ? text === t.words.notRead : row.surplus === 'zero' ? litresOf(text) === 0 : text !== t.words.notRead && litresOf(text) === null)
+    const wrong = []
+    const problems = []
+    let tankers = 0
+    let harvested = 0
+
+    for (const how of ['loading', 'failed']) {
+      const stage = (o.unread || {})[how] || { rows: [], values: [], harvesters: [] }
+      const table = paired('the tanker table', stage.rows, listed)
+      const crop = paired('the harvester table', stage.harvesters, harvesters)
+
+      problems.push(...table.problems.map((problem) => [how, problem]), ...crop.problems.map((problem) => [how, problem]))
+      table.pairs.forEach(([row, line]) => {
+        const found = [
+          ['reserve', cell(line, 'reserve'), cell(line, 'reserve') === t.words.notRead],
+          ['place', cell(line, 'reserve-source'), cell(line, 'reserve-source') === null],
+          ['surplus', cell(line, 'surplus'), surplusRead(row, cell(line, 'surplus'))],
+          ['stored', cell(line, 'stored'), litresOf(cell(line, 'stored')) === rounded(row.fuel)],
+          ['minimum', cell(line, 'minimum'), litresOf(cell(line, 'minimum')) === rounded(row.minimum)],
+          ['permission', cell(line, 'permission'), labelKey(cell(line, 'permission'), t.words.permissions) === row.permission],
+        ]
+
+        tankers += row.surplus === 'number' ? 1 : 0
+        wrong.push(...found.filter(([, , ok]) => !ok).map(([what, text]) => [how, 'tanker', row.name, what, text]))
+      })
+      crop.pairs.forEach(([row, line]) => {
+        const text = (role) => {
+          const entry = oneOf(line.figures.filter((candidate) => candidate.role === role))
+
+          return entry ? entry.text : undefined
+        }
+        const permission = oneOf(line.permission.filter((entry) => entry.role === 'permission'))
+        const found = [
+          ['reserve', text('reserve'), text('reserve') === t.words.notRead],
+          ['surplus', text('surplus'), surplusRead(row, text('surplus'))],
+          ['stored', text('stored'), litresOf(text('stored')) === rounded(row.fuel)],
+          ['minimum', text('minimum'), litresOf(text('minimum')) === rounded(row.minimum)],
+          ['permission', permission && permission.text, Boolean(permission) && labelKey(permission.text, t.words.permissions) === row.permission],
+        ]
+
+        harvested += row.surplus === 'number' ? 1 : 0
+        wrong.push(...found.filter(([, , ok]) => !ok).map(([what, shown]) => [how, 'harvester', row.name, what, shown]))
+      })
+
+      const eligible = oneOf(stage.values.filter((entry) => entry.role === 'eligible'))
+      const total = oneOf(stage.values.filter((entry) => entry.role === 'stored'))
+
+      if (!eligible || litresOf(eligible.text) !== null) {
+        wrong.push([how, 'the eligible total', eligible && eligible.text, 'no figure'])
+      }
+
+      if (!total || litresOf(total.text) === null || Math.abs(litresOf(total.text) - stored) > 0.5) {
+        wrong.push([how, 'the stored total', total && total.text, stored])
+      }
+    }
+
+    return verdict(problems.length === 0 && wrong.length === 0 && tankers > 0 && harvested > 0, { problems: problems.slice(0, 3), wrong: wrong.slice(0, 4), tankers, harvested })
+  }],
   ['no-errors', 'the page raises no error', (o) => verdict(o.unexpected.length === 0, o.unexpected.slice(0, 3))],
 ]
 
@@ -930,12 +1210,13 @@ const CHECKS = [
 /* eslint-disable no-template-curly-in-string */
 const PAGE = PAGE_FILE
 const FIGURES = FIGURES_FILE
+const REPORT_CALL = 'return tankerReport(this.fuelDonors, { version: this.formulaVersion, reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready), reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount })'
 
 // A planted fault or a rewrite changes one file of the page: `file` and `change` (the text of the file to the text served in its place).
 const PAGE_FAULTS = [
   { name: 'the stored fuel cell draws the eligible surplus', file: PAGE, change: swap('data-donor-cell="stored">{{ donorText(item).stored }}', 'data-donor-cell="stored">{{ donorText(item).surplus }}'), fails: ['figures', 'inventory'] },
   { name: 'the class minimum cell draws the local reserve', file: PAGE, change: swap('data-donor-cell="minimum">{{ donorText(item).minimum }}', 'data-donor-cell="minimum">{{ donorText(item).reserve }}'), fails: ['figures'] },
-  { name: 'the local reserve cell draws the class minimum', file: PAGE, change: swap('data-donor-cell="reserve">{{ donorText(item).reserve }}', 'data-donor-cell="reserve">{{ donorText(item).minimum }}'), fails: ['figures'] },
+  { name: 'the local reserve cell draws the class minimum', file: PAGE, change: swap('data-donor-cell="reserve">{{ donorText(item).reserve }}', 'data-donor-cell="reserve">{{ donorText(item).minimum }}'), fails: ['figures', 'reserves', 'unread'] },
   { name: 'the surplus of a ship that cannot serve is drawn as a figure of 0 litres', file: PAGE, change: swap('data-donor-cell="surplus">{{ donorText(item).surplus }}', 'data-donor-cell="surplus">{{ item.donor.eligibleSurplus === null ? donorText(item).surplus : exactLitres(item.donor.eligibleSurplus) }}'), fails: ['figures', 'reasons'] },
   { name: 'the reason of a ship that cannot serve is not drawn', file: PAGE, change: swap('<div v-if="donorText(item).reason" class="caption text--secondary" data-donor-cell="reason">', '<div v-if="false" class="caption text--secondary" data-donor-cell="reason">'), fails: ['reasons'] },
   { name: 'the table lists only the ships counted in the tanker stock', file: PAGE, change: swap('this.donorReport.rows.filter((row) => row.listed)', 'this.donorReport.rows.filter((row) => row.counted)'), fails: ['rows', 'figures', 'uncounted'] },
@@ -943,7 +1224,7 @@ const PAGE_FAULTS = [
   { name: 'the empty mark is never drawn', file: PAGE, change: swap('<div v-if="item.Fuel === 0" class="caption text--secondary" data-donor-cell="empty">', '<div v-if="false" class="caption text--secondary" data-donor-cell="empty">'), fails: ['empty'] },
   { name: 'a ship with no engines is not marked a service site', file: PAGE, change: swap(':data-service-site="item.site ? \'yes\' : \'no\'"', ':data-service-site="\'no\'"'), fails: ['sites'] },
   { name: 'the surplus cell is drawn at opacity 0', file: PAGE, change: swap('data-donor-cell="surplus">{{ donorText(item).surplus }}', 'style="opacity: 0" data-donor-cell="surplus">{{ donorText(item).surplus }}'), fails: ['figures'] },
-  { name: 'the damage of the transfer systems is left out of the permission', file: PAGE, change: swap('return tankerReport(this.fuelDonors, { version: this.formulaVersion })', 'return tankerReport(this.fuelDonors.map((ship) => ({ ...ship, UndamagedTransfer: ship.TransferSystems })), { version: this.formulaVersion })'), fails: ['permission', 'reasons'] },
+  { name: 'the damage of the transfer systems is left out of the permission', file: PAGE, change: swap(REPORT_CALL, REPORT_CALL.replace('this.fuelDonors,', 'this.fuelDonors.map((ship) => ({ ...ship, UndamagedTransfer: ship.TransferSystems })),')), fails: ['permission', 'reasons'] },
   { name: 'the tanker table leaves out the empty tankers', file: PAGE, change: swap('this.donorReport.rows.filter((row) => row.listed)', 'this.donorReport.rows.filter((row) => row.listed && row.Fuel > 0)'), fails: ['rows', 'empty'] },
   { name: 'the harvesters carry no role', file: PAGE, change: swap('fuelRole: this.donorByShip.has(row.ShipID) ? this.donorByShip.get(row.ShipID).role : null,', 'fuelRole: null,'), fails: ['harvesters'] },
   { name: 'the harvesters carry no fuel service', file: PAGE, change: swap('fuelDonor: this.donorByShip.has(row.ShipID) ? this.donorByShip.get(row.ShipID).donor : null,', 'fuelDonor: null,'), fails: ['harvesters'] },
@@ -967,6 +1248,24 @@ const PAGE_FAULTS = [
   { name: 'the surplus column sorts by a nested key the comparator never resolves', file: PAGE, change: (text) => swap('<template #[`item.eligibleSurplus`]', '<template #[`item.donor.eligibleSurplus`]')(swap('value: \'eligibleSurplus\', align: \'end\' }', 'value: \'donor.eligibleSurplus\', align: \'end\' }')(text)), fails: ['sort'] },
   { name: 'the sort value of the surplus reads an unknown surplus as 0', file: MODULE_FILE, change: swap('eligibleSurplus: donor.eligibleSurplus, role', 'eligibleSurplus: donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus, role'), fails: ['sort'] },
   { name: 'the sort value of the surplus is the fuel aboard', file: MODULE_FILE, change: swap('eligibleSurplus: donor.eligibleSurplus, role', 'eligibleSurplus: ship.Fuel, role'), fails: ['sort'] },
+  { name: 'the reserve of a ship is left out of the reserves the page draws', file: PAGE, change: swap('table ? fuelReserveOf(table, ship) : null', 'table ? fuelReserveOf({ ship: new Map(), class: table.class }, ship) : null'), fails: ['reserves'] },
+  { name: 'the reserve of a class never reaches its ships', file: PAGE, change: swap('table ? fuelReserveOf(table, ship) : null', 'table ? fuelReserveOf({ ship: table.ship, class: new Map() }, ship) : null'), fails: ['reserves'] },
+  { name: 'a reserve of 0 litres is read as none set', file: PAGE, change: swap('reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount', 'reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount || null'), fails: ['reserves'] },
+  { name: 'the reserve of a class is said to be set on the ship', file: PAGE, change: swap('reserve.source === \'ship\' ? \'ship\' : \'class\'', '\'ship\''), fails: ['reserves'] },
+  { name: 'the place of a reserve is not drawn', file: PAGE, change: swap('<div v-if="reserveSourceText(item)"', '<div v-if="false"'), fails: ['reserves'] },
+  { name: 'a reserve cleared is not removed', file: RESERVES_FILE, change: swap('const outcome = await deleteReserve(this.repository, this.scope, entry)', 'const outcome = { ok: true }'), fails: ['reserves'] },
+  { name: 'a reserve is kept one litre over what was entered', file: RESERVES_FILE, change: swap('reserves: { [FUEL_RESOURCE]: fuel }', 'reserves: { [FUEL_RESOURCE]: fuel + 1 }'), fails: ['reserves'] },
+  { name: 'a record of a class is listed as a ship', file: RESERVES_FILE, change: swap('data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>', 'data-fuel-record-type>{{ typeWords.ship }}</v-chip>'), fails: ['reserves'] },
+  { name: 'the note that no reserve is kept is never drawn', file: RESERVES_FILE, change: swap('<div v-if="!entries.length" class="caption text--secondary" data-fuel-no-records>', '<div v-if="false" class="caption text--secondary" data-fuel-no-records>'), fails: ['reserves'] },
+  { name: 'the reserve of a ship is not given to the donor result', file: MODULE_FILE, change: swap('fuelDonor(ship, { playerReserve: reserveOf(ship), reserveRead, version })', 'fuelDonor(ship, { reserveRead, version })'), fails: ['reserves'] },
+  { name: 'the surplus above the floors leaves out the reserve', file: MODULE_FILE, change: swap('Math.max(minimum, reserve === null ? 0 : reserve)', 'minimum'), fails: ['reserves'] },
+  { name: 'the page makes its tanker report whether or not the reserve records are read', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready), ', ''), fails: ['unread'] },
+  { name: 'a failed read of the reserve records is taken for a finished one', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready)', 'reserveRead: Boolean(this.fuelReserves)'), fails: ['unread'] },
+  { name: 'records the panel has not yet reported are taken for read ones', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready)', 'reserveRead: !this.fuelReserves || this.fuelReserves.ready'), fails: ['unread'] },
+  { name: 'the tanker report is not told whether the reserve records are read', file: MODULE_FILE, change: swap('reserveOf(ship), reserveRead, version', 'reserveOf(ship), version'), fails: ['unread'] },
+  { name: 'the eligible total counts the ships whose reserve is not read', file: MODULE_FILE, change: swap('known.length && reserveRead !== false ?', 'known.length ?'), fails: ['unread'] },
+  { name: 'the reserve of a ship is worded as none set while the records are not read', file: MODULE_FILE, change: swap('donor.reserveRead === false ? NOT_READ_TEXT : donor.playerReserve === null', 'donor.playerReserve === null'), fails: ['unread'] },
+  { name: 'the surplus of a ship is worded as 0 litres while its reserve is not read', file: MODULE_FILE, change: swap('donor.eligibleSurplus === null ? NOT_READ_TEXT : litres(donor.eligibleSurplus)', 'litres(donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus)'), fails: ['unread'] },
 ]
 
 const PAGE_BENIGN = [
@@ -982,10 +1281,26 @@ const PAGE_BENIGN = [
   { name: 'the kinds of a harvester in the other order, joined by a plus', file: PAGE, change: swap('data-harvester-role>{{ item.fuelRole }}', 'data-harvester-role>{{ item.fuelRole.split(\' and \').reverse().join(\' + \') }}') },
   { name: 'the label of a harvester figure written without its element', file: FIGURES, change: swap('<span class="text--secondary">{{ figure.label }}</span>', '{{ figure.label }}') },
   { name: 'a hidden sign beside the value of a harvester figure', file: FIGURES, change: swap('<span class="text-no-wrap" data-fuel-value>{{ figure.text }}</span>', '<span style="display: none">\u2212</span><span class="text-no-wrap" data-fuel-value>{{ figure.text }}</span><span style="display: none">7</span>') },
+  { name: 'the reserve record bound by an explicit value and event', file: RESERVES_FILE, change: swap('v-model="draft.fuel"', ':value="draft.fuel" @input="draft.fuel = $event"') },
+  { name: 'the reserves of the panel listened to by the longhand of the event', file: PAGE, change: swap('@reserves="fuelReserves = $event"', 'v-on:reserves="fuelReserves = $event"') },
+  { name: 'the type of a record written after its name', file: RESERVES_FILE, change: swap('<v-chip x-small outlined class="mr-1" data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>\n          <span class="font-weight-medium" data-fuel-record-name>{{ entry.source.name }}</span>', '<span class="font-weight-medium" data-fuel-record-name>{{ entry.source.name }}</span>\n          <v-chip x-small outlined class="mr-1" data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>') },
+  { name: 'the note that no reserve is kept put another way', file: RESERVES_FILE, change: swap('No reserve is kept for a ship or a ship class yet.', 'Nothing is kept for any ship or ship class yet.') },
+  { name: 'the condition of the place of a reserve parenthesised', file: PAGE, change: swap('<div v-if="reserveSourceText(item)"', '<div v-if="(reserveSourceText(item))"') },
+  { name: 'the test that the reserve records are read spelled out', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready)', 'reserveRead: this.fuelReserves !== null && this.fuelReserves.ready === true') },
 ]
 /* eslint-enable no-template-curly-in-string */
 
 // ---------- the run ----------
+
+// The reserves the page is driven through, from the planted ship of a fraction of a litre above its minimum and the class it is of: a reserve for the class (and then another figure), a reserve of 0 for the ship itself, then each cleared. `stages` is what each step leaves: the reserve of the class and of the ship, null for none.
+const reservePlan = (copy) => {
+  const id = Number(Object.keys(copy.kinds).find((key) => copy.kinds[key] === 'fraction'))
+  const row = copy.ships.find((ship) => ship.id === id)
+  const first = row.minimum + 200
+  const second = row.minimum + 100
+
+  return { shipId: row.id, shipName: row.name, classId: row.classId, className: row.className, scenario: 'Convoy', first, second, override: 0, stages: [{ class: null, ship: null }, { class: first, ship: null }, { class: second, ship: null }, { class: second, ship: 0 }, { class: second, ship: null }, { class: null, ship: null }] }
+}
 
 let ENV = null
 const cleanups = []
@@ -998,7 +1313,9 @@ const setUp = async () => {
   cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
 
   const { [MODULE]: donors } = await loadUtilities([MODULE])
-  const env = { texts: new Map(), originals: { [PAGE_FILE]: fs.readFileSync(path.join(root, PAGE_FILE), 'utf8'), [FIGURES_FILE]: fs.readFileSync(path.join(root, FIGURES_FILE), 'utf8'), [MODULE_FILE]: fs.readFileSync(path.join(root, MODULE_FILE), 'utf8') }, truth: { oracle: oracleOf(copy), words: { permissions: { ...donors.PERMISSION_TEXT }, reasons: { ...donors.REASONS }, roles: { ...donors.ROLE_TEXT } } }, baseline: null }
+  const env = { texts: new Map(), originals: { [PAGE_FILE]: fs.readFileSync(path.join(root, PAGE_FILE), 'utf8'), [FIGURES_FILE]: fs.readFileSync(path.join(root, FIGURES_FILE), 'utf8'), [MODULE_FILE]: fs.readFileSync(path.join(root, MODULE_FILE), 'utf8'), [RESERVES_FILE]: fs.readFileSync(path.join(root, RESERVES_FILE), 'utf8') }, truth: { oracle: oracleOf(copy), reserves: reservePlan(copy), words: { permissions: { ...donors.PERMISSION_TEXT }, reasons: { ...donors.REASONS }, roles: { ...donors.ROLE_TEXT }, noReserve: donors.donorTexts(donors.fuelDonor(ship()), (value) => String(value)).reserve } }, baseline: null }
+
+  env.truth.words.notRead = donors.NOT_READ_TEXT
 
   env.server = await startPageServer({ save: copy.file })
   cleanups.push(() => env.server.stop())

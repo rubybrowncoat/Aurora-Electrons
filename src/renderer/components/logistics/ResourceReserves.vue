@@ -382,12 +382,14 @@ export default {
       return this.kind === 'minerals' && this.feeds.some((feed) => feed.withdrawals.length > 0)
     },
 
+    // The records of colonies: the records of ships and ship classes are the Fuel panel's own.
     entries() {
-      return this.read.entries
+      return this.read.entries.filter((entry) => entry.source.type === 'colony')
     },
 
+    // The scenarios any record names, a ship's or a class's included: the names are shared.
     scenarioNames() {
-      return scenarioNames(this.entries)
+      return scenarioNames(this.read.entries)
     },
 
     // The scenarios picked that a record still names.

@@ -37,9 +37,9 @@ registerRule({
   id: 'fuelService.playerReserve',
   versions: FUEL_SERVICE_VERSIONS,
   units: 'L',
-  verification: 'assumed',
-  structure: [],
-  note: 'A level the player chose to keep aboard. It is a local note and no game rule: it lowers the surplus offered for service and never changes the stored fuel, the class minimum or the game\'s permission.',
+  verification: 'confirmed',
+  structure: ['the scenario records of kind resource.reserve'],
+  note: 'A level the player chose to keep aboard a ship or a ship class, read from the player\'s own record: a ship\'s own reserve over that of its class. It is a local note and no game rule: it lowers the surplus offered for service and never changes the stored fuel, the class minimum or the game\'s permission.',
 })
 
 registerRule({
@@ -109,7 +109,7 @@ const gatesOf = (ship, recipient) => {
 
 // The donor side of one fuel service. `ship` is a row of `loadFuelDonors` (or the same fields); `recipient` is { size } of the recipient in hull spaces, left out when the result is for the donor alone; `playerReserve` the litres the player keeps aboard (a number of 0 or more, null when none is set); `version` the save's formula version (`loadFormulaVersion`, null when not stated).
 // The result: `permission` ('allowed', 'blocked' or 'unknown'), `gate` (the first gate that fails, or for an unknown permission the first that cannot be decided, else null), `reason` (its code in REASONS, else null), `gates` (every gate with its status), the four figures (`stored`, `minimum`, `playerReserve`, `eligibleSurplus`) and `aboveFloors` (the whole litres above the larger of the minimum and the reserve, whatever the permission), `heldByReserve` (what the player's reserve holds back above the class minimum), `recipientLimit` (the largest recipient in hull spaces a low-rate class serves, null otherwise) and `results` (the figures as provenance results). `eligibleSurplus` is `aboveFloors` when allowed, 0 when blocked and null when unknown. The stored fuel is never changed by any gate.
-export const fuelDonor = (ship, { recipient, playerReserve = null, version = null } = {}) => {
+export const fuelDonor = (ship, { recipient, playerReserve = null, reserveRead = true, version = null } = {}) => {
   const gates = gatesOf(ship, recipient)
   const failed = gates.find((gate) => gate.status === 'fail')
   const undecided = gates.find((gate) => gate.status === 'unknown')
@@ -117,18 +117,19 @@ export const fuelDonor = (ship, { recipient, playerReserve = null, version = nul
   const decisive = failed || undecided || null
   const stored = isNumber(ship.Fuel) ? ship.Fuel : null
   const minimum = isNumber(ship.MinimumFuel) ? ship.MinimumFuel : null
-  const reserve = isNumber(playerReserve) && playerReserve >= 0 ? playerReserve : null
+  const unread = reserveRead === false
+  const reserve = !unread && isNumber(playerReserve) && playerReserve >= 0 ? playerReserve : null
   const supported = ruleSupports('fuelService.eligibleSurplus', version) === true
   const assumptions = supported ? [] : [UNVERIFIED_SAVE]
   const gameAvailable = stored === null || minimum === null ? null : Math.max(0, Math.floor(stored) - minimum)
-  const aboveFloors = gameAvailable === null ? null : Math.max(0, Math.floor(stored) - Math.max(minimum, reserve === null ? 0 : reserve))
-  const heldByReserve = gameAvailable === null ? null : gameAvailable - aboveFloors
+  const aboveFloors = gameAvailable === null || unread ? null : Math.max(0, Math.floor(stored) - Math.max(minimum, reserve === null ? 0 : reserve))
+  const heldByReserve = gameAvailable === null || unread ? null : gameAvailable - aboveFloors
   const eligibleSurplus = permission === 'allowed' ? aboveFloors : permission === 'blocked' ? 0 : null
   const results = {
     stored: stored === null ? unavailable({ rule: 'fuelService.stored', missing: ['the fuel aboard'] }) : ofRule({ rule: 'fuelService.stored', value: stored, inputs: { present: ['the fuel aboard'] } }),
     minimum: minimum === null ? unavailable({ rule: 'fuelService.gameMinimum', missing: ['the class minimum fuel'] }) : ofRule({ rule: 'fuelService.gameMinimum', value: minimum, inputs: { present: ['the class minimum fuel'] } }),
-    playerReserve: reserve === null ? null : ofRule({ rule: 'fuelService.playerReserve', value: reserve, inputs: { present: ['the player\'s reserve'] } }),
-    eligibleSurplus: eligibleSurplus === null ? unavailable({ rule: 'fuelService.eligibleSurplus', missing: [REASONS[decisive.reason]], present: ['the fuel aboard', 'the class minimum fuel'], assumptions }) : ofRule({ rule: 'fuelService.eligibleSurplus', value: eligibleSurplus, inputs: { present: ['the fuel aboard', 'the class minimum fuel', 'the designation', 'the transfer systems', 'the class rate'] }, assumptions }),
+    playerReserve: reserve === null ? null : ofRule({ rule: 'fuelService.playerReserve', value: reserve, inputs: { present: ['the player\'s reserve record'] } }),
+    eligibleSurplus: eligibleSurplus === null ? unavailable({ rule: 'fuelService.eligibleSurplus', missing: [decisive ? REASONS[decisive.reason] : 'the player\'s reserve record'], present: ['the fuel aboard', 'the class minimum fuel'], assumptions }) : ofRule({ rule: 'fuelService.eligibleSurplus', value: eligibleSurplus, inputs: { present: ['the fuel aboard', 'the class minimum fuel', 'the designation', 'the transfer systems', 'the class rate'] }, assumptions }),
     permission: permission === 'unknown' ? unavailable({ rule: 'fuelService.donor', missing: [REASONS[decisive.reason]], assumptions }) : ofRule({ rule: 'fuelService.donor', value: permission, inputs: { present: ['the designation', 'the transfer systems', 'the class rate', 'the fuel aboard', 'the class minimum fuel'] }, assumptions }),
   }
 
@@ -140,6 +141,7 @@ export const fuelDonor = (ship, { recipient, playerReserve = null, version = nul
     stored,
     minimum,
     playerReserve: reserve,
+    reserveRead: !unread,
     aboveFloors,
     heldByReserve,
     eligibleSurplus,
@@ -167,9 +169,9 @@ export const countsAsTanker = (ship) => Boolean(ship.FuelTanker) && ship.FuelCap
 export const isServiceShip = (ship) => Boolean(ship.FuelTanker) || ship.RefuellingRate > 0 || ship.TransferSystems > 0
 
 // The ships of `loadFuelDonors` with their donor result: one row per ship, `donor` its `fuelDonor`, `eligibleSurplus` its surplus as a top-level value for a table sort (null when not known), `role` its words, `counted` whether its fuel is in the tanker total, and `site` for an engine-less provider. `reserveOf(ship)` is the player's reserve for it in litres, null when none is set. `totals`: the stored fuel of the counted ships (a `columnTotal` of the same rule the Fuel stock figure sums by, so the two are one number), the counted ships with no fuel aboard, the surplus that can be served and the permissions among them.
-export const tankerReport = (ships, { version = null, reserveOf = () => null } = {}) => {
+export const tankerReport = (ships, { version = null, reserveOf = () => null, reserveRead = true } = {}) => {
   const rows = ships.map((ship) => {
-    const donor = fuelDonor(ship, { playerReserve: reserveOf(ship), version })
+    const donor = fuelDonor(ship, { playerReserve: reserveOf(ship), reserveRead, version })
 
     return { ...ship, donor, eligibleSurplus: donor.eligibleSurplus, role: roleText(ship), counted: countsAsTanker(ship), listed: isServiceShip(ship), site: ship.EnginePower === 0 }
   })
@@ -186,7 +188,7 @@ export const tankerReport = (ships, { version = null, reserveOf = () => null } =
       ships: counted.length,
       stored,
       empty: counted.filter((row) => row.Fuel === 0).length,
-      eligible: known.length ? known.reduce((sum, row) => sum + row.donor.eligibleSurplus, 0) : null,
+      eligible: known.length && reserveRead !== false ? known.reduce((sum, row) => sum + row.donor.eligibleSurplus, 0) : null,
       eligibleUnknown: counted.length - known.length,
       permissions,
     },
@@ -220,6 +222,9 @@ export const loadFuelDonors = async (database, { GameID, RaceID }) => {
   return Object.freeze(rows)
 }
 
+// What the reserve and the surplus read as while the player's reserve records are not read: the surplus of a ship that may serve is not worked out as if no reserve existed.
+export const NOT_READ_TEXT = 'Not read'
+
 // The words a screen shows for a donor result, from `fuelDonor`: the permission, the reason (null when the ship can serve), the restriction on recipients and the four figures. `litres(value)` writes a known figure with its unit. The surplus of a ship that cannot serve reads as a reason, "Blocked" (or 0 where only the minimum stops it), never as a bare 0 that would read as no fuel aboard; one that cannot be decided reads as unknown.
 export const donorTexts = (donor, litres) => ({
   permission: PERMISSION_TEXT[donor.permission],
@@ -227,8 +232,8 @@ export const donorTexts = (donor, litres) => ({
   limit: donor.recipientLimit ? `Serves recipients of ${donor.recipientLimit} HS or less only` : null,
   stored: donor.stored === null ? UNKNOWN_TEXT : litres(donor.stored),
   minimum: donor.minimum === null ? UNKNOWN_TEXT : litres(donor.minimum),
-  reserve: donor.playerReserve === null ? 'None set' : litres(donor.playerReserve),
-  surplus: donor.permission === 'unknown' ? UNKNOWN_TEXT : donor.permission === 'blocked' && donor.gate !== 'litres' ? 'Blocked' : litres(donor.eligibleSurplus),
+  reserve: donor.reserveRead === false ? NOT_READ_TEXT : donor.playerReserve === null ? 'None set' : litres(donor.playerReserve),
+  surplus: donor.permission === 'unknown' ? UNKNOWN_TEXT : donor.permission === 'blocked' && donor.gate !== 'litres' ? 'Blocked' : donor.eligibleSurplus === null ? NOT_READ_TEXT : litres(donor.eligibleSurplus),
 })
 
 // The four figures of a donor, in the order a screen lists them, with their names.

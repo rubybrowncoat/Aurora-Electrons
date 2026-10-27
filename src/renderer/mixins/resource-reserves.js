@@ -10,7 +10,7 @@ import { loadReserveObjects, readReserves, registerResourceReserves, scopeOf } f
 
 // The reads behind the reserve panel and the words that name each when it fails. The tracked key, the async-computed name and the label key of a read are one string.
 export const RESERVE_LABELS = {
-  reserveObjects: 'the colonies',
+  reserveObjects: 'the colonies, ships and ship classes',
   reserveClasses: 'the ship classes',
   reservePackets: 'the mass-driver packets in flight',
   reserveSupply: 'the colonies\' fuel and maintenance supplies',
@@ -19,7 +19,7 @@ export const RESERVE_LABELS = {
 
 const messageOf = (error) => (error && error.message ? error.message : String(error))
 
-// The read state of the reserve panel and the records it shows, for a component that mixes in `tracked` reads of its own (it needs a `kind` prop: 'supplies' or 'minerals'). Nothing here writes the save: the records live in the scenario repository (utilities/resource-reserves.js).
+// The read state of the reserve panel and the records it shows, for a component that mixes in `tracked` reads of its own (it needs a `kind` prop or computed: 'supplies' or 'minerals' for the colonies' reserves, 'fuel' for the reserves of ships and ship classes). Nothing here writes the save: the records live in the scenario repository (utilities/resource-reserves.js).
 export default {
   data() {
     return {
@@ -66,9 +66,14 @@ export default {
       }
     },
 
-    // The reads the panel waits on: the packets in flight matter to minerals alone, and so do the colonies' supplies and production rates, which the Logistics page hands to the supplies panel but the Hauling page does not read: the supply production draws on the minerals' stocks.
+    // The kinds of source the panel's records name and its reads load: the colonies, or for fuel the ships and the ship classes.
+    reserveTypes() {
+      return this.kind === 'fuel' ? ['ship', 'class'] : ['colony']
+    },
+
+    // The reads the panel waits on: the packets in flight matter to minerals alone, and so do the colonies' supplies and production rates, which the Logistics page hands to the supplies panel but the Hauling page does not read: the supply production draws on the minerals' stocks. The reserves of ships and classes need no class minimum.
     reserveInputs() {
-      return this.kind === 'minerals' ? ['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveObjects', 'reserveClasses']
+      return this.kind === 'fuel' ? ['reserveObjects'] : this.kind === 'minerals' ? ['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveObjects', 'reserveClasses']
     },
 
     // The reads as made for the save, game and race shown now: a read that is still running for another save or race leaves the last one in place, and it is not used.
@@ -88,7 +93,7 @@ export default {
       return this.bundleOf(this.reserveSupply)
     },
 
-    // What the links are checked against: the open save's colonies for the race shown, with its campaign, branch and the campaign's branches. Null while the colonies are not read.
+    // What the links are checked against: the open save's objects of the kinds the panel names (colonies, or ships and ship classes) for the race shown, with its campaign, branch and the campaign's branches. Null while they are not read.
     reserveContext() {
       const bundle = this.reserveObjectsBundle
       const open = this.reserveResolved
@@ -115,7 +120,7 @@ export default {
     // The state of the panel's reads: loading until every read is in for the save and race shown (and no read has failed), else the words naming the failed reads with the first message. The panel shows no figure from a read that is in flight or failed.
     reserveState() {
       const failed = this.reserveFailedKeys
-      const current = Boolean(this.reserveRecords && this.reserveObjectsBundle && this.reserveClassesBundle && (this.kind !== 'minerals' || (this.reservePacketsBundle && this.reserveSupplyBundle && this.loadErrors.populationProductionModifiers === null)))
+      const current = Boolean(this.reserveRecords && this.reserveObjectsBundle && (this.kind === 'fuel' || (this.reserveClassesBundle && (this.kind !== 'minerals' || (this.reservePacketsBundle && this.reserveSupplyBundle && this.loadErrors.populationProductionModifiers === null)))))
 
       return { loading: failed.length === 0 && !current, failed: joinLabels(failed.map((key) => RESERVE_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
     },
@@ -152,7 +157,7 @@ export default {
       default: null,
       lazy: true,
     },
-    // The race's colonies, which a record's source is checked against and picked from. The read carries the save, game and race it was made for.
+    // The race's objects of the kinds the records name (colonies, or ships and ship classes), which a record's source is checked against and picked from. The read carries the save, game and race it was made for.
     reserveObjects: {
       get: tracked('reserveObjects', async function () {
         const { database, GameID, RaceID } = this
@@ -161,17 +166,17 @@ export default {
           return null
         }
 
-        return Object.freeze({ ...(await loadReserveObjects(database, { GameID, RaceID })), database })
+        return Object.freeze({ ...(await loadReserveObjects(database, { GameID, RaceID }, { types: this.reserveTypes })), database })
       }),
       default: null,
       lazy: true,
     },
-    // The ship classes of the race with ships, for the class minimum.
+    // The ship classes of the race with ships, for the class minimum; the reserves of ships and classes need none.
     reserveClasses: {
       get: tracked('reserveClasses', async function () {
         const { database, GameID, RaceID } = this
 
-        if (!database || !GameID || !RaceID) {
+        if (!database || !GameID || !RaceID || this.kind === 'fuel') {
           return null
         }
 

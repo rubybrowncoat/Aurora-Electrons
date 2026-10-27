@@ -1877,7 +1877,7 @@ const defineCases = (modules) => {
 
   invariant('logistics', 'the fuel service rules are registered with their units, and the donor result names allowed, blocked or unknown with the first gate that decides it', () => {
     ;['stored', 'gameMinimum', 'playerReserve', 'eligibleSurplus', 'donor'].forEach((key) => assert.ok(provenance.getRule(`fuelService.${key}`), key))
-    assert.equal(provenance.getRule('fuelService.playerReserve').verification, 'assumed')
+    assert.equal(provenance.getRule('fuelService.playerReserve').verification, 'confirmed')
     assert.equal(donors.fuelDonor(donorShip()).permission, 'allowed')
     assert.equal(donors.fuelDonor(donorShip({ FuelTanker: 0 })).gate, 'designation')
     assert.equal(donors.fuelDonor(donorShip({ TransferSystems: 0, UndamagedTransfer: 0 })).gate, 'system')

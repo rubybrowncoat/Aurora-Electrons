@@ -42,6 +42,7 @@ const FILES = {
   feeds: path.join(renderer, 'utilities', 'resource-feeds.js'),
   mixin: path.join(renderer, 'mixins', 'resource-reserves.js'),
   component: path.join(renderer, 'components', 'logistics', 'ResourceReserves.vue'),
+  fuelComponent: path.join(renderer, 'components', 'logistics', 'FuelReserves.vue'),
   logistics: path.join(renderer, 'pages', 'logistics.vue'),
   hauling: path.join(renderer, 'pages', 'hauling.vue'),
   history: path.join(renderer, 'pages', 'history.vue'),
@@ -199,7 +200,7 @@ const TREE = { b1: { parent: null, t: null }, b2: { parent: 'b1', t: 1000 } }
 
 const colony = (id, name, systemId, bodyId, speciesId = 7) => ({ id, name, systemId, bodyId, speciesId })
 
-const SAVE = () => ({ systems: [{ id: 1, name: 'Sol' }, { id: 2, name: 'Alpha Centauri' }], colonies: [colony(10, 'Earth Prime', 1, 100), colony(11, 'Proxima Base', 2, 200)], classes: [{ id: 5, name: 'Tanker', fuel: 5000, supplies: 0, ships: 3 }, { id: 6, name: 'Escort', fuel: 100, supplies: null, ships: 1 }] })
+const SAVE = () => ({ systems: [{ id: 1, name: 'Sol' }, { id: 2, name: 'Alpha Centauri' }], colonies: [colony(10, 'Earth Prime', 1, 100), colony(11, 'Proxima Base', 2, 200)], classes: [{ id: 5, name: 'Tanker', fuel: 5000, supplies: 0, ships: 3, hull: 21 }, { id: 6, name: 'Escort', fuel: 100, supplies: null, ships: 1, hull: 22 }], ships: [{ id: 10, name: 'Tanker One', className: 'Tanker', constructed: 5000 }, { id: 11, name: 'Tanker Two', className: 'Tanker', constructed: 6000 }, { id: 12, name: 'Escort One', className: 'Escort', constructed: 7000 }] })
 
 const edited = (save, change) => {
   const copy = clone(save)
@@ -225,6 +226,14 @@ const fakeSave = (save, { failing = [] } = {}) => {
         throw new Error(`no such table: ${failed}`)
       }
 
+      if (sql.includes('from FCT_Ship left join')) {
+        return [(save.ships || []).map((row) => ({ ShipID: row.id, ShipName: row.name, Constructed: row.constructed, ClassName: row.className }))]
+      }
+
+      if (sql.includes('FCT_ShipClass.HullDescriptionID')) {
+        return [save.classes.map((row) => ({ ShipClassID: row.id, ClassName: row.name, HullDescriptionID: row.hull }))]
+      }
+
       if (sql.includes('from FCT_ShipClass')) {
         return [save.classes.map((row) => ({ ShipClassID: row.id, ClassName: row.name, MinimumFuel: row.fuel, MinimumSupplies: row.supplies, Ships: row.ships }))]
       }
@@ -243,9 +252,9 @@ const fakeSave = (save, { failing = [] } = {}) => {
 }
 
 // The colonies of an open save as the panel hands them to the records, with the campaign and branch the save is open on.
-const open = async (m, save, where = scope(), { branches = TREE, failing = [] } = {}) => {
+const open = async (m, save, where = scope(), { branches = TREE, failing = [], types = ['colony'] } = {}) => {
   const database = fakeSave(save, { failing })
-  const loaded = await m.rr.loadReserveObjects(database, { GameID: GAME, RaceID: where.RaceID })
+  const loaded = await m.rr.loadReserveObjects(database, { GameID: GAME, RaceID: where.RaceID }, { types })
 
   return { ...loaded, campaignId: where.campaignId, branchId: where.branchId, branches, database }
 }
@@ -258,6 +267,19 @@ const keep = (m, w, where, context, { colonyId = 10, scenario = 'Alpha', resourc
 
 const kept = async (m, w, where, context, options = {}) => {
   const outcome = await keep(m, w, where, context, options)
+
+  assert.equal(outcome.ok, true, outcome.message)
+
+  return outcome.record
+}
+
+// Every kind of source a record names: the reads of the Fuel panel (ships and ship classes) and of the Reserves panel (colonies) together.
+const SOURCES = ['colony', 'ship', 'class']
+
+const keepFuel = (m, w, where, context, type, id, { scenario = 'Alpha', fuel = 100, note = '', ...extra } = {}) => m.rr.saveReserve(w.repo, where, { source: { type, row: context.objects[type].get(id) }, scenario, resources: ['fuel'], reserves: { fuel }, plans: [], note, context, ...extra })
+
+const keptFuel = async (m, w, where, context, type, id, options = {}) => {
+  const outcome = await keepFuel(m, w, where, context, type, id, options)
 
   assert.equal(outcome.ok, true, outcome.message)
 
@@ -1259,6 +1281,146 @@ const records = (ctx) => {
     return read.entries.length === 2 && read.entries.every((one) => one.applied === false && one.overlap === 1 && typeof one.reason === 'string' && one.reason !== '') && m.rr.entriesForLedger(read.entries).length === 0 && gone.ok === true && left.entries.length === 1 && left.entries[0].applied === true && left.entries[0].overlap === 0 ? true : short([read.entries.map((one) => [one.applied, one.overlap]), left.entries.map((one) => [one.applied, one.overlap])])
   })
 
+  add('record: a ship and a ship class each keep a fuel reserve in a record of their own, held by the save and by the player\'s confirmation, which survives a reload and a switch of race, with the colony of the same ID untouched', async () => {
+    const w = world(m)
+    const context = await open(m, SAVE(), scope(), { types: SOURCES })
+
+    await kept(m, w, scope(), context, { reserves: { Duranium: 5 } })
+    await keptFuel(m, w, scope(), context, 'ship', 10, { fuel: 300 })
+    await keptFuel(m, w, scope(), context, 'class', 5, { fuel: 200 })
+
+    const reloaded = world(m, w.inst)
+    const again = m.rr.readReserves(reloaded.repo, scope(), context)
+    const away = m.rr.readReserves(reloaded.repo, scope('b1', RACE + 1), await open(m, SAVE(), scope('b1', RACE + 1), { types: SOURCES }))
+    const back = m.rr.readReserves(reloaded.repo, scope(), context)
+    const rows = again.entries.map((one) => [one.source.type, one.source.id, one.source.name, one.applied, one.reserves, one.plans, one.source.verdict.basis]).sort()
+    const ledger = m.rr.entriesForLedger(again.entries).map((one) => [one.sourceId, one.reserves])
+
+    return same(rows, [['class', 5, 'Tanker', true, { fuel: 200 }, [], 'confirmed'], ['colony', 10, 'Earth Prime', true, { Duranium: 5 }, [], 'confirmed'], ['ship', 10, 'Tanker One', true, { fuel: 300 }, [], 'evidence']]) === true && same(ledger, [[10, { Duranium: 5 }]]) === true && away.entries.length === 0 && back.entries.length === 3 ? true : short([rows, ledger, away.entries.length, back.entries.length])
+  })
+  add('record: a ship\'s own reserve holds over its class\'s, even a smaller one or 0, a ship with none takes its class\'s, and clearing restores what is left', async () => {
+    const w = world(m)
+    const context = await open(m, SAVE(), scope(), { types: SOURCES })
+    const ships = [{ ShipID: 10, ShipClassID: 5 }, { ShipID: 11, ShipClassID: 5 }, { ShipID: 12, ShipClassID: 6 }]
+    const entryOf = (type) => m.rr.readReserves(w.repo, scope(), context).entries.find((one) => one.source.type === type)
+    const holds = () => {
+      const table = m.rr.fuelReserves(m.rr.readReserves(w.repo, scope(), context).entries)
+
+      return ships.map((ship) => {
+        const reserve = m.rr.fuelReserveOf(table, ship)
+
+        return reserve ? [reserve.source, reserve.amount] : null
+      })
+    }
+
+    await keptFuel(m, w, scope(), context, 'class', 5, { fuel: 400 })
+
+    const classOnly = holds()
+
+    await keptFuel(m, w, scope(), context, 'ship', 10, { fuel: 100 })
+
+    const smaller = holds()
+
+    await m.rr.saveReserve(w.repo, scope(), { entry: entryOf('ship'), resources: ['fuel'], reserves: { fuel: 0 }, context })
+
+    const zero = holds()
+
+    await m.rr.deleteReserve(w.repo, scope(), entryOf('ship'))
+
+    const afterShip = holds()
+
+    await m.rr.deleteReserve(w.repo, scope(), entryOf('class'))
+
+    return same([classOnly, smaller, zero, afterShip, holds()], [[['class', 400], ['class', 400], null], [['ship', 100], ['class', 400], null], [['ship', 0], ['class', 400], null], [['class', 400], ['class', 400], null], [null, null, null]])
+  })
+  add('record: the scenarios chosen pick the reserves that count, the largest of a source\'s wins, and a record that is not applied counts for nothing', async () => {
+    const w = world(m)
+    const save = SAVE()
+    const context = await open(m, save, scope(), { types: SOURCES })
+
+    await keptFuel(m, w, scope(), context, 'ship', 10, { scenario: 'Alpha', fuel: 100 })
+    await keptFuel(m, w, scope(), context, 'ship', 10, { scenario: 'Beta', fuel: 250 })
+    await keptFuel(m, w, scope(), context, 'class', 5, { scenario: 'Beta', fuel: 900 })
+
+    const entries = m.rr.readReserves(w.repo, scope(), context).entries
+    const amounts = (scenarios, list = entries) => {
+      const table = m.rr.fuelReserves(list, scenarios)
+
+      return [table.ship.has(10) ? table.ship.get(10).amount : null, table.class.has(5) ? table.class.get(5).amount : null]
+    }
+    const reissued = await readOn(m, w, edited(save, (copy) => { copy.classes[0].hull = 99; copy.ships[0].constructed = 9999 }), scope(), { types: SOURCES })
+
+    return same([amounts([]), amounts(['Alpha']), amounts(['Beta']), amounts(['Alpha', 'Beta']), amounts([], reissued.read.entries)], [[250, 900], [100, null], [250, 900], [250, 900], [null, null]])
+  })
+  add('record: a ship or a class keeps a fuel reserve alone and no timed line, a reserve of 0 is a reserve, and a ship and a colony of one ID each keep a record for one scenario', async () => {
+    const w = world(m)
+    const context = await open(m, SAVE(), scope(), { types: SOURCES })
+    const mineral = await m.rr.saveReserve(w.repo, scope(), { source: { type: 'ship', row: context.objects.ship.get(10) }, scenario: 'Alpha', resources: ['Duranium'], reserves: { Duranium: 1 }, plans: [], note: '', context })
+    const lines = await keepFuel(m, w, scope(), context, 'class', 5, { scenario: 'Lines', plans: [plan('p1', 'Tank', 5, 3, 'fuel')] })
+    const zero = await keepFuel(m, w, scope(), context, 'ship', 11, { fuel: 0 })
+    const first = await keepFuel(m, w, scope(), context, 'ship', 10)
+    const again = await keepFuel(m, w, scope(), context, 'ship', 10, { fuel: 9 })
+    const colonyToo = await keep(m, w, scope(), context, { reserves: { Duranium: 1 } })
+
+    return mineral.ok === false && lines.ok === false && zero.ok === true && first.ok === true && again.ok === false && again.code === 'exists' && /ship/.test(again.message) && colonyToo.ok === true && m.rr.readReserves(w.repo, scope(), context).entries.length === 3 ? true : short([mineral, lines, zero.ok, first.ok, again, colonyToo.ok])
+  })
+  add('record: a ship picked while the ships were not read, or one the save does not hold, is refused, and a read of the colonies alone lists the records of ships and classes as not checked, never as gone', async () => {
+    const w = world(m)
+    const full = await open(m, SAVE(), scope(), { types: SOURCES })
+    const colonies = await open(m, SAVE())
+
+    await keptFuel(m, w, scope(), full, 'ship', 10)
+    await keptFuel(m, w, scope(), full, 'class', 5)
+
+    const blind = await m.rr.saveReserve(w.repo, scope(), { source: { type: 'ship', row: full.objects.ship.get(10) }, scenario: 'Beta', resources: ['fuel'], reserves: { fuel: 1 }, plans: [], note: '', context: colonies })
+    const stranger = await m.rr.saveReserve(w.repo, scope(), { source: { type: 'ship', row: { ...full.objects.ship.get(10), id: 999 } }, scenario: 'Beta', resources: ['fuel'], reserves: { fuel: 1 }, plans: [], note: '', context: full })
+    const read = m.rr.readReserves(w.repo, scope(), colonies)
+
+    return blind.ok === false && blind.code === 'link-not-read' && stranger.ok === false && same(read.entries.map((one) => [one.source.type, one.source.verdict.state, one.applied]).sort(), [['class', 'unread', false], ['ship', 'unread', false]]) === true && m.rr.entriesForLedger(read.entries).length === 0 ? true : short([blind, stranger, read.entries.map((one) => one.source.verdict.state)])
+  })
+  add('record: a class whose ID was given to another hull reads as under review and applies to nothing until the player confirms it, and a ship that is gone applies to nothing', async () => {
+    const w = world(m)
+    const save = SAVE()
+    const first = await open(m, save, scope(), { types: SOURCES })
+
+    await keptFuel(m, w, scope(), first, 'ship', 10, { fuel: 70 })
+    await keptFuel(m, w, scope(), first, 'class', 5, { fuel: 800 })
+
+    const { context, read } = await readOn(m, w, edited(save, (copy) => { copy.classes[0].hull = 99; copy.ships = copy.ships.filter((one) => one.id !== 10) }), scope(), { types: SOURCES })
+    const state = (type) => read.entries.find((one) => one.source.type === type)
+
+    if (!state('class') || !state('ship')) {
+      return short(['the records of the ship and the class are not read', read.entries.length])
+    }
+
+    const before = m.rr.fuelReserves(read.entries)
+    const refused = await m.rr.confirmSource(w.repo, scope(), { entry: state('ship'), context })
+    const confirmed = await m.rr.confirmSource(w.repo, scope(), { entry: state('class'), context })
+    const after = m.rr.readReserves(w.repo, scope(), context).entries.find((one) => one.source.id === 5)
+    const table = m.rr.fuelReserves(m.rr.readReserves(w.repo, scope(), context).entries)
+
+    return same([state('class').source.verdict.state, state('class').applied, state('ship').source.verdict.state, state('ship').applied, before.class.size + before.ship.size], ['review', false, 'gone', false, 0]) === true && refused.ok === false && refused.code === 'not-in-review' && confirmed.ok === true && after?.source.type === 'class' && after.applied === true && after.source.verdict.basis === 'confirmed' && table.class.get(5)?.amount === 800 && table.ship.size === 0 ? true : short([refused, confirmed, after && after.applied, [...table.class]])
+  })
+  add('record: an edit of a ship\'s reserve changes the figure and keeps the note, a blank figure keeps no reserve and is refused, and deleting the record clears the reserve', async () => {
+    const w = world(m)
+    const context = await open(m, SAVE(), scope(), { types: SOURCES })
+    const entryOf = () => m.rr.readReserves(w.repo, scope(), context).entries.find((one) => one.source.type === 'ship')
+
+    await keptFuel(m, w, scope(), context, 'ship', 10, { fuel: 100, note: 'keep' })
+
+    if (!entryOf()) {
+      return short(['the record of the ship is not read'])
+    }
+
+    const edit = await m.rr.saveReserve(w.repo, scope(), { entry: entryOf(), resources: ['fuel'], reserves: { fuel: 150 }, context })
+    const edited = entryOf()
+    const blank = await m.rr.saveReserve(w.repo, scope(), { entry: edited, resources: ['fuel'], reserves: { fuel: null }, context })
+    const gone = await m.rr.deleteReserve(w.repo, scope(), edited)
+    const table = m.rr.fuelReserves(m.rr.readReserves(w.repo, scope(), context).entries)
+
+    return edit.ok === true && edited.reserves.fuel === 150 && edited.note === 'keep' && blank.ok === false && blank.code === 'invalid-reserve' && gone.ok === true && m.rr.fuelReserveOf(table, { ShipID: 10, ShipClassID: 5 }) === null ? true : short([edit, edited.reserves, blank, gone])
+  })
+
   return statements
 }
 
@@ -1285,6 +1447,13 @@ const loaders = (ctx) => {
     const outcomes = await Promise.all([m.rr.loadReserveObjects(fakeSave(SAVE(), { failing: ['FCT_Population'] }), { GameID: GAME, RaceID: RACE }).then(() => 'read', (error) => error.message), m.rf.loadClassMinimums(fakeSave(SAVE(), { failing: ['FCT_ShipClass'] }), { GameID: GAME, RaceID: RACE }).then(() => 'read', (error) => error.message), m.rf.loadSupplyState(fakeSave(SAVE(), { failing: ['FCT_PopulationInstallations'] }), { GameID: GAME, RaceID: RACE }).then(() => 'read', (error) => error.message)])
 
     return outcomes.every((outcome) => /no such table/.test(outcome)) ? true : short(outcomes)
+  })
+  add('loaders: the reads of the ships and the ship classes are selects with the game and race as parameters, name the class of each ship, and a read that fails fails the whole read', async () => {
+    const database = fakeSave(SAVE())
+    const loaded = await m.rr.loadReserveObjects(database, { GameID: GAME, RaceID: RACE }, { types: ['ship', 'class'] })
+    const failed = await Promise.all([m.rr.loadReserveObjects(fakeSave(SAVE(), { failing: ['FCT_Ship.ShipID'] }), { GameID: GAME, RaceID: RACE }, { types: ['ship'] }).then(() => 'read', (error) => error.message), m.rr.loadReserveObjects(fakeSave(SAVE(), { failing: ['HullDescriptionID'] }), { GameID: GAME, RaceID: RACE }, { types: ['class'] }).then(() => 'read', (error) => error.message)])
+
+    return database.sent.length === 2 && database.sent.every((one) => /^select /i.test(one.sql) && !/\b(insert|update|delete|drop|alter|create)\b/i.test(one.sql) && one.replacements.GameID === GAME && one.replacements.RaceID === RACE) && same([Object.keys(loaded.objects), [...loaded.objects.ship.keys()], loaded.objects.ship.get(11).group, loaded.objects.class.get(6).name], [['ship', 'class'], [10, 11, 12], 'Tanker', 'Escort']) === true && failed.every((outcome) => /no such table/.test(outcome)) ? true : short([database.sent.length, Object.keys(loaded.objects), failed])
   })
 
   return statements
@@ -1662,9 +1831,9 @@ const voice = (ctx) => {
   const add = (name, test) => statements.push([name, test])
 
   add('voice: nothing the panel, the mixin and the utilities say is in the first or second person', () => {
-    const texts = { component: ctx.texts.component, mixin: ctx.texts.mixin, ledger: ctx.texts.ledger, reserves: ctx.texts.reserves, feeds: ctx.texts.feeds }
+    const texts = { component: ctx.texts.component, fuelComponent: ctx.texts.fuelComponent, mixin: ctx.texts.mixin, ledger: ctx.texts.ledger, reserves: ctx.texts.reserves, feeds: ctx.texts.feeds }
     const found = Object.entries(texts).flatMap(([name, text]) => {
-      const strings = name === 'component' ? [...stringsOf(scriptOf(text)), ...staticTextOf(templateAst(text))] : stringsOf(text)
+      const strings = name === 'component' || name === 'fuelComponent' ? [...stringsOf(scriptOf(text)), ...staticTextOf(templateAst(text))] : stringsOf(text)
 
       return strings.filter((one) => PRONOUNS.test(one)).map((one) => [name, one.slice(0, 80)])
     })
@@ -2288,6 +2457,29 @@ const pages = (ctx) => {
 
     return error === null && preview && preview.rejected === 1 && !preview.importable ? true : short([error, preview && preview.rejected, preview && preview.importable])
   })
+  add('history: a restore keeps the records of a ship and of a ship class with those of the colonies, through the backup of the page', async () => {
+    const warm = world(m)
+    const context = await open(m, SAVE(), scope(), { types: SOURCES })
+
+    await kept(m, warm, scope(), context, { reserves: { Duranium: 1 } })
+    await keptFuel(m, warm, scope(), context, 'ship', 10, { fuel: 300 })
+    await keptFuel(m, warm, scope(), context, 'class', 5, { fuel: 200 })
+
+    const bundle = warm.repo.exportRecords(scope())
+    const target = { campaignId: 'c2', RaceID: RACE, branch: 'b1' }
+    const registry = m.records.createAdapterRegistry()
+
+    m.rr.registerResourceReserves(registry.register)
+
+    const repo = m.records.createRepository({ storage: memory().storage, adapters: registry, newId: () => uuid(900), now: () => 5000 })
+    const preview = repo.previewImport(bundle, target, { restore: true })
+    const imported = preview.importable ? repo.importRecords(bundle, target, { preview, restore: true }).imported.length : 0
+    const { adapter, error } = await instantiate(ctx.pageOptions.history, { boundary, $store: PAGE_STORE, database: null, GameID: GAME, RaceID: RACE, data: {} }).backupAnnotations()
+    const page = adapter ? adapter.preview(bundle, target, { restore: true }) : null
+    const there = m.rr.readReserves(repo, { campaignId: 'c2', RaceID: RACE, branchId: 'b1', gameTime: 100000 }, null).entries.map((one) => [one.source.type, one.reserves]).sort()
+
+    return preview.rejected === 0 && imported === 3 && error === null && page && page.rejected === 0 && page.importable === 3 && same(there, [['class', { fuel: 200 }], ['colony', { Duranium: 1 }], ['ship', { fuel: 300 }]]) === true ? true : short([preview.rejected, imported, error, page && page.rejected, page && page.importable, there])
+  })
 
   return statements
 }
@@ -2413,11 +2605,33 @@ const MUTATIONS = [
   { name: 'a scenario that may take the name of the plan', file: 'reserves', find: 'return scenario.toLowerCase() === PLAN_SCENARIO.toLowerCase() ?', replace: 'return false ?', fails: ['plan'] },
   { name: 'a record read under every race', file: 'reserves', find: 'listed = repository.list(scope, { kind: RESERVE_KIND, context: context || undefined })', replace: 'listed = repository.list({ ...scope, RaceID: scope.RaceID + 1 }, { kind: RESERVE_KIND, context: context || undefined })', fails: ['record'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'a select that writes', file: 'reserves', find: 'const [rows] = await database.query(COLONY.sql, { replacements: { GameID, RaceID } })', replace: 'const [rows] = await database.query(`update FCT_Population set PopName = PopName; ${COLONY.sql}`, { replacements: { GameID, RaceID } })', fails: ['loaders'] },
+  { name: 'a select that writes', file: 'reserves', find: 'const [rows] = await database.query(RESERVE_TARGETS[type].sql, { replacements: { GameID, RaceID } })', replace: 'const [rows] = await database.query(`update FCT_Population set PopName = PopName; ${RESERVE_TARGETS[type].sql}`, { replacements: { GameID, RaceID } })', fails: ['loaders'] },
   { name: 'a class read that hides its failure', file: 'feeds', find: 'const [rows] = await database.query(CLASS_SQL, { replacements: { GameID, RaceID } })', replace: 'const [rows] = await database.query(CLASS_SQL, { replacements: { GameID, RaceID } }).catch(() => [[]])', fails: ['loaders'] },
   { name: 'a panel with no summary of its own', file: 'component', find: ':data-summary="summary" data-reserve-panel>', replace: 'data-reserve-panel>', fails: ['browser'], parts: ['cells'] },
   { name: 'a panel that shows the three minimums in one column', file: 'component', find: "{ text: 'Class minimum (reference)', value: 'class' },", replace: '', fails: ['component'] },
-  { name: 'a panel that waits on no read of the colonies', file: 'mixin', find: "return this.kind === 'minerals' ? ['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveObjects', 'reserveClasses']", replace: "return this.kind === 'minerals' ? ['reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveClasses']", fails: ['component'] },
+  { name: 'a panel that waits on no read of the colonies', file: 'mixin', find: "return this.kind === 'fuel' ? ['reserveObjects'] : this.kind === 'minerals' ? ['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveObjects', 'reserveClasses']", replace: "return this.kind === 'fuel' ? ['reserveObjects'] : this.kind === 'minerals' ? ['reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveClasses']", fails: ['component'] },
+  { name: 'a ship\'s own fuel reserve that loses to its class\'s', file: 'reserves', find: 'if (own) {', replace: 'if (own && !table.class.has(ship.ShipClassID)) {', fails: ['record'] },
+  { name: 'a ship\'s own fuel reserve of 0 passed over for its class\'s', file: 'reserves', find: 'if (own) {', replace: 'if (own && own.amount > 0) {', fails: ['record'] },
+  { name: 'a fuel reserve that is the smallest of the scenarios a source is in', file: 'reserves', find: 'held.amount = Math.max(held.amount, entry.reserves[FUEL])', replace: 'held.amount = Math.min(held.amount, entry.reserves[FUEL])', fails: ['record'] },
+  { name: 'a scenario that is not chosen and still counts for the fuel reserves', file: 'reserves', find: '(!scenarios.length || scenarios.includes(entry.scenario))', replace: 'true', fails: ['record'] },
+  { name: 'a fuel reserve of a record that is not applied', file: 'reserves', find: 'entry.applied && hasOwn(table, entry.source.type)', replace: 'hasOwn(table, entry.source.type)', fails: ['record'] },
+  { name: 'a record of a ship that reaches the ledger as the record of a colony', file: 'reserves', find: "entry.applied && entry.source.type === 'colony'", replace: 'entry.applied', fails: ['record'] },
+  { name: 'a ship and a colony of one ID that meet as one source for a scenario', file: 'reserves', find: 'item.payload.source.type === type && item.payload.source.id === sourceId', replace: 'item.payload.source.id === sourceId', fails: ['record'] },
+  { name: 'a ship class that the save is taken to hold by itself', file: 'reserves', find: "identity: 'unwitnessed',\n  unwitnessedNote:", replace: "identity: 'static',\n  unwitnessedNote:", fails: ['record'] },
+  { name: 'a ship class told by its name alone, not its hull', file: 'reserves', find: "fingerprint: (row) => ['class', present(row.hullId)].join('|'),", replace: "fingerprint: (row) => ['class'].join('|'),", fails: ['record'] },
+  { name: 'a record of a ship that keeps a reserve of a mineral', file: 'reserves', find: 'if (others.length) {', replace: 'if (false) {', fails: ['record'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'a record of a class that keeps timed lines', file: 'reserves', find: 'problems.push(`a ${noun} has no timed lines`)', replace: 'void 0', fails: ['record'] },
+  { name: 'a record that can be made for a colony alone', file: 'reserves', find: 'hasOwn(RESERVE_TARGETS, source.type) && isObject(source.row)', replace: "source.type === 'colony' && isObject(source.row)", fails: ['record'] },
+  { name: 'an edit that keeps no reserve and is still written', file: 'reserves', find: 'if (Object.keys(made.reserves).length === 0 && made.plans.length === 0) {', replace: 'if (false) {', fails: ['record'] },
+  { name: 'a confirmation that makes the source a colony again', file: 'reserves', find: 'source: refOf(view.type, checked.row, scope)', replace: "source: refOf('colony', checked.row, scope)", fails: ['record'] },
+  { name: 'a read of the ships that names no class for a ship', file: 'reserves', find: 'group: present(source.ClassName) }', replace: "group: '' }", fails: ['loaders'] },
+  { name: 'a ship\'s fuel reserve taken from the class by a second lookup', file: 'reserves', find: "const kind = table.class.get(ship.ShipClassID)\n\n  return kind ? { amount: kind.amount, source: 'class', scenarios: [...kind.scenarios] } : null", replace: "return table.class.has(ship.ShipClassID) ? { amount: table.class.get(ship.ShipClassID).amount, source: 'class', scenarios: table.class.get(ship.ShipClassID).scenarios.slice() } : null", fails: ['record'], benign: true },
+  { name: 'a fuel reserve compared by a conditional in place of Math.max', file: 'reserves', find: 'held.amount = Math.max(held.amount, entry.reserves[FUEL])', replace: 'held.amount = held.amount < entry.reserves[FUEL] ? entry.reserves[FUEL] : held.amount', fails: ['record'], benign: true },
+  { name: 'a ledger filter with the kind written first', file: 'reserves', find: "entry.applied && entry.source.type === 'colony'", replace: "'colony' === entry.source.type && entry.applied", fails: ['record'], benign: true },
+  { name: 'a scenario filter written as a count of 0', file: 'reserves', find: '(!scenarios.length || scenarios.includes(entry.scenario))', replace: '(scenarios.length === 0 || scenarios.includes(entry.scenario))', fails: ['record'], benign: true },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'a record of a class whose timed lines are tested in parentheses', file: 'reserves', find: 'if (Array.isArray(payload.plans) && payload.plans.length) {\n      problems.push(`a ${noun}', replace: 'if ((Array.isArray(payload.plans)) && (payload.plans.length > 0)) {\n      problems.push(`a ${noun}', fails: ['record'], benign: true },
   { name: 'a read of the packets for supplies', file: 'mixin', find: "if (!database || !GameID || !RaceID || this.kind !== 'minerals') {\n          return null\n        }\n\n        return Object.freeze({ packets:", replace: 'if (!database || !GameID || !RaceID) {\n          return null\n        }\n\n        return Object.freeze({ packets:', fails: ['component'] },
   { name: 'a panel that is ready before the supplies and the production rates are in', file: 'mixin', find: 'this.reservePacketsBundle && this.reserveSupplyBundle && this.loadErrors.populationProductionModifiers === null', replace: 'this.reservePacketsBundle', fails: ['component'] },
   { name: 'a minerals panel that takes the supplies from the colonies the host read', file: 'component', find: "this.kind === 'supplies' ? this.colonies : this.reserveSupplyBundle.colonies", replace: 'this.colonies', fails: ['component'] },
@@ -2463,6 +2677,7 @@ const MUTATIONS = [
   { name: 'a Logistics page that shows the panel in the wrong view', file: 'logistics', find: '<template v-else-if="view === \'reserves\'">', replace: '<template v-else-if="view === \'stations\'">', fails: ['browser'] },
   { name: 'a backup that registers the reserve adapter through a wrapper', file: 'history', find: 'reserves.registerResourceReserves(records.registerAdapter)', replace: 'reserves.registerResourceReserves((adapter) => records.registerAdapter(adapter))', fails: ['history'], benign: true },
   { name: 'a panel that speaks in the second person', file: 'component', find: 'No source has a record or a plan. Keep a record, or show every source.', replace: 'You have no record or plan. Keep a record, or show every source.', fails: ['voice'] },
+  { name: 'a fuel reserve panel that speaks in the second person', file: 'fuelComponent', find: 'The campaign of this save is not settled yet, so reserves wait for it.', replace: 'The campaign of your save is not settled yet, so reserves wait for it.', fails: ['voice'] },
   { name: 'a fuel output held to the Sorium the colony has now, so a refinery that starts empty never refines', file: 'feeds', find: 'const fuel = isNumber(colony.Sorium) ? capacity : refineryYield(colony, modifier)', replace: 'const fuel = refineryYield(colony, modifier)', fails: ['feeds', 'combined'] },
   { name: 'a refinery with no Sorium feed that goes on refining the Sorium it has not got', file: 'feeds', find: 'isNumber(colony.Sorium) && colony.Sorium < 1 ? 0 : isAvailable(lasts)', replace: 'isAvailable(lasts)', fails: ['feeds', 'combined'] },
   { name: 'production of a source whose own stock is not in the save that takes nothing from its inputs', file: 'ledger', find: 'if (line.daily > 0 && (line.shared || (line.known &&', replace: 'if (line.known && line.daily > 0 && (line.shared || (line.known &&', fails: ['combined', 'component'] },

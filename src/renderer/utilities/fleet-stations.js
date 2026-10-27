@@ -370,11 +370,11 @@ const confirmationShared = (ref, context) => {
   return shared !== null && ref.confirmed.gameTime < shared
 }
 
-// Whether the object now under the ID is the very one the player confirmed: the same fingerprint and name and, for a fleet, ship classes that overlap those it had, for a waypoint the same anchor, and a confirmation that holds on the open branch.
-const confirmedHolds = (ref, row, context) => {
+// Whether the object now under the ID is the very one the player confirmed: the same fingerprint and name and, for a fleet, ship classes that overlap those it had, for a waypoint the same anchor, and a confirmation that holds on the open branch. `targets` is the table of kinds the reference is one of (the stations' own by default).
+const confirmedHolds = (ref, row, context, targets = STATION_TARGETS) => {
   const confirmed = ref.confirmed
 
-  return Boolean(confirmed) && confirmationShared(ref, context) && confirmed.fingerprint === STATION_TARGETS[ref.type].fingerprint(row) && confirmed.name === row.name && (ref.type !== 'fleet' || overlaps(confirmed.classes, row.classes)) && (ref.type !== 'waypoint' || sameAnchor(confirmed.anchor, waypointAnchorOf(row)))
+  return Boolean(confirmed) && confirmationShared(ref, context) && confirmed.fingerprint === targets[ref.type].fingerprint(row) && confirmed.name === row.name && (ref.type !== 'fleet' || overlaps(confirmed.classes, row.classes)) && (ref.type !== 'waypoint' || sameAnchor(confirmed.anchor, waypointAnchorOf(row)))
 }
 
 const currentRowOf = (context, link) => {
@@ -386,8 +386,8 @@ const currentRowOf = (context, link) => {
 // What the player can check by eye when an object under the ID is not shown to be the one named: whether it has the name and, for a fleet, ship classes the confirmed one had (null where the classes of either are not known).
 const resemblanceOf = (ref, row) => ({ sameName: row.name === ref.confirmed.name || row.name === ref.name, classesOverlap: ref.type === 'fleet' && Array.isArray(ref.confirmed.classes) && Array.isArray(row.classes) ? overlaps(ref.confirmed.classes, row.classes) : null })
 
-// The verdict on one reference: `link` is the link as `resolveLink` gives it, `row` the object now under the ID (null when there is none). `held` is an object known to be the one named, by evidence the save holds (`evidence`) or by the player's confirmation of that very object (`confirmed`); `review` is an object under the ID that is not shown to be it (`reused`: its fingerprint differs, so another object made later holds the ID; `unwitnessed`: the save stores nothing that tells); `gone` is no object under the ID; `unread` is a link that could not be checked, which says nothing about the object.
-export const verdictOf = (ref, link, row, context = null) => {
+// The verdict on one reference: `link` is the link as `resolveLink` gives it, `row` the object now under the ID (null when there is none). `held` is an object known to be the one named, by evidence the save holds (`evidence`) or by the player's confirmation of that very object (`confirmed`); `review` is an object under the ID that is not shown to be it (`reused`: its fingerprint differs, so another object made later holds the ID; `unwitnessed`: the save stores nothing that tells); `gone` is no object under the ID; `unread` is a link that could not be checked, which says nothing about the object. `targets` is the table of kinds the reference is one of (the stations' own by default).
+export const verdictOf = (ref, link, row, context = null, targets = STATION_TARGETS) => {
   if (!link || (link.status === 'unknown' && !link.unverified)) {
     return { state: VERDICTS.UNREAD, basis: null, reason: link && link.reason ? link.reason : 'The link could not be checked against the save.', resemblance: null }
   }
@@ -404,7 +404,7 @@ export const verdictOf = (ref, link, row, context = null) => {
     return { state: VERDICTS.HELD, basis: 'evidence', reason: '', resemblance: null }
   }
 
-  if (row && confirmedHolds(ref, row, context)) {
+  if (row && confirmedHolds(ref, row, context, targets)) {
     return { state: VERDICTS.HELD, basis: 'confirmed', reason: '', resemblance: null }
   }
 

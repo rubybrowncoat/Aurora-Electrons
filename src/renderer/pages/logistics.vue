@@ -97,7 +97,7 @@
             </div>
           </v-card>
 
-          <v-card class="panel" data-summary="Tanker ships with the fuel each holds, its class minimum, local reserve and servable surplus, or why it cannot serve. Use it to tell stored fuel from fuel free to give." elevation="1" data-donor-panel>
+          <v-card class="panel" data-summary="Tanker ships with the fuel each holds, its class minimum, local reserve and servable surplus, or why it cannot serve. Use it to tell stored fuel from fuel free to give, and to keep a reserve back on a ship or on a ship class." elevation="1" data-donor-panel>
             <div class="panel-head">
               <span>Tankers and fuel service<provenance-mark rule="fuelService.eligibleSurplus" label /></span>
               <v-chip v-if="donorReport" small data-donor-chip><span data-donor-value="ships">{{ donorReport.totals.ships }}</span> {{ donorReport.totals.ships === 1 ? 'tanker' : 'tankers' }} · <span data-donor-value="chip">{{ litres(donorReport.totals.stored.value) }}</span> stored</v-chip>
@@ -129,7 +129,10 @@
                   </template>
                 </template>
                 <template #[`item.MinimumFuel`]="{ item }"><span class="text-no-wrap" data-donor-cell="minimum">{{ donorText(item).minimum }}</span></template>
-                <template #[`item.reserve`]="{ item }"><span class="text-no-wrap text--secondary" data-donor-cell="reserve">{{ donorText(item).reserve }}</span></template>
+                <template #[`item.reserve`]="{ item }">
+                  <div class="text-no-wrap text--secondary" data-donor-cell="reserve">{{ donorText(item).reserve }}</div>
+                  <div v-if="reserveSourceText(item)" class="caption text--secondary" data-donor-cell="reserve-source">{{ reserveSourceText(item) }}</div>
+                </template>
                 <template #[`item.eligibleSurplus`]="{ item }">
                   <span class="text-no-wrap" :class="item.donor.permission === 'allowed' ? '' : 'text--secondary'" data-donor-cell="surplus">{{ donorText(item).surplus }}<provenance-mark :result="item.donor.results.eligibleSurplus" /></span>
                 </template>
@@ -139,8 +142,9 @@
                   <div v-if="donorText(item).limit" class="caption text--secondary" data-donor-cell="limit">{{ donorText(item).limit }}</div>
                 </template>
               </v-data-table>
+              <fuel-reserves :key="`${GameID}-${RaceID}`" @reserves="fuelReserves = $event" />
               <div class="panel-foot caption text--secondary">
-                Stored fuel is the fuel aboard now and no restriction lowers it. The class minimum is the fuel the game keeps in a donor, and the local reserve a level the player keeps aboard; no reserve can be set on a ship yet, so it reads as none set. The eligible surplus is the whole litres above the larger of the two, given only when the ship has the Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0 and fuel above the class minimum, and a rate under 20,000 LPH serves recipients of 20 HS or less only. A ship that cannot serve is shown with the reason, not as empty. A ship with no engines is a service site and has no range of its own. The damaged systems are read from the ship; no saved game has one yet. The ship's refuel mode is not read. {{ versionNote }}
+                Stored fuel is the fuel aboard now and no restriction lowers it. The class minimum is the fuel the game keeps in a donor, and the local reserve a level the player keeps aboard, kept as a record for a ship or for a ship class: a ship's own record holds over its class's, and a ship with none reads as none set. The eligible surplus is the whole litres above the larger of the two, given only when the ship has the Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0 and fuel above the class minimum, and a rate under 20,000 LPH serves recipients of 20 HS or less only. A ship that cannot serve is shown with the reason, not as empty. A ship with no engines is a service site and has no range of its own. The damaged systems are read from the ship; no saved game has one yet. The ship's refuel mode is not read. {{ versionNote }}
               </div>
             </template>
           </v-card>
@@ -307,6 +311,7 @@ import MspSupply from '../components/logistics/MspSupply.vue'
 import FleetStations from '../components/fleets/FleetStations.vue'
 import ResourceReserves from '../components/logistics/ResourceReserves.vue'
 import FuelFigures from '../components/logistics/FuelFigures.vue'
+import FuelReserves from '../components/logistics/FuelReserves.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -323,6 +328,7 @@ import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
 import { donorTexts, loadFuelDonors, tankerReport } from '../utilities/fuel-donors'
+import { fuelReserveOf } from '../utilities/resource-reserves'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sortNullLast, totalOf } from '../utilities/production'
@@ -366,7 +372,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, FleetStations, FuelFigures, LoadState, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
+  components: { ChartCanvas, FleetStations, FuelFigures, FuelReserves, LoadState, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -391,6 +397,8 @@ export default {
       horizonOptions: HARVESTER_HORIZONS,
       mspHorizonOptions: MSP_HORIZONS,
       sortNullLast,
+      // The fuel reserves of ships and ship classes as the Fuel panel's records give them ({ ready, table }), null until the panel has read them.
+      fuelReserves: null,
     }
   },
   computed: {
@@ -435,13 +443,20 @@ export default {
       return this.optionalState(DONOR_INPUTS)
     },
 
-    // The ships that can serve fuel with their donor results and totals, null until the read is in.
+    // The player's fuel reserve that holds for each ship by its ID (its own, else its class's), null for a ship with none.
+    reserveByShip() {
+      const table = this.fuelReserves && this.fuelReserves.ready ? this.fuelReserves.table : null
+
+      return new Map((this.fuelDonors || []).map((ship) => [ship.ShipID, table ? fuelReserveOf(table, ship) : null]))
+    },
+
+    // The ships that can serve fuel with their donor results and totals, null until the read is in. The surplus of a ship that may serve and the total are worked out only once the reserve records are read: until then they read as not read, and the stored fuel and the game's permission stay.
     donorReport() {
       if (!this.fuelDonors || this.donorState.loading || this.donorState.failed) {
         return null
       }
 
-      return tankerReport(this.fuelDonors, { version: this.formulaVersion })
+      return tankerReport(this.fuelDonors, { version: this.formulaVersion, reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready), reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount })
     },
 
     // The tanker table lists every ship that is designated a tanker, has a refuelling rate or mounts a transfer system.
@@ -842,6 +857,13 @@ export default {
     // The words of a ship's donor result.
     donorText(row) {
       return donorTexts(row.donor, (value) => this.exactLitres(value))
+    },
+
+    // Where a ship's reserve is set, on the ship or on its class, with the scenarios it comes from; empty when none is set.
+    reserveSourceText(row) {
+      const reserve = this.reserveByShip.get(row.ShipID)
+
+      return reserve ? `Set on the ${reserve.source === 'ship' ? 'ship' : 'class'}${reserve.scenarios.length ? ` · ${reserve.scenarios.join(', ')}` : ''}` : ''
     },
 
     // Reads again the read of the incoming minerals, whether it failed whole or settled with sources it could not read.
