@@ -28,6 +28,7 @@ This repository has no CI and the owner lands commits on the working branch. Ope
   - When the interim round leaves no still-present P0-P2 and the landing run has passed, spawn one fresh `reviewer` for the closing round.
   - If a closing round requests changes, the fixes go back to the interim reviewer, then a second fresh closing round runs.
   - Interim rechecks are not capped. A third fresh closing round needs the owner's approval: ask, with the still-open findings.
+  - A finding id still present after two review rounds is a requirements question, not another fix request (HS-AE-002). Stop the loop on it and write a short decision note in the evidence file: the rule the finding turns on, the reading chosen and its source. Interview the owner when no spec, decision or game rule settles it. Then add a fixture or check case that pins the chosen reading, and resume. The review standard stays the same: the note settles what the requirement is, not whether the finding counts.
   - Keep each iteration short. The proof rules below keep it so.
 - Proof:
   - A round runs only the head checks plus the faults and rewrites the round touched, focused.
