@@ -111,14 +111,25 @@ const modelsOf = (ast) => {
   return models
 }
 
-// Walks `node` collecting what it reads: `reads` (table -> columns), `refs` (identifiers it uses), and the inputs nested in it (`tracked` reads and checks), which are not descended into.
-const collect = (node, models) => {
+// The parameters whose bare-name default is not followed, by declaration: the link table of the milestones' link functions (`types = LINK_TYPES`). Every caller either passes its own table (the notes, the stations, the reserves, the tags, the desired routes and the recovery ledger) or is the milestones' own, which names `LINK_TYPES` itself, so following the default would give a page the milestone queries of kinds it never links. Any other default is followed, for a caller that leaves the argument out reaches it.
+const NAMED_DEFAULTS = {
+  'utilities/history-milestones.js': { linkTypeOf: ['types'], unverifiedOf: ['types'], timeLost: ['types'], linkOf: ['types'], checkLink: ['types'] },
+}
+
+// Walks `node` collecting what it reads: `reads` (table -> columns), `refs` (identifiers it uses), and the inputs nested in it (`tracked` reads and checks), which are not descended into. `named` lists the parameters of `node` whose bare-name default is not followed (`NAMED_DEFAULTS`).
+const collect = (node, models, named = null) => {
   const reads = new Map()
   const refs = new Set()
   const inputs = []
 
   const visit = (current, parent) => {
     if (!current || typeof current.type !== 'string') {
+      return
+    }
+
+    if (named && current.type === 'AssignmentPattern' && current.left.type === 'Identifier' && named.includes(current.left.name) && current.right.type === 'Identifier' && parent === node && isFunction(node) && node.params.includes(current)) {
+      visit(current.left, current)
+
       return
     }
 
@@ -254,7 +265,7 @@ const fileOf = (absolute, models) => {
   files.set(absolute, info)
 
   const declare = (name, node) => {
-    const { reads, refs, inputs } = collect(node, models)
+    const { reads, refs, inputs } = collect(node, models, (NAMED_DEFAULTS[info.relative] || {})[name])
 
     info.decls.set(name, { reads, refs })
     info.inputs.push(...inputs)
@@ -306,6 +317,10 @@ const fileOf = (absolute, models) => {
 // The readers that fail into a report of their own, so that no page rests on what they read: each is followed from no page, and the page that reaches one has an input of its own for it (`inputsOfPage`). { [file relative to the renderer]: { [declaration]: { key, label } } }.
 const SEPARATE = {
   'utilities/ground-formations.js': { readFormationObservations: { key: 'observationRead', label: 'the formations observed' } },
+  'utilities/recovery-ledger.js': {
+    readLifepodObservations: { key: 'recoveryObservationRead', label: 'the life pods and wrecks observed' },
+    readWreckObservations: { key: 'recoveryObservationRead', label: 'the life pods and wrecks observed' },
+  },
 }
 const SEPARATE_KEYS = new Map(Object.entries(SEPARATE).flatMap(([file, names]) => Object.entries(names).map(([name, entry]) => [`${path.join(root, file)}::${name}`, entry])))
 const reached = new Set()
@@ -513,4 +528,7 @@ const scanReads = (routes) => {
   return reports
 }
 
-module.exports = { scanReads, root }
+// The reads of the declaration `name` of the file `absolute`, as a page that calls it would have them: the check of the scanner's own handling of default parameters runs on files of its own.
+const readsOfFile = (absolute, name) => flatten(readsOfDeclaration(fileOf(absolute, {}), name, new Set(), {}))
+
+module.exports = { scanReads, readsOfFile, root }

@@ -47,7 +47,8 @@ const OPTIONAL = Object.freeze({
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
   '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'positionFacts' || key === 'orbitFacts',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
-  '/map': (key) => key === 'groundFormations',
+  '/map': (key) => key === 'groundFormations' || key === 'recoveryObjects' || key === 'observationRead',
+  // The life pods and wrecks of the recovery ledger of the Galaxy Map (`recoveryObjects`) are read only when the ledger is opened: a save that lacks a table or column of them leaves the ledger without them, and the ledger says so in place. The formations read for an observation (`observationRead`) are reached through the choice of the ledger's observation, which names every observed kind; the map reads no formation for it.
   // The formations read for the observation (`observationRead`) are an opt-in feature of Survey Progress and of the recorder behind History: a save without a column of that read leaves the observation unavailable (Survey Progress says so in place of the switch, and the recorder notes the failed read in the record), and nothing else of either page.
   '/survey-progress': (key) => ['formations', 'groundCommanders', 'ruinSites', 'constructSites', 'troopBays', 'observationRead'].includes(key),
   '/history': (key) => key === 'observationRead',
@@ -55,7 +56,8 @@ const OPTIONAL = Object.freeze({
   '/commanders': (key) => key === 'navalTree' || key === 'groundTree',
 })
 
-export const isOptional = (route, key) => Boolean(OPTIONAL[route] && OPTIONAL[route](key))
+// The life pods and wrecks read for the observation (`recoveryObservationRead`) are an opt-in of the Galaxy Map's recovery ledger and of the recorder behind History, which any page that switches observation on or reads a record reaches: a save without a column of that read leaves the observation unavailable, in place of its switch, and nothing else of any page.
+export const isOptional = (route, key) => key === 'recoveryObservationRead' || Boolean(OPTIONAL[route] && OPTIONAL[route](key))
 
 // The ranks of the naval admin commanders decide whether a command's bonus applies down its chain, so a report that reads them keeps its stock figures and leaves only the rates that need the chain unknown (`loadNavalAdmins` takes `ranks`).
 const navalRank = (affects) => Object.freeze({ key: 'navalRank', label: 'Naval admin ranks', affects, fields: Object.freeze(['FCT_Commander.RankID', 'FCT_Ranks.*']) })

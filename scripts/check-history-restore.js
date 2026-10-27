@@ -83,6 +83,7 @@ const FIXTURES = {
   'planner.techChoice': { policy: 'branch', payload: { choices: {} } },
   'resource.reserve': { policy: 'branch', payload: { source: { type: 'colony', id: 1, name: 'Colony', systemId: 1, systemName: 'Sol', origin: ORIGIN, confirmed: { fingerprint: 'colony|1|1|1', name: 'Colony', classes: null, gameTime: 0 } }, scenario: 'Plan', reserves: {}, plans: [], note: '' } },
   'route.desire': { payload: { name: 'A', cargo: 'minerals', yearly: null, note: '', from: { id: 101, name: 'Alpha', systemId: 1, systemName: 'System 1', origin: ORIGIN }, to: { id: 102, name: 'Beta', systemId: 2, systemName: 'System 2', origin: ORIGIN } } },
+  'recovery.status': { policy: 'branch', payload: { ref: { type: 'wreck', id: 1, label: 'Wreck of Unknown class #1: 100 tons', systemId: 1, systemName: 'Sol', own: false, origin: ORIGIN, copies: 1 }, status: 'acknowledged', observed: null } },
   'world.tag': { payload: { tag: 'ok', target: { ...body } } },
 }
 

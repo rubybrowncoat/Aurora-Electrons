@@ -24,7 +24,7 @@ const vm = require('vm')
 const sqlite3 = require('sqlite3')
 const { Sequelize } = require('sequelize')
 const { loadUtilities } = require('./lib/utilities')
-const { scanReads } = require('./lib/capability-scan')
+const { readsOfFile, scanReads } = require('./lib/capability-scan')
 const { chainChecks } = require('./lib/capability-chains')
 const { pageChecks } = require('./lib/capability-pages')
 
@@ -147,9 +147,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/lagrange jumpInfrastructure', '/lagrange jumpBuilders', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/hauling routeQueues', '/information fleetShips', '/logistics mspSupply', '/logistics fuelDonors', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics ResourceReserves', '/logistics FuelReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/survey-progress formations', '/survey-progress groundCommanders', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/survey-progress observationRead', '/history observationRead', '/commanders navalTree', '/commanders groundTree']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/lagrange jumpInfrastructure', '/lagrange jumpBuilders', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/hauling routeQueues', '/information fleetShips', '/logistics mspSupply', '/logistics fuelDonors', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics ResourceReserves', '/logistics FuelReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/map recoveryObjects', '/map observationRead', '/map recoveryObservationRead', '/survey-progress formations', '/survey-progress groundCommanders', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/survey-progress observationRead', '/survey-progress recoveryObservationRead', '/history observationRead', '/history recoveryObservationRead', '/commanders navalTree', '/commanders groundTree']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships, the jump point infrastructure and the gate builders of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the saved queues of /hauling, the fleet profile\'s ships of /information, the incoming minerals, the fuel service of the ships, the fleet stations\' reads and the fuel reserves of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the ground formations of /map and /survey-progress, the ground survey commanders, the ruins, the ancient constructs and the troop ships of /survey-progress, the formations observed of /survey-progress and /history, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings, the ships, the jump point infrastructure and the gate builders of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the saved queues of /hauling, the fleet profile\'s ships of /information, the incoming minerals, the fuel service of the ships, the fleet stations\' reads and the fuel reserves of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the ground formations and the life pods and wrecks of /map, the ground survey commanders, the ruins, the ancient constructs and the troop ships of /survey-progress, the formations observed of /survey-progress and /history, the life pods and wrecks observed of /map, /survey-progress and /history, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   const formationReaders = (route) => capabilities.INPUTS[route].filter((input) => input.reads.FCT_GroundUnitFormationElement || input.reads.FCT_GroundUnitFormation).map((input) => input.key).sort().join()
 
@@ -204,6 +204,40 @@ const registryChecks = (capabilities, scan, navigation) => {
   check('registry: every route a lookup gate names is a report', [...gated].every((route) => capabilities.REPORT_ROUTES.includes(route)), [...gated].filter((route) => !capabilities.REPORT_ROUTES.includes(route)).join(', '))
   check('registry: Hauling rests on the Production bonus (5, the colonies\' production rates of the reserve panel) and the cargo handling bonus (24) and on no other lookup, so the Shipbuilding and Ground Construction bonuses leave it supported', Object.entries(capabilities.BONUS_NAMES).filter(([, bonus]) => bonus.routes.includes('/hauling')).map(([id]) => id).join() === '5,24')
   check('registry: every route of the scan with inputs is a report (or the shell)', Object.keys(scan).filter((route) => scan[route] && Object.keys(scan[route]).length).every((route) => route === 'shell' || capabilities.REPORT_ROUTES.includes(route) || Object.values(scan[route]).every((input) => !Object.keys(input.reads).length)))
+}
+
+// What the scanner follows of a default parameter: a bare name stands for an argument a caller may leave out, so the caller that does reaches the queries of the name; one that passes its own argument is not told apart (the scan does not read arguments), so the default's reads stay. Only the milestones' link table is not followed, and a page that names the table itself reads it.
+const scannerChecks = (scan) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-capabilities-scan-'))
+
+  try {
+    const write = (name, source) => {
+      const file = path.join(directory, name)
+
+      fs.writeFileSync(file, source)
+
+      return file
+    }
+
+    const shape = (reads) => Object.entries(reads).map(([table, columns]) => `${table}(${columns.join(' ')})`).sort().join(' ')
+    const preface = "const WRECKS = 'select FCT_Wrecks.Size from FCT_Wrecks'\nexport const load = (db, sql = WRECKS) => db.query(sql)\n"
+    const omitted = write('omitted.js', `${preface}export const page = (db) => load(db)\n`)
+    const supplied = write('supplied.js', `${preface}export const page = (db) => load(db, 'select FCT_Ship.ShipID from FCT_Ship')\n`)
+    const supplies = write('supplies.js', `${preface}const OWN = 'select FCT_Ship.ShipID from FCT_Ship'\nexport const page = (db) => load(db, OWN)\n`)
+    const shapes = write('shapes.js', "const WRECKS = 'select FCT_Wrecks.Size from FCT_Wrecks'\nexport const withDefault = (db, sql = WRECKS) => db.query(sql)\nexport const withValue = (db, sql = 'select FCT_Ship.ShipID from FCT_Ship') => db.query(sql)\n")
+
+    check('scanner: a caller that leaves out an argument whose default is a bare name reads what the name holds', shape(readsOfFile(omitted, 'page')) === 'FCT_Wrecks(Size)', shape(readsOfFile(omitted, 'page')))
+    check('scanner: a caller that passes a literal argument keeps the default\'s reads next to its own, for the scan does not read arguments', shape(readsOfFile(supplied, 'page')) === 'FCT_Ship(ShipID) FCT_Wrecks(Size)', shape(readsOfFile(supplied, 'page')))
+    check('scanner: a caller that passes a name keeps the default\'s reads next to the name\'s', shape(readsOfFile(supplies, 'page')) === 'FCT_Ship(ShipID) FCT_Wrecks(Size)', shape(readsOfFile(supplies, 'page')))
+    check('scanner: a default that is a bare name and one that is an expression are both read of the function itself', shape(readsOfFile(shapes, 'withDefault')) === 'FCT_Wrecks(Size)' && shape(readsOfFile(shapes, 'withValue')) === 'FCT_Ship(ShipID)')
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+
+  const mapReads = Object.keys(scan['/map'].recoveryObjects.reads)
+
+  check('scanner: the recovery ledger\'s link check, which passes its own table, reads no milestone query (the game log) for /map', !mapReads.includes('FCT_GameLog'), mapReads.join())
+  check('scanner: the milestones\' own page reads the milestone queries, for it names the link table itself', Object.values(scan['/history']).some((input) => Object.keys(input.reads).includes('FCT_GameLog')))
 }
 
 const realSaveChecks = async (capabilities, save) => {
@@ -959,6 +993,7 @@ const main = async () => {
   const { capabilities } = await loadUtilities(['capabilities'])
 
   registryChecks(capabilities, scan, navigation)
+  scannerChecks(scan)
   await markerChecks(capabilities)
 
   for (const save of REAL) {

@@ -1,4 +1,4 @@
-// What the Galaxy Map can mark at each system, read through what the race knows, as the game shows it: ruins and ancient constructs only on bodies the race has surveyed; aether rifts and wrecks in every system it knows (the game counts every one there, whoever left it); the race's own ships, shipyards and waypoints; the alien contacts it holds now; and how many bodies there its species could live on. Keyed by SystemID as a string, with only the systems that have something.
+// What the Galaxy Map can mark at each system, read through what the race knows, as the game shows it: ruins and ancient constructs only on bodies the race has surveyed; aether rifts and wrecks in every system it knows (the game counts every one there, whoever left it, and the count says how many are the race's own); the race's own ships, shipyards and waypoints; the alien contacts it holds now; and how many bodies there its species could live on. Keyed by SystemID as a string, with only the systems that have something.
 
 import groupBy from 'lodash/groupBy'
 import { systemBodyName } from './aurora'
@@ -66,7 +66,7 @@ const CONTACT_STATUSES = ['hostile', 'neutral', 'friendly', 'allied', 'civilian'
 
 export const CONTACT_ORDER = ['hostile', 'unknown', 'neutral', 'friendly', 'allied', 'civilian']
 
-export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
+export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, ownWrecks: 0, protection: 0, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
 
 export const loadMapFeatures = async (database, { GameID, RaceID }) => {
   const [ruins, constructs, rifts, wrecks, ships, shipyards, waypoints, contacts] = await Promise.all([
@@ -88,7 +88,7 @@ from FCT_AetherRift
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_AetherRift.SystemID and FCT_RaceSysSurvey.GameID = FCT_AetherRift.GameID and FCT_RaceSysSurvey.RaceID = ${RaceID}
 where FCT_AetherRift.GameID = ${GameID}
 group by FCT_AetherRift.SystemID`),
-    rows(database, `select FCT_Wrecks.SystemID, count(*) as Wrecks
+    rows(database, `select FCT_Wrecks.SystemID, count(*) as Wrecks, sum(FCT_Wrecks.RaceID = ${RaceID}) as Own
 from FCT_Wrecks
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Wrecks.SystemID and FCT_RaceSysSurvey.GameID = FCT_Wrecks.GameID and FCT_RaceSysSurvey.RaceID = ${RaceID}
 where FCT_Wrecks.GameID = ${GameID}
@@ -130,9 +130,7 @@ group by FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus`),
   rifts.forEach((row) => {
     of(row.SystemID).rifts = row.Rifts
   })
-  wrecks.forEach((row) => {
-    of(row.SystemID).wrecks = row.Wrecks
-  })
+  wrecks.forEach((row) => Object.assign(of(row.SystemID), { wrecks: row.Wrecks, ownWrecks: row.Own || 0 }))
   ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.UnknownClasses > 0 ? null : row.Protection || 0, military: row.Military || 0, ships: row.Ships || 0 }))
   shipyards.forEach((row) => {
     of(row.SystemID).shipyards = row.Shipyards

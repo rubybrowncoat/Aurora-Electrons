@@ -385,7 +385,7 @@ const unitChecks = (m) => {
       let refused = false
 
       try {
-        obs.saveObservationChoice(settings, 'c1', 7, 'lifepod', true)
+        obs.saveObservationChoice(settings, 'c1', 7, 'hangar', true)
       } catch (error) {
         refused = error instanceof RangeError
       }

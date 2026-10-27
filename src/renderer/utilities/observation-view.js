@@ -2,6 +2,7 @@
 
 import { observationStore } from './history'
 import { observationFileProblem, observationOf } from './observations'
+import { LATEST_CAPTURE_WORDS } from './observation-words'
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -33,8 +34,8 @@ export const OBSERVATION_RULE = 'Observed since is the first capture that saw th
 
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`
 
-// The words for one object: { headline, summary, details: [text] }. `summary` is the short line of a table cell: the captures of the span and its longest interval. `date(seconds)` and `duration(seconds)` are the page's own formats.
-export const observationText = ({ state, span }, { date, duration }) => {
+// The words for one object: { headline, summary, details: [text] }. `summary` is the short line of a table cell: the captures of the span and its longest interval. `date(seconds)` and `duration(seconds)` are the page's own formats; `likeness` says what a fork had seen of the object (a formation by default, a life pod or a wreck for those kinds).
+export const observationText = ({ state, span }, { date, duration, likeness = 'a formation with this id and these elements' }) => {
   if (state === 'unrecorded') {
     return { headline: 'Not observed yet', summary: 'Nothing captured yet', details: ['The recorder has not captured this branch yet.'] }
   }
@@ -60,7 +61,7 @@ export const observationText = ({ state, span }, { date, duration }) => {
   } else if (span.basis === 'moved') {
     details.push(span.before === null ? 'Moved or changed since an earlier capture.' : `Differed at the capture of ${date(span.before)}: moved or changed after it.`)
   } else if (span.basis === 'branch') {
-    details.push('A formation with this id and these elements was seen before the fork of this branch. An id is not certified across a fork, so the span starts at the first capture of this branch.')
+    details.push(`${likeness.charAt(0).toUpperCase()}${likeness.slice(1)} was seen before the fork of this branch. An id is not certified across a fork, so the span starts at the first capture of this branch.`)
   } else if (span.before !== null) {
     details.push(`Not there at the capture of ${date(span.before)}.`)
   }
@@ -81,6 +82,9 @@ export const observationText = ({ state, span }, { date, duration }) => {
 
   return { headline: state === 'changed' ? 'Changed since the last capture' : since, summary: `${counted}${span.failed > 0 ? `, ${span.failed} failed` : ''}${span.inherited ? ', with the stretch before the fork' : ''}`, details }
 }
+
+// The line that names the latest capture which saw the object as the record holds it, for a page that shows more than the headline: null when the record says nothing of a span. It claims one capture only, never that the object was there between the first capture and this one.
+export const lastCaptureLine = ({ state, span }, { date }) => (span && (state === 'observed' || state === 'changed') ? LATEST_CAPTURE_WORDS[state](date(span.last)) : null)
 
 // The account of a whole record for the foot of a panel: the captures it holds, its widest interval, the failed captures, what is no longer kept (past the cap or cleared) and what lies before the fork.
 export const recordNote = (record, { date, duration }) => {

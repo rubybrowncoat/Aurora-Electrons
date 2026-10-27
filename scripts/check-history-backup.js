@@ -3249,7 +3249,7 @@ const defineSuite = (m) => {
     refused(observed((files) => { files.b1.version = 2 }), /not an observation file this version reads/)
     refused(observed((files) => { files.b1.extra = 1 }), /not an observation file this version reads/)
     refused(observed((files) => { files.b1.races.x = files.b1.races[1] }), /race x is not a record/)
-    refused(observed((files) => { files.b1.races[1].kinds.wreck = files.b1.races[1].kinds.formation }), /is not a kind this version observes/)
+    refused(observed((files) => { files.b1.races[1].kinds.hangar = files.b1.races[1].kinds.formation }), /is not a kind this version observes/)
     refused(observed((files) => { record(files).objects[1][2] = 'nothex' }), /holds an object this version cannot read/)
     refused(observed((files) => { record(files).objects.x = record(files).objects[1] }), /holds an object this version cannot read/)
     refused(observed((files) => { record(files).captures.reverse() }), /too many or out of order/)

@@ -80,6 +80,7 @@
             </v-card>
           </v-menu>
           <v-btn outlined :disabled="!!busy || !movedIds.length" title="Put every system back where the save has it" @click="revertPositions"><v-icon small left>mdi-undo</v-icon>Revert</v-btn>
+          <v-btn outlined :disabled="!!busy || !systemRows.length" title="The life pods and wrecks in the known systems, with a status for each" data-recovery-open @click="openRecovery"><v-icon small left>mdi-lifebuoy</v-icon>Recovery</v-btn>
           <v-btn outlined color="primary" :disabled="!!busy || !movedIds.length" @click="saveDialog = true"><v-icon small left>mdi-content-save-outline</v-icon>Save positions<span v-if="movedIds.length">&nbsp;({{ movedIds.length }})</span></v-btn>
         </div>
       </div>
@@ -273,6 +274,20 @@
         </v-card-text>
       </v-card>
     </v-dialog>
+
+    <v-dialog v-model="recoveryDialog" fullscreen hide-overlay transition="dialog-bottom-transition">
+      <v-card>
+        <v-toolbar dark color="primary">
+          <v-btn icon dark aria-label="Close" data-recovery-close @click="recoveryDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title data-recovery-title>Recovery ledger</v-toolbar-title>
+        </v-toolbar>
+        <v-card-text v-if="recoveryDialog">
+          <recovery-ledger :state="recoveryState" :view="recoveryView" :repository="recoveryRepository" :repository-error="recoveryRepositoryError" :scope="recoveryScope" :context="recoveryContext" :game-time="GameTime" :start-year="StartYear" :place.sync="recoveryPlace" :owner.sync="recoveryOwner" :status-filter.sync="recoveryStatusFilter" :observable="recoveryObservable" :can-observe="recoveryCanObserve" :observation-gaps="recoveryObservationGaps" :observe-choice="recoveryObserveChoice" :observe-message="recoveryObserveMessage" :observation-note="recoveryObservationNote" :purpose="recoveryPurpose" :observation-rule="recoveryRule" @retry="retryRecovery" @changed="recoveryChanged" @observe="setRecoveryObserve" @show-system="showRecoverySystem" />
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -289,11 +304,13 @@ import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import SystemView from '../components/SystemView.vue'
+import RecoveryLedger from '../components/map/RecoveryLedger.vue'
 import WorldTags from '../components/notebook/WorldTags.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
+import recoveryLedger, { RECOVERY_INPUTS, RECOVERY_LABELS } from '../mixins/recovery-ledger'
 import worldTags, { tagFilterView } from '../mixins/world-tags'
 import { activeAppearance, MAP_MENU } from '../utilities/appearance'
 import { fontRoles, whenFontsReady } from '../utilities/appearance-font'
@@ -301,7 +318,7 @@ import { glyphFace } from '../utilities/glyph-faces'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { loadJumpPoints } from '../utilities/jump-graph'
-import { tracked } from '../utilities/load-tracking'
+import { allLoaded, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
 import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
@@ -313,6 +330,7 @@ import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
 import { jumpPointPlaces } from '../utilities/places'
 import { isAvailable, valueOrNull } from '../utilities/provenance'
+import { OBSERVATION_PURPOSE, OBSERVATION_RULE } from '../utilities/recovery-ledger'
 import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
 import { ALL_TAGS } from '../utilities/world-tags'
 import { loadFormulaVersion } from '../utilities/capabilities'
@@ -329,7 +347,10 @@ const INPUT_LABELS = {
   features: 'what the map can mark',
   groundFormations: 'the ground formations',
   formulaVersion: 'the save\'s schema',
+  ...RECOVERY_LABELS,
 }
+// The reads behind the recovery ledger feed the ledger alone.
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !RECOVERY_INPUTS.includes(key))
 
 const LAYERS = [
   { value: 'geological', text: 'Geological survey' },
@@ -630,7 +651,7 @@ const ARRANGE_DEFAULTS = { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT
 
 export default {
   name: 'MapPage',
-  components: { LoadState, MapGlyph, ProvenanceMark, SystemView, WorldTags },
+  components: { LoadState, MapGlyph, ProvenanceMark, RecoveryLedger, SystemView, WorldTags },
   mixins: [
     countFormat,
     deepLink,
@@ -661,8 +682,13 @@ export default {
       remoteRoles: rolesView,
       // The tag the map is filtered to (mixins/world-tags.js), shared with the Notebook's tags but kept under a key of its own.
       tagFilter: tagFilterView('mapTagFilter'),
+      // The choices of the recovery ledger's lists.
+      recoveryPlace: { key: 'mapRecoveryPlace', default: 'all', scope: 'race', valid: oneOf(['all', 'lifepod', 'wreck']) },
+      recoveryOwner: { key: 'mapRecoveryOwner', default: 'all', scope: 'race', valid: oneOf(['all', 'own', 'foreign']) },
+      recoveryStatusFilter: { key: 'mapRecoveryStatus', default: 'all', scope: 'race', valid: oneOf(['all', 'pending', 'acknowledged', 'personal']) },
     }),
     worldTags,
+    recoveryLedger,
   ],
   data() {
     return {
@@ -705,6 +731,10 @@ export default {
       markGroups: MARK_GROUPS,
       hierarchyLevels: HIERARCHY_LEVELS,
 
+      recoveryDialog: false,
+      recoveryPurpose: OBSERVATION_PURPOSE,
+      recoveryRule: OBSERVATION_RULE,
+
       linkTo,
       place,
     }
@@ -712,6 +742,15 @@ export default {
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
     ...mapState('empires', ['games']),
+
+    // The reads behind the ledger feed the ledger alone: the page never waits for them, and a failure of one is shown in the ledger.
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
 
     // The selected race's title, from the empire list the rail and Settings read it from.
     raceTitle() {
@@ -1543,7 +1582,8 @@ export default {
         ruins.length && { label: 'Ruins', value: ruins.map(({ ruin, state }) => `${ruin.body}: ${ruin.ruin}${ruin.race ? ` built by ${ruin.race}` : ''}, ${!isAvailable(state) ? 'installations left not stored' : ruin.factories > 0 ? `${this.count(ruin.factories)} installations left` : 'nothing left'}`).join('; '), result: weakestResult(ruins.map((entry) => entry.state)) },
         // As the game shows them, a dormant construct keeps its field and bonus hidden.
         constructs.length && { label: 'Ancient constructs', value: constructs.map(({ construct, bonus }) => `${construct.body}: ${!bonus ? 'dormant' : isAvailable(bonus) ? `${construct.field} research +${bonus.value}%` : `${construct.field} research, bonus not stored`}`).join('; '), result: bonuses.length ? weakestResult(bonuses) : null },
-        features.wrecks && { label: 'Wrecks', value: this.count(features.wrecks) },
+        features.ownWrecks && { label: 'Own wrecks', value: this.count(features.ownWrecks) },
+        features.wrecks - (features.ownWrecks || 0) > 0 && { label: 'Foreign wrecks', value: this.count(features.wrecks - (features.ownWrecks || 0)) },
         features.rifts && { label: 'Aether rifts', value: this.count(features.rifts) },
         // A system with no danger rating stored shows a dash; one whose ships' protection is not stored shows the rating and a dash for the protection, with no ⚠.
         danger && { label: 'Danger', value: system.danger === null ? '—' : `${this.count(system.danger)}, protection ${Number.isFinite(features.protection) ? this.count(features.protection) : '—'}${danger.value ? ' ⚠' : ''}`, result: danger },
@@ -2017,6 +2057,17 @@ export default {
   },
   methods: {
     ...mapActions('snackbar', ['activateSnackbar']),
+
+    // The recovery ledger opens over the map; the reads behind it start when it does.
+    openRecovery() {
+      this.recoveryDialog = true
+    },
+
+    // A system picked in the ledger is shown on the map, which the ledger leaves.
+    showRecoverySystem(systemId) {
+      this.recoveryDialog = false
+      this.applyLink(linkTo.map(systemId).query)
+    },
 
     toggleMark(value) {
       this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]

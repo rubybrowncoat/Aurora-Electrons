@@ -4,12 +4,13 @@ import { registerFleetStations } from './fleet-stations'
 import { registerMilestones } from './history-milestones'
 import { registerDesigner } from './missile-designer'
 import { registerBriefs } from './mission-briefs'
+import { registerRecoveryLedger } from './recovery-ledger'
 import { registerResourceReserves } from './resource-reserves'
 import { registerRouteDesires } from './route-desires'
 import { registerTechScenarios } from './tech-scenarios'
 import { registerWorldTags } from './world-tags'
 
-export const SCENARIO_ADAPTERS = Object.freeze([registerTechScenarios, registerBriefs, registerDesigner, registerResourceReserves, registerRouteDesires, registerMilestones, registerEconomyNotes, registerWorldTags, registerFleetStations])
+export const SCENARIO_ADAPTERS = Object.freeze([registerTechScenarios, registerBriefs, registerDesigner, registerResourceReserves, registerRouteDesires, registerMilestones, registerEconomyNotes, registerWorldTags, registerFleetStations, registerRecoveryLedger])
 
 // Registers every kind's adapter with a repository's `registerAdapter`, once per function and adapter.
 export const registerScenarioAdapters = (register) => {

@@ -1,4 +1,4 @@
-// Object observations: the opt-in record of how long the objects of a kind (a race's ground formations, later its lifepods and wrecks) have been seen unchanged. The save keeps a formation's place and elements but no date they were set, so the only age that can be given is the one the app observed: from the first save it read in which the object looked as it does now. The choice is campaign state, `campaign.<campaign id>.race.<RaceID>.observe` (the kinds kept, a list) in the settings; the record of a branch is its own file beside the branch file, `campaign-<campaign id>-<branch id>-observations.json`:
+// Object observations: the opt-in record of how long the objects of a kind (a race's ground formations, life pods and wrecks) have been seen unchanged. The save keeps a formation's place and elements but no date they were set, so the only age that can be given is the one the app observed: from the first save it read in which the object looked as it does now. The choice is campaign state, `campaign.<campaign id>.race.<RaceID>.observe` (the kinds kept, a list) in the settings; the record of a branch is its own file beside the branch file, `campaign-<campaign id>-<branch id>-observations.json`:
 // { version: 1, races: { [RaceID]: { kinds: { [kind]: { captures, objects, failures?, cut?, seed? } } } } }
 // - `captures` [[t, n]] in game time, one for each save the recorder read the kind from, `n` being the increments its ledger held. Between two captures nothing is known, so a capture is the only evidence of time that passed.
 // - `objects` { [id]: [first, last, digest] or [first, last, digest, mark] }: the objects the newest capture saw. `first` is the game time of the capture that first saw the object as the digest describes it, `last` the newest capture that saw it so, and every capture between them saw it so too (an object not seen by a capture is dropped, one that differs starts again). The fourth entry says why the run started: 1, a stored object differed (it moved or changed); 2, the parent branch saw the object so before the fork and the first capture of this branch restarted the run, since an id is not certified across a fork. Its absence says the object was not seen before. An object is told by its id alone only inside the branch file: ids repeat across a fork and nothing in a save dates them.
@@ -7,6 +7,7 @@
 
 import { branchFileName, hashValue } from './campaign'
 import { readFormationObservations } from './ground-formations'
+import { readLifepodObservations, readWreckObservations } from './recovery-ledger'
 import { isKnownNumber } from './math'
 
 export const OBSERVATION_VERSION = 1
@@ -17,6 +18,8 @@ const RESTARTED = 2
 // What each kind is read as. `read(database, { GameID, RaceID }, options)` gives the race's objects at the open save as [[id, signature]], `noun` names one of them for the page.
 export const OBSERVED_KINDS = Object.freeze({
   formation: Object.freeze({ label: 'Ground formations', noun: 'formation', read: readFormationObservations }),
+  lifepod: Object.freeze({ label: 'Life pods', noun: 'life pod', read: readLifepodObservations }),
+  wreck: Object.freeze({ label: 'Wrecks', noun: 'wreck', read: readWreckObservations }),
 })
 
 export const KIND_NAMES = Object.freeze(Object.keys(OBSERVED_KINDS))
