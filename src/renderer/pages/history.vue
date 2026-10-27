@@ -2143,11 +2143,12 @@ export default {
     // The adapter the backup reads and restores the planners' annotations through: { adapter, error }, the adapter null with the reason when the records cannot be opened here. The modules load when a backup is made or read, so the page doesn't carry them otherwise.
     async backupAnnotations() {
       try {
-        const [records, tech, briefs, reserves] = await Promise.all([import('../utilities/scenario-records'), import('../utilities/tech-scenarios'), import('../utilities/mission-briefs'), import('../utilities/resource-reserves')])
+        const [records, tech, briefs, reserves, desires] = await Promise.all([import('../utilities/scenario-records'), import('../utilities/tech-scenarios'), import('../utilities/mission-briefs'), import('../utilities/resource-reserves'), import('../utilities/route-desires')])
 
         tech.registerTechScenarios(records.registerAdapter)
         briefs.registerBriefs(records.registerAdapter)
         reserves.registerResourceReserves(records.registerAdapter)
+        desires.registerRouteDesires(records.registerAdapter)
         registerMilestones(records.registerAdapter)
         registerEconomyNotes(records.registerAdapter)
         registerWorldTags(records.registerAdapter)

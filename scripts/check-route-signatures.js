@@ -9,6 +9,7 @@
   - the ten relations between two routes, the shapes of a queue (a route, a queue with no orders, one that cannot be traced, a closed queue, one that repeats a fixed number of times, none) and the classes of the states of a fleet on a route;
   - two identical observed cycles group once with both fleets, their capacity is summed once, and a group's capacity, status and duplicate flag follow its capable fleets;
   - a desired route with no capable active fleet is `uncovered`, which is not the `unknown` of a cycle that is observed and cannot be told, and a desired route is only ever the player's own record, kept apart from the observed groups;
+  - the History page's backup registers the desired routes: a restore previewed through the adapter its own `backupAnnotations` returns keeps a kept route, which a repository with no adapter of the kind rejects;
   - every group and every fleet of it names the stored orders it was inferred from;
   - the loader reads the queues of a database made here, in a save of 2.6 or later, and says why it cannot read one that predates the conditional orders;
   - the page, in a browser over a constructed copy of a save, draws the groups, their fleets, their stored orders, their capacity (the fleets' own figures of the table above it, summed once), their flags and the queues that do not repeat, each read back by the `data-*` hook it carries and against the page's own tables of words.
@@ -22,9 +23,10 @@ const os = require('os')
 const path = require('path')
 const { Database } = require('bun:sqlite')
 const { loadUtilities } = require('./lib/utilities')
+const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { runSuite } = require('./lib/suite-runner')
-const { assert, runChecks, caughtBy, subjectModule } = require('./lib/fault-credit')
+const { assert, runChecks, caughtBy, subjectModule, harnessStore, boundary } = require('./lib/fault-credit')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
@@ -39,6 +41,7 @@ const FILES = {
   page: inRenderer('pages', 'hauling.vue'),
   desireView: inRenderer('components', 'hauling', 'RouteDesires.vue'),
   desireMixin: inRenderer('mixins', 'route-desires.js'),
+  history: inRenderer('pages', 'history.vue'),
 }
 const UTILITY_NAMES = { signatures: 'route-signatures', audit: 'route-audit', queues: 'route-queues', desires: 'route-desires', cargo: 'hauling' }
 const NAMES = ['route-signatures', 'route-audit', 'route-queues', 'route-desires', 'hauling', 'scenario-records', 'provenance', 'history-milestones', 'economy-notes']
@@ -53,6 +56,10 @@ const STUBS = {
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
+// The scenario records of a loaded History page as a module of their own, so the adapters one copy of the page registers are not the registry of another.
+const recordsOf = (tag) => ({ 'utilities/scenario-records': `${fs.readFileSync(inRenderer('utilities', 'scenario-records.js'), 'utf8')}\n// ${tag}\n` })
+// The store the History page is given is the harness's: a read of it that fails stops the run, where the page's own code runs behind the boundary of scripts/lib/fault-credit.js.
+const PAGE_STORE = harnessStore({ getters: { 'history/campaign': { campaignId: 'c1', branchId: 'b1' }, GameTime: 100000 }, state: { history: { revision: 0 } }, dispatch: async () => {} }, { 'history/campaign': ['object'], GameTime: ['number'] })
 
 const options = { mutations: !process.argv.includes('--no-mutations'), detail: process.argv.includes('--detail') }
 
@@ -950,20 +957,24 @@ const memory = () => {
   return { files, storage: { open: (campaignId) => store(`campaign-${campaignId}`), registry: () => ({}), writable: () => Promise.resolve(true) } }
 }
 
-add('desire-records', 'a desired route is kept as a local record of its own: it validates, links its two colonies, is read back with its links, and nothing it does reaches the observed groups', async ({ m }) => {
-  const inst = memory()
+// A repository of desired routes over memory, with the two colonies of the race a route can run between: Alpha (101) in System 1 and Beta (102) in System 2.
+const desireWorld = async (m) => {
   const registry = m.records.createAdapterRegistry()
   let ids = 0
   let clock = 1000
 
   m.desires.registerRouteDesires(registry.register)
 
-  const repository = m.records.createRepository({ storage: inst.storage, adapters: registry, newId: () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`, now: () => ++clock })
+  const repository = m.records.createRepository({ storage: memory().storage, adapters: registry, newId: () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`, now: () => ++clock })
   const scope = { campaignId: 'c1', RaceID: RACE, branchId: 'b1', gameTime: 100000 }
   const source = (id, name, system) => ({ PopulationID: id, PopName: name, SpeciesID: 1, SystemID: system, SystemBodyID: 1000 + system, SystemName: `System ${system}` })
   const objects = await m.desires.loadDesireObjects(database({ query: () => ({ all: () => [source(101, 'Alpha', 1), source(102, 'Beta', 2)] }) }), { GameID: 1, RaceID: RACE })
-  const context = { ...objects, campaignId: 'c1', branchId: 'b1' }
-  const row = (id) => objects.objects.colony.get(id)
+
+  return { repository, scope, context: { ...objects, campaignId: 'c1', branchId: 'b1' }, row: (id) => objects.objects.colony.get(id) }
+}
+
+add('desire-records', 'a desired route is kept as a local record of its own: it validates, links its two colonies, is read back with its links, and nothing it does reaches the observed groups', async ({ m }) => {
+  const { repository, scope, context, row } = await desireWorld(m)
   const valid = { name: 'Wanted run', cargo: 'minerals', yearly: 120, note: 'for the mine', from: { id: 101, name: 'Alpha', systemId: 1, systemName: 'System 1', origin: { campaignId: 'c1', branchId: 'b1' } }, to: { id: 102, name: 'Beta', systemId: 2, systemName: 'System 2', origin: { campaignId: 'c1', branchId: 'b1' } } }
 
   assert.deepEqual(m.desires.problemsOf(valid), [], 'a valid record has no problem')
@@ -1016,6 +1027,27 @@ add('colony-choices', 'the colonies a desired route can run between are listed b
   assert.deepEqual([m.audit.colonyChoices(null), m.audit.colonyChoices({})], [[], []], 'no colonies are read')
 })
 
+add('backup', 'the History page\'s backup registers the desired routes, so a restore in a session that never opened the Hauling page keeps a kept route that a repository without the adapter rejects', async ({ m, history }) => {
+  const { repository, scope, context, row } = await desireWorld(m)
+  const saved = await m.desires.saveDesire(repository, scope, { name: 'Wanted run', cargo: 'minerals', yearly: 120, note: '', from: { row: row(101) }, to: { row: row(102) }, context })
+
+  assert.equal(saved.ok, true, `the record is kept: ${saved.message || ''}`)
+
+  const bundle = repository.exportRecords(scope)
+  const target = { campaignId: 'c2', RaceID: RACE, branch: 'b1' }
+  const bare = m.records.createRepository({ storage: memory().storage, adapters: m.records.createAdapterRegistry(), newId: () => '00000000-0000-4000-8000-000000000900', now: () => 5000 }).previewImport(bundle, target, { restore: true })
+
+  assert.deepEqual([bare.rejected, bare.importable], [1, 0], 'a repository with no adapter of the kind rejects the route, so the restore turns on the registration')
+
+  const { adapter, error } = await instantiate(await history(), { boundary, $store: PAGE_STORE, database: null, GameID: 1, RaceID: RACE, data: {} }).backupAnnotations()
+
+  assert.equal(error, null, 'the page opens the records for the backup')
+
+  const preview = adapter.preview(bundle, target, { restore: true })
+
+  assert.deepEqual([preview.rejected, preview.importable, preview.items.map((item) => [item.kind, item.status])], [0, 1, [['route.desire', 'import']]], 'the page\'s backup restores the route')
+})
+
 // ---- The faults and the rewrites of the pure sources --------------------------------------------------------------------
 
 const S = 'signatures'
@@ -1024,6 +1056,7 @@ const Q = 'queues'
 const D = 'desires'
 const G = 'groups'
 const C = 'cargo'
+const H = 'history'
 /* eslint-disable no-template-curly-in-string */
 
 // { name, file, find (the text, once) or at (a pattern, once) with to, fails: the ids of the checks one of which must fail by a value }
@@ -1184,6 +1217,7 @@ const MUTATIONS = [
   { name: 'the match of a template is the match of any of them', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.some((record) => matched.some((template) => template.pacingKey === record.route.pacingKey))', fails: ['names'] },
   { name: 'the match of a template is the match of the last of them', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.some((record) => record.route.pacingKey === matched[matched.length - 1].pacingKey)', fails: ['names'] },
   { name: 'the match of a template needs every fleet at its pacing', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.every((record) => record.route.pacingKey === matched[0].pacingKey)', fails: ['names'] },
+  { name: 'the History page\'s backup leaves the desired routes unregistered', file: H, find: '        desires.registerRouteDesires(records.registerAdapter)\n', to: '', fails: ['backup'] },
 ]
 
 // Rewrites that say the same thing: each must leave every statement green. `family` names the kind of rewrite.
@@ -1222,14 +1256,26 @@ const applied = (sources, edit) => {
   return { ...sources, [edit.file]: patched(path.basename(FILES[edit.file]), sources[edit.file], edit.find, edit.to) }
 }
 
+// The History page is loaded once for each text of it and of the utilities it reaches, so the faults that change neither reuse the copy of the head.
+const historyPages = new Map()
+
 const contextOf = async (sources) => {
   const changed = Object.keys(UTILITY_NAMES).filter((key) => sources[key] !== read(FILES[key]))
   const overrides = Object.fromEntries(changed.map((key) => [UTILITY_NAMES[key], sources[key]]))
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: overrides })
   const subject = (name) => subjectModule(loaded[name])
   const raw = { ...loaded['route-signatures'], ...loaded['route-desires'] }
+  const pageUtilities = Object.fromEntries(changed.map((key) => [`utilities/${UTILITY_NAMES[key]}`, sources[key]]))
+  const pageKey = JSON.stringify([sources.history, pageUtilities])
+  const history = () => {
+    if (!historyPages.has(pageKey)) {
+      historyPages.set(pageKey, loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': sources.history, ...pageUtilities, ...recordsOf(`the page ${historyPages.size}`) } }))
+    }
 
-  return { m: { sig: subject('route-signatures'), audit: subject('route-audit'), queues: subject('route-queues'), desires: subject('route-desires'), hauling: subject('hauling'), records: subject('scenario-records'), raw } }
+    return historyPages.get(pageKey)
+  }
+
+  return { m: { sig: subject('route-signatures'), audit: subject('route-audit'), queues: subject('route-queues'), desires: subject('route-desires'), hauling: subject('hauling'), records: subject('scenario-records'), raw }, history }
 }
 
 const headChecks = () => CHECKS.filter((item) => item.part === 'head')
