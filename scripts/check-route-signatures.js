@@ -1225,7 +1225,7 @@ const BENIGN = [
   { name: 'the transit test of an order parenthesised', family: 'parenthesised condition', file: S, find: 'const path = isTransit(order, action) ?', to: 'const path = (isTransit(order, action)) ?' },
   { name: 'the words of a group status written with the qualifier last', family: 'qualifier moved', file: S, find: "  capable: 'Served',\n  paused: 'Waiting at a stock',", to: "  capable: 'Served',\n  paused: 'At a stock, waiting'," },
   { name: 'a reason worded with a synonym', family: 'synonym', file: S, find: "reason: 'the fleet has no ships'", to: "reason: 'the fleet holds no ship'" },
-  { name: 'a name source worded another way', family: 'synonym', file: S, find: "fleet: 'fleet name',", to: "fleet: 'name of the fleet'," },
+  { name: 'a name source worded another way', family: 'synonym', file: S, find: "fleet: 'from fleet name',", to: "fleet: 'from the name of the fleet'," },
   { name: 'the comparison of two conditional sets written the other way round', family: 'condition turned round', file: S, find: 'return left.conditionalKey !== right.conditionalKey', to: 'return right.conditionalKey !== left.conditionalKey' },
   { name: 'the halves of an even number written the other way', family: 'condition turned round', file: S, find: 'floor % 2 === 0 ? floor : floor + 1', to: '(floor % 2 !== 0) ? floor + 1 : floor' },
   { name: 'the empty year written as a function result', family: 'rewrite', file: A, find: 'const NO_YEAR = null', to: 'const NO_YEAR = (() => null)()' },
@@ -1882,9 +1882,9 @@ addBrowser('screen-closed', 'the queues that close but do not repeat are listed 
 // The page's own words, loaded from the modules of the sources the browser serves.
 const wordsOf = async () => {
   const loaded = await loadUtilities(['route-signatures', 'hauling'], { stubs: STUBS })
-  const { STATES, GROUP_STATUSES, NAME_SOURCES, FLAGS, RELATIONS, MATCHES, SHAPES, CAPACITY_NOTES, COVERAGE, CARGO_KINDS, CARGO_UNITS, CONDITION_STATUSES } = loaded['route-signatures']
+  const { STATES, GROUP_STATUSES, NAME_SOURCES, FLAGS, RELATIONS, MATCHES, SHAPES, CAPACITY_NOTES, COVERAGE, CARGO_KINDS, CARGO_UNITS, CONDITION_STATUSES, DESIRE_DEMAND_NONE } = loaded['route-signatures']
 
-  return { STATES, GROUP_STATUSES, NAME_SOURCES, FLAGS, RELATIONS, MATCHES, SHAPES, CAPACITY_NOTES, COVERAGE, CARGO_KINDS, CARGO_UNITS, CONDITION_STATUSES, CARGO_UNSETTLED: loaded.hauling.CARGO_UNSETTLED }
+  return { STATES, GROUP_STATUSES, NAME_SOURCES, FLAGS, RELATIONS, MATCHES, SHAPES, CAPACITY_NOTES, COVERAGE, CARGO_KINDS, CARGO_UNITS, CONDITION_STATUSES, DESIRE_DEMAND_NONE, CARGO_UNSETTLED: loaded.hauling.CARGO_UNSETTLED }
 }
 
 // ---- The desired routes: made, changed, reloaded and deleted in the page ---------------------------------------------------
@@ -1912,6 +1912,7 @@ const readDesires = () => {
       deliveredUnit: texts(row, 'data-desire-delivered-unit'),
       demand: texts(row, 'data-desire-demand'),
       demandUnit: texts(row, 'data-desire-demand-unit'),
+      demandNone: texts(row, 'data-desire-demand-none'),
       gap: texts(row, 'data-desire-gap'),
       gapUnit: texts(row, 'data-desire-gap-unit'),
     }
@@ -1995,6 +1996,7 @@ const WANTED = [
   { name: 'Ore from Lyrenia', route: 'D', cargo: 'minerals', yearly: 1e9, serving: ['D'], open: ['E'], unknown: false },
   { name: 'Settlers to Aurelia', route: 'A', cargo: 'colonists', yearly: 500, serving: [], open: [], unknown: false },
   { name: 'Ore from Elysium', route: 'K', cargo: 'minerals', yearly: 100, serving: [], open: [], unknown: true },
+  { name: 'Ore for Aurelia, no demand', route: 'A', cargo: 'minerals', yearly: null, serving: ['A', 'B', 'C'], open: [], unknown: false },
 ]
 const EDITED = { name: 'Ore from Veles, renamed', yearly: 2e9 }
 const REMOVED = 'Settlers to Aurelia'
@@ -2041,7 +2043,10 @@ const openDesires = async (browser, url, world, labels, refresh = false) => {
         await pickCargo(page, labels.CARGO_KINDS[want.cargo])
       }
 
-      await page.locator('input[data-desire-yearly]').fill(String(want.yearly), { timeout: FORM_WAIT })
+      if (want.yearly !== null) {
+        await page.locator('input[data-desire-yearly]').fill(String(want.yearly), { timeout: FORM_WAIT })
+      }
+
       created.push({ name: want.name, closed: await keep(page, step, want.name) })
     }
 
@@ -2146,8 +2151,8 @@ const oracleOf = (want, world, table) => {
   const open = want.open.filter((key) => flowOf(table, world, key, want.cargo).capable)
   const capacity = flows.length ? { tonnes: flows.reduce((sum, flow) => sum + flow.tonnes, 0), error: flows.reduce((sum, flow) => sum + flow.error, 0) } : null
   const state = flows.length ? (flows.some((flow) => !stalledOf(world, flow.key)) ? 'covered' : 'paused') : want.unknown ? 'unknown' : 'uncovered'
-  const short = Math.max(0, want.yearly - (capacity ? capacity.tonnes : 0))
-  const gap = short === 0 || (!want.unknown && !open.length) ? short : null
+  const short = want.yearly === null ? null : Math.max(0, want.yearly - (capacity ? capacity.tonnes : 0))
+  const gap = short === null ? null : short === 0 || (!want.unknown && !open.length) ? short : null
 
   return { state, capacity, gap, error: capacity ? capacity.error : 0 }
 }
@@ -2199,8 +2204,14 @@ const assertRow = ({ row, want, world, table, labels, grouping, unavailable = fa
     assert.equal(once(row.deliveredUnit, 'the unit of the delivered freight'), unit, `the freight delivered for "${want.name}" is told in the unit of its cargo`)
   }
 
-  assert.equal(figureOf(once(row.demand, 'the demand'), 'the demand'), want.yearly, `the demand drawn for "${want.name}"`)
-  assert.equal(once(row.demandUnit, 'the unit of the demand'), unit, `the demand of "${want.name}" is told in the unit of its cargo`)
+  if (want.yearly === null) {
+    assert.deepEqual([row.demand, row.demandUnit], [[], []], `no demand figure is drawn for "${want.name}", nor its unit: it is kept without one`)
+    assert.equal(once(row.demandNone, 'the line that says no demand is set'), labels.DESIRE_DEMAND_NONE, `the record kept without demand says so: "${want.name}"`)
+  } else {
+    assert.equal(figureOf(once(row.demand, 'the demand'), 'the demand'), want.yearly, `the demand drawn for "${want.name}"`)
+    assert.equal(once(row.demandUnit, 'the unit of the demand'), unit, `the demand of "${want.name}" is told in the unit of its cargo`)
+    assert.deepEqual(row.demandNone, [], `no line that says no demand is set is drawn beside the demand of "${want.name}"`)
+  }
 
   if (expected.gap === null) {
     assert.deepEqual([row.gap, row.gapUnit], [[], []], `no shortfall is drawn for "${want.name}", nor its unit: a fleet that may deliver it is not known to`)
@@ -2362,6 +2373,8 @@ const BROWSER_MUTATIONS = [
   { name: 'the freight delivered by a desired route is told in the unit of colonists', file: 'desireView', find: '<span data-desire-delivered-unit>{{ unit(item.entry.cargo) }}</span>', to: "<span data-desire-delivered-unit>{{ unit('colonists') }}</span>", fails: ['desire-created'] },
   { name: 'the demand of a desired route is told in tonnes whatever its cargo', file: 'desireView', find: '<span data-desire-demand-unit>{{ unit(item.entry.cargo) }}</span>', to: "<span data-desire-demand-unit>{{ unit('minerals') }}</span>", fails: ['desire-created'] },
   { name: 'the unit of the shortfall of a desired route is hidden', file: 'desireView', find: '<span data-desire-gap-unit>', to: '<span v-show="false" data-desire-gap-unit>', fails: ['desire-created'] },
+  { name: 'a desired route kept without demand does not say so', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div v-if="false" class="caption text--secondary" data-desire-demand-none>', fails: ['desire-created'] },
+  { name: 'a desired route kept with a demand says that none is set', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div class="caption text--secondary" data-desire-demand-none>', fails: ['desire-created'] },
   { name: 'the conditional status of a fleet is hidden', file: G, find: '<span data-route-conditional-status>', to: '<span v-show="false" data-route-conditional-status>', fails: ['screen-flags'] },
 ]
 

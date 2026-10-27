@@ -65,6 +65,7 @@
             <div v-if="item.cover.capacity !== null"><span data-desire-delivered>{{ number(item.cover.capacity) }}</span> <span data-desire-delivered-unit>{{ unit(item.entry.cargo) }}</span> a year delivered</div>
             <div v-else class="text--secondary">—</div>
             <div v-if="item.entry.yearly" class="caption text--secondary">Demand <span data-desire-demand>{{ number(item.entry.yearly) }}</span> <span data-desire-demand-unit>{{ unit(item.entry.cargo) }}</span> a year<template v-if="item.cover.gap !== null"> · short by <span data-desire-gap>{{ number(item.cover.gap) }}</span> <span data-desire-gap-unit>{{ unit(item.entry.cargo) }}</span></template></div>
+            <div v-else class="caption text--secondary" data-desire-demand-none>{{ demandNone }}</div>
           </div>
         </template>
         <template #[`item.actions`]="{ item }">
@@ -86,7 +87,7 @@
 import LoadState from '../page/LoadState.vue'
 import persistedView, { tableView } from '../../mixins/persisted-view'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
-import { CARGO_KINDS, CARGO_UNITS, COVERAGE, DESIRE_CARGO, DESIRE_NAME_LENGTH, DESIRE_NOTE_LENGTH } from '../../utilities/route-signatures'
+import { CARGO_KINDS, CARGO_UNITS, COVERAGE, DESIRE_CARGO, DESIRE_DEMAND_NONE, DESIRE_NAME_LENGTH, DESIRE_NOTE_LENGTH } from '../../utilities/route-signatures'
 
 const PAGE_SIZES = [10, 25, -1]
 
@@ -147,6 +148,7 @@ export default {
       pageSizes: PAGE_SIZES,
       nameLength: DESIRE_NAME_LENGTH,
       noteLength: DESIRE_NOTE_LENGTH,
+      demandNone: DESIRE_DEMAND_NONE,
       draft: blankDraft(),
       conflict: null,
       deleting: null,

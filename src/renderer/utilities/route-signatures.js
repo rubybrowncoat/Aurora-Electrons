@@ -115,9 +115,9 @@ export const FLAGS = Object.freeze({
 })
 
 export const NAME_SOURCES = Object.freeze({
-  template: 'template name',
-  fleet: 'fleet name',
-  generated: 'generated name',
+  template: 'from template',
+  fleet: 'from fleet name',
+  generated: 'from its colonies',
 })
 
 // What a group named after a template says about how the template matches: the content of the stored orders, and whether the pacing is the same too.
@@ -132,6 +132,9 @@ export const COVERAGE = Object.freeze({
   unknown: 'Not known',
   uncovered: 'No capable active fleet',
 })
+
+// What the desired routes say of a record kept with no yearly demand, where the demand line would go.
+export const DESIRE_DEMAND_NONE = 'No demand set'
 
 export const CARGO_KINDS = Object.freeze({
   minerals: 'Minerals',
