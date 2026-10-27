@@ -270,7 +270,7 @@ check('legs-own-age', 'a body, a fleet and a contact each give their own age and
   assert.equal(positions.oldest, GAME_TIME - BODY_TIME, 'the oldest saved position')
 })
 
-check('motion-switch', 'whether a body moves follows the game\'s orbital motion switches, an unrecorded switch is unknown and the lifepod and deep-space families are not supported', async (w) => {
+check('motion-switch', 'whether a body moves follows the game\'s orbital motion switches, an unrecorded switch is unknown and the life pod family is not supported', async (w) => {
   const off = await positionsOf(w, [BODY], { facts: { ...FACTS, clock: { ...CLOCK, orbitalMotion: 0 } } })
 
   assert.equal(off.records[0].moves, false, 'a body that does not move is exact')
@@ -305,7 +305,7 @@ check('motion-switch', 'whether a body moves follows the game\'s orbital motion 
   assert.deepEqual(frozen.records[0].conditions, [])
   assert.equal(frozen.caveat, false)
 
-  const drifting = await positionsOf(w, [{ family: 'lifepod', key: 'lifepod:1', id: 1, SystemID: 1, Xcor: 1, Ycor: 1 }, { family: 'deep-space-population', key: 'deep-space-population:2', id: 2, SystemID: 1, Xcor: 1, Ycor: 1 }])
+  const drifting = await positionsOf(w, [{ family: 'lifepod', key: 'lifepod:1', id: 1, SystemID: 1, Xcor: 1, Ycor: 1 }])
 
   drifting.records.forEach((record) => {
     assert.equal(record.supported, false)
@@ -337,6 +337,10 @@ check('motion-matrix', 'whether an endpoint moves follows the two motion switche
     { name: 'fixed body of a planet', endpoint: body(8), rule: planetRule },
     { name: 'fixed body of an independent asteroid', endpoint: body(9), rule: rockRule },
     { name: 'fixed body whose parent was not read', endpoint: body(10), rule: bothRule },
+    { name: 'type 15 order on a fixed body with no parent', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 7, SystemID: 1, X: 1, Y: 1 }), rule: () => false },
+    { name: 'type 15 order on a fixed body of a planet', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 8, SystemID: 1, X: 1, Y: 1 }), rule: planetRule },
+    { name: 'type 15 order on a fixed body of an independent asteroid', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 9, SystemID: 1, X: 1, Y: 1 }), rule: rockRule },
+    { name: 'type 15 order on a fixed body whose parent was not read', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 10, SystemID: 1, X: 1, Y: 1 }), rule: bothRule },
     { name: 'independent asteroid, circular', endpoint: body(4), rule: rockRule },
     { name: 'independent asteroid, eccentric', endpoint: body(6), rule: rockRule },
     { name: 'body the orbit read lacks, picked as a planet', endpoint: body(99, 'planet'), rule: planetRule },
@@ -349,7 +353,7 @@ check('motion-matrix', 'whether an endpoint moves follows the two motion switche
     { name: 'colony on a planet', endpoint: { family: 'colony', key: 'colony:71', id: 71, ...at }, rule: planetRule },
     { name: 'colony on an asteroid', endpoint: { family: 'colony', key: 'colony:72', id: 72, ...at }, rule: rockRule },
     { name: 'Lagrange point of a planet', endpoint: { family: 'lagrange-point', key: 'lagrange:91', id: 91, ...at }, rule: planetRule },
-    { name: 'Lagrange point of an asteroid', endpoint: { family: 'lagrange-point', key: 'lagrange:92', id: 92, ...at }, rule: rockRule },
+    { name: 'Lagrange point of an asteroid, which the game never moves', endpoint: { family: 'lagrange-point', key: 'lagrange:92', id: 92, ...at }, rule: () => false },
     { name: 'waypoint carried by no body', endpoint: waypoint(1), rule: () => false },
     { name: 'waypoint carried by a planet', endpoint: waypoint(2), rule: planetRule },
     { name: 'waypoint carried by an asteroid', endpoint: waypoint(3), rule: rockRule },
@@ -372,6 +376,7 @@ check('motion-matrix', 'whether an endpoint moves follows the two motion switche
 
         cells += 1
         assert.equal(record.moves, expected, label + ': moves ' + expected)
+        assert.equal(record.supported, true, label + ': the contract supports the place')
         assert.equal(record.conditions.includes('motion-switch'), expected === null && !branch.unread && rp.FAMILY_NAMES.includes(branch.endpoint.family) && !['system', 'jump-point'].includes(branch.endpoint.family), label + ': names the switch only when it is the unknown')
       })
     })
@@ -1006,8 +1011,15 @@ const PARENT_ONLY = [
 
 const PICKER_GROUPS = { 1: 'planet', 2: 'moon', 3: 'asteroid', 5: 'comet' }
 
-// What the game does to a Lagrange point never reaches a fixed body (a point belongs to a planet), so a point is made only for the others.
-const POINT_OWNERS = OWNERS.filter((owner) => !owner.row.FixedBody)
+// The classes of body the game's coordinate update of a Lagrange point sets a position for: a planet (1) and a moon (2), the only owners it moves a point for. A point is made only for those in the matrix; a point on any other owner (a trojan, an independent asteroid, a comet, a fixed body) is malformed data, checked apart with its own expectation.
+const LAGRANGE_OWNER_CLASSES = [1, 2]
+
+const POINT_OWNERS = OWNERS.filter((owner) => LAGRANGE_OWNER_CLASSES.includes(owner.row.BodyClass))
+
+const MALFORMED_POINT_OWNERS = OWNERS.filter((owner) => !LAGRANGE_OWNER_CLASSES.includes(owner.row.BodyClass))
+
+// The bodies a deep-space population or location is: class 3 bodies the game creates fixed, and the destination type 15 of a move order reaches.
+const FIXED_OWNERS = OWNERS.filter((owner) => owner.row.FixedBody)
 
 const AU_KM = 149600000
 
@@ -1035,8 +1047,8 @@ const ownerRows = () => {
 
 const OWNER_ROWS = ownerRows()
 
-// A database of the loaders' tables with those bodies, a colony, a waypoint and a fleet on each and a Lagrange point on each that can have one, the motion switches given (null stores none), and the body table without one column (a save of another schema) when `without` names it.
-const ownerDatabase = (switches, without = null) => {
+// A database of the loaders' tables with those bodies, a colony, a waypoint and a fleet on each and a Lagrange point on each of `pointOwners`, the motion switches given (null stores none), and the body table without one column (a save of another schema) when `without` names it.
+const ownerDatabase = (switches, without = null, pointOwners = POINT_OWNERS) => {
   const columns = OWNER_COLUMNS.filter((name) => name !== without)
   const sql = (value) => (value === null || value === undefined ? 'null' : value)
   const bodyRow = (owner) => `insert into FCT_SystemBody (${columns.join(', ')}) values (${columns.map((name) => sql(OWNER_ROWS[owner.id][name])).join(', ')});`
@@ -1057,7 +1069,7 @@ const ownerDatabase = (switches, without = null) => {
     insert into FCT_RaceSysSurvey values (1, 2, 1);
     ${[...OWNERS, ...PARENT_ONLY].map(bodyRow).join('\n    ')}
     ${OWNERS.map((owner) => `insert into FCT_Population values (${70 + owner.id}, 1, ${owner.id}); insert into FCT_Waypoint values (${100 + owner.id}, 1, 2, ${owner.id}); insert into FCT_Fleet values (${300 + owner.id}, 1, 2, 950000, ${owner.id}, ${OWNER_ROWS[owner.id].Xcor}, ${OWNER_ROWS[owner.id].Ycor}, 0);`).join('\n    ')}
-    ${POINT_OWNERS.map((owner) => `insert into FCT_LagrangePoint values (${90 + owner.id}, 1, 1, ${owner.id}, 0.1, 30, 1, 1);`).join('\n    ')}
+    ${pointOwners.map((owner) => `insert into FCT_LagrangePoint values (${90 + owner.id}, 1, 1, ${owner.id}, 0.1, 30, 1, 1);`).join('\n    ')}
     insert into FCT_Waypoint values (201, 1, 2, 0), (202, 1, 2, 99);
   `)
 }
@@ -1099,7 +1111,10 @@ const gameUpdate = (rows, id, planets, rocks) => {
   return { value: outcomes.size === 1 ? [...outcomes][0] : null, reads }
 }
 
-check('loader-motion-matrix', 'whether a place moves with the bodies follows the game\'s own position update for every place that derives a motion group from saved fields (a body, an order\'s destination, a colony, a Lagrange point, a waypoint, a fleet orbiting a body) on every kind of body (planet, moon, comet, trojan, independent asteroid, a deep-space population at a gas giant, a deep-space location, fixed bodies of other parents), read by the real loaders from a save with every field and from saves lacking each of the fields the update reads, with each switch read on, read off or never read, against an oracle that transcribes the update', async (w) => {
+// What the update does to a Lagrange point: the coordinate update sets a position only for a planet or a moon, so a point owned by anything else is never moved, whatever the switches say, and reads nothing of its owner but the class.
+const pointUpdate = (rows, id, planets, rocks) => (LAGRANGE_OWNER_CLASSES.includes(rows[id].BodyClass) ? gameUpdate(rows, id, planets, rocks) : { value: false, reads: new Set(['BodyClass']) })
+
+check('loader-motion-matrix', 'whether a place moves with the bodies follows the game\'s own position update for every place that derives a motion group from saved fields (a body, an order\'s destination of type 2 or, on a fixed body, type 15, a colony, a Lagrange point of a planet or a moon, a waypoint, a fleet orbiting a body) on every kind of body (planet, moon, comet, trojan, independent asteroid, a deep-space population at a gas giant, a deep-space location, fixed bodies of other parents), read by the real loaders from a save with every field and from saves lacking each of the fields the update reads, with each switch read on, read off or never read, against an oracle that transcribes the update', async (w) => {
   const m = await w.modules()
   const rp = m['route-position']
   const orbit = m['orbit-propagation']
@@ -1118,7 +1133,7 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
 
   // What a place must read: the update's answer when every field it rests on was read, and what is not known (the planet switch off settling it) when one was not. A picked body with no orbit read has the picker's group alone, which names a planet, moon or comet and cannot tell an independent asteroid, a trojan and a fixed body apart.
   const expectedOf = (variant, place, planets, rocks) => {
-    const update = gameUpdate(OWNER_ROWS, place.owner.id, planets, rocks)
+    const update = (place.point ? pointUpdate : gameUpdate)(OWNER_ROWS, place.owner.id, planets, rocks)
     const orbitRead = !ORBIT_REQUIRED.includes(variant.without)
 
     if (place.source === 'picker' && !orbitRead) {
@@ -1142,7 +1157,8 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
             { label: 'a waypoint on the ' + owner.name, owner, source: 'position', endpoint: rp.orderEndpoint({ DestinationType: 5, DestinationID: 100 + owner.id, SystemID: 1, X: 1, Y: 1 }) },
             { label: 'a fleet orbiting the ' + owner.name, owner, source: 'position', endpoint: { family: 'fleet', key: 'fleet:' + (300 + owner.id), id: 300 + owner.id, ...at } },
           ]),
-          ...POINT_OWNERS.map((owner) => ({ label: 'a Lagrange point of the ' + owner.name, owner, source: 'orbit', endpoint: rp.orderEndpoint({ DestinationType: 12, DestinationID: 90 + owner.id, SystemID: 1, X: 1, Y: 1 }) })),
+          ...FIXED_OWNERS.map((owner) => ({ label: 'a type 15 order on the ' + owner.name, owner, source: 'orbit', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: owner.id, SystemID: 1, X: 1, Y: 1 }) })),
+          ...POINT_OWNERS.map((owner) => ({ label: 'a Lagrange point of the ' + owner.name, owner, point: true, source: 'orbit', endpoint: rp.orderEndpoint({ DestinationType: 12, DestinationID: 90 + owner.id, SystemID: 1, X: 1, Y: 1 }) })),
         ]
         const read = await rp.loadPositionFacts(database, { GameID: 1, RaceID: 2 })
         const orbits = await orbit.loadOrbitFacts(database, { GameID: 1, RaceID: 2 }, places.map((place) => place.endpoint))
@@ -1156,6 +1172,7 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
 
           cells += 1
           assert.equal(record.moves, expected, label + ': moves ' + expected)
+          assert.equal(record.supported, true, label + ': the contract supports the place')
           assert.equal(record.conditions.includes('motion-switch'), expected === null, label + ': names the switch only when it is unknown')
         })
 
@@ -1169,7 +1186,7 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
     }
   }
 
-  assert.equal(cells, VARIANTS.length * SWITCHES.length * SWITCHES.length * (OWNERS.length * 5 + POINT_OWNERS.length))
+  assert.equal(cells, VARIANTS.length * SWITCHES.length * SWITCHES.length * (OWNERS.length * 5 + FIXED_OWNERS.length + POINT_OWNERS.length))
 
   // The motion group is the same wherever it is read: the position read's group of a waypoint and of a fleet and the orbit read's group of the body agree for every body, and are the group the update gives it.
   const database = await ownerDatabase([1, 0])
@@ -1184,6 +1201,113 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
     assert.equal(orbit.groupOf(orbits, { family: 'body', id: owner.id }), groupOfUpdate, owner.name + ': and so does the orbit read')
   })
   database.close()
+})
+
+check('fixed-body-order', 'a type 15 order (a deep space population, reached as the fixed class 3 body it stands on) is a body the contract knows and supports, and read by the real loaders a fixed body with no parent is supported and stays where it is saved on either basis, stating nothing, for every pair of switches, while one with a fixed parent moves as the update moves it and is held at its saved position with the reason it is not propagated', async (w) => {
+  const m = await w.modules()
+  const rp = m['route-position']
+  const orbit = m['orbit-propagation']
+  const order = (id, type = 15) => ({ DestinationType: type, DestinationID: id, PopulationID: 0, SystemID: 1, X: 1, Y: 1 })
+  const SWITCHES = [1, 0, null]
+  let cells = 0
+
+  assert.ok(!rp.FAMILY_NAMES.includes('deep-space-population'), 'no family is kept for a deep space population: an order that reaches one names its body')
+  ;[1, 2, 4, 5, 6, 7, 8, 10, 12, 14, 15].forEach((type) => assert.ok(rp.FAMILY_NAMES.includes(rp.orderEndpoint(order(9, type)).family), 'destination type ' + type + ': the family of an order is one the contract knows'))
+  assert.equal(rp.orderEndpoint(order(9)).family, 'body')
+  assert.equal(rp.orderEndpoint(order(9)).key, rp.orderEndpoint(order(9, 2)).key, 'a deep space population and a body are one place to the pages')
+
+  for (const planets of SWITCHES) {
+    for (const rocks of SWITCHES) {
+      const database = await ownerDatabase([planets, rocks])
+      const endpoints = FIXED_OWNERS.map((owner) => rp.orderEndpoint(order(owner.id)))
+      const read = await rp.loadPositionFacts(database, { GameID: 1, RaceID: 2 })
+      const orbits = await orbit.loadOrbitFacts(database, { GameID: 1, RaceID: 2 }, endpoints)
+      const facts = { ...read, orbits }
+
+      FIXED_OWNERS.forEach((owner, index) => {
+        const expected = gameUpdate(OWNER_ROWS, owner.id, planets, rocks).value
+
+        ;[['saved positions', rp.NO_ADAPTERS], ['propagation offered', rp.ADAPTERS]].forEach(([basis, adapters]) => {
+          const positions = rp.routePositions([endpoints[index]], { facts, adapters })
+          const [record] = positions.records
+          const label = 'type 15 order on the ' + owner.name + ', ' + basis + ', planets ' + planets + ', asteroids ' + rocks
+
+          cells += 1
+          assert.equal(record.supported, true, label + ': supported')
+          assert.equal(record.moves, expected, label + ': moves ' + expected)
+          assert.equal(record.basis, 'static', label + ': stands on the saved position, as the app has no orbit for a fixed body')
+          assert.equal(record.conditions.includes('motion-switch'), expected === null, label + ': names the switch only when it is unknown')
+          assert.equal(record.conditions.includes('orbit-family'), basis === 'propagation offered' && expected !== false, label + ': is refused for its family only when it moves or may')
+
+          if (expected === false) {
+            assert.deepEqual(record.conditions, [], label + ': a body that stays states nothing')
+            assert.equal(record.assumption, 'fixed', label + ': and is held as fixed')
+            assert.deepEqual([positions.caveat, positions.moving, positions.mode, [...positions.unsupported]], [false, 0, 'static', []], label + ': and its summary carries no caveat')
+          }
+        })
+      })
+      database.close()
+    }
+  }
+  assert.equal(cells, SWITCHES.length * SWITCHES.length * FIXED_OWNERS.length * 2)
+
+  const location = FIXED_OWNERS.find((owner) => owner.row.FixedBodyParentID === undefined && !owner.row.TrojanAsteroid)
+
+  SWITCHES.forEach((planets) => SWITCHES.forEach((rocks) => assert.equal(gameUpdate(OWNER_ROWS, location.id, planets, rocks).value, false, 'the oracle: a fixed body with no parent never moves, whatever the switches say')))
+})
+
+check('lagrange-owner-class', 'a Lagrange point whose owner is neither a planet nor a moon (a trojan, an independent asteroid, a comet, a fixed body) is never moved by the game\'s coordinate update, so read by the real loaders it stays where it is saved for every pair of switches, whatever its owner\'s other fields say, and is unknown only where the class itself was not read', async (w) => {
+  const m = await w.modules()
+  const rp = m['route-position']
+  const orbit = m['orbit-propagation']
+  const both = (planets, rocks) => (planets === 0 ? false : planets === 1 && rocks === 1 ? true : null)
+  const VARIANTS = [
+    { name: 'a save with every field', without: null },
+    { name: 'a save with no fixed parent field', without: 'FixedBodyParentID' },
+    { name: 'a save with no trojan field', without: 'TrojanAsteroid' },
+    { name: 'a save with no body class', without: 'BodyClass' },
+  ]
+  const SWITCHES = [1, 0, null]
+  let cells = 0
+
+  assert.ok(MALFORMED_POINT_OWNERS.length > 0 && MALFORMED_POINT_OWNERS.every((owner) => !POINT_OWNERS.includes(owner)), 'the owners that are neither a planet nor a moon are the ones the matrix leaves out')
+  for (const variant of VARIANTS) {
+    for (const planets of SWITCHES) {
+      for (const rocks of SWITCHES) {
+        const database = await ownerDatabase([planets, rocks], variant.without, MALFORMED_POINT_OWNERS)
+        const points = MALFORMED_POINT_OWNERS.map((owner) => ({ owner, endpoint: rp.orderEndpoint({ DestinationType: 12, DestinationID: 90 + owner.id, SystemID: 1, X: 1, Y: 1 }) }))
+        const read = await rp.loadPositionFacts(database, { GameID: 1, RaceID: 2 })
+        const orbits = await orbit.loadOrbitFacts(database, { GameID: 1, RaceID: 2 }, points.map((point) => point.endpoint))
+
+        points.forEach(({ owner, endpoint }) => {
+          const facts = { ...read, orbits }
+          const [record] = rp.routePositions([endpoint], { facts }).records
+          const [offered] = rp.routePositions([endpoint], { facts, adapters: rp.ADAPTERS }).records
+          const expected = ORBIT_REQUIRED.includes(variant.without) ? both(planets, rocks) : pointUpdate(OWNER_ROWS, owner.id, planets, rocks).value
+          const label = variant.name + ', a Lagrange point of the ' + owner.name + ', planets ' + planets + ', asteroids ' + rocks
+          const saved = { SystemID: endpoint.SystemID, Xcor: endpoint.Xcor, Ycor: endpoint.Ycor }
+
+          cells += 1
+          assert.equal(record.moves, expected, label + ': moves ' + expected)
+          assert.equal(record.conditions.includes('motion-switch'), expected === null, label + ': names the switch only when it is unknown')
+          ;[[record, 'on saved positions'], [offered, 'with propagation offered']].forEach(([one, basis]) => {
+            assert.equal(one.supported, true, label + ', ' + basis + ': supported')
+            assert.equal(one.basis, 'static', label + ', ' + basis + ': stands on the saved position')
+            assert.deepEqual(one.position, saved, label + ', ' + basis + ': at the saved coordinates')
+            assert.equal(one.moves, expected, label + ', ' + basis + ': moves ' + expected)
+
+            if (expected === false) {
+              assert.deepEqual(one.conditions, [], label + ', ' + basis + ': a point that stays states nothing')
+              assert.equal(one.assumption, 'fixed', label + ', ' + basis + ': and is held as fixed')
+            }
+          })
+          assert.deepEqual(rp.ADAPTERS['lagrange-point'](endpoint, { facts, at: read.clock.gameTime + 1 }).reasons, [ORBIT_REQUIRED.includes(variant.without) ? 'orbit-missing' : 'orbit-family'], label + ': the adapter refuses to propagate it, for its owner\'s family where the point is read and as not found where the save lacks the columns that read it')
+        })
+        database.close()
+      }
+    }
+  }
+  assert.equal(cells, VARIANTS.length * SWITCHES.length * SWITCHES.length * MALFORMED_POINT_OWNERS.length)
 })
 
 check('fixed-proxy-results', 'a deep-space population at a gas giant (a fixed class 3 body that takes its parent\'s position whatever the asteroid switch says), its colony, a waypoint on it and a fleet orbiting it move with the planet switch: with planets on and asteroids off a saved distance to each is an estimate, the body and the colony are refused for the family they are with their reason, and a Route Finder plan from each to a propagated comet is mixed; a deep-space location and a fixed body of an independent asteroid stay where they are saved and state nothing', async (w) => {
@@ -2158,8 +2282,10 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
   const PINNED = [rock(1, 1, 90, 8760, { fixed: 1, fixedParentId: 0 }), rock(2, 2, 0, 17520, { fixed: 1, fixedParentId: 0 })]
   const GAS_GIANT = rock(3, 4, 200, 30000, { bodyClass: 1 })
   const PROXIES = [rock(1, 1, 90, 8760, { fixed: 1, fixedParentId: 3 }), rock(2, 2, 0, 17520, { fixed: 1, fixedParentId: 3 }), GAS_GIANT]
-  const point = (id, planetId, base) => Object.freeze({ id, systemId: 1, planetId, distance: base.distance, bearing: (base.bearing + 60) % 360, ...at(base.distance, base.bearing + 60) })
-  const POINTS = { 31: point(31, 1, MOVING[0]), 32: point(32, 2, MOVING[1]) }
+  const moon = (id, parent, km, bearing, year) => Object.freeze({ id, systemId: 1, starId: 1, bodyClass: 2, trojan: 0, distance: km, bearing, year, eccentricity: 0, direction: 0, parentId: parent.id, parentType: 3, fixed: 0, xcor: parent.xcor + km * Math.cos(((bearing - 90) * Math.PI) / 180), ycor: parent.ycor + km * Math.sin(((bearing - 90) * Math.PI) / 180) })
+  const MOONS = [moon(5, MOVING[0], 1e6, 90, 240), moon(6, MOVING[1], 2e6, 0, 480)]
+  const point = (id, owner) => Object.freeze({ id, systemId: 1, planetId: owner.id, distance: owner.distance / AU, bearing: (owner.bearing + 60) % 360, xcor: MOVING[owner.parentId - 1].xcor + owner.distance * Math.cos(((owner.bearing + 60 - 90) * Math.PI) / 180), ycor: MOVING[owner.parentId - 1].ycor + owner.distance * Math.sin(((owner.bearing + 60 - 90) * Math.PI) / 180) })
+  const POINTS = { 31: point(31, MOONS[0]), 32: point(32, MOONS[1]) }
   const orbitsOf = (rocks, bodyOf = { 7: 1, 8: 2 }, points = {}) => ({ bodies: Object.fromEntries(rocks.map((one) => [one.id, one])), stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points, hidden: {}, hiddenPoints: {}, bodyOf, problems: [] })
   const claims = (result) => Boolean(result) && result.assumptions.includes(rp.ASSUMPTIONS.propagated)
   const groupsOf = (positions) => [...new Set(instantiate(component, { $store: STORE, data: { positions, state: { loading: false, failed: '', error: '' } } }).groups.map((group) => group.assumption))].sort()
@@ -2181,7 +2307,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
     { name: 'deep-space populations at a gas giant', pinned: true, rocks: PROXIES, origin: place('body', 1, here(PROXIES)), destination: place('body', 2, there(PROXIES)) },
     { name: 'asteroids', moving: true, asteroid: true, rocks: MOVING, origin: place('body', 1, here(MOVING)), destination: place('body', 2, there(MOVING)) },
     { name: 'colonies', moving: true, asteroid: true, rocks: MOVING, origin: place('colony', 7, here(MOVING)), destination: place('colony', 8, there(MOVING)) },
-    { name: 'Lagrange points', moving: true, asteroid: true, rocks: MOVING, points: POINTS, origin: place('lagrange', 31, { SystemID: 1, Xcor: POINTS[31].xcor, Ycor: POINTS[31].ycor }), destination: place('lagrange', 32, { SystemID: 1, Xcor: POINTS[32].xcor, Ycor: POINTS[32].ycor }) },
+    { name: 'Lagrange points of moons', moving: true, rocks: [...MOVING, ...MOONS], points: POINTS, origin: place('lagrange', 31, { SystemID: 1, Xcor: POINTS[31].xcor, Ycor: POINTS[31].ycor }), destination: place('lagrange', 32, { SystemID: 1, Xcor: POINTS[32].xcor, Ycor: POINTS[32].ycor }) },
     { name: 'an asteroid beside a fleet', beside: true, asteroid: true, rocks: MOVING, facts: { fleets: FLEETS }, origin: place('body', 1, here(MOVING)), destination: place('fleet', 8, there(MOVING)) },
   ]
   const MOTIONS = [
@@ -2733,6 +2859,13 @@ const FAULTS = [
   ['a plan that gains a wait on the moved bodies is flown on them', 'plan', 'if (!flightClock(moved, speed)) {', 'if (false) {', ['timed-clock']],
   ['Hauling flies a cycle that gains a wait on the moved bodies on them', 'haulingPage', 'const simulation = flownWalk && !flightOnly(flownWalk, sailing.Speed) ? this.simulateRoute(orders, sailing, handling, held, flownWalk) : first', 'const simulation = first', ['pages-hauling']],
   ['Transport flies a round trip that gains a wait on the moved bodies on them', 'transportPage', 'const simulation = flownTrip && !flightOnly(flownTrip.cycle, profile.cruise) ? this.simulate(reach, profile.cruise, flownTrip) : first', 'const simulation = first', ['pages-transport']],
+  ['a deep space population order names a family the contract does not keep', 'position', '\'aether-gate\', 15: \'body\' })', '\'aether-gate\', 15: \'deep-space-population\' })', ['fixed-body-order']],
+  ['a deep space population order is a life pod', 'position', '\'aether-gate\', 15: \'body\' })', '\'aether-gate\', 15: \'lifepod\' })', ['fixed-body-order']],
+  ['a family is kept for a deep space population no order reaches', 'position', '  lifepod: { clock: \'none\', motion: \'drift\', supported: false },\n', '  lifepod: { clock: \'none\', motion: \'drift\', supported: false },\n  \'deep-space-population\': { clock: \'none\', motion: \'drift\', supported: false },\n', ['fixed-body-order']],
+  ['a place that never moves is not supported', 'position', 'spec.supported !== false && !conditions.includes(\'stale-contact\')', 'spec.supported !== false && state.moves !== false && !conditions.includes(\'stale-contact\')', ['fixed-body-order', 'motion-matrix']],
+  ['a Lagrange point moves with an owner that is no planet or moon', 'orbit', 'if (body && endpoint.family === \'lagrange-point\' && ', 'if (false && body && endpoint.family === \'lagrange-point\' && ', ['lagrange-owner-class', 'motion-matrix']],
+  ['a Lagrange point stays only with an asteroid owner', 'orbit', 'isNumber(body.bodyClass) && !POINT_OWNER_CLASSES.includes(body.bodyClass)', 'body.bodyClass === 3', ['lagrange-owner-class']],
+  ['a Lagrange point of a body that is no planet or moon is propagated', 'orbit', 'if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {', 'if (false && !POINT_OWNER_CLASSES.includes(body.bodyClass)) {', ['lagrange-owner-class']],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -2758,6 +2891,8 @@ const BENIGN = [
   { label: 'the comment on a group that needs both switches reworded', target: 'position', at: /(and an 'unknown' one needs )both\./, to: (m) => `${m[1]}both switches on.` },
   { label: 'the fixed-parent condition parenthesised with its conjuncts reordered', target: 'orbit', at: /\} else if \(fixed && body\.fixedParentId > 0\) \{/, to: () => '} else if ((body.fixedParentId > 0) && fixed) {' },
   { label: 'the timed test of a plan written as its negation', target: 'plan', at: /const flight = (?:timed \|\| !flightClock\(held, speed\) \? null : (flightOf\(\{ facts, adapters, speed \}\))|!timed && flightClock\(held, speed\) \? (flightOf\(\{ facts, adapters, speed \}\)) : null)/, to: (m) => `const flight = !timed && flightClock(held, speed) ? ${m[1] || m[2]} : null` },
+  { label: 'the condition of a life pod reworded', target: 'position', at: new RegExp(`(\\n {2}'drift-unobserved': )${STRING}`), to: (m) => `${m[1]}'no motion of a life pod is recorded by the save'` },
+  { label: 'the owner class test of a Lagrange point parenthesised with its conjuncts reordered', target: 'orbit', at: /isNumber\(body\.bodyClass\) && !POINT_OWNER_CLASSES\.includes\(body\.bodyClass\)/, to: () => '(!POINT_OWNER_CLASSES.includes(body.bodyClass)) && isNumber(body.bodyClass)' },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 
 const STANDALONE = new Set([
@@ -2874,6 +3009,9 @@ const COMPOSED = new Set([
   236,
   238,
   240,
+  244,
+  247,
+  248,
 ])
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
@@ -2892,7 +3030,7 @@ const run = async (checks, world) => {
 }
 
 // The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
-const BY_VALUE = new Set(['timed-basis', 'timed-clock'])
+const BY_VALUE = new Set(['timed-basis', 'timed-clock', 'fixed-body-order', 'lagrange-owner-class'])
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 

@@ -67,10 +67,12 @@ const BODIES = {
   22: { cls: 3, a: 1.8, e: 0.1, dir: 120, B: 200, year: 3000, star: 1, system: 1 },
   23: { cls: 1, a: 1, e: 0.2, dir: 30, B: 100, year: 6000, star: 1, system: 1 },
   24: { cls: 3, a: 150, e: 0, B: 40, year: 16100000, star: 1, system: 1 },
+  25: { cls: 1, a: 2, e: 0.15, dir: 70, B: 40, year: 17520, star: 1, system: 1 },
+  26: { cls: 1, a: 1, e: 0.1, dir: 250, B: 200, year: 8760, star: 1, system: 1 },
 }
 
-// The Lagrange points: the body they sit on and their distance from the star, AU.
-const POINTS = { 31: { body: 10, a: 2 }, 32: { body: 19, a: 1 } }
+// The Lagrange points: the planet they sit on (the game moves a point only for a planet or a moon, and a planet is propagated only with an eccentric orbit) and their distance from the star, AU.
+const POINTS = { 31: { body: 25, a: 2 }, 32: { body: 26, a: 1 }, 33: { body: 10, a: 2 } }
 
 const circlePoint = (star, a, bearing) => ({ Xcor: star.Xcor + a * KM * Math.cos(rad(bearing - 90)), Ycor: star.Ycor + a * KM * Math.sin(rad(bearing - 90)) })
 
@@ -126,7 +128,7 @@ const bodyAt = (id, elapsed, step = STEP) => {
   return body.e && !body.trojan ? ellipsePoint(star, body, bearing) : circlePoint(star, body.a, bearing)
 }
 
-const pointAt = (id, elapsed) => circlePoint(STARS[BODIES[POINTS[id].body].star], POINTS[id].a, turn(bearingAt(POINTS[id].body, elapsed) + 60))
+const pointAt = (id, elapsed) => ellipsePoint(STARS[BODIES[POINTS[id].body].star], { a: POINTS[id].a, e: BODIES[POINTS[id].body].e, dir: BODIES[POINTS[id].body].dir }, turn(bearingAt(POINTS[id].body, elapsed) + 60))
 
 // The arrival of a fleet at `speed` from `from` leaving at `depart`: the root of (distance to the body when it arrives) / speed - T by bisection.
 const arrivalOf = (from, depart, speed, positionAt) => {
@@ -219,6 +221,7 @@ const ENDPOINTS = {
   c702: { family: 'colony', key: 'colony:702', id: 702, name: 'Hidden colony', SystemID: 2, Xcor: saved(16).Xcor, Ycor: saved(16).Ycor },
   p31: { family: 'lagrange-point', key: 'lagrange:31', id: 31, name: 'LP 31', SystemID: 1, Xcor: pointAt(31, 0).Xcor, Ycor: pointAt(31, 0).Ycor },
   p32: { family: 'lagrange-point', key: 'lagrange:32', id: 32, name: 'LP 32', SystemID: 1, Xcor: pointAt(32, 0).Xcor, Ycor: pointAt(32, 0).Ycor },
+  p33: { family: 'lagrange-point', key: 'lagrange:33', id: 33, name: 'LP 33', SystemID: 1, Xcor: pointAt(33, 0).Xcor, Ycor: pointAt(33, 0).Ycor },
 }
 
 const LAGRANGE_ROWS = [31, 32].map((id) => ({ LagrangePointID: id, SystemID: 1, Xcor: pointAt(id, 0).Xcor, Ycor: pointAt(id, 0).Ycor }))
@@ -303,6 +306,7 @@ check('rebuild', 'a position is rebuilt from the orbit fields only when it lands
   assert.ok(!refused('b20'), 'one 0.5 km off is')
   assert.deepEqual(refused('b18'), ['orbit-missing'], 'an orbit with a field the save lacks')
   assert.deepEqual(refused('b15'), ['orbit-family'], 'a circular planet is not a family that is propagated')
+  assert.deepEqual(refused('p33'), ['orbit-family'], 'a Lagrange point of an asteroid is never moved by the game, so it is not a family that is propagated')
   assert.deepEqual(refused('b21'), ['orbit-star'], 'a body around a star that is not the primary')
   assert.deepEqual(refused('b16'), ['orbit-unsurveyed'], 'a body of a system the race has not surveyed')
   assert.deepEqual(refused('c702'), ['orbit-unsurveyed'], 'a colony on it')
@@ -1156,6 +1160,7 @@ const FAULTS = [
   ['a year that fell back states the propagated records', 'plan', 'summarisePositions(unmoved ? [...unserved, ...kept] : [...unserved, ...unmovedFirst(everything)], { merge: true })', 'summarisePositions([...unserved, ...unmovedFirst(everything)], { merge: true })', ['review-round-1-flights']],
   ['an unsurveyed point is read in full', 'orbit', 'pointSites.filter((row) => surveyed.has(row.SystemID)).map((row) => row.LagrangePointID)', 'pointSites.map((row) => row.LagrangePointID)', ['review-round-1-read']],
   ['a path is not part of the key', 'graph', 'step.to.WarpPointID || step.to.key || null, step.via', 'null, step.via', ['review-round-1-read']],
+  ['a Lagrange point of an asteroid is propagated', 'orbit', 'if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {\n    throw unsupported(\'orbit-family\')\n  }', 'if (false) {\n    throw unsupported(\'orbit-family\')\n  }', ['rebuild']],
 ]
 /* eslint-enable no-template-curly-in-string */
 

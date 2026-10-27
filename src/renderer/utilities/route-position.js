@@ -25,7 +25,6 @@ const FAMILIES = Object.freeze({
   'lagrange-point': { clock: 'body', motion: 'orbit' },
   wreck: { clock: 'body', motion: 'tied' },
   lifepod: { clock: 'none', motion: 'drift', supported: false },
-  'deep-space-population': { clock: 'none', motion: 'drift', supported: false },
   fleet: { clock: 'fleet', motion: 'own' },
   contact: { clock: 'contact', motion: 'own' },
 })
@@ -40,7 +39,7 @@ export const CONDITIONS = Object.freeze({
   'wreck-orbit-tie': 'whether a body carries the wreck is not recorded',
   'waypoint-orbit-unread': 'whether a body carries the waypoint is not recorded',
   'position-unread': 'the position of the place is not recorded',
-  'drift-unobserved': 'the save records no motion for a life pod or a deep space population',
+  'drift-unobserved': 'the save records no motion for a life pod',
   'fleet-state-unread': 'the fleet\'s last move, orbit, anchor and queued orders are not recorded',
   'fleet-orders': 'the fleet has queued orders, so where it will be is not known',
   'fleet-anchored': 'the fleet is anchored to another fleet and moves in formation with it, so where it will be is not known',
@@ -72,7 +71,7 @@ export const ASSUMPTIONS = Object.freeze({
   'wreck-held': 'the wreck is held at its saved position; a body may carry it',
   'waypoint-held': 'the waypoint is held at its saved position; a body may carry it',
   unplaced: 'the save records no position for the place, so none is held',
-  'drift-held': 'the life pod or deep space population is held at its saved position; its motion is not recorded',
+  'drift-held': 'the life pod is held at its saved position; its motion is not recorded',
   'fleet-idle': 'the fleet is idle and held where the save has it',
   'fleet-following': 'the fleet orbits a body and moves with it; it is held at its saved position',
   'fleet-held': 'the fleet is held where the save has it now; its later position is not known',
@@ -113,6 +112,7 @@ const switchOf = (value) => (value === 1 || value === true ? true : value === 0 
 // An endpoint is { family, key, id, name, SystemID, Xcor, Ycor } with `group` (a body's picker group) and `lastUpdate` (a contact's last update) where the page has them. These build one from what each page holds.
 const KIND_FAMILY = Object.freeze({ colony: 'colony', system: 'system', fleet: 'fleet', jump: 'jump-point', lagrange: 'lagrange-point', body: 'body', survey: 'survey-location', waypoint: 'waypoint', wreck: 'wreck', lifepod: 'lifepod', contact: 'contact', aether: 'aether-gate' })
 
+// The family of an order's destination by the game's destination type. A deep space population (15) is reached as the body it stands on, a fixed class 3 body, so it is a body: whether it moves, and with what, comes from the orbit read of that body (`motionOf` of utilities/orbit-propagation.js), which reads `FixedBody` and `FixedBodyParentID`, and a fixed body with no parent never moves.
 const ORDER_FAMILY = Object.freeze({ 1: 'jump-point', 2: 'body', 4: 'survey-location', 5: 'waypoint', 6: 'contact', 7: 'lifepod', 8: 'wreck', 10: 'fleet', 12: 'lagrange-point', 14: 'aether-gate', 15: 'body' })
 
 // The kind of the key an order's destination has in utilities/deep-links.js `place`, so the contract names an endpoint as every page does.

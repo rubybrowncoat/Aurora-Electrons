@@ -225,9 +225,17 @@ const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0 } = {})
   return { ...point, bearing, stepped, family }
 }
 
+// The classes of the body a Lagrange point rides: the game's coordinate update of a point sets its position only for a planet (1) and a moon (2), so a point owned by any other class is never moved and stays where it is saved.
+const POINT_OWNER_CLASSES = Object.freeze([1, 2])
+
 // The state of a Lagrange point: its body's bearing plus 60 degrees, on the body's own orbit (a planet's eccentric one at the point's distance, a moon's circle of the point's distance in AU converted to km).
 const pointStateAt = (orbits, clock, point, elapsed, options = {}) => {
   const body = bodyOf(orbits, point.planetId)
+
+  if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {
+    throw unsupported('orbit-family')
+  }
+
   const state = stateAt(orbits, clock, point.planetId, elapsed, options)
   const bearing = wrap(state.bearing + 60)
 
@@ -241,7 +249,7 @@ const pointStateAt = (orbits, clock, point, elapsed, options = {}) => {
 }
 
 // What an endpoint names in the orbit read: the point of a Lagrange point, the body of a body or of a colony (`bodyOf` maps the race's colonies to their bodies).
-// The motion group (`motionOf`) of the body an endpoint stands on or is, from the body's own fields and those of its parents, null when the orbit read does not hold the body or the endpoint is not on one. A Lagrange point rides the body it belongs to.
+// The motion group (`motionOf`) of the body an endpoint stands on or is, from the body's own fields and those of its parents, null when the orbit read does not hold the body or the endpoint is not on one. A Lagrange point rides the body it belongs to, and is 'static' when that body is neither a planet nor a moon.
 export const groupOf = (orbits, endpoint) => {
   if (!orbits || !orbits.bodies || (endpoint.family !== 'body' && endpoint.family !== 'colony' && endpoint.family !== 'lagrange-point')) {
     return null
@@ -249,6 +257,10 @@ export const groupOf = (orbits, endpoint) => {
 
   const id = endpoint.family === 'colony' ? (orbits.bodyOf || {})[endpoint.id] : endpoint.family === 'lagrange-point' ? ((orbits.points || {})[endpoint.id] || {}).planetId : endpoint.id
   const body = Number.isInteger(id) ? orbits.bodies[id] : null
+
+  if (body && endpoint.family === 'lagrange-point' && isNumber(body.bodyClass) && !POINT_OWNER_CLASSES.includes(body.bodyClass)) {
+    return 'static'
+  }
 
   return body ? motionOf(orbits.bodies, id) : null
 }
