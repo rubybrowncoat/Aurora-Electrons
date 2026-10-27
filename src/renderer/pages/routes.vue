@@ -175,6 +175,7 @@ import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import RoutePositions from '../components/page/RoutePositions.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import StopList from '../components/routes/StopList.vue'
+import capabilityGates from '../mixins/capability-gates'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -243,6 +244,7 @@ export default {
   name: 'RoutesPage',
   components: { LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles, StopList, SystemMap },
   mixins: [
+    capabilityGates,
     countFormat,
     deepLink,
     loadState(INPUT_LABELS),
@@ -1396,14 +1398,16 @@ export default {
       }),
       default: [],
     },
-    // The waypoints, wrecks, life pods, contacts and aether gates of the known systems.
+    // The waypoints, wrecks, life pods, contacts and aether gates of the known systems. The gates are read only when the save has their table (the capability report's `aetherGates` group); without it the picker offers no gate.
     smallPlaces: {
       get: tracked('smallPlaces', async function () {
+        const gates = this.capabilityGates('/routes')
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await loadSmallPlaces(this.database, this.context, this.count)
+        return await loadSmallPlaces(this.database, this.context, this.count, await gates)
       }),
       default: [],
     },

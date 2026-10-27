@@ -220,9 +220,9 @@ order by FCT_Contacts.ContactName`)).map((row) => ({
   text: textOf(row.ContactName, row.AlienRaceName, row.SystemName),
 }))
 
-// The places that come in modest numbers, all read together: waypoints, wrecks, life pods, contacts and aether gates. `count(number)` formats a figure.
-export const loadSmallPlaces = async (database, context, count) => {
-  const lists = await Promise.all([loadWaypoints(database, context), loadWrecks(database, context, count), loadLifepods(database, context), loadContacts(database, context), loadAetherGates(database, context)])
+// The places that come in modest numbers, all read together: waypoints, wrecks, life pods, contacts and aether gates. `count(number)` formats a figure. The aether gates are read only when the save has their table (`aetherGates`, the capability report's group of that name): a save from before 2.6 has none, so it offers no gate and every other place reads as before.
+export const loadSmallPlaces = async (database, context, count, { aetherGates }) => {
+  const lists = await Promise.all([loadWaypoints(database, context), loadWrecks(database, context, count), loadLifepods(database, context), loadContacts(database, context), ...(aetherGates ? [loadAetherGates(database, context)] : [])])
 
   return Object.freeze(lists.flat())
 }

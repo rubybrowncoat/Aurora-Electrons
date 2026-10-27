@@ -422,10 +422,12 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_SystemBody.Bearing dropped degrades /routes, /information and /hauling by their orbit facts alone, and leaves none unsupported', byOrbitOnly(orbit), JSON.stringify(ROUTE_PAGES.map((route) => orbit.reports[route])))
     check('altered: FCT_SystemBody.Bearing dropped makes no other report unsupported', Object.values(orbit.reports).filter((report) => !ROUTE_PAGES.includes(report.route)).every((report) => report.status !== 'unsupported' || report.missing.some((entry) => entry.fields.includes('FCT_SystemBody.Bearing'))), notSupported(orbit).map((report) => report.route + ' ' + report.status).join(', '))
 
-    const gateReaders = Object.keys(capabilities.INPUTS).filter((route) => route !== '/hauling' && capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates))
+    const GATE_PAGES = ['/hauling', '/routes']
+    const gateReaders = Object.keys(capabilities.INPUTS).filter((route) => !GATE_PAGES.includes(route) && capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates))
 
     check('altered: FCT_AetherGates dropped degrades /hauling by the gates alone, naming the table, and leaves it in service', gateless.reports['/hauling'].status === 'degraded' && gateless.reports['/hauling'].missing.length === 0 && gateless.reports['/hauling'].groups.aetherGates === false && gateless.reports['/hauling'].degraded.some((entry) => entry.group && entry.key === 'aetherGates' && entry.fields.includes('FCT_AetherGates (table)')) && baseline.reports['/hauling'].groups.aetherGates === true, JSON.stringify(gateless.reports['/hauling']))
-    check('altered: the same copy leaves unsupported only the reports whose own required inputs read the table', gateReaders.length > 0 && Object.values(gateless.reports).filter((report) => report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)'))).map((report) => report.route).sort().join() === gateReaders.sort().join() && Object.values(gateless.reports).filter((report) => !gateReaders.includes(report.route) && report.status === 'unsupported').every((report) => baseline.reports[report.route].status === 'unsupported'), notSupported(gateless).map((report) => `${report.route} ${report.status}`).join(', '))
+    check('altered: FCT_AetherGates dropped degrades /routes by the gates alone, naming the table, and leaves it in service', gateless.reports['/routes'].status === 'degraded' && gateless.reports['/routes'].missing.length === 0 && gateless.reports['/routes'].groups.aetherGates === false && gateless.reports['/routes'].degraded.filter((entry) => !baseline.reports['/routes'].degraded.some((before) => before.key === entry.key)).map((entry) => `${entry.key}:${entry.group}:${entry.fields.includes('FCT_AetherGates (table)')}`).join() === 'aetherGates:true:true' && baseline.reports['/routes'].groups.aetherGates === true && baseline.reports['/routes'].status !== 'unsupported', JSON.stringify(gateless.reports['/routes']))
+    check('altered: the same copy leaves unsupported only the reports whose own required inputs read the table and do not hold it as a part they can lose (/hauling and /routes do)', GATE_PAGES.every((route) => capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates)) && Object.values(gateless.reports).filter((report) => report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)'))).map((report) => report.route).sort().join() === gateReaders.sort().join() && Object.values(gateless.reports).filter((report) => !gateReaders.includes(report.route) && report.status === 'unsupported').every((report) => baseline.reports[report.route].status === 'unsupported'), notSupported(gateless).map((report) => `${report.route} ${report.status}`).join(', '))
 
     const gateGroup = ", aetherGates('the place of an order to an aether gate, which rests on the gates of the save')"
     const noGroup = mutatedCopy('utilities/capabilities.js', gateGroup, '')
@@ -437,6 +439,18 @@ const alteredChecks = async (capabilities, source) => {
       check('altered: a copy of the code in which /hauling does not hold the gates as a part it can lose makes it unsupported on a save without the table, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')), report.status)
     } finally {
       fs.rmSync(noGroup, { recursive: true, force: true })
+    }
+
+    const routesGroup = "  '/routes': Object.freeze([aetherGates('the aether gates among the places to choose, which rest on the gates of the save')]),\n"
+    const noRoutesGroup = mutatedCopy('utilities/capabilities.js', routesGroup, '')
+
+    try {
+      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(noRoutesGroup, 'utilities') })).capabilities
+      const report = (await preflightOf(mutant, noGates)).result.reports['/routes']
+
+      check('altered: a copy of the code in which /routes does not hold the gates as a part it can lose makes it unsupported on a save without the table, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')), report.status)
+    } finally {
+      fs.rmSync(noRoutesGroup, { recursive: true, force: true })
     }
 
     for (const route of ROUTE_PAGES) {
