@@ -41,22 +41,40 @@ export const routeResults = (route, missing = 'an explored route') => {
   return { jumps: ofRule({ rule: 'route.jumps', value: route.jumps, inputs: { present: ROUTE_INPUTS } }), km: ofRule({ rule: 'route.distanceKm', value: route.km, inputs: { present: ROUTE_INPUTS } }) }
 }
 
-// The jump points the race has charted in systems it knows, with its own flags on them. Only explored ones (`Explored`) can be travelled: the far side of the rest is unknown. `Distance` is how far the point sits from its star, which numbers the system's jump points (JP1, JP2, …) as the game lists them. `JumpGateStrength` > 0 is a gate, which ships without a jump drive need to transit from that side; `MilitaryRestricted` keeps civilian shipping out; `IgnoreForDistance` leaves it out of distance measures. The rows are frozen: they are read-only, and Vue would otherwise observe every field of thousands of them.
+// The race knows the link of a charted jump point (`WPLink`, and with it the system beyond) when it has explored the point or the point at the far end. A charted point it has explored neither way keeps its identity and position and has no link: the game shows the far side of it as unexplored. A query that uses it joins the race's survey of the point as `FCT_RaceJumpPointSurvey` and its survey of the point at the far end, charted, as `VIR_FarSurvey`.
+export const LINK_KNOWN_SQL = '(FCT_RaceJumpPointSurvey.Explored = 1 or VIR_FarSurvey.Explored = 1)'
+
+// The jump points the race has charted in systems it knows, with its own flags on them. Only explored ones (`Explored`) can be travelled: the far side of the rest is unknown, so `WPLink` is null unless the point or the one at the far end is explored. `Distance` is how far the point sits from its star, which numbers the system's jump points (JP1, JP2, …) as the game lists them. `JumpGateStrength` > 0 is a gate, which ships without a jump drive need to transit from that side; `MilitaryRestricted` keeps civilian shipping out; `IgnoreForDistance` leaves it out of distance measures. The rows are frozen: they are read-only, and Vue would otherwise observe every field of thousands of them.
 export const loadJumpPoints = async (database, { GameID, RaceID }) => {
-  const [rows] = await database.query(`select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Distance, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.MilitaryRestricted, FCT_RaceJumpPointSurvey.IgnoreForDistance
+  const [rows] = await database.query(`select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, case when ${LINK_KNOWN_SQL} then FCT_JumpPoint.WPLink else null end as WPLink, FCT_JumpPoint.Distance, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.MilitaryRestricted, FCT_RaceJumpPointSurvey.IgnoreForDistance
 from FCT_JumpPoint
 inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.GameID = FCT_JumpPoint.GameID and FCT_RaceJumpPointSurvey.Charted = 1
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_JumpPoint.GameID
+left join FCT_RaceJumpPointSurvey as VIR_FarSurvey on VIR_FarSurvey.WarpPointID = FCT_JumpPoint.WPLink and VIR_FarSurvey.RaceID = ${RaceID} and VIR_FarSurvey.GameID = FCT_JumpPoint.GameID and VIR_FarSurvey.Charted = 1
 where FCT_JumpPoint.GameID = ${GameID}`)
 
   return Object.freeze(rows)
 }
 
-// One { SystemID, DestinationID } per charted jump point whose far side is charted too, for SystemMap.
+// One { SystemID, DestinationID } per jump point of `jumpPoints` (`loadJumpPoints` rows) whose far point is charted too and that the race has explored from either end, for SystemMap. A charted point it has explored neither way has no link.
 export const jumpLinks = (jumpPoints) => {
   const byId = Object.fromEntries(jumpPoints.map((jumpPoint) => [jumpPoint.WarpPointID, jumpPoint]))
 
-  return jumpPoints.filter((jumpPoint) => byId[jumpPoint.WPLink]).map((jumpPoint) => ({ SystemID: jumpPoint.SystemID, DestinationID: byId[jumpPoint.WPLink].SystemID }))
+  return jumpPoints.filter((jumpPoint) => byId[jumpPoint.WPLink] && (jumpPoint.Explored || byId[jumpPoint.WPLink].Explored)).map((jumpPoint) => ({ SystemID: jumpPoint.SystemID, DestinationID: byId[jumpPoint.WPLink].SystemID }))
+}
+
+// One { SystemID, DestinationID } per jump point the race has charted and explored from either end whose far point it has charted in a system it knows, read straight from the save for a page that needs only the links. The same pairs as `jumpLinks` over `loadJumpPoints`, without the flags a route reads. The rows are frozen.
+export const loadJumpLinks = async (database, { GameID, RaceID }) => {
+  const [rows] = await database.query(`select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID
+from FCT_JumpPoint
+inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
+inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink
+inner join FCT_RaceJumpPointSurvey as VIR_FarSurvey on VIR_FarSurvey.WarpPointID = VIR_Destination.WarpPointID and VIR_FarSurvey.RaceID = ${RaceID} and VIR_FarSurvey.Charted = 1
+inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
+inner join FCT_RaceSysSurvey as VIR_FarSystem on VIR_FarSystem.SystemID = VIR_Destination.SystemID and VIR_FarSystem.RaceID = ${RaceID} and VIR_FarSystem.GameID = ${GameID}
+where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)
+
+  return Object.freeze(rows)
 }
 
 const BEFORE = {

@@ -736,7 +736,7 @@ const MODULE_FAULTS = [
   { name: 'the salvos of every race are read', file: MODULE, change: swap('FCT_MissileSalvo.RaceID = ${RaceID} and ', ''), fails: ['m-small-counts'] },
   { name: 'the contacts of every kind are read', file: MODULE, change: swap('and FCT_Contacts.ContactType = 3 and ', 'and '), fails: ['m-detected', 'm-small-counts'] },
   { name: 'the contacts that move are read', file: MODULE, change: swap(' and FCT_Contacts.Speed = 0`', '`'), fails: ['m-detected', 'm-small-counts'] },
-  { name: 'the points the race has not charted are read', file: GRAPH, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1', ''), fails: ['m-charted'] },
+  { name: 'the points the race has not charted are read', file: GRAPH, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1\ninner join FCT_RaceSysSurvey', '\ninner join FCT_RaceSysSurvey'), fails: ['m-charted'] },
   { name: 'a contact with no update time is taken as an earlier one', file: MODULE, change: swap('const undatedSeen = seen.filter((contact) => !contact.dated).length', 'const undatedSeen = 0'), fails: ['m-small-dates'] },
   { name: 'a contact with a dated row beside an undated one stays undated', file: MODULE, change: swap('if (!kept || (dated && (!kept.dated || contact.LastUpdate > kept.LastUpdate))) {', 'if (!kept) {'), fails: ['m-small-dates'] },
 ]
@@ -754,7 +754,7 @@ const PAGE_FAULTS = [
   { name: 'the earlier contacts draw one more than there are', file: PAGE, change: swap("earlierFigure: row.earlier > 0 ? this.count(row.earlier) : ''", "earlierFigure: row.earlier > 0 ? this.count(row.earlier + 1) : ''"), fails: ['detected'] },
   { name: 'the far side names the system of the point', file: PAGE, change: swap("beyondName: row.beyondSystemID ? systemName(row.beyondSystemID) : ''", "beyondName: row.beyondSystemID ? systemName(row.SystemID) : ''"), fails: ['name'] },
   { name: 'the table lists every system whatever is picked', file: PAGE, change: swap('return this.infrastructureRows.filter((row) => !this.selectedSystemId || row.SystemID === this.selectedSystemId)', 'return this.infrastructureRows'), fails: ['rows'] },
-  { name: 'the points the race has not charted are listed', file: GRAPH, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1', ''), fails: ['rows'] },
+  { name: 'the points the race has not charted are listed', file: GRAPH, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1\ninner join FCT_RaceSysSurvey', '\ninner join FCT_RaceSysSurvey'), fails: ['rows'] },
   { name: 'the link of a row opens the system without the point', file: PAGE, change: swap(':to="linkTo.map(item.SystemID, item.WarpPointID)"', ':to="linkTo.map(item.SystemID)"'), fails: ['map-select'], map: true },
   { name: 'the map selects the first point of the system whatever the route names', file: MAP, change: swap('entry.jumpPoint.WarpPointID === this.pointId && ', ''), fails: ['map-select'], map: true },
   { name: 'the System view is told no point', file: MAP, change: swap(':jump-point-id="viewedPoint ? viewedPoint.jumpPoint.WarpPointID : null"', ':jump-point-id="null"'), fails: ['map-view'], map: true },

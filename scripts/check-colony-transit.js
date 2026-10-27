@@ -1003,7 +1003,7 @@ const MUTATIONS = [
   { name: 'a body in no known origin system read as reached', file: T, find: 'const hasOrigin = colonies.some(hasPosition)', replace: 'const hasOrigin = true', fails: ['unknown'] },
   { name: 'a body without a position read as routed from the origin', file: T, find: '} else if (!hasPosition(body)) {', replace: '} else if (false) {', fails: ['unknown'] },
   { name: 'the unexplored links crossed', file: J, find: 'if (state.at.Explored && partner &&', replace: 'if (partner &&', fails: ['hidden'] },
-  { name: 'a link whose far side is not charted crossed', file: J, find: ' and FCT_RaceJumpPointSurvey.Charted = 1', replace: '', fails: ['hidden'] },
+  { name: 'a link whose far side is not charted crossed', file: J, find: ' and FCT_RaceJumpPointSurvey.Charted = 1\ninner join FCT_RaceSysSurvey', replace: '\ninner join FCT_RaceSysSurvey', fails: ['hidden'] },
   { name: 'the speed change finds links by crossing more with a faster ship', file: T, find: 'const chosen = normaliseBasis(basis)', replace: 'const chosen = normaliseBasis(basis)\n  chosen.drive = chosen.speed > 1000 ? \'drive\' : chosen.drive', fails: ['hidden'] },
   { name: 'the route estimate stated as confirmed', file: T, find: 'verification: \'estimated\',\n  structure: [\'FCT_JumpPoint.Xcor, Ycor, WPLink, JumpGateStrength\'', replace: 'verification: \'confirmed\',\n  structure: [\'FCT_JumpPoint.Xcor, Ycor, WPLink, JumpGateStrength\'', fails: ['registry', 'speed'] },
   { name: 'the speed stated as estimated', file: T, find: 'verification: \'assumed\',\n  structure: [\'FCT_ShipClass.MaxSpeed\']', replace: 'verification: \'estimated\',\n  structure: [\'FCT_ShipClass.MaxSpeed\']', fails: ['registry', 'speed'] },

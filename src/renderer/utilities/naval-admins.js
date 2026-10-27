@@ -1,3 +1,4 @@
+import { loadJumpLinks } from './jump-graph'
 import { navalAdminRadius, navalAdminRequiredRanks, systemsWithinJumps } from './minerals'
 
 // An assigned commander whose rank cannot be evaluated (no rank, no rank row or no priority) leaves what the command's required rank and its eligibility depend on unknown: the command, and every command above it, whose required rank counts it.
@@ -23,7 +24,7 @@ export const navalAdminReads = (share) => ({
   FCT_Commander: ['CommanderID', 'CommandID', 'CommandType', 'RaceID'],
   FCT_CommanderBonuses: ['CommanderID', 'BonusID', 'BonusValue'],
   FCT_JumpPoint: ['SystemID', 'WarpPointID', 'WPLink', 'GameID'],
-  FCT_RaceJumpPointSurvey: ['WarpPointID', 'RaceID', 'Charted'],
+  FCT_RaceJumpPointSurvey: ['WarpPointID', 'RaceID', 'Charted', 'Explored'],
   FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'GameID'],
 })
 
@@ -49,7 +50,7 @@ export const loadNavalAdmins = async (database, { GameID, RaceID, bonusId, share
   }
 
   const captains = !ranks ? [] : await database.query(`select FCT_Fleet.ParentCommandID as NavalAdminCommandID, min(FCT_Ranks.Priority) as RankPriority, sum(FCT_Ranks.Priority is null) as Unranked from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Commander on FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.ParentCommandID > 0 group by FCT_Fleet.ParentCommandID`).then(([items]) => items)
-  const links = await database.query(`select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID from FCT_JumpPoint inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = VIR_Destination.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID} where FCT_JumpPoint.GameID = ${GameID}`).then(([items]) => items)
+  const links = await loadJumpLinks(database, { GameID, RaceID })
   const graph = {}
 
   links.forEach((link) => {

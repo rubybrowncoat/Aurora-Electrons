@@ -110,7 +110,7 @@ const SCHEMA = {
   DIM_NavalAdminCommandType: ['CommandTypeID', 'Radius', 'Logistics'],
   FCT_Ranks: ['RankID', 'Priority'],
   FCT_JumpPoint: ['GameID', 'SystemID', 'WarpPointID', 'WPLink'],
-  FCT_RaceJumpPointSurvey: ['WarpPointID', 'RaceID', 'Charted'],
+  FCT_RaceJumpPointSurvey: ['WarpPointID', 'RaceID', 'Charted', 'Explored'],
 }
 
 // What each factor of the loader needs of the database, by hand: the commander and the governor the officers' tables, the sector commander the survey's sector too, and the admin chain everything the naval admin query and the fleet's command read. The ranks only ever make the chain's eligibility known.
@@ -163,7 +163,7 @@ const ROWS = () => ({
   DIM_NavalAdminCommandType: [{ CommandTypeID: 1, Radius: 1, Logistics: 0.25 }],
   FCT_Ranks: [{ RankID: 1, Priority: 5 }, { RankID: 2, Priority: 1 }],
   FCT_JumpPoint: [{ GameID: 1, SystemID: 3, WarpPointID: 100, WPLink: 101 }, { GameID: 1, SystemID: 4, WarpPointID: 101, WPLink: 100 }],
-  FCT_RaceJumpPointSurvey: [{ WarpPointID: 100, RaceID: 2, Charted: 1 }, { WarpPointID: 101, RaceID: 2, Charted: 1 }],
+  FCT_RaceJumpPointSurvey: [{ WarpPointID: 100, RaceID: 2, Charted: 1, Explored: 1 }, { WarpPointID: 101, RaceID: 2, Charted: 1, Explored: 1 }],
 })
 
 // The names of the tables and columns an `omit` entry takes out: 'Table' the whole table, 'Table.Column' one column.

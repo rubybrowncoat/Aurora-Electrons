@@ -369,6 +369,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
 import { cleanQuery, linkTo, place, queryId } from '../utilities/deep-links'
+import { loadJumpLinks } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { navalAdminChain } from '../utilities/minerals'
@@ -1206,14 +1207,14 @@ export default {
       }),
       default: [],
     },
-    // Jump links the race has charted to a system it knows.
+    // Jump links the race has explored, from either end, to a charted point in a system it knows.
     links: {
       get: tracked('links', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID from FCT_JumpPoint inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = VIR_Destination.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_JumpPoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
+        return await loadJumpLinks(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
     },

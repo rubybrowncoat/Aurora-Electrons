@@ -38,9 +38,9 @@ const DETAIL = process.argv.includes('--detail')
 // What the race may see of a point: the position, the gate strength, whether it is explored, and the system beyond with its name once it is explored.
 const FIELDS = ['DestinationID', 'DestinationName', 'Explored', 'JumpGateStrength', 'SystemID', 'WarpPointID', 'Xcor', 'Ycor']
 
-// The cases the save does not hold, written into the copy: the point the race has charted without exploring (its far system is known to the race), a gate of strength 500 and a point with no gate.
+// The cases the save does not hold, written into the copy: the point the race has charted without exploring, at either end (its far system is known to the race), a gate of strength 500 and a point with no gate.
 const STATEMENTS = [
-  `update FCT_RaceJumpPointSurvey set Explored = 0 where GameID = ${GAME} and RaceID = ${RACE.player} and WarpPointID = ${POINT.hidden}`,
+  `update FCT_RaceJumpPointSurvey set Explored = 0 where GameID = ${GAME} and RaceID = ${RACE.player} and WarpPointID in (${POINT.hidden}, (select WPLink from FCT_JumpPoint where GameID = ${GAME} and WarpPointID = ${POINT.hidden}))`,
   `update FCT_JumpPoint set JumpGateStrength = 500 where GameID = ${GAME} and WarpPointID = ${POINT.gated}`,
   `update FCT_JumpPoint set JumpGateStrength = 0 where GameID = ${GAME} and WarpPointID = ${POINT.hidden}`,
 ]
@@ -95,8 +95,9 @@ const truthOf = async (file, { GameID, RaceID }, system) => {
     const rows = new Map()
 
     points.filter((point) => point.SystemID === system && nameOf.has(system) && surveyById.has(point.WarpPointID) && surveyById.get(point.WarpPointID).Charted === 1).forEach((point) => {
-      const explored = surveyById.get(point.WarpPointID).Explored === 1
       const far = pointById.get(point.WPLink)
+      const farSurvey = surveyById.get(point.WPLink)
+      const explored = surveyById.get(point.WarpPointID).Explored === 1 || Boolean(farSurvey && farSurvey.Charted === 1 && farSurvey.Explored === 1)
       const known = Boolean(far) && nameOf.has(far.SystemID)
 
       rows.set(point.WarpPointID, {
@@ -115,19 +116,20 @@ const truthOf = async (file, { GameID, RaceID }, system) => {
   }
 }
 
-// The small save written here: game 1, race 2 (race 3 charts some of the same points, game 2 holds one more of the same system).
+// The small save written here: game 1, race 2 (race 3 charts some of the same points, game 2 holds one more of the same system). The points 20 and 21 lead to each other and only the far one (21) is explored by race 2, so the race knows where 20 leads; the points 22 and 23 lead to each other, 22 is charted and unexplored, and 23 is explored but not charted, so the race knows nothing of where 22 leads.
 const SMALL = [
   'create table FCT_JumpPoint (WarpPointID integer, GameID integer, SystemID integer, Xcor real, Ycor real, Distance real, WPLink integer, JumpGateStrength integer, JumpGateRaceID integer)',
-  'insert into FCT_JumpPoint values (1, 1, 10, 100, 100, 1, 2, 1000, 2), (2, 1, 11, 5, 5, 1, 1, 0, 0), (3, 1, 10, 200, 200, 2, 4, 500, 3), (4, 1, 12, 6, 6, 1, 3, 0, 0), (5, 1, 10, 300, 300, 3, 6, 999, 3), (6, 1, 13, 7, 7, 1, 5, 0, 0), (7, 1, 10, 400, 400, 4, 8, 0, 0), (8, 1, 14, 8, 8, 1, 7, 1000, 2), (9, 1, 10, 500, 500, 5, 2, 1000, 3), (10, 2, 10, 600, 600, 1, 12, 1000, 2), (11, 1, 10, 700, 700, 6, NULL, NULL, 0), (12, 2, 11, 9, 9, 1, 10, 0, 0)',
+  'insert into FCT_JumpPoint values (1, 1, 10, 100, 100, 1, 2, 1000, 2), (2, 1, 11, 5, 5, 1, 1, 0, 0), (3, 1, 10, 200, 200, 2, 4, 500, 3), (4, 1, 12, 6, 6, 1, 3, 0, 0), (5, 1, 10, 300, 300, 3, 6, 999, 3), (6, 1, 13, 7, 7, 1, 5, 0, 0), (7, 1, 10, 400, 400, 4, 8, 0, 0), (8, 1, 14, 8, 8, 1, 7, 1000, 2), (9, 1, 10, 500, 500, 5, 2, 1000, 3), (10, 2, 10, 600, 600, 1, 12, 1000, 2), (11, 1, 10, 700, 700, 6, NULL, NULL, 0), (12, 2, 11, 9, 9, 1, 10, 0, 0), (20, 1, 10, 800, 800, 7, 21, 0, 0), (21, 1, 11, 9, 9, 2, 20, 0, 0), (22, 1, 10, 900, 900, 8, 23, 0, 0), (23, 1, 11, 10, 10, 3, 22, 0, 0)',
   'create table FCT_RaceJumpPointSurvey (WarpPointID integer, GameID integer, RaceID integer, Charted integer, Explored integer)',
-  'insert into FCT_RaceJumpPointSurvey values (1, 1, 2, 1, 1), (2, 1, 2, 1, 1), (3, 1, 2, 1, 0), (4, 1, 2, 1, 0), (5, 1, 2, 1, 1), (6, 1, 2, 1, 0), (7, 1, 2, 0, 0), (8, 1, 2, 1, 0), (11, 1, 2, 1, 0), (1, 1, 3, 1, 1), (3, 1, 3, 1, 1), (9, 1, 3, 1, 1), (10, 2, 2, 1, 1)',
+  'insert into FCT_RaceJumpPointSurvey values (1, 1, 2, 1, 1), (2, 1, 2, 1, 1), (3, 1, 2, 1, 0), (4, 1, 2, 1, 0), (5, 1, 2, 1, 1), (6, 1, 2, 1, 0), (7, 1, 2, 0, 0), (8, 1, 2, 1, 0), (11, 1, 2, 1, 0), (20, 1, 2, 1, 0), (21, 1, 2, 1, 1), (22, 1, 2, 1, 0), (23, 1, 2, 0, 1), (1, 1, 3, 1, 1), (3, 1, 3, 1, 1), (9, 1, 3, 1, 1), (10, 2, 2, 1, 1)',
   'create table FCT_RaceSysSurvey (SystemID integer, GameID integer, RaceID integer, Name text)',
   "insert into FCT_RaceSysSurvey values (10, 1, 2, 'Home'), (11, 1, 2, 'Alpha'), (12, 1, 2, 'Bravo'), (10, 1, 3, 'HomeX'), (11, 1, 3, 'AlphaX'), (13, 1, 3, 'Charlie'), (10, 2, 2, 'Home2'), (11, 2, 2, 'Alpha2')",
 ]
 
 // What each read of the small save must give, written by hand: a row for each point, with the far system and name the race knows and the strength. `null` for what the race cannot know.
 const SMALL_READS = [
-  { key: 'home', ids: { GameID: 1, RaceID: 2 }, system: 10, rows: { 1: { far: 11, name: 'Alpha', strength: 1000, explored: true }, 3: { far: null, name: null, strength: 500, explored: false }, 5: { far: null, name: null, strength: 999, explored: true }, 11: { far: null, name: null, strength: null, explored: false } } },
+  { key: 'home', ids: { GameID: 1, RaceID: 2 }, system: 10, rows: { 1: { far: 11, name: 'Alpha', strength: 1000, explored: true }, 3: { far: null, name: null, strength: 500, explored: false }, 5: { far: null, name: null, strength: 999, explored: true }, 11: { far: null, name: null, strength: null, explored: false }, 20: { far: 11, name: 'Alpha', strength: 0, explored: true }, 22: { far: null, name: null, strength: 0, explored: false } } },
+  { key: 'far-end', ids: { GameID: 1, RaceID: 2 }, system: 11, rows: { 2: { far: 10, name: 'Home', strength: 0, explored: true }, 21: { far: 10, name: 'Home', strength: 0, explored: true } } },
   { key: 'other-race', ids: { GameID: 1, RaceID: 3 }, system: 10, rows: { 1: { far: 11, name: 'AlphaX', strength: 1000, explored: true }, 3: { far: null, name: null, strength: 500, explored: true }, 9: { far: 11, name: 'AlphaX', strength: 1000, explored: true } } },
   { key: 'other-game', ids: { GameID: 2, RaceID: 2 }, system: 10, rows: { 10: { far: 11, name: 'Alpha2', strength: 1000, explored: true } } },
   { key: 'unknown-system', ids: { GameID: 1, RaceID: 2 }, system: 14, rows: {} },
@@ -258,7 +260,7 @@ const MODULE_CHECKS = [
     const small = SMALL_READS.flatMap((entry) => Object.entries(entry.rows).map(([id, want]) => {
       const found = lookOf(o.small[entry.key], Number(id))
 
-      return found !== null && (found.row.DestinationID ?? null) === want.far && (found.row.DestinationName ?? null) === want.name ? null : [entry.key, id, found && found.row.DestinationID, want.far, found && found.row.DestinationName, want.name]
+      return found !== null && (found.row.DestinationID ?? null) === want.far && (found.row.DestinationName ?? null) === want.name && Number(found.row.Explored) === (want.explored ? 1 : 0) ? null : [entry.key, id, found && found.row.DestinationID, want.far, found && found.row.DestinationName, want.name, found && found.row.Explored, want.explored]
     }).filter(Boolean))
     const named = [...t.own.rows.values()].some((row) => row.farName !== null)
 
@@ -414,13 +416,19 @@ const swap = (from, to, count = 1) => (text) => {
 }
 
 /* eslint-disable no-template-curly-in-string */
-const FAR_JOIN = 'left join FCT_JumpPoint as FarPoint on FCT_RaceJumpPointSurvey.Explored = 1 and FarPoint'
+const FAR_JOIN = 'left join FCT_JumpPoint as FarPoint on ${LINK_KNOWN_SQL} and FarPoint'
+const OWN_END = '(FCT_RaceJumpPointSurvey.Explored = 1)'
+const OWN_FAR_JOIN = 'left join FCT_JumpPoint as FarPoint on FCT_RaceJumpPointSurvey.Explored = 1 and FarPoint'
+const EXPLORED_COLUMN = 'case when ${LINK_KNOWN_SQL} then 1 else 0 end as Explored'
 const LABEL = 'label: explored && name ? name : FAR_SIDE_TEXT[explored ? \'uncharted\' : \'unexplored\'],'
 
 const MODULE_FAULTS = [
   { name: 'the far system of a point that is not explored is read', file: MODULE, change: swap(FAR_JOIN, 'left join FCT_JumpPoint as FarPoint on FarPoint'), fails: ['m-point', 'm-far'] },
-  { name: 'the builder of the gate is read', file: MODULE, change: swap('FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored,', 'FCT_JumpPoint.JumpGateStrength, FCT_JumpPoint.JumpGateRaceID, FCT_RaceJumpPointSurvey.Explored,'), fails: ['m-fields'] },
-  { name: 'the link of the point is read', file: MODULE, change: swap('FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored,', 'FCT_JumpPoint.JumpGateStrength, FCT_JumpPoint.WPLink, FCT_RaceJumpPointSurvey.Explored,'), fails: ['m-fields'] },
+  { name: 'the far system of a point is read only when the race has explored the point itself, not the point at its far end', file: MODULE, change: swap(FAR_JOIN, OWN_FAR_JOIN), fails: ['m-far'] },
+  { name: 'a point counts as explored only when the race has explored the point itself, not the point at its far end', file: MODULE, change: swap(EXPLORED_COLUMN, 'FCT_RaceJumpPointSurvey.Explored'), fails: ['m-far'] },
+  { name: 'the link of a point is known only when the race has explored the point itself, in every place of the read', file: MODULE, change: swap('${LINK_KNOWN_SQL}', OWN_END, 2), fails: ['m-far'] },
+  { name: 'the builder of the gate is read', file: MODULE, change: swap(`FCT_JumpPoint.JumpGateStrength, ${EXPLORED_COLUMN},`, `FCT_JumpPoint.JumpGateStrength, FCT_JumpPoint.JumpGateRaceID, ${EXPLORED_COLUMN},`), fails: ['m-fields'] },
+  { name: 'the link of the point is read', file: MODULE, change: swap(`FCT_JumpPoint.JumpGateStrength, ${EXPLORED_COLUMN},`, `FCT_JumpPoint.JumpGateStrength, FCT_JumpPoint.WPLink, ${EXPLORED_COLUMN},`), fails: ['m-fields'] },
   { name: 'the points the race has not charted are read', file: MODULE, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1', ''), fails: ['m-rows'] },
   { name: 'the points of systems the race does not know are read', file: MODULE, change: swap('inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID', 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID'), fails: ['m-rows'] },
   { name: 'the survey of every race is read', file: MODULE, change: swap('FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and', 'FCT_RaceJumpPointSurvey.RaceID > 0 and'), fails: ['m-rows'] },
