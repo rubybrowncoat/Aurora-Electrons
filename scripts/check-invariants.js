@@ -1751,6 +1751,9 @@ const defineCases = (modules) => {
     assert.deepEqual(logistics.mspMineralShortfall(colony, null), [])
   })
 
+  // A row of the page's ship read (`loadMaintenanceShips`): an ordinary warship in a fleet at the origin of system 1, with every figure the maintenance step reads.
+  const rawShip = (over = {}) => ({ ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'System', OrbitBodyID: 1, Xcor: 0, Ycor: 0, AssignedPopulationID: 0, ShipClassID: 1, ClassName: 'Class', Size: 1, Cost: 0, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, ClassSupplies: 0, MaintPriority: 0, CurrentMaintSupplies: 0, MaintenanceState: 0, LastOverhaul: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0, ...over })
+
   invariant('logistics', 'how long a colony\'s Sorium lasts is unavailable while its refinery output or stock is not known or nothing is refined, and a location leaves a colony without a production figure out of its sum and counts it', () => {
     const colony = { FuelProdStatus: 1, Refineries: 4, FuelProduction: 1000, Sorium: 20 }
     const output = logistics.refineryOutput(colony, 1)
@@ -1760,9 +1763,9 @@ const defineCases = (modules) => {
     assert.equal(logistics.soriumLasts(colony, logistics.refineryOutput(colony, null)).status, 'unavailable')
     assert.equal(logistics.soriumLasts({ ...colony, FuelProdStatus: 0 }, logistics.refineryOutput({ ...colony, FuelProdStatus: 0 }, 1)).status, 'unavailable')
 
-    const make = (id) => ({ PopulationID: id, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 1 })
-    const fleets = [{ FleetID: 1, SystemID: 1, OrbitBodyID: 1, MaintainedTons: 100, MaintainedShips: 1, AnnualMSP: 10, MaintenanceModules: 0, SupplyMSP: 0 }]
-    const place = (colonies, modifierOf) => logistics.maintenanceLocations({ colonies, fleets, modifierOf, maintenanceCapacity: 1, economicModifier: 1 })[0]
+    const make = (id) => ({ PopulationID: id, SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 1 })
+    const ships = [rawShip({ Size: 2, Cost: 40 })]
+    const place = (colonies, modifierOf) => logistics.maintenanceLocations({ colonies, ships, modifierOf, maintenanceCapacity: 1, economicModifier: 1 })[0]
     const mixed = place([make(1), make(2)], (id) => (id === 1 ? 1 : null))
 
     assert.equal(mixed.production, 40)
@@ -1781,10 +1784,11 @@ const defineCases = (modules) => {
   })
 
   invariant('logistics', 'a maintenance location leaves an unknown capacity, tonnage, stock or supply out and names it, while a real 0 still counts', () => {
-    const colony = { PopulationID: 1, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 0, MaintenanceStockpile: 100, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 50, WarningMSP: 0 }
-    const fleet = { FleetID: 1, SystemID: 1, OrbitBodyID: 1, MaintainedTons: 100, MaintainedShips: 1, AnnualMSP: 10, MaintenanceModules: 0, SupplyMSP: 5 }
-    const place = (colonies, fleets) => logistics.maintenanceLocations({ colonies, fleets, modifierOf: () => 1, maintenanceCapacity: 50, economicModifier: 1 })[0]
-    const whole = place([colony], [fleet])
+    const colony = { PopulationID: 1, SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 0, MaintenanceStockpile: 100, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 50, WarningMSP: 0 }
+    const fleet = rawShip({ Size: 2, Cost: 40 })
+    const supplier = rawShip({ ShipID: 2, FleetID: 2, Commercial: 1, SupplyShip: 1, CurrentMaintSupplies: 5 })
+    const place = (colonies, ships) => logistics.maintenanceLocations({ colonies, ships, modifierOf: () => 1, maintenanceCapacity: 50, economicModifier: 1 })[0]
+    const whole = place([colony], [fleet, supplier])
 
     assert.equal(whole.capacity, 50)
     assert.equal(whole.rate, 0.5)
@@ -1797,7 +1801,7 @@ const defineCases = (modules) => {
     assert.equal(logistics.facilityCapacity({ ...colony, MaintenanceFacilities: 0, Efficiency: null }), 0)
     assert.equal(logistics.facilityCapacity({ ...colony, Efficiency: -1 }), 0)
 
-    const noCapacity = place([{ ...colony, Efficiency: null }], [fleet])
+    const noCapacity = place([{ ...colony, Efficiency: null }], [fleet, supplier])
 
     assert.equal(noCapacity.capacity, null)
     assert.equal(noCapacity.capacityResult.status, 'unavailable')
@@ -1805,32 +1809,32 @@ const defineCases = (modules) => {
     assert.equal(noCapacity.upkeep, null)
     assert.equal(noCapacity.net, null)
     assert.equal(noCapacity.netResult.status, 'unavailable')
-    assert.equal(place([{ ...colony, Efficiency: null }], [{ ...fleet, AnnualMSP: 0 }]).upkeep, 0)
-    assert.equal(place([{ ...colony, Efficiency: null }], [{ ...fleet, MaintainedTons: 0 }]).rate, 1)
+    assert.equal(place([{ ...colony, Efficiency: null }], [{ ...fleet, Cost: 0 }]).upkeep, 0)
+    assert.equal(place([{ ...colony, Efficiency: null }], [{ ...fleet, Size: 0 }]).rate, 1)
 
-    const moduleUnknown = place([colony], [{ ...fleet, ModulesUnknown: 1 }])
+    const moduleUnknown = place([colony], [fleet, rawShip({ ShipID: 3, FleetID: 3, Commercial: 1, Modules: null })])
 
     assert.equal(moduleUnknown.capacity, null)
     assert.ok(moduleUnknown.capacityResult.inputs.missing.some((text) => text.includes('maintenance modules')))
-    assert.equal(place([colony], [{ ...fleet, MaintenanceModules: 2 }]).capacity, 150)
+    assert.equal(place([colony], [fleet, rawShip({ ShipID: 3, FleetID: 3, Commercial: 1, Modules: 2 })]).capacity, 150)
 
-    const noTons = place([colony], [{ ...fleet, TonsUnknown: 1 }])
+    const noTons = place([colony], [{ ...fleet, Size: null }])
 
     assert.equal(noTons.tons, null)
     assert.equal(noTons.upkeep, null)
     assert.equal(noTons.tonsResult.status, 'unavailable')
     assert.ok(noTons.tonsResult.inputs.missing.some((text) => text.includes('maintained ships')))
 
-    const mixedTons = place([colony], [fleet, { ...fleet, FleetID: 2, MaintainedTons: null }])
+    const mixedTons = place([colony], [fleet, { ...fleet, ShipID: 2, FleetID: 2, Size: null }])
 
     assert.equal(mixedTons.tons, null)
     assert.equal(mixedTons.tonsResult.status, 'unavailable')
     assert.equal(mixedTons.upkeep, null)
-    assert.equal(place([colony], [fleet, { ...fleet, FleetID: 2 }]).tonsResult.value, 200)
-    assert.equal(place([colony], [{ ...fleet, MaintainedUnknown: 1, AnnualMSP: 0 }]).upkeep, null)
-    assert.equal(place([colony], [{ ...fleet, MaintainedTons: null }]).tons, null)
+    assert.equal(place([colony], [fleet, { ...fleet, ShipID: 2, FleetID: 2 }]).tonsResult.value, 200)
+    assert.equal(place([colony], [{ ...fleet, Commercial: null, Cost: 0 }]).upkeep, null)
+    assert.equal(place([colony], [{ ...fleet, Size: null }]).tons, null)
 
-    const noStock = place([{ ...colony, MaintenanceStockpile: null }], [fleet])
+    const noStock = place([{ ...colony, MaintenanceStockpile: null }], [fleet, supplier])
 
     assert.equal(noStock.stock, null)
     assert.equal(noStock.stockUnknown, 1)
@@ -1840,19 +1844,19 @@ const defineCases = (modules) => {
     assert.equal(noStock.runwayResult.status, 'unavailable')
     assert.ok(noStock.runwayResult.inputs.missing.some((text) => text.includes('stockpile')))
 
-    const partial = place([colony, { ...colony, PopulationID: 2, MaintenanceStockpile: null }], [fleet])
+    const partial = place([colony, { ...colony, PopulationID: 2, MaintenanceStockpile: null }], [fleet, supplier])
 
     assert.equal(partial.stock, 100)
     assert.equal(partial.stockUnknown, 1)
     assert.equal(partial.runway, null)
 
-    const noSupply = place([colony], [{ ...fleet, SupplyUnknown: 1 }])
+    const noSupply = place([colony], [fleet, { ...supplier, CurrentMaintSupplies: null }])
 
     assert.equal(noSupply.supply, null)
     assert.equal(noSupply.supplyUnknown, 1)
-    assert.equal(place([colony], [{ ...fleet, SupplyMSP: null }]).supply, null)
-    assert.equal(place([colony], [{ ...fleet, SupplyMSP: 0 }]).supply, 0)
-    assert.equal(place([{ ...colony, MaintenanceStockpile: 0 }], [{ ...fleet, SupplyMSP: 0 }]).stock, 0)
+    assert.equal(place([colony], [fleet, { ...supplier, SupplyShip: null }]).supply, null)
+    assert.equal(place([colony], [fleet, { ...supplier, CurrentMaintSupplies: 0 }]).supply, 0)
+    assert.equal(place([{ ...colony, MaintenanceStockpile: 0 }], [fleet, { ...supplier, CurrentMaintSupplies: 0 }]).stock, 0)
 
     const total = logistics.columnTotal('logistics.fuelStock', [{ Fuel: 5 }, { Fuel: null }, { Fuel: 7, Flag: 1 }], 'Fuel', 'the fuel aboard', 'ships', ['Flag'])
 

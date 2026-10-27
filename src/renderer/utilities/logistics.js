@@ -1,6 +1,7 @@
 // Fuel and maintenance-supply maths for the Logistics page. Sources and checks: docs/plans/aurcalcs/build-2.md § Logistics.
 
 import { crewFraction } from './crew'
+import { maintenanceClusters, shipFigures } from './maintenance-pools'
 import { roundToDecimal } from './math'
 import { fleetCommandChain } from './minerals'
 import { MINING_BONUS, MINING_WITHHELD } from './mining-data'
@@ -128,18 +129,16 @@ export const mspMineralShortfall = (colony, modifier) => {
   return colony.MaintProdStatus && isAvailable(production) ? mspMineralLimits(colony).filter(({ msp }) => msp !== null && msp < production.value).map(({ name }) => name) : []
 }
 
-// Tons the colony's facilities can maintain (docs `maintenance`, rule 6), as a number or null while any of its factors is not in the save (a colony with no facilities maintains 0 whatever else is missing). Never negative: a bombarded or rioting colony's modifier bottoms out at zero.
+// Tons the colony's facilities can maintain (docs `maintenance`, rule 6), as a number or null while any of its factors is not in the save (a colony with no facilities maintains 0 whatever else is missing). Never negative: a bombarded or rioting colony's modifier bottoms out at zero. The race's economic modifier is not a factor of the capacity: it multiplies the coverage of the tonnage there (`maintenanceLocations`).
 export const facilityCapacity = (colony) => {
   if (colony.MaintenanceFacilities === 0) {
     return 0
   }
 
-  const factors = [colony.MaintenanceFacilities, colony.MaintenanceCapacity, colony.Efficiency, colony.CapacityModifier, colony.EconomicProdModifier]
+  const factors = [colony.MaintenanceFacilities, colony.MaintenanceCapacity, colony.Efficiency, colony.CapacityModifier]
 
   return factors.every(isNumber) ? Math.max(0, factors.reduce((product, factor) => product * factor, 1)) : null
 }
-
-const locationKey = (fleet) => (fleet.OrbitBodyID > 0 ? `body-${fleet.OrbitBodyID}` : `space-${fleet.SystemID}-${Math.round(fleet.Xcor)}-${Math.round(fleet.Ycor)}`)
 
 // A stored column summed over rows, as { result, unknown, value, gap } under `rule`: a row whose figure is not a number, or whose `flags` (columns counting the ships behind it that the save does not describe) are above 0, is left out and counted. A row that is itself a sum may count, in `missingKey`, the members it left out: the row then stays in the sum as a partial figure, those members are counted as unknown and the result says so. `value` is the sum of the rest (null when no row has a figure), `gap` names what is missing, null when nothing is.
 export const columnTotal = (rule, rows, key, label, noun, flags = [], missingKey = null) => {
@@ -159,30 +158,31 @@ const LOCATION_RULE = 'logistics.maintenanceLocation'
 const STOCK_RULE = 'logistics.maintenanceStock'
 const FLEET_RULE = 'logistics.maintainedFleet'
 
-// Maintenance locations: every colony body, and every spot in space with ships. Ships use MSP where they are, not where they're assigned: populations there first, then supply ships, then their own. Commercial classes and craft in military hangars need none. Over capacity, every ship there is maintained at the Effective Maintenance Rate (capacity / tons) and uses that share of its MSP. `modifierOf(PopulationID)`: the colony's overall production modifier, null where it is not in the save. A colony with no production figure stays out of the location's production, potential and blocked sums and is counted in `uncounted`; a location whose colonies all lack one has null for them (and for `net`) and unavailable `productionResult`, `potentialResult` and `netResult`. A fleet row may carry `MaintainedUnknown`, `TonsUnknown`, `AnnualUnknown`, `ModulesUnknown` and `SupplyUnknown` (counts of its ships whose class or stock the save does not describe): that fleet's figure is left out. The tonnage, upkeep and capacity are whole figures or null: `capacity`, `tons`, `ships`, `required`, `rate`, `upkeep`, `net` and `runway` are null while an input is missing, each with a result (`capacityResult`, `tonsResult`, `upkeepResult`, `netResult`, `runwayResult`) that names it; `stock` and `supply` are the sum of the rows that have a figure (null when none does) with `stockUnknown` and `supplyUnknown` counting the rest and a result saying so.
-export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenanceCapacity, economicModifier }) => {
-  const locations = {}
-  const at = (key) => (locations[key] = locations[key] || { key, colonies: [], fleets: [] })
+// Maintenance locations as the game groups them (`maintenanceClusters`, maintenance-pools.js): the pools of colonies with maintenance facilities and ships with undamaged maintenance modules, with the ships they maintain and the supply ships they draw on, and the places with no maintenance at all (colonies without facilities, ships with no pool). Ships use MSP where their pool is: its colonies by stock, then its supply ships, then their own. Commercial classes and craft in military hangars need none. Over capacity, every ship there is maintained at the coverage (capacity x the economic modifier / tons) and uses that share of its MSP. `ships`: the rows of `loadMaintenanceShips`; `modifierOf(PopulationID)`: the colony's overall production modifier, null where it is not in the save. A colony with no production figure stays out of the location's production, potential and blocked sums and is counted in `uncounted`; a location whose colonies all lack one has null for them (and for `net`) and unavailable `productionResult`, `potentialResult` and `netResult`. A ship whose class, cost, size or stock the save does not describe (`shipFigures`) leaves its figure out and is counted unknown. The tonnage, upkeep and capacity are whole figures or null: `capacity`, `tons`, `ships`, `required`, `rate`, `upkeep`, `net` and `runway` are null while an input is missing, each with a result (`capacityResult`, `tonsResult`, `upkeepResult`, `netResult`, `runwayResult`) that names it; `stock` and `supply` (the whole stock of the supply ships, which the maintenance step draws) are the sum of the rows that have a figure (null when none does) with `stockUnknown` and `supplyUnknown` counting the rest and a result saying so, and `supplyAbove` is the part of it above the class minimums. A colony that supports several pools is in each of them, so the rows' stock and production are summed over distinct colonies by the caller.
+export const maintenanceLocations = ({ colonies, ships, modifierOf, maintenanceCapacity, economicModifier }) => {
+  const { clusters, places } = maintenanceClusters({ colonies, ships, capacityOf: facilityCapacity, racialCapacity: maintenanceCapacity })
+  const groups = [
+    ...clusters.map((cluster) => ({ key: cluster.key, pool: cluster, colonies: cluster.colonies, located: cluster.located, ships: cluster.ships, sources: cluster.sources })),
+    ...places.map((place) => ({ key: place.key, pool: null, colonies: place.colonies, located: place.colonies, ships: place.ships, sources: [] })),
+  ]
 
-  colonies.forEach((colony) => at(`body-${colony.SystemBodyID}`).colonies.push(colony))
-  fleets.forEach((fleet) => at(locationKey(fleet)).fleets.push(fleet))
-
-  return Object.values(locations).map((location) => {
-    const capacities = location.colonies.map(facilityCapacity)
-    const surfaceUnknown = capacities.filter((value) => value === null).length
-    const surfaceCapacity = capacities.reduce((total, value) => total + (value ?? 0), 0)
-    const modules = columnTotal(FLEET_RULE, location.fleets, 'MaintenanceModules', 'the maintenance modules aboard', 'fleets', ['ModulesUnknown'])
-    const racialKnown = isNumber(maintenanceCapacity) && isNumber(economicModifier)
-    const capacityGaps = [...(surfaceUnknown ? [`the maintenance facility figures of ${surfaceUnknown} ${surfaceUnknown === 1 ? 'colony' : 'colonies'}`] : []), ...(modules.gap ? [modules.gap] : []), ...(modules.value > 0 && !racialKnown ? ['the racial maintenance capacity and the economic modifier'] : [])]
-    const capacity = capacityGaps.length ? null : surfaceCapacity + (modules.value > 0 ? modules.value * maintenanceCapacity * economicModifier : 0)
+  return groups.map((location) => {
+    const rows = (location.pool ? [...new Set([...location.pool.assigned, ...location.pool.supplyShips])] : location.ships).map((ship) => ({ ...ship, ...shipFigures(ship) }))
+    const unknownSources = (kind) => location.sources.filter((source) => source.kind === kind && source.tons === null).length
+    const surfaceUnknown = unknownSources('colony')
+    const moduleUnknown = unknownSources('module')
+    const surfaceCapacity = location.sources.filter((source) => source.kind === 'colony').reduce((total, source) => total + (source.tons ?? 0), 0)
+    const capacityGaps = [...(surfaceUnknown ? [`the maintenance facility figures of ${surfaceUnknown} ${surfaceUnknown === 1 ? 'colony' : 'colonies'}`] : []), ...(moduleUnknown ? [`the undamaged maintenance modules of ${moduleUnknown} ${moduleUnknown === 1 ? 'ship' : 'ships'}${isNumber(maintenanceCapacity) ? '' : ' and the racial maintenance capacity'}`] : [])]
+    const capacity = capacityGaps.length ? null : location.sources.reduce((total, source) => total + source.tons, 0)
     const capacityResult = capacity === null ? unavailable({ rule: CAPACITY_RULE, missing: capacityGaps }) : ofRule({ rule: CAPACITY_RULE, value: capacity, inputs: { present: ['the facilities and maintenance modules there'] } })
-    const tonsTotal = columnTotal(FLEET_RULE, location.fleets, 'MaintainedTons', 'the size of the maintained ships', 'fleets', ['MaintainedUnknown', 'TonsUnknown'])
-    const shipsTotal = columnTotal(FLEET_RULE, location.fleets, 'MaintainedShips', 'the maintained ships', 'fleets', ['MaintainedUnknown'])
-    const requiredTotal = columnTotal(FLEET_RULE, location.fleets, 'AnnualMSP', 'the maintenance cost of the ships', 'fleets', ['MaintainedUnknown', 'AnnualUnknown'])
+    const tonsTotal = columnTotal(FLEET_RULE, rows, 'MaintainedTons', 'the size of the maintained ships', 'ships', ['MaintainedUnknown', 'TonsUnknown'])
+    const shipsTotal = columnTotal(FLEET_RULE, rows, 'MaintainedShips', 'the maintained ships', 'ships', ['MaintainedUnknown'])
+    const requiredTotal = columnTotal(FLEET_RULE, rows, 'AnnualMSP', 'the maintenance cost of the ships', 'ships', ['MaintainedUnknown', 'AnnualUnknown'])
     const tons = wholeValue(tonsTotal)
     const required = wholeValue(requiredTotal)
-    const rate = tons === null ? null : tons > 0 ? (capacity === null ? null : Math.min(1, Math.max(0, capacity / tons))) : 1
-    const rateGaps = tons === null ? [tonsTotal.gap] : tons > 0 && capacity === null ? capacityGaps : []
+    const modifierKnown = isNumber(economicModifier)
+    const rate = tons === null ? null : tons > 0 ? (capacity === null || !modifierKnown ? null : Math.min(1, Math.max(0, capacity * economicModifier / tons))) : 1
+    const rateGaps = tons === null ? [tonsTotal.gap] : tons > 0 && capacity === null ? capacityGaps : tons > 0 && !modifierKnown ? ['the race\'s economic modifier'] : []
     const upkeepGaps = [...(requiredTotal.gap ? [requiredTotal.gap] : []), ...rateGaps]
     const upkeepResult = required === 0 ? ofRule({ rule: LOCATION_RULE, value: 0, inputs: { present: ['the ships there need no maintenance supplies'] } }) : upkeepGaps.length ? unavailable({ rule: LOCATION_RULE, missing: upkeepGaps }) : ofRule({ rule: LOCATION_RULE, value: required * rate, inputs: { present: ['the maintenance cost of the ships', 'the tonnage and the capacity there'] } })
     const upkeep = valueOrNull(upkeepResult)
@@ -196,21 +196,25 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
     const blocked = location.colonies.reduce((total, colony, index) => total + (colony.MaintProdStatus && isAvailable(potentials[index]) && isAvailable(outputs[index]) ? potentials[index].value - outputs[index].value : 0), 0)
     const missing = [...new Set(location.colonies.flatMap((colony) => mspMineralShortfall(colony, modifierOf(colony.PopulationID))))]
     const stock = columnTotal(STOCK_RULE, location.colonies, 'MaintenanceStockpile', 'the colony\'s maintenance stockpile', 'colonies')
-    const supply = columnTotal(STOCK_RULE, location.fleets, 'SupplyMSP', 'the spare MSP of the supply ships', 'fleets', ['SupplyUnknown'])
+    const supplyRows = rows.filter((row) => row.designated !== false)
+    const supply = columnTotal(STOCK_RULE, supplyRows, 'SupplyMSP', 'the stock of the supply ships', 'ships', ['SupplyUnknown'])
+    const supplyAbove = columnTotal(STOCK_RULE, supplyRows, 'SupplyAboveMinimum', 'the stock of the supply ships above their minimums', 'ships', ['SupplyUnknown'])
     const netResult = combine({ rule: LOCATION_RULE, parts: { production: made.result, upkeep: upkeepResult }, compute: (values) => values.production - values.upkeep, inputs: { present: ['the upkeep of the ships there'] } })
     const net = valueOrNull(netResult)
     const stockGaps = [stock.gap, supply.gap].filter(Boolean)
-    // Years until the colonies' stock and the supply ships' spare MSP run out; none to give while the net is not negative, unavailable while the stock is not whole.
-    const runwayResult = net === null || net >= 0 ? null : stockGaps.length ? unavailable({ rule: LOCATION_RULE, missing: stockGaps }) : ofRule({ rule: LOCATION_RULE, value: (stock.value + supply.value) / -net, inputs: { present: ['the stock and the supply ships\' spare MSP', 'the net MSP a year'] } })
+    // Years until the colonies' stock and the supply ships' stock run out; none to give while the net is not negative, unavailable while the stock is not whole.
+    const runwayResult = net === null || net >= 0 ? null : stockGaps.length ? unavailable({ rule: LOCATION_RULE, missing: stockGaps }) : ofRule({ rule: LOCATION_RULE, value: (stock.value + supply.value) / -net, inputs: { present: ['the stock and the supply ships\' stock', 'the net MSP a year'] } })
 
     return {
       ...location,
       surfaceCapacity,
       capacity,
+      economicModifier: modifierKnown ? economicModifier : null,
       capacityResult,
       tons,
       tonsResult: tons === null ? unavailable({ rule: FLEET_RULE, missing: [tonsTotal.gap || 'the size of the maintained ships'] }) : tonsTotal.result,
       ships: wholeValue(shipsTotal),
+      shipRows: location.ships,
       required,
       rate,
       upkeep,
@@ -227,6 +231,7 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
       stockResult: stock.result,
       stockUnknown: stock.unknown,
       supply: supply.value,
+      supplyAbove: supplyAbove.value,
       supplyResult: supply.result,
       supplyUnknown: supply.unknown,
       net,
@@ -236,6 +241,28 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
       warningLevel: columnTotal(STOCK_RULE, location.colonies, 'WarningMSP', 'the warning level', 'colonies').value ?? 0,
     }
   })
+}
+
+// What the maintenance locations hold and make together. A colony can support several locations and a ship can be listed in more than one, so the stock, the production and the supply ships are summed over the distinct colonies and ships, never over the locations' own figures. Each figure comes with its result and the count of what the save does not give.
+export const maintenanceSupplyTotals = (locations, modifierOf) => {
+  const colonies = [...new Map(locations.flatMap((location) => location.colonies).map((colony) => [colony.PopulationID, colony])).values()]
+  const ships = [...new Map(locations.flatMap((location) => location.shipRows).map((ship) => [ship.ShipID, { ...ship, ...shipFigures(ship) }])).values()]
+  const made = totalOf('logistics.mspOutput', colonies.map((colony) => mspOutput(colony, modifierOf(colony.PopulationID))), 'colonies')
+  const possible = totalOf('logistics.mspProduction', colonies.map((colony) => mspProduction(colony, modifierOf(colony.PopulationID))), 'colonies')
+  const stock = columnTotal(STOCK_RULE, colonies, 'MaintenanceStockpile', 'the colony\'s maintenance stockpile', 'colonies')
+  const supply = columnTotal(STOCK_RULE, ships.filter((ship) => ship.designated !== false), 'SupplyMSP', 'the stock of the supply ships', 'ships', ['SupplyUnknown'])
+  const stocks = totalOf(STOCK_RULE, [stock.result, supply.result], 'stocks')
+
+  return {
+    stock: stock.value ?? 0,
+    supply: supply.value ?? 0,
+    stockResult: stocks.result,
+    stockUnknown: stock.unknown + supply.unknown,
+    production: valueOrNull(made.result),
+    productionResult: made.result,
+    uncounted: made.unknown,
+    potential: valueOrNull(possible.result) ?? 0,
+  }
 }
 
 // Fuel a class burns per ship and year at full power: engine power x litres per EP-hour.
@@ -485,8 +512,8 @@ registerRule({
   versions: LOGISTICS_VERSIONS,
   units: 't',
   verification: 'estimated',
-  structure: ['FCT_Population.MaintenanceFacilities, MaintenanceCapacity, Efficiency, CapacityModifier, EconomicProdModifier'],
-  note: 'Facilities times the racial capacity times the colony\'s efficiency and modifiers, never negative, from the game\'s documentation; not compared with a stored figure.',
+  structure: ['FCT_Population.MaintenanceFacilities, MaintenanceCapacity, Efficiency, CapacityModifier'],
+  note: 'Facilities times the racial capacity times the colony\'s efficiency and modifiers, never negative, from the game\'s documentation; the maintenance location cuts it to a whole number of tons. Not compared with a stored figure.',
 })
 
 registerRule({
@@ -504,7 +531,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_Population.MaintenanceStockpile, WarningMSP', 'FCT_Ship.CurrentMaintSupplies and FCT_ShipClass.MinimumSupplies of the supply ships'],
-  note: 'The stored maintenance stockpiles of the colonies at a spot and the spare MSP (above the class minimum) of the supply ships there, summed as stored.',
+  note: 'The stored maintenance stockpiles of the colonies that support a location and the whole stock of the supply ships there, summed as stored. The class minimum of a supply ship is kept apart: the maintenance step draws the whole stock.',
 })
 
 registerRule({
@@ -512,9 +539,9 @@ registerRule({
   versions: LOGISTICS_VERSIONS,
   units: 't, MSP/yr',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.Commercial, Size, Cost, MaintModules, Crew, SupplyShip', 'FCT_Ship.MaintenanceState, CurrentCrew, MothershipID'],
-  note: 'What the ships of a fleet need maintained and the maintenance modules aboard: military classes not in a military hangar, a class\'s cost over 4 (its full cost while overhauling) a year, modules scaled by the crew aboard. A fleet with a ship the save does not describe is left out of the sums.',
-  assumptions: ['A military class in no hangar is maintained where its fleet is'],
+  structure: ['FCT_ShipClass.Commercial, Size, Cost, SupplyShip', 'FCT_Ship.MaintenanceState, MothershipID'],
+  note: 'What the ships of a location need maintained: classes that are not commercial and not in a military hangar (a supply ship is tried before those tests), a class\'s cost over 4 (its full cost while overhauling) a year. A ship the save does not describe is left out of the sums.',
+  assumptions: ['A military class in no hangar is maintained where its fleet is', 'Ships in a training command and ships in a yard task are maintained like the rest'],
 })
 
 registerRule({
@@ -522,9 +549,9 @@ registerRule({
   versions: LOGISTICS_VERSIONS,
   units: 'MSP/yr, t, years',
   verification: 'estimated',
-  structure: ['FCT_Fleet.OrbitBodyID, Xcor, Ycor', 'FCT_ShipClass.Commercial, Size', 'FCT_Population maintenance columns'],
-  note: 'Capacity, upkeep, net MSP and runway of the ships and colonies at one spot. The documentation\'s worked example (100 kt in orbit against 80 kt of capacity gives 80 %) is reproduced; the figures are not compared with a stored total, and the upkeep draws from where ships are, not where they are assigned.',
-  assumptions: ['Ships use the supplies where they are, populations first, then supply ships, then their own', 'A ship in a military hangar needs none'],
+  structure: ['FCT_Fleet.Xcor, Ycor, SystemID', 'FCT_ShipClass.Commercial, Size', 'FCT_Population maintenance columns', 'logistics.maintenancePool'],
+  note: 'Capacity, upkeep, net MSP and runway of the ships and colonies of one maintenance location, grouped as the game groups them. The documentation\'s worked example (100 kt in orbit against 80 kt of capacity gives 80 %) is reproduced; the figures are not compared with a stored total.',
+  assumptions: ['Ships use the supplies of their location: its colonies, then its supply ships, then their own', 'A ship in a military hangar needs none'],
 })
 
 registerRule({

@@ -210,16 +210,16 @@
         </template>
 
         <template v-else-if="view === 'maintenance'">
-          <v-card class="panel" data-summary="The colonies where ships are maintained, with their supply stock, production and upkeep. Use it to spot locations that will run short of maintenance supplies." elevation="1">
+          <v-card class="panel" data-summary="The places where ships are maintained, a colony with maintenance facilities or a ship with maintenance modules, with their supply stock, production and upkeep. Open a row to see its capacity sources, the stock providers in the order they are drawn, and what each ship takes. Use it to spot locations that will run short of maintenance supplies." elevation="1">
             <div class="panel-head">
               <span>Maintenance locations<provenance-mark rule="logistics.maintenanceLocation" label /></span>
               <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
             </div>
-            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :custom-sort="sortNullLast" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
+            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" show-expand single-expand :expanded.sync="expandedLocations" :custom-sort="sortNullLast" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
-                <div class="py-2">
-                  <div class="font-weight-medium">{{ item.name }}<page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
-                  <div class="caption text--secondary">{{ item.place }}</div>
+                <div class="py-2" :data-location="item.key">
+                  <div class="font-weight-medium"><span data-location-name>{{ item.name }}</span><page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
+                  <div class="caption text--secondary" data-location-place>{{ item.place }}</div>
                 </div>
               </template>
               <template #[`item.stock`]="{ item }">
@@ -227,7 +227,7 @@
                   <v-icon v-if="item.belowWarning" small color="warning" :title="`Below the warning level of ${count(item.warningLevel)}`">mdi-alert</v-icon>
                   {{ count(item.stock) }}<provenance-mark v-if="item.stockUnknown" :result="item.stockResult" />
                 </span>
-                <div v-if="item.supply || item.supplyUnknown" class="caption text--secondary text-no-wrap">{{ item.supply === null ? 'Supply ships not known' : `+${count(item.supply)} on supply ships` }}<provenance-mark v-if="item.supplyUnknown" :result="item.supplyResult" /></div>
+                <div v-if="item.supply || item.supplyUnknown" class="caption text--secondary text-no-wrap" data-location-supply :title="item.supplyAbove === null ? '' : `${count(item.supplyAbove)} above the class minimums`">{{ item.supply === null ? 'Supply ships not known' : `+${count(item.supply)} ${locationWords.supply}` }}<provenance-mark v-if="item.supplyUnknown" :result="item.supplyResult" /></div>
               </template>
               <template #[`item.production`]="{ item }">
                 <span v-if="item.production === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.productionResult" /></span>
@@ -251,7 +251,7 @@
                 <span v-else class="text--secondary">—</span>
               </template>
               <template #[`item.upkeep`]="{ item }">
-                <span v-if="item.unmaintained" class="error--text text-no-wrap" title="No maintenance facilities or modules here: the ships' maintenance clocks are running">Not maintained</span>
+                <span v-if="item.unmaintained" class="error--text text-no-wrap" data-location-unmaintained title="No maintenance facilities or modules here: the ships' maintenance clocks are running">{{ locationWords.unmaintained }}</span>
                 <span v-else-if="item.upkeep === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.upkeepResult" /></span>
                 <span v-else-if="item.upkeep > 0" class="text-no-wrap">{{ count(item.upkeep) }}<span v-if="item.rate !== null && item.rate < 1" class="caption warning--text"> at {{ percent(item.rate) }}</span></span>
                 <span v-else class="text--secondary">—</span>
@@ -267,9 +267,14 @@
                 <span v-else-if="item.upkeep > 0" class="text--secondary">Covered</span>
                 <span v-else class="text--secondary">—</span>
               </template>
+              <template #expanded-item="{ headers: columns, item }">
+                <td :colspan="columns.length" class="pa-3">
+                  <maintenance-pool :location="item" :days="poolDays" :period="poolPeriod" />
+                </td>
+              </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}. Production here counts the minerals in stock alone; the panel below adds mining, packets and hauls on the days they arrive.
+              {{ groupingText }} Ships use supplies where their location is: the stock of its colonies first (the fullest colony first), then the supply ships there (the fullest first), then their own. The supply caption is the whole stock of the supply ships; their class minimums show in the open row. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity × the economic modifier / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}. Production here counts the minerals in stock alone; the panel below adds mining, packets and hauls on the days they arrive.
             </div>
           </v-card>
 
@@ -307,6 +312,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
+import MaintenancePool from '../components/logistics/MaintenancePool.vue'
 import MspSupply from '../components/logistics/MspSupply.vue'
 import FleetStations from '../components/fleets/FleetStations.vue'
 import ResourceReserves from '../components/logistics/ResourceReserves.vue'
@@ -326,7 +332,8 @@ import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
+import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, maintenanceLocations, maintenanceSupplyTotals, refineryYield, soriumLasts } from '../utilities/logistics'
+import { POOL_WORDS, SETTLED_POINTS, loadMaintenanceShips, periodDays, shipFigures } from '../utilities/maintenance-pools'
 import { donorTexts, loadFuelDonors, tankerReport } from '../utilities/fuel-donors'
 import { fuelReserveOf } from '../utilities/resource-reserves'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
@@ -338,7 +345,7 @@ import { MSP_HORIZONS, loadMspSupply, mspSupplyRows } from '../utilities/msp-sup
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
-  fleets: 'fleets and their ships',
+  maintenanceShips: 'the ships and their maintenance',
   harvesters: 'harvesters',
   burn: 'fuel burn by class',
   shipFuel: 'fuel on ships',
@@ -372,7 +379,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, FleetStations, FuelFigures, FuelReserves, LoadState, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
+  components: { ChartCanvas, FleetStations, FuelFigures, FuelReserves, LoadState, MaintenancePool, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -394,6 +401,8 @@ export default {
   data() {
     return {
       pageSizes: PAGE_SIZES,
+      // The maintenance location whose pool is open (one at a time, not kept between visits).
+      expandedLocations: [],
       horizonOptions: HARVESTER_HORIZONS,
       mspHorizonOptions: MSP_HORIZONS,
       sortNullLast,
@@ -614,16 +623,23 @@ export default {
       const economicModifier = this.colonies.length ? this.colonies[0].EconomicProdModifier : 1
       const maintenanceCapacity = this.colonies.length ? this.colonies[0].MaintenanceCapacity : 0
 
-      return maintenanceLocations({ colonies: this.colonies, fleets: this.fleets, modifierOf: this.modifierOf, maintenanceCapacity, economicModifier }).map((location) => {
-        const main = location.colonies.slice().sort((a, b) => b.Population - a.Population || b.MaintenanceStockpile - a.MaintenanceStockpile)[0]
-        const fleets = location.fleets.filter((fleet) => fleet.MaintainedShips > 0 || fleet.MaintenanceModules > 0 || fleet.SupplyMSP > 0)
+      return maintenanceLocations({ colonies: this.colonies, ships: this.maintenanceShips, modifierOf: this.modifierOf, maintenanceCapacity, economicModifier }).map((location) => {
+        const pool = location.pool
+        // A pool is named and placed from its anchor: the anchor colony, or for a module ship the most populous colony in the anchor's system. Sources of other systems within the grouping distance are sources and nothing more.
+        const here = pool ? location.located.filter((colony) => colony.SystemID === pool.SystemID) : location.located
+        const anchor = pool && pool.anchor.kind === 'colony' ? here.find((colony) => colony.PopulationID === pool.anchor.id) : null
+        const main = anchor || here.slice().sort((a, b) => b.Population - a.Population || b.MaintenanceStockpile - a.MaintenanceStockpile)[0]
+        const local = pool ? location.shipRows.filter((ship) => ship.SystemID === pool.SystemID) : location.shipRows
+        const shipsHere = local.length ? local : location.shipRows
+        const named = shipsHere.filter((ship) => shipFigures(ship).MaintainedShips > 0 || shipFigures(ship).SupplyMSP > 0 || Number(ship.Modules) > 0)
+        const fleetNames = [...new Set((named.length ? named : shipsHere).map((ship) => ship.FleetName))]
         const unmaintained = location.tons > 0 && location.capacity !== null && location.capacity <= 0
 
         return {
           ...location,
           PopulationID: main ? main.PopulationID : null,
-          name: main ? main.PopName : fleets.length ? fleets.map((fleet) => fleet.FleetName).slice(0, 2).join(', ') : location.fleets[0].FleetName,
-          place: main ? this.place(main) : `${location.fleets[0].SystemName || 'Unknown system'}, deep space`,
+          name: main ? main.PopName : fleetNames.slice(0, 2).join(', '),
+          place: main ? this.place(main) : `${shipsHere[0].SystemName || 'Unknown system'}, deep space`,
           unmaintained,
           belowWarning: location.warningLevel > 0 && location.stock !== null && location.stock < location.warningLevel,
           // The load unknown (null) sorts last: a tonnage or a capacity the save does not give is no load of 0.
@@ -640,28 +656,48 @@ export default {
 
     // The supply ships' fleets, a fleet with a ship the save does not describe with no figure (null).
     supplyFleets() {
-      return this.fleets.filter((fleet) => fleet.SupplyMSP >= 1 || fleet.SupplyUnknown > 0).map((fleet) => ({ ...fleet, SupplyMSP: fleet.SupplyUnknown > 0 ? null : fleet.SupplyMSP, place: fleet.SystemName || 'Unknown system' })).sort((a, b) => (b.SupplyMSP ?? -1) - (a.SupplyMSP ?? -1))
+      const fleets = new Map()
+
+      this.maintenanceShips.forEach((ship) => {
+        const figures = shipFigures(ship)
+        const fleet = fleets.get(ship.FleetID) || { FleetID: ship.FleetID, FleetName: ship.FleetName, SystemName: ship.SystemName, SupplyShips: 0, SupplyMSP: 0, SupplyUnknown: 0 }
+
+        fleet.SupplyShips += figures.designated === true ? 1 : 0
+        fleet.SupplyMSP += figures.SupplyAboveMinimum
+        fleet.SupplyUnknown += figures.SupplyUnknown
+        fleets.set(ship.FleetID, fleet)
+      })
+
+      return [...fleets.values()].filter((fleet) => fleet.SupplyMSP >= 1 || fleet.SupplyUnknown > 0).map((fleet) => ({ ...fleet, SupplyMSP: fleet.SupplyUnknown > 0 ? null : fleet.SupplyMSP, place: fleet.SystemName || 'Unknown system' })).sort((a, b) => (b.SupplyMSP ?? -1) - (a.SupplyMSP ?? -1))
     },
 
     supplyTotal() {
       return columnTotal('logistics.maintenanceStock', this.supplyFleets, 'SupplyMSP', 'the spare MSP of the supply ships', 'fleets')
     },
 
+    // The period the open pool is worked out over: the horizon the incoming-minerals panel below is set to.
+    poolDays() {
+      return periodDays(this.mspHorizon)
+    },
+
+    poolPeriod() {
+      return MSP_HORIZONS.find((option) => option.years === this.mspHorizon).label
+    },
+
+    groupingText() {
+      return SETTLED_POINTS.find((point) => point.key === 'grouping').text
+    },
+
+    locationWords() {
+      return POOL_WORDS.location
+    },
+
     mspTotals() {
       const sum = (key) => this.locations.reduce((total, location) => total + (location[key] ?? 0), 0)
       const unmaintained = this.locations.filter((location) => location.unmaintained)
-      const made = totalOf('logistics.mspOutput', this.locations.map((location) => location.productionResult), 'locations')
-      const stock = totalOf('logistics.maintenanceStock', this.locations.flatMap((location) => [location.stockResult, location.supplyResult]), 'locations')
 
       return {
-        stock: sum('stock'),
-        supply: sum('supply'),
-        stockResult: stock.result,
-        stockUnknown: sum('stockUnknown') + sum('supplyUnknown'),
-        production: valueOrNull(made.result),
-        productionResult: made.result,
-        uncounted: sum('uncounted'),
-        potential: sum('potential'),
+        ...maintenanceSupplyTotals(this.locations, this.modifierOf),
         upkeep: sum('upkeep'),
         upkeepUnknown: this.locations.filter((location) => location.upkeep === null).length,
         overloaded: this.locations.filter((location) => location.rate !== null && location.rate < 1 && location.capacity > 0).length,
@@ -883,20 +919,20 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.SystemBodyID, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.WarningMSP, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.WarningFuel, FCT_Population.Sorium, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Race.MSPProduction, FCT_Race.MaintenanceCapacity, FCT_Race.FuelProduction, FCT_Race.EconomicProdModifier, max(0, min(1, 1 - coalesce(FCT_SystemBody.RadiationLevel, 0) / 10000.0)) * max(0, min(1, 1 - FCT_Population.UnrestPoints / 100.0)) * coalesce(DIM_PopPoliticalStatus.ProductionMod, 1) as CapacityModifier, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite,
+        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.SystemBodyID, FCT_Population.SystemID, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.WarningMSP, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.WarningFuel, FCT_Population.Sorium, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Race.MSPProduction, FCT_Race.MaintenanceCapacity, FCT_Race.FuelProduction, FCT_Race.EconomicProdModifier, max(0, min(1, 1 - coalesce(FCT_SystemBody.RadiationLevel, 0) / 10000.0)) * max(0, min(1, 1 - FCT_Population.UnrestPoints / 100.0)) * coalesce(DIM_PopPoliticalStatus.ProductionMod, 1) as CapacityModifier, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite,
           coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.MaintenanceFacilities, 0) as MaintenanceFacilities, coalesce(VIR_Installations.Refineries, 0) as Refineries, coalesce(VIR_Installations.Refuel, 0) as CanRefuel, coalesce(VIR_Installations.Resupply, 0) as CanResupply from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
           left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.MaintenanceValue * FCT_PopulationInstallations.Amount) as MaintenanceFacilities, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries, sum(DIM_PlanetaryInstallation.MiningProductionValue * FCT_PopulationInstallations.Amount) as Mines, max(case when DIM_PlanetaryInstallation.MassRefuelling > 0 then 1 else 0 end) as Refuel, max(case when DIM_PlanetaryInstallation.MaintenanceValue > 0 or DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Resupply from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
     },
-    // Per fleet: what its ships need maintained (military classes not in a military hangar), the maintenance modules aboard (scaled by crew), and supply ships' MSP above their minimums.
-    fleets: {
-      get: tracked('fleets', async function () {
+    // Every ship of the race with what its maintenance step reads (utilities/maintenance-pools.js): the fleet's place and assigned colony, the class's size, cost and designations, the ship's state and own stock, and the undamaged maintenance modules and cargo shuttle bays.
+    maintenanceShips: {
+      get: tracked('maintenanceShips', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then 1 else 0 end) as MaintainedShips, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then FCT_ShipClass.Size * 50 else 0 end) as MaintainedTons, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then case when FCT_Ship.MaintenanceState = 2 then FCT_ShipClass.Cost else FCT_ShipClass.Cost / 4.0 end else 0 end) as AnnualMSP, sum(case when FCT_Ship.MothershipID = 0 and FCT_ShipClass.MaintModules > 0 then FCT_ShipClass.MaintModules * case when FCT_ShipClass.Crew > 0 then min(1.0, max(0, FCT_Ship.CurrentCrew) * 1.0 / FCT_ShipClass.Crew) else 1 end else 0 end) as MaintenanceModules, sum(case when FCT_ShipClass.SupplyShip = 1 and FCT_Ship.CurrentMaintSupplies > FCT_ShipClass.MinimumSupplies then FCT_Ship.CurrentMaintSupplies - FCT_ShipClass.MinimumSupplies else 0 end) as SupplyMSP, sum(case when FCT_ShipClass.SupplyShip = 1 then 1 else 0 end) as SupplyShips, sum(case when FCT_ShipClass.Commercial is null then 1 else 0 end) as MaintainedUnknown, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 and FCT_ShipClass.Size is null then 1 else 0 end) as TonsUnknown, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 and (FCT_ShipClass.Cost is null or FCT_Ship.MaintenanceState is null) then 1 else 0 end) as AnnualUnknown, sum(case when FCT_Ship.MothershipID = 0 and (FCT_ShipClass.MaintModules is null or (FCT_ShipClass.MaintModules > 0 and (FCT_ShipClass.Crew is null or (FCT_ShipClass.Crew > 0 and FCT_Ship.CurrentCrew is null)))) then 1 else 0 end) as ModulesUnknown, sum(case when FCT_ShipClass.SupplyShip is null or (FCT_ShipClass.SupplyShip = 1 and (FCT_Ship.CurrentMaintSupplies is null or FCT_ShipClass.MinimumSupplies is null)) then 1 else 0 end) as SupplyUnknown from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join (select FCT_Ship.ShipID, FCT_ShipClass.CommercialHangar from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}) as VIR_Mothership on VIR_Mothership.ShipID = FCT_Ship.MothershipID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_Fleet.FleetID`).then(([items]) => items)
+        return await loadMaintenanceShips(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
     },
