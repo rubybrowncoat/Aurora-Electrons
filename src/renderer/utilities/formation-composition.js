@@ -91,7 +91,7 @@ const classRows = (node, template) => {
 // The bays of the race's troop ships (`troops`: { classes: [{ TroopCapacity, Ships }] }, null when the save does not give them) that can hold a formation: a class counts when its capacity and its number of ships are whole figures above 0.
 const baysOf = (troops) => (troops && Array.isArray(troops.classes) ? troops.classes.filter((item) => item && isNumber(item.TroopCapacity) && Number.isInteger(item.Ships) && item.Ships > 0).map((item) => ({ TroopCapacity: item.TroopCapacity, Ships: item.Ships })) : [])
 
-// Whether a formation of `mass` fits one troop bay of the race's ships (`carryFormations` of utilities/mine-bootstrap.js, whole formations only): { kind, mass, largest }, `kind` being `fits`, `oversize` (more than the largest bay holds), `no-bays` (no troop ship), `unsized` (the mass is not known) or `unknown` (the troop ships are not known). With no bay at all `carryFormations` would wait forever for room for a formation of no mass, so it is not asked then.
+// Whether a formation of `mass` fits one troop bay of the race's ships (`carryFormations` of utilities/mine-bootstrap.js, whole formations only): { kind, mass, largest }, `kind` being `fits`, `oversize` (more than the largest bay holds), `no-bays` (no troop ship), `unsized` (the mass is not known) or `unknown` (the troop ships are not known). With no bay at all the kind is `no-bays`, not the `oversize` that `carryFormations` would give, so it is not asked then.
 export const troopFit = (mass, troops) => {
   const known = isNumber(mass) ? mass : null
 

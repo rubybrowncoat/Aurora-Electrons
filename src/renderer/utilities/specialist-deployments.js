@@ -268,7 +268,7 @@ const liftOf = (rows, troops, pool) => {
   const place = (list) => {
     const verdict = (id, kind, lift = null, lifts = null) => result.set(id, { kind, lift, lifts, largest })
 
-    // With no bay at all nothing is carried, and `carryFormations` would wait forever for room for a formation of no mass.
+    // With no bay at all the verdict is `no-bays` (or `unsized`), not the `none` that `carryFormations` gives a formation larger than the largest bay, so it is not asked then.
     if (bays === 0) {
       list.forEach((row) => verdict(row.id, Number.isFinite(row.mass) ? 'no-bays' : 'unsized'))
 

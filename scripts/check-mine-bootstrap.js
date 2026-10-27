@@ -19,6 +19,8 @@ const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { runChild } = require('./lib/check-pool')
+const { HarnessError } = require('./lib/browser-observe')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
@@ -94,6 +96,97 @@ const fixtures = (m) => {
   const runGround = (over = {}) => m['mine-bootstrap'].groundRoute(ground(over))
 
   return { cap, split, MINE, AUTO, req, local, T, B1, B2, B3, FREIGHTER, options, importing, runImport, form, power, FACTOR, groundFormations, ground, runGround }
+}
+
+// `carryFormations` on inputs that once made it loop forever (a formation of no tonnage with no bay to hold it). A loop cannot be judged in the process that makes the checks, so a child of its own (`--carry-probe`, with the mutant's source when a fault is planted) answers every case, under a time limit; a child that does not answer in time fails the check by an assertion (the loop is the defect the check is for). A child that ends any other way (a nonzero exit, a crash of the subject or of the load, no answer, an answer of another shape) is a HarnessError, which stops the run: a crash is never credit for a planted fault.
+const CARRY_PROBE = 'CARRY-PROBE '
+const CARRY_LIMIT = 30000
+const CARRY_CASES = [
+  { name: 'no bay: every formation of known tonnage is held by none (a tonnage of 0 or below included) and an unknown one is unsized', classes: [], masses: [[1, 0], [2, 5000], [3, null], [4, -3]], expected: { carried: [], later: [], lifts: 0, oversize: [2, 1, 4], unsized: [3] } },
+  { name: 'classes with no ship are no bay', classes: [{ TroopCapacity: 8000, Ships: 0 }], masses: [[1, 0], [2, 100]], expected: { carried: [], later: [], lifts: 0, oversize: [2, 1], unsized: [] } },
+  { name: 'classes of unknown capacity are no bay', classes: [{ TroopCapacity: null, Ships: 2 }], masses: [[1, 0]], expected: { carried: [], later: [], lifts: 0, oversize: [1], unsized: [] } },
+  { name: 'a bay of negative capacity holds no formation, a tonnage of 0 included', classes: [{ TroopCapacity: -5, Ships: 1 }], masses: [[1, 0]], expected: { carried: [], later: [], lifts: 0, oversize: [1], unsized: [] } },
+  { name: 'only formations of unknown tonnage and no bay', classes: [], masses: [[1, null]], expected: { carried: [], later: [], lifts: 0, oversize: [], unsized: [1] } },
+  { name: 'no formation and no bay', classes: [], masses: [], expected: { carried: [], later: [], lifts: 0, oversize: [], unsized: [] } },
+  { name: 'a bay holds a formation of no tonnage beside a full one, and an unknown one is unsized', classes: [{ TroopCapacity: 8000, Ships: 1 }], masses: [[1, 0], [2, 8000], [3, null]], expected: { carried: [2, 1], later: [], lifts: 1, oversize: [], unsized: [3] } },
+  { name: 'a bay of capacity 0 holds a formation of no tonnage and no other', classes: [{ TroopCapacity: 0, Ships: 1 }], masses: [[1, 0], [2, 1]], expected: { carried: [1], later: [], lifts: 1, oversize: [2], unsized: [] } },
+]
+
+// The child of the carry probe: the answers of the real source or of the mutant named by CARRY_MUTANT. CARRY_CONTROL breaks the child on purpose for the control `carriage-harness`: `startup` (it fails before loading), `subject` (the subject throws), `silent` (it ends without an answer), `malformed` (an answer that is not JSON), `shape` (an answer of the wrong shape) or a kind of record in the right number of answers: `nulls`, `empty` (no fields), `partial` (a field missing), `text` (a list that is text), `ids` (a list that holds other than ids) or `lifts` (a lift count that is not a number).
+const carryProbe = async () => {
+  const control = process.env.CARRY_CONTROL
+
+  if (control === 'startup') {
+    throw new Error('the carry probe failed to start')
+  }
+
+  const mutant = MUTANTS.find(({ id }) => id === process.env.CARRY_MUTANT)
+  const real = mutant && mutant.file === U ? patched(U, textOf(U), mutant.find, mutant.replace) : textOf(U)
+  const source = control === 'subject' ? patched(U, real, 'const biggest = Math.max(...bays)', 'throw new Error(\'a planted throw of the subject\')') : real
+  const { 'mine-bootstrap': mb } = await loadUtilities(['mine-bootstrap'], { stubs: STUBS, sources: { 'mine-bootstrap': source } })
+  const ids = (items) => items.map((item) => item.formation.FormationID)
+
+  const answers = CARRY_CASES.map(({ classes, masses }) => {
+    const planned = mb.carryFormations(masses.map(([id, size]) => ({ formation: { FormationID: id, ownSize: size }, bp: 1 })), { classes })
+
+    return { carried: ids(planned.carried), later: ids(planned.later), lifts: planned.lifts, oversize: ids(planned.oversize), unsized: ids(planned.unsized) }
+  })
+
+  if (control === 'silent') {
+    process.exit(0)
+  }
+
+  const records = (change) => answers.map((record) => change(record))
+  const wrong = { shape: {}, nulls: records(() => null), empty: records(() => ({})), partial: records((record) => ({ carried: record.carried, later: record.later, oversize: record.oversize, lifts: record.lifts })), text: records((record) => ({ ...record, carried: 'none' })), ids: records((record) => ({ ...record, unsized: [null] })), lifts: records((record) => ({ ...record, lifts: '1' })) }
+
+  console.log(control === 'malformed' ? `${CARRY_PROBE}{not json` : `${CARRY_PROBE}${JSON.stringify(wrong[control] || answers)}`)
+  process.exit(0)
+}
+
+// The answers of the child, one per case. A child past its limit is the loop: an assertion. Any other way the child fails to answer, a launcher that throws or rejects included, is the harness's own failure (HarnessError). `launch` is the launcher of the child (the controls of `carriage-harness` give a broken one).
+const carryAnswers = async (mutant, control = '', launch = runChild) => {
+  let ended
+
+  try {
+    ended = await launch(__filename, ['--carry-probe'], { env: { CARRY_MUTANT: mutant || '', CARRY_CONTROL: control }, limit: CARRY_LIMIT })
+  } catch (error) {
+    throw new HarnessError(`the carry probe could not be started: ${error && error.message}`)
+  }
+
+  const { code, stdout, stderr, timedOut } = ended
+
+  assert.equal(timedOut, false, `carryFormations did not return in ${CARRY_LIMIT / 1000} s`)
+
+  const unfit = (why) => new HarnessError(`the carry probe ${why} (status ${code}): ${stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 400)}`)
+  const line = stdout.split('\n').find((row) => row.startsWith(CARRY_PROBE))
+  let answers
+
+  if (code !== 0) {
+    throw unfit('ended with a nonzero status')
+  }
+
+  if (!line) {
+    throw unfit('printed no answers')
+  }
+
+  try {
+    answers = JSON.parse(line.slice(CARRY_PROBE.length))
+  } catch (error) {
+    throw unfit('printed an answer that is not JSON')
+  }
+
+  if (!Array.isArray(answers) || answers.length !== CARRY_CASES.length) {
+    throw unfit('printed an answer of the wrong shape')
+  }
+
+  const ids = (value) => Array.isArray(value) && value.every((id) => Number.isInteger(id))
+  const bad = answers.findIndex((record) => !(record && typeof record === 'object' && ['carried', 'later', 'oversize', 'unsized'].every((field) => ids(record[field])) && Number.isFinite(record.lifts)))
+
+  if (bad >= 0) {
+    throw unfit(`printed a record of the wrong shape for the case ${bad} (${CARRY_CASES[bad].name})`)
+  }
+
+  return answers
 }
 
 const pure = (ctx) => {
@@ -743,6 +836,65 @@ const pure = (ctx) => {
     assert.deepEqual(ids(unsized.carried), [2])
     assert.deepEqual([ids(twice.carried), ids(twice.later), twice.lifts, twice.oversize.length], [[1], [2], 2, 0])
     assert.deepEqual([thrice.carried.length, thrice.later.length, thrice.lifts, ids(thrice.oversize)], [1, 2, 3, [4]])
+
+    return true
+  })
+  add('carriage-return: carryFormations returns on a formation of no or unknown tonnage and no bay, a class with no ship, a capacity not known or a negative one, reporting what no bay holds as too large and what has no tonnage as unsized', async () => {
+    const answers = await carryAnswers(ctx.mutant)
+
+    CARRY_CASES.forEach((item, index) => assert.deepEqual(answers[index], item.expected, item.name))
+
+    return true
+  })
+  add('carriage-harness: a probe that fails to start (a launcher that throws or rejects included), a subject that throws, a probe with no answer, a malformed one, one of the wrong shape or one whose records are null, empty, incomplete or of the wrong kind is a HarnessError that stops the run and no result a fault could be credited with', async () => {
+    const failure = async (work) => {
+      try {
+        await work()
+      } catch (error) {
+        return error
+      }
+
+      return null
+    }
+
+    for (const control of ['startup', 'subject', 'silent', 'malformed', 'shape', 'nulls', 'empty', 'partial', 'text', 'ids', 'lifts']) {
+      const error = await failure(() => carryAnswers(null, control))
+
+      assert.ok(error instanceof HarnessError, `${control}: ${error ? `${error.name}: ${error.message}` : 'the probe returned answers'}`)
+    }
+
+    const launchers = {
+      'a launcher that throws': () => {
+        throw new Error('spawn EPERM: the launcher threw')
+      },
+      'a launcher that rejects': () => Promise.reject(new Error('spawn EPERM: the launcher rejected')),
+    }
+
+    for (const [name, launch] of Object.entries(launchers)) {
+      const error = await failure(() => carryAnswers(null, '', launch))
+
+      assert.ok(error instanceof HarnessError, `${name}: ${error ? `${error.name}: ${error.message}` : 'the probe returned answers'}`)
+    }
+
+    const compared = async (control, launch) => {
+      const answers = await carryAnswers(null, control, launch)
+
+      CARRY_CASES.forEach((item, index) => assert.deepEqual(answers[index], item.expected, item.name))
+
+      return true
+    }
+
+    const crashes = { 'a probe that crashes': () => compared('subject'), 'a launcher that throws': () => compared('', launchers['a launcher that throws']), 'a launcher that rejects': () => compared('', launchers['a launcher that rejects']) }
+
+    for (const control of ['nulls', 'empty', 'partial', 'text', 'ids', 'lifts']) {
+      crashes[`a probe whose records are ${control}`] = () => compared(control)
+    }
+
+    for (const [name, probe] of Object.entries(crashes)) {
+      const crash = await failure(() => runStatements([[`carriage-return: ${name}`, probe]]))
+
+      assert.ok(crash instanceof HarnessError, `${name}: a statement whose probe could not answer was given a result that a fault could be credited with`)
+    }
 
     return true
   })
@@ -2114,6 +2266,8 @@ const MUTATIONS = [
   { name: 'an import with unknown fuel inputs called blocked rather than unavailable', file: U, find: 'if (!best && inputsUnknown.length) {', replace: 'if (false) {', fails: ['import-fuel', 'import-handling', 'page'] },
   { name: 'the unknown fuel inputs of the other classes not named', file: U, find: 'unread.push(...inputsUnknown)', replace: '', fails: ['import-fuel'] },
   { name: 'a formation another lift would carry called too large for any troop ship', file: U, find: 'oversize: sized.filter((candidate) => candidate.formation.ownSize > biggest)', replace: 'oversize: sized.filter((candidate) => !lifts.slice(0, 1).flat().includes(candidate))', fails: ['ground-carriage'] },
+  { name: 'a formation of no tonnage waiting forever for room when no bay is there', file: U, find: 'const biggest = Math.max(...bays)', replace: 'const biggest = Math.max(0, ...bays)', fails: ['carriage-return'] },
+  { name: 'the formations no bay holds not reported when there is no bay', file: U, find: 'oversize: sized.filter((candidate) => candidate.formation.ownSize > biggest)', replace: 'oversize: sized.filter((candidate) => bays.length && candidate.formation.ownSize > biggest)', fails: ['carriage-return'] },
   { name: 'the formations that wait for another lift dropped', file: U, find: 'later: lifts.slice(1).flat(),', replace: 'later: [],', fails: ['ground-carriage'] },
   { name: 'the formations of a further lift left out of the engineers\' figure', file: U, find: 'const movable = carriage ? [...carriage.carried, ...carriage.later] : candidates', replace: 'const movable = carriage ? carriage.carried : candidates', fails: ['ground-carriage'] },
   { name: 'the further lifts not counted in the text', file: U, find: 'carriage.lifts > 1 ?', replace: 'false ?', fails: ['ground-carriage'] },
@@ -2165,10 +2319,10 @@ const buildersOf = (keys) => BUILDER_NAMES.filter((name) => keys.some((key) => b
 // Whether a run judging `keys` loads the page: for the page's checks and the saves'.
 const loadsPage = (keys) => keys.some((key) => key.startsWith('save-')) || buildersOf(keys).includes('page')
 
-const contextOf = async (sources, page = true) => {
+const contextOf = async (sources, page = true, mutant = null) => {
   const utilitySources = Object.fromEntries([U, D, H].filter((file) => sources[file] !== textOf(file)).map((file) => [FILES[file], sources[file]]))
   const m = await loadUtilities(NAMES, { stubs: STUBS, sources: utilitySources })
-  const ctx = { m, pageText: sources[P], capabilitiesText: sources[C] }
+  const ctx = { m, pageText: sources[P], capabilitiesText: sources[C], mutant: mutant ? mutant.id : null }
 
   if (page) {
     const pageSources = { 'pages/colony-outlook': sources[P], ...Object.fromEntries(Object.entries(utilitySources).map(([name, text]) => [`utilities/${name}`, text])) }
@@ -2219,6 +2373,10 @@ const runStatements = async (statements, keys = null, ctx = {}) => {
       ctx.reader = `check ${keyOf(name)}`
       result = await test()
     } catch (error) {
+      if (error instanceof HarnessError) {
+        throw error
+      }
+
       result = `threw ${String(error.message).split('\n')[0]}`
     }
 
@@ -2301,7 +2459,7 @@ const checkMutant = async (mutant) => {
   let ctx
 
   try {
-    ctx = await contextOf(sources, loadsPage(mutant.fails))
+    ctx = await contextOf(sources, loadsPage(mutant.fails), mutant)
   } catch (error) {
     check(`mutation caught: ${mutant.name}`, `does not load: ${error.message}`)
 
@@ -2318,13 +2476,15 @@ const checkMutant = async (mutant) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { part: null, mutations: true, saves: true }
+  const options = { part: null, mutations: true, saves: true, carryProbe: false }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--part') {
       options.part = argv[++index]
     } else if (argv[index] === '--no-mutations') {
       options.mutations = false
+    } else if (argv[index] === '--carry-probe') {
+      options.carryProbe = true
     } else if (argv[index] === '--no-saves') {
       options.saves = false
     } else {
@@ -2338,6 +2498,10 @@ const parseArguments = (argv) => {
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
+
+  if (options.carryProbe) {
+    await carryProbe()
+  }
 
   if (options.part !== null) {
     const mutant = MUTANTS.find(({ id }) => id === options.part)

@@ -494,10 +494,10 @@ export const engineerCapacityGap = (modifiers, ground, version, population) => {
   return unknown.length ? unavailable({ rule: 'mineBootstrap.groundAssistance', missing: [engineerGap(unknown)], units: 'BP/yr' }) : null
 }
 
-// Which engineer formations (`candidates`, each { formation }) the race's troop ships can carry. A formation is not split among ships: the whole of its own tonnage goes into one ship's bay. `troopCapacity.classes` is [{ TroopCapacity, Ships }]. A formation larger than the largest bay is carried by no ship at all (`oversize`); the others go the largest first, each into the first ship with room, and those the first lift leaves without room wait for another lift of the same ships (`later`). Returns { carried, later, lifts, oversize, unsized }: the candidates the first lift carries, those that need another lift, the number of lifts all the carriable ones take, the candidates no bay holds and those whose tonnage is not known.
+// Which engineer formations (`candidates`, each { formation }) the race's troop ships can carry. A formation is not split among ships: the whole of its own tonnage goes into one ship's bay. `troopCapacity.classes` is [{ TroopCapacity, Ships }]. A formation larger than the largest bay is carried by no ship at all (`oversize`); with no bay at all every formation of known tonnage is `oversize`, a tonnage of 0 included. The others go the largest first, each into the first ship with room, and those the first lift leaves without room wait for another lift of the same ships (`later`). Returns { carried, later, lifts, oversize, unsized }: the candidates the first lift carries, those that need another lift, the number of lifts all the carriable ones take, the candidates no bay holds and those whose tonnage is not known. It always returns: each lift carries at least the largest formation that fits the largest bay.
 export const carryFormations = (candidates, troopCapacity) => {
   const bays = troopCapacity.classes.flatMap((item) => (isNumber(item.TroopCapacity) ? Array(Math.max(0, item.Ships)).fill(item.TroopCapacity) : []))
-  const biggest = Math.max(0, ...bays)
+  const biggest = Math.max(...bays)
   const sized = candidates.filter((candidate) => isNumber(candidate.formation.ownSize)).sort((a, b) => b.formation.ownSize - a.formation.ownSize)
   const lifts = []
   let pending = sized.filter((candidate) => candidate.formation.ownSize <= biggest)
