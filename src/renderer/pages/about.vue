@@ -3,11 +3,12 @@
     <v-container fluid class="about-page">
       <v-row class="my-0">
         <v-col cols="12" md="6" class="d-flex flex-column py-0">
-          <v-card class="panel flex-grow-1" data-summary="What this app is, its version and who made it. Use it to check which release is running." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="What this app is, its version, the Aurora saves it supports and who made it. Use it to check which release is running and which saves it opens." elevation="1">
             <div class="panel-head">
-              <span class="d-flex align-center">
+              <span class="d-flex align-center flex-wrap">
                 <span>Aurora Electrons</span>
                 <v-chip small class="ml-3">v{{ version }}</v-chip>
+                <v-chip small outlined class="ml-2" data-aurora-line>For Aurora {{ auroraLine }} saves</v-chip>
               </span>
               <span class="caption text--secondary">Looking Inwards</span>
             </div>
@@ -183,6 +184,7 @@ import { shell } from 'electron'
 import { mapActions, mapGetters } from 'vuex'
 
 import ExternalLink from '../components/ExternalLink.vue'
+import { STATED_FORMULA_VERSION } from '../utilities/capabilities'
 import { CREDITS } from '../utilities/credits'
 import { registryStore } from '../utilities/history'
 import { FORUM_URL } from '../utilities/navigation'
@@ -205,6 +207,7 @@ export default {
   data() {
     return {
       version,
+      auroraLine: STATED_FORMULA_VERSION,
       forumUrl: FORUM_URL,
       repoUrl: REPO_URL,
       issuesUrl: `${REPO_URL}/issues`,
