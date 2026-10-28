@@ -32,7 +32,7 @@
 
     <section-flyout v-if="flyoutSection" :style="flyoutSection.style" :section="flyoutSection" :pages="flyoutSection.pages" :active-route="page.route" :shortcut="railSections.indexOf(flyoutSection) + 1" :peeks="peekLines" @go="go" @mouseenter.native="cancelLeave" @mouseleave.native="leaveRail" />
 
-    <flyout-panel v-if="flyoutId === EMPIRES_ID && !onEmpiresPage" class="empire-flyout" :style="neutralStyle" title="Empires" :meta="`${raceCount} ${raceCount === 1 ? 'empire' : 'empires'}`" :width="380" @mouseenter.native="cancelLeave" @mouseleave.native="leaveRail">
+    <flyout-panel v-if="flyoutId === EMPIRES_ID && !onEmpiresPage && !refused" class="empire-flyout" :style="neutralStyle" title="Empires" :meta="`${raceCount} ${raceCount === 1 ? 'empire' : 'empires'}`" :width="380" @mouseenter.native="cancelLeave" @mouseleave.native="leaveRail">
       <empire-list :games="games" @pick="flyoutId = null" />
       <template #foot><kbd>Esc</kbd> close</template>
     </flyout-panel>
@@ -83,7 +83,8 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <capability-state v-if="capabilityReport && capabilityReport.status === 'unsupported'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
+        <unsupported-save v-if="refusedHere" />
+        <capability-state v-else-if="capabilityReport && capabilityReport.status === 'unsupported'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
         <template v-else>
           <capability-state v-if="capabilityReport && capabilityReport.status === 'degraded'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
           <router-view :key="$route.path" />
@@ -117,7 +118,9 @@ import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import CapabilityState from '../components/page/CapabilityState.vue'
 import SectionNav from '../components/page/SectionNav.vue'
+import UnsupportedSave from '../components/page/UnsupportedSave.vue'
 import { SYSTEM_QUERY, activeAppearance, appearanceStyle, applyPolicy, followSystem, loadAppearance, nativeThemeSource, quickSwitch, requestNativeTheme } from '../utilities/appearance'
+import { REPORT_ROUTES } from '../utilities/capabilities'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
@@ -139,6 +142,7 @@ export default {
     SaveStatus,
     SectionFlyout,
     SectionNav,
+    UnsupportedSave,
   },
   data () {
     return {
@@ -166,13 +170,14 @@ export default {
     ...mapState('history', {
       historyRevision: 'revision',
     }),
-    ...mapState('peeks', {
-      peekLines: 'lines',
+    ...mapGetters('peeks', {
+      peekLines: 'visible',
     }),
 
     ...mapGetters('capabilities', {
       capabilityStatus: 'status',
       reportOf: 'report',
+      refused: 'refused',
     }),
 
     ...mapGetters([
@@ -211,9 +216,13 @@ export default {
     page () {
       return pageByRoute[this.$route.path]
     },
-    // What the capability check found of the open page (store/capabilities.js): null until it has answered, or if it failed, so the page then reads as before.
+    // What the capability check found of the open page (store/capabilities.js): null until it has answered, or if it failed, so the page then reads as before. A refused save has no report shown: the notice stands for every page (`refusedHere`) and on the Empires page the page draws it.
     capabilityReport () {
-      return this.reportOf(this.$route.path)
+      return this.refused ? null : this.reportOf(this.$route.path)
+    },
+    // Whether the open page is a report that the refusal of the save replaces with its notice: every report but the Empires page, which draws the notice itself and keeps the Save panel under it. Settings, About and the rest that read nothing of the save draw as always.
+    refusedHere () {
+      return this.refused && this.$route.path !== '/' && REPORT_ROUTES.includes(this.$route.path)
     },
     capabilityChecking () {
       return this.capabilityStatus === 'checking'

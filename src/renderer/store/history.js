@@ -9,7 +9,7 @@ export const state = () => {
     // { [GameID]: generation }: the copy of the save (the store's freshness generation) a pass of the recorder last wrote the empire's snapshot of each game for. A failure of a later pass is in `failures`; a game without an entry for the copy now open has no confirmed recording of it yet.
     passes: {},
     captures: 0,
-    // The end of the latest pass of the recorder, whatever it was: { from, to, generation, outcome }. `from` to `to` are the requests (`captures`, the count after each `capture`) the pass took, empty (`to` below `from`) when an opened save started it; `generation` is the copy of the save it ran for and `outcome` is 'passed', 'failed' (a read or a write failed), 'refused' (another tab records) or 'superseded' (a newer copy replaced it). Passes end in any order. A view that committed `capture` waits for the end whose range holds its own request, on its own generation.
+    // The end of the latest pass of the recorder, whatever it was: { from, to, generation, outcome }. `from` to `to` are the requests (`captures`, the count after each `capture`) the pass took, empty (`to` below `from`) when an opened save started it; `generation` is the copy of the save it ran for and `outcome` is 'passed', 'failed' (a read or a write failed), 'refused' (another tab records), 'held' (the save is refused by the capability check, so nothing was recorded) or 'superseded' (a newer copy replaced it). Passes end in any order. A view that committed `capture` waits for the end whose range holds its own request, on its own generation.
     ended: null,
   }
 }

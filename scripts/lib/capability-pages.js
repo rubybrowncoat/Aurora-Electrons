@@ -12,6 +12,7 @@
 */
 const fs = require('fs')
 const { loadPage, replacing, instantiate } = require('./page-loader')
+const { routes: routeTable } = require('./store-routes')
 
 const FLEET = { ShipID: 1, ShipName: 'Surveyor', FleetID: 1, Damaged: 0, CurrentCrew: 100, ClassCrew: 100, ProductionBonus: 1.2, CaptainName: 'Captain' }
 
@@ -30,11 +31,13 @@ const MUTATIONS = [
   ['survey-progress', 'its observation gaps are read from an input of another name', "report.degraded.find((degraded) => degraded.key === 'observationRead')", "report.degraded.find((degraded) => degraded.key === 'observationReads')"],
 ]
 
-// The getters of store/capabilities.js over `result` as a page reads them ('capabilities/gates', ...), and a dispatch that records the actions and answers a check with `answer`.
+// The getters of store/capabilities.js over `result` as a page reads them ('capabilities/gates', ...), and a dispatch that records the actions and answers a check with `answer`. The dispatch answers by the table of calls of scripts/lib/store-routes.js: `capabilities/preflight` and `capabilities/retry`, root actions called by their full names with no options; any other dispatch is recorded as not accepted, answered with undefined and not settled, and `rejected()` lists those. Every store is kept in `created` for the check that none rejected a call.
+const created = []
 const storeOver = (store, result, answer = null) => {
   const rootState = { freshness: { generation: 1 } }
   const state = store.state()
   const getters = {}
+  const dispatches = routeTable([{ type: 'capabilities/preflight', root: false }, { type: 'capabilities/retry', root: false }])
   const dispatched = []
   const settle = (value) => {
     store.mutations.started(state, { generation: 1, at: 0 })
@@ -48,10 +51,16 @@ const storeOver = (store, result, answer = null) => {
 
   Object.keys(store.getters).forEach((name) => Object.defineProperty(getters, `capabilities/${name}`, { get: () => get(name), enumerable: true }))
 
-  return {
+  const over = {
     getters,
     dispatched,
-    dispatch: async (action) => {
+    calls: dispatches.calls,
+    rejected: dispatches.rejected,
+    dispatch: async (action, _payload, options) => {
+      if (!dispatches.take(action, options)) {
+        return undefined
+      }
+
       dispatched.push(action)
 
       if (answer) {
@@ -61,6 +70,10 @@ const storeOver = (store, result, answer = null) => {
       return answer
     },
   }
+
+  created.push(over)
+
+  return over
 }
 
 // A connection that answers each read of a page with the rows `rows(sql)` gives, in the shape Sequelize's `query` has, and records what it was asked.
@@ -290,11 +303,22 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
       renamed6: await copy('bonus6', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"]),
     }
 
+    created.length = 0
+
     for (const [page, run] of Object.entries(PAGE_RESULTS)) {
       for (const [statement, held] of await run(context, fixtures)) {
         check(`pages: /${page}: ${statement}`, held)
       }
     }
+
+    const rejections = created.flatMap((over) => over.rejected())
+
+    check('pages: the stores the pages ran against recorded no dispatch the root store does not answer', created.length > 0 && rejections.length === 0 && created.some((over) => over.calls.length > 0))
+
+    const probe = storeOver(context.store, null)
+    const answers = [await probe.dispatch('not-an-action'), await probe.dispatch('peeks/capabilities/preflight'), await probe.dispatch('capabilities/preflight', null, { root: true }), await probe.dispatch('capabilities/retry')]
+
+    check('pages: the stores of the pages record and reject, answering undefined, a dispatch that is not an action of the root store, a prefixed name and a call with options', JSON.stringify(answers) === JSON.stringify([undefined, undefined, undefined, null]) && JSON.stringify(probe.calls.map(({ type, accepted }) => [type, accepted])) === JSON.stringify([['not-an-action', false], ['peeks/capabilities/preflight', false], ['capabilities/preflight', false], ['capabilities/retry', true]]) && probe.rejected().length === 3 && probe.dispatched.join() === 'capabilities/retry')
 
     for (const [page, label, from, to] of MUTATIONS) {
       const broken = (await PAGE_RESULTS[page](context, fixtures, replacing(from, to))).filter(([, held]) => !held).map(([statement]) => statement)

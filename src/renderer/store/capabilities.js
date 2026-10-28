@@ -38,6 +38,14 @@ export const getters = {
   },
   // The report of a route ({ status, missing, degraded, groups, ... }), or null while the result is not known, so a page is never held back for a check that has not answered.
   report: (_state, getters) => (route) => (getters.result && getters.result.reports[route]) || null,
+  // Which Aurora line the copy now open is of (utilities/capabilities.js `lineResult`: { status, reason, line, missing }), or null while no result is known for it: bound to the copy like `result`, so a save that replaced the one refused is never read as refused, and one that is refused is never read as accepted.
+  line (_state, getters) {
+    return getters.result ? getters.result.line || null : null
+  },
+  // Whether the copy now open is known to be refused: true only for a result of this copy whose line is refused. While the check is running or has failed (no result) nothing is refused, as a page is never held back for a check that has not answered.
+  refused (_state, getters) {
+    return getters.line !== null && getters.line.status === 'refused'
+  },
   // The bonus IDs whose row in the save does not read as the planners expect, as a Set: every ID the planners read while no result is known.
   blockedBonuses (_state, getters) {
     return blockedBonuses(getters.gates)

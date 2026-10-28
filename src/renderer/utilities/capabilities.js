@@ -294,11 +294,39 @@ const GATE_TABLES = Object.freeze({
 
 const FORMULA_COLUMNS = Object.freeze(['AllowCMC', 'AncientRelics'])
 
+// The columns Aurora 2.7 added over 2.6, as 'Table.Column', which tell a 2.7 save from an older one: a save carries no version label, and no 2.7 save is without all of them. Read from the saves on disk (AuroraDB_270_base.db against AuroraDB_260_base.db: every other table and column is the same).
+export const LINE_SIGNATURE = Object.freeze([
+  'FCT_Game.AllowCMC',
+  'FCT_Game.AncientRelics',
+  'FCT_DesignPhilosophy.MaintenanceModules',
+  'FCT_Fleet.AutoLP',
+  'FCT_Population.AcademyNameThemeID',
+  'FCT_Population.BuildReplacements',
+  'FCT_Population.ReplacementCapacity',
+  'FCT_Population.UseAcademyNameTheme',
+  'FCT_Race.RandomClassName',
+  'FCT_Race.chkCometNames',
+  'FCT_Race.chkComets',
+  'FCT_Ship.MaxActiveResolution',
+  'FCT_Ship.SLRetire',
+  'FCT_ShipClassTemplate.CrewDesignEfficiency',
+])
+
+// The Aurora line the app is for, as its major and minor ('2.7'): the stated formula version without its patch.
+export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
+
+// The words of a refusal, by the reason of `lineResult`: `notice` is the sentence the Unsupported save panel opens with, `status` the line the save status says.
+export const REFUSALS = Object.freeze({
+  'not-aurora': Object.freeze({ notice: 'The file has no FCT_Game table, so it is not an Aurora save.', status: 'refused: no FCT_Game table' }),
+  'pre-2.7': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora ${LINE_NAME} added is in it.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns of Aurora ${LINE_NAME})` }),
+})
+
 const allTables = () => {
   const tables = new Set(Object.keys(GATE_TABLES))
 
   Object.values(INPUTS).forEach((inputs) => inputs.forEach((input) => Object.keys(input.reads).forEach((table) => tables.add(table))))
   tables.add('FCT_Game')
+  LINE_SIGNATURE.forEach((field) => tables.add(field.split('.')[0]))
 
   return [...tables].sort()
 }
@@ -340,6 +368,25 @@ export const formulaResult = (schema) => {
   const missing = qualified(FORMULA_COLUMNS.filter((column) => !hasColumn(schema, 'FCT_Game', column)), 'FCT_Game')
 
   return missing.length ? unavailable({ rule: FORMULA, missing, present: qualified(FORMULA_COLUMNS.filter((column) => hasColumn(schema, 'FCT_Game', column)), 'FCT_Game') }) : ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: qualified(FORMULA_COLUMNS, 'FCT_Game') } })
+}
+
+// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-2.7' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 2.7: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 2.7 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora's later lines are not told apart (a 3.0 save is expected to hold every column of the signature).
+export const lineResult = (schema) => {
+  if (!hasTable(schema, 'FCT_Game')) {
+    return Object.freeze({ status: 'refused', reason: 'not-aurora', line: null, missing: Object.freeze([]) })
+  }
+
+  const missing = LINE_SIGNATURE.filter((field) => {
+    const [table, column] = field.split('.')
+
+    return !hasColumn(schema, table, column)
+  })
+
+  if (missing.length === LINE_SIGNATURE.length) {
+    return Object.freeze({ status: 'refused', reason: 'pre-2.7', line: null, missing: Object.freeze(missing) })
+  }
+
+  return Object.freeze({ status: 'accepted', reason: null, line: STATED_FORMULA_VERSION, missing: Object.freeze(missing) })
 }
 
 // The formula version the save's schema stands for: the stated one ('2.7.x') for a save with both 2.7 columns of FCT_Game, null for any other shape, and the landing rule is then not settled (`landingThreshold`).
@@ -486,7 +533,7 @@ export const gateGaps = (gates, { bonuses = [], components = [] }) => {
   return [...bonuses.flatMap((id) => gapsOfGate(gates.bonuses[id], id, 'commander bonus')), ...components.flatMap((id) => gapsOfGate(gates.components[id], id, 'component type'))]
 }
 
-// The save's capabilities from its schema (`schemaOf`) and lookup rows (`rows`: { bonuses, components } keyed by ID): { formula, gates, reports: { [route]: { status, missing, degraded, unchecked, groups } }, shell, tables, columns }.
+// The save's capabilities from its schema (`schemaOf`) and lookup rows (`rows`: { bonuses, components } keyed by ID): { line, formula, gates, reports: { [route]: { status, missing, degraded, unchecked, groups } }, shell, tables, columns }. `line` is `lineResult`'s: whether the save is of the Aurora line the app reads at all; every report is evaluated whatever it says, and the layout decides what a refused save is shown.
 //  - `missing` are the required inputs with a missing field: [{ key, label, fields }].
 //  - `degraded` are the optional inputs and soft groups with a missing field, [{ key, label, affects, fields, group? }], and the lookup rows that differ, as { key, label, affects, fields: [why], gate: true }.
 //  - `unchecked` are the reads whose columns the preflight does not check because the read guards itself, [{ key, label, table, why }].
@@ -510,7 +557,7 @@ export const evaluate = (schema, rows = {}) => {
   const shell = evaluateInputs('shell', schema)
   const columns = [...schema.values()].reduce((total, set) => total + set.size, 0)
 
-  return { formula: formulaResult(schema), gates, reports, shell: { ...shell, status: shell.status === 'unsupported' ? 'degraded' : shell.status }, tables: schema.size, columns }
+  return { line: lineResult(schema), formula: formulaResult(schema), gates, reports, shell: { ...shell, status: shell.status === 'unsupported' ? 'degraded' : shell.status }, tables: schema.size, columns }
 }
 
 const asRows = (rows) => (Array.isArray(rows) ? rows : [])

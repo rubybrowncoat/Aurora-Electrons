@@ -14,7 +14,8 @@
   - the resource reserves panel's reads, which the scan of its component does not follow (`EXTRA_READS`, an optional input of /logistics and /hauling): a copy without FCT_ShipClass.MinimumFuel and FCT_Race.MSPProduction degrades /hauling by the panel alone and names both fields on /logistics beside the page's own required read, and the copies without FuelStockpile or MaintenanceStockpile count the panel among the readers; and the Production bonus (5) its production rates rest on, which a copy with the bonus renamed leaves /hauling degraded by, naming the reserve production;
   - what a built-by-name read depends on: each marker of an input stands for its own columns (`Reserve*` for the reserves, a bare `*` for the minerals, and the share its page loads for the command types, `MARKER_USES`, which is compared with the page's own `share: '<name>'`). Copies without FCT_Population.ReserveDuranium, FuelStockpile or MaintenanceStockpile, or without the Industrial, Survey or Tactical share, leave supported every report that does not read the column by name (the readers are derived from the generated reads) and make the others unsupported, naming it; a copy of the code that stands every marker for the whole list of its table must fail those checks. On the copy without ReserveDuranium the Mineral Outlook page's own stockpile read runs and the Minerals page's colony read (which names the reserves) fails;
   - the pages' own wiring (scripts/lib/capability-pages.js): the real script of /lagrange, /commanders and /production run on the capability results of real copies (the unverified lookup rows and missing ship columns withhold the stabilisation ships, the roster's blocked bonuses are unknown and its queries wait for the check, the research read and the colony capacities leave a blocked bonus unknown). Each page is run again with one gate cut out of its script, and a page check must fail there;
-  - the file's SHA-256 before and after a preflight on a copy, and that every query the preflight sent was a select.
+  - the file's SHA-256 before and after a preflight on a copy, and that every query the preflight sent was a select;
+  - the Aurora line (`lineResult`, `LINE_SIGNATURE`: the fourteen columns Aurora 2.7 added over 2.6): the signature is the fourteen columns; the real 2.7 saves are of the line with none missing; a copy without FCT_Game is refused as no Aurora save, a copy with all fourteen dropped is refused as a save from before 2.7 (the 2.6 save, when it is present, too) naming each, and a copy with one or seven dropped is still of the line, naming exactly those it lacks; the refused copies still have every report evaluated. The store's `line` and `refused` getters follow the result of the copy now open: nothing is refused before the check answers or after it failed, a retry keeps the refusal of the same copy, and a copy that replaced a refused one is not refused. Two mutants fail a consumer check: one in which the line counts a schema with some of the fourteen columns as one with none, one in which the store refuses a copy on the result of an earlier copy. What a player sees is checked by scripts/check-unsupported-save-page.js.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -27,6 +28,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { readsOfFile, scanReads } = require('./lib/capability-scan')
 const { chainChecks } = require('./lib/capability-chains')
 const { pageChecks } = require('./lib/capability-pages')
+const { routes: routeTable } = require('./lib/store-routes')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
@@ -44,6 +46,30 @@ const OLDER = [
   { label: 'Old64 (Pepega)', file: 'AuroraDB_Pepega.db' },
   { label: 'OldDde (Offline Elminster)', file: 'AuroraDB_OfflineElminster.db' },
 ]
+
+// The fourteen columns Aurora 2.7 added over 2.6, as 'Table.Column', written here from the diff of the two saves on disk: the oracle utilities/capabilities.js `LINE_SIGNATURE` is compared with, and the columns the planted copies drop.
+const LINE_COLUMNS = [
+  'FCT_Game.AllowCMC',
+  'FCT_Game.AncientRelics',
+  'FCT_DesignPhilosophy.MaintenanceModules',
+  'FCT_Fleet.AutoLP',
+  'FCT_Population.AcademyNameThemeID',
+  'FCT_Population.BuildReplacements',
+  'FCT_Population.ReplacementCapacity',
+  'FCT_Population.UseAcademyNameTheme',
+  'FCT_Race.RandomClassName',
+  'FCT_Race.chkCometNames',
+  'FCT_Race.chkComets',
+  'FCT_Ship.MaxActiveResolution',
+  'FCT_Ship.SLRetire',
+  'FCT_ShipClassTemplate.CrewDesignEfficiency',
+]
+// Seven of them, among them the two the formula version rests on: a copy without these is damaged, not older.
+const SEVEN_COLUMNS = ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics', 'FCT_Fleet.AutoLP', 'FCT_Population.BuildReplacements', 'FCT_Race.chkComets', 'FCT_Ship.SLRetire', 'FCT_ShipClassTemplate.CrewDesignEfficiency']
+
+const dropStatements = (fields) => fields.map((field) => `alter table ${field.split('.')[0]} drop column ${field.split('.')[1]}`)
+
+const sameFields = (found, wanted) => [...found].sort().join() === [...wanted].sort().join()
 
 let checks = 0
 let failures = 0
@@ -108,6 +134,22 @@ const alteredCopy = async (source, name, statements) => {
   await new Promise((resolve) => database.close(resolve))
 
   return copy
+}
+
+// The columns of `fields` ('Table.Column') that the save file lacks, read in SQL here: the oracle for what a refused or damaged copy is missing.
+const absentIn = async (file, fields) => {
+  const absent = []
+
+  for (const field of fields) {
+    const [table, column] = field.split('.')
+    const rows = await all(file, `select name from pragma_table_xinfo('${table}')`)
+
+    if (!rows.some((row) => row.name.toLowerCase() === column.toLowerCase())) {
+      absent.push(field)
+    }
+  }
+
+  return absent
 }
 
 const summary = (result) => {
@@ -256,6 +298,7 @@ const realSaveChecks = async (capabilities, save) => {
   check(`${save.label}: the shell is supported`, result.shell.status === 'supported', JSON.stringify(result.shell))
   check(`${save.label}: every lookup row reads as expected`, failedGates(result).length === 0, failedGates(result).join(', '))
   check(`${save.label}: the formula version is the stated one, as an assumption`, result.formula.value === capabilities.STATED_FORMULA_VERSION && result.formula.status === 'assumed')
+  check(`${save.label}: the save is of the 2.7 line, with none of the fourteen columns missing`, result.line.status === 'accepted' && result.line.reason === null && result.line.line === capabilities.STATED_FORMULA_VERSION && result.line.missing.length === 0, JSON.stringify(result.line))
   check(`${save.label}: the commanders soft groups are both whole`, result.reports['/commanders'].groups.rank === true && result.reports['/commanders'].groups.age === true)
 }
 
@@ -296,6 +339,9 @@ const alteredChecks = async (capabilities, source) => {
     const retyped = await alteredCopy(source, 'component', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"])
     const noBonusTable = await alteredCopy(source, 'nobonus', ['drop table DIM_CommanderBonusType'])
     const noFormula = await alteredCopy(source, 'formula', ['alter table FCT_Game drop column AncientRelics'])
+    const noGame = await alteredCopy(source, 'game', ['drop table FCT_Game'])
+    const pre27 = await alteredCopy(source, 'pre27', dropStatements(LINE_COLUMNS))
+    const sevenDropped = await alteredCopy(source, 'seven', dropStatements(SEVEN_COLUMNS))
     const noFinance = await alteredCopy(source, 'finance', ['drop table FCT_WealthData'])
     const noSpecies = await alteredCopy(source, 'species', ['alter table FCT_Commander drop column SpeciesID'])
     const noCrew = await alteredCopy(source, 'crew', ['alter table FCT_Ship drop column CurrentCrew'])
@@ -318,6 +364,7 @@ const alteredChecks = async (capabilities, source) => {
 
     copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, noHeadquarters, productionRenamed, noGates)
     copies.push(noUnits, noFormationShip)
+    copies.push(noGame, pre27, sevenDropped)
 
     const baseline = (await preflightOf(capabilities, source)).result
     const rank = (await preflightOf(capabilities, rankless)).result
@@ -347,6 +394,9 @@ const alteredChecks = async (capabilities, source) => {
     const retype = (await preflightOf(capabilities, retyped)).result
     const noBonus = (await preflightOf(capabilities, noBonusTable)).result
     const formula = (await preflightOf(capabilities, noFormula)).result
+    const gameless = (await preflightOf(capabilities, noGame)).result
+    const older27 = (await preflightOf(capabilities, pre27)).result
+    const sevenLess = (await preflightOf(capabilities, sevenDropped)).result
     const finance = (await preflightOf(capabilities, noFinance)).result
     const orbit = (await preflightOf(capabilities, noOrbit)).result
 
@@ -380,6 +430,19 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: a renamed component type (29) degrades /lagrange only', failedGates(retype).join() === 'component type 29' && retype.reports['/lagrange'].status === 'degraded' && unrelated(retype, '/lagrange'), notSupported(retype).map((report) => report.route).join(', '))
     check('altered: DIM_CommanderBonusType dropped fails every bonus lookup, and /commanders (which reads it) is unsupported', failedGates(noBonus).length === Object.keys(capabilities.BONUS_NAMES).length && noBonus.reports['/commanders'].status === 'unsupported')
     check('altered: FCT_Game.AncientRelics dropped makes the formula version unavailable, without touching a report', formula.formula.status === 'unavailable' && formula.formula.inputs.missing.join() === 'FCT_Game.AncientRelics' && notSupported(formula).length === 0, JSON.stringify(formula.formula.inputs))
+
+    const pre27Absent = await absentIn(pre27, LINE_COLUMNS)
+    const sevenAbsent = await absentIn(sevenDropped, LINE_COLUMNS)
+    const formulaAbsent = await absentIn(noFormula, LINE_COLUMNS)
+    const reported = (result) => Object.keys(result.reports).sort().join() === [...capabilities.REPORT_ROUTES].sort().join() && Object.values(result.reports).every((report) => ['supported', 'degraded', 'unsupported'].includes(report.status))
+
+    check('line: LINE_SIGNATURE is the fourteen columns Aurora 2.7 added over 2.6', sameFields(capabilities.LINE_SIGNATURE, LINE_COLUMNS) && capabilities.LINE_SIGNATURE.length === 14, JSON.stringify(capabilities.LINE_SIGNATURE))
+    check('line: the unaltered 2.7 copy is of the 2.7 line with none of the fourteen missing', baseline.line.status === 'accepted' && baseline.line.reason === null && baseline.line.line === capabilities.STATED_FORMULA_VERSION && baseline.line.missing.length === 0, JSON.stringify(baseline.line))
+    check('line: a copy with the fourteen columns dropped is refused as a save from before 2.7, naming each of the fourteen the file lacks', pre27Absent.length === 14 && older27.line.status === 'refused' && older27.line.reason === 'pre-2.7' && older27.line.line === null && sameFields(older27.line.missing, pre27Absent), JSON.stringify(older27.line))
+    check('line: a refused copy still has every report evaluated, so the layout alone decides what is shown', reported(older27) && older27.formula.status === 'unavailable', Object.keys(older27.reports).length)
+    check('line: a copy without the FCT_Game table is refused as no Aurora save, naming no column', gameless.line.status === 'refused' && gameless.line.reason === 'not-aurora' && gameless.line.line === null && gameless.line.missing.length === 0 && reported(gameless), JSON.stringify(gameless.line))
+    check('line: the copy without FCT_Game.AncientRelics is still of the 2.7 line, naming the column the file lacks, with the formula version unavailable', formulaAbsent.length === 1 && formula.line.status === 'accepted' && formula.line.line === capabilities.STATED_FORMULA_VERSION && sameFields(formula.line.missing, formulaAbsent) && formula.formula.status === 'unavailable', JSON.stringify(formula.line))
+    check('line: a copy with seven of the fourteen columns dropped is still of the 2.7 line, naming exactly the seven the file lacks, with the formula version unavailable', sevenAbsent.length === 7 && sevenLess.line.status === 'accepted' && sevenLess.line.line === capabilities.STATED_FORMULA_VERSION && sameFields(sevenLess.line.missing, sevenAbsent) && sevenLess.formula.status === 'unavailable' && reported(sevenLess), JSON.stringify(sevenLess.line))
     const species = (await preflightOf(capabilities, noSpecies)).result
     const crew = (await preflightOf(capabilities, noCrew)).result
     const message = (await preflightOf(capabilities, noMessage)).result
@@ -565,16 +628,17 @@ const LOOKUP_SCHEMA = new Map([['dim_commanderbonustype', new Set(['bonusid', 'd
 
 const gatesWith = (capabilities, options) => capabilities.gatesOf(LOOKUP_SCHEMA, lookupRows(capabilities, options))
 
-// A store module over a fake copy of the save: `run(action)` dispatches with a context the way Vuex does, `state` and `getters` are read as a page reads them.
+// A store module over a fake copy of the save: `run(action)` dispatches with a context the way Vuex does, `state` and `getters` are read as a page reads them. `commit` answers by the table of calls of scripts/lib/store-routes.js: the module's own mutations by their names with no options; any other commit is recorded as not accepted, not applied and answered with undefined, and `rejected()` lists those.
 const storeOver = (store, rootState) => {
   const state = store.state()
   const getters = {}
-  const commit = (name, payload) => store.mutations[name](state, payload)
+  const commits = routeTable(Object.keys(store.mutations).map((type) => ({ type, root: false })))
+  const commit = (name, payload, options) => (commits.take(name, options) ? store.mutations[name](state, payload) : undefined)
   const get = (name) => store.getters[name](state, new Proxy({}, { get: (_target, key) => get(key) }), rootState)
 
   Object.keys(store.getters).forEach((name) => Object.defineProperty(getters, name, { get: () => get(name) }))
 
-  return { state, getters, run: (action) => store.actions[action]({ commit, rootState }) }
+  return { state, getters, commit, committed: commits.calls, rejected: commits.rejected, forgive: commits.forgive, run: (action) => store.actions[action]({ commit, rootState }) }
 }
 
 // A connection to a copy of a save that can be made to fail the way a locked one does.
@@ -586,7 +650,7 @@ const switchable = (file) => {
 }
 
 // What the consumers of the capability result do with it, run on the real modules: [[statement, held]]. Every statement must hold of the unmutated modules and fail of a module with its gate taken out (`mutationChecks`).
-const consumerResults = async (mods, source) => {
+const consumerResults = async (mods, source, refusedFile) => {
   const capabilities = mods.capabilities
   const commanders = mods.commanders
   const mixin = mods['../mixins/production-modifiers']
@@ -631,10 +695,41 @@ const consumerResults = async (mods, source) => {
   holds('a colony capacity is the product while no bonus is blocked', mixin.capacityResult(modifiers, 'ordnance', new Set()).value === 9)
   holds('a colony capacity of a colony the read does not cover is unavailable', !isAvailableResult(mixin.capacityResult(undefined, 'ordnance', new Set())))
 
+  // The line of a schema written here as the schema of a save is: FCT_Game with the columns of `fields`, or with no FCT_Game table and the columns alone.
+  const schemaOf = (fields, game = true) => {
+    const schema = new Map(game ? [['fct_game', new Set()]] : [])
+
+    fields.forEach((field) => {
+      const [table, column] = field.toLowerCase().split('.')
+
+      schema.set(table, (schema.get(table) || new Set()).add(column))
+    })
+
+    return schema
+  }
+  const none = capabilities.lineResult(schemaOf([]))
+  const some = capabilities.lineResult(schemaOf(SEVEN_COLUMNS))
+  const one = capabilities.lineResult(schemaOf(['FCT_Ship.SLRetire']))
+  const whole = capabilities.lineResult(schemaOf(LINE_COLUMNS))
+  const noGameLine = capabilities.lineResult(schemaOf(LINE_COLUMNS.filter((field) => !field.startsWith('FCT_Game.')), false))
+
+  holds('a schema with FCT_Game and none of the fourteen columns is refused as a save from before 2.7', none.status === 'refused' && none.reason === 'pre-2.7' && sameFields(none.missing, LINE_COLUMNS))
+  holds('a schema with any of the fourteen columns is of the 2.7 line, one column or seven, naming those it lacks', one.status === 'accepted' && sameFields(one.missing, LINE_COLUMNS.filter((field) => field !== 'FCT_Ship.SLRetire')) && some.status === 'accepted' && sameFields(some.missing, LINE_COLUMNS.filter((field) => !SEVEN_COLUMNS.includes(field))))
+  holds('a schema with every one of the fourteen columns is of the 2.7 line, with none missing', whole.status === 'accepted' && whole.missing.length === 0)
+  holds('a schema without the FCT_Game table is refused as no Aurora save, whatever else it holds', noGameLine.status === 'refused' && noGameLine.reason === 'not-aurora')
+
   const quiet = console.error
-  const connections = [switchable(source), switchable(source), switchable(source)]
+  const connections = [switchable(source), switchable(source), switchable(source), switchable(refusedFile)]
   const freshness = { generation: 3 }
-  const over = storeOver(store, { database: connections[0].database, freshness })
+  const drivers = []
+  const driven = (module, root) => {
+    const driver = storeOver(module, root)
+
+    drivers.push(driver)
+
+    return driver
+  }
+  const over = driven(store, { database: connections[0].database, freshness })
 
   console.error = () => {}
 
@@ -642,15 +737,17 @@ const consumerResults = async (mods, source) => {
     holds('the store blocks every bonus before any check', over.getters.blockedBonuses.size === all.length)
     await over.run('preflight')
     holds('the store releases the bonuses once the check answered on this copy', over.getters.status === 'ok' && over.getters.blockedBonuses.size === 0)
+    holds('an accepted copy is of the 2.7 line, and is not refused', over.getters.line !== null && over.getters.line.status === 'accepted' && over.getters.refused === false)
 
     connections[1].state.busy = true
 
-    const failed = storeOver(store, { database: connections[1].database, freshness: { generation: 1 } })
+    const failed = driven(store, { database: connections[1].database, freshness: { generation: 1 } })
 
     await failed.run('preflight')
     holds('the store blocks every bonus when the first check failed', failed.getters.status === 'failed' && failed.getters.result === null && failed.getters.blockedBonuses.size === all.length)
+    holds('a copy whose first check failed has no line and is not refused', failed.getters.line === null && failed.getters.refused === false)
 
-    const retained = storeOver(store, { database: connections[2].database, freshness: { generation: 5 } })
+    const retained = driven(store, { database: connections[2].database, freshness: { generation: 5 } })
 
     await retained.run('preflight')
     connections[2].state.busy = true
@@ -663,6 +760,32 @@ const consumerResults = async (mods, source) => {
     await pending
     freshness.generation = 4
     holds('a result of an earlier copy is never returned, and its lookups block every bonus', over.getters.result === null && over.getters.blockedBonuses.size === all.length)
+
+    const refusedFreshness = { generation: 7 }
+    const refusedOver = driven(store, { database: connections[3].database, freshness: refusedFreshness })
+
+    holds('no line is known and nothing is refused before the check answers', refusedOver.getters.line === null && refusedOver.getters.refused === false)
+    await refusedOver.run('preflight')
+    holds('a copy without the fourteen columns is refused by the store, as a save from before 2.7', refusedOver.getters.refused === true && refusedOver.getters.line.reason === 'pre-2.7')
+
+    const again = refusedOver.run('retry')
+
+    holds('a check that runs again on a refused copy keeps the refusal of the copy', refusedOver.getters.status === 'checking' && refusedOver.getters.refused === true)
+    await again
+    refusedFreshness.generation = 8
+    holds('the refusal of an earlier copy is not the refusal of the copy that replaced it', refusedOver.getters.refused === false && refusedOver.getters.line === null)
+
+    const probe = storeOver(store, {})
+    const untouched = JSON.stringify(probe.state)
+
+    probe.commit('not-an-action', 1)
+    probe.commit('peeks/capabilities/started', 2)
+    probe.commit('started', 3, { root: true })
+
+    const recorded = probe.committed.map(({ type, accepted }) => [type, accepted])
+
+    holds('the store driver records and rejects, applying nothing and answering undefined, a commit that is not a mutation of the module, a prefixed name and a call with options', JSON.stringify(recorded) === JSON.stringify([['not-an-action', false], ['peeks/capabilities/started', false], ['started', false]]) && probe.rejected().length === 3 && JSON.stringify(probe.state) === untouched)
+    holds('the store driver made no commit the module does not answer in the checks above', drivers.every((driver) => driver.rejected().length === 0) && drivers.some((driver) => driver.committed.length > 0))
   } finally {
     console.error = quiet
     await Promise.all(connections.map((connection) => connection.close()))
@@ -699,6 +822,8 @@ const MUTATIONS = [
   ['no assessment is read as confirmed lookup rows', 'utilities/capabilities.js', 'if (!gates) {\n    return [UNCONFIRMED]', 'if (!gates) {\n    return []'],
   ['a retry clears the result of the same copy', 'store/capabilities.js', 'if (state.resultGeneration !== generation) {', 'if (true) {'],
   ['the store returns a result of an earlier copy', 'store/capabilities.js', 'return state.resultGeneration === rootState.freshness.generation ? state.result : null', 'return state.result'],
+  ['the line counts a schema with some of the fourteen columns as one with none', 'utilities/capabilities.js', 'if (missing.length === LINE_SIGNATURE.length) {', 'if (missing.length > 0) {'],
+  ['the store refuses a copy on the result of an earlier copy', 'store/capabilities.js', "return getters.line !== null && getters.line.status === 'refused'", "return Boolean(_state.result && _state.result.line && _state.result.line.status === 'refused')"],
 ]
 
 // The nodes of a page's script that `wanted(node)` accepts, and the script's text: { script, nodes }.
@@ -762,7 +887,17 @@ const rosterRun = async (commanders, file, groups) => {
 // The consumers of the capability result, on the real modules and, with one gate taken out of a copy of them, on mutants that must fail.
 const consumerChecks = async (source) => {
   const mods = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS })
-  const results = await consumerResults(mods, source)
+  const refusedFile = await alteredCopy(source, 'pre27store', dropStatements(LINE_COLUMNS))
+
+  try {
+    return await consumerRun(mods, source, refusedFile)
+  } finally {
+    fs.rmSync(refusedFile, { force: true })
+  }
+}
+
+const consumerRun = async (mods, source, refusedFile) => {
+  const results = await consumerResults(mods, source, refusedFile)
 
   results.forEach(([statement, held]) => check(`consumers: ${statement}`, held))
 
@@ -771,7 +906,7 @@ const consumerChecks = async (source) => {
 
     try {
       const mutants = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
-      const broken = (await consumerResults(mutants, source)).filter(([, held]) => !held).map(([statement]) => statement)
+      const broken = (await consumerResults(mutants, source, refusedFile)).filter(([, held]) => !held).map(([statement]) => statement)
 
       check(`consumers: a copy of the code in which ${label} fails a consumer check`, broken.length > 0)
     } finally {
@@ -1015,6 +1150,14 @@ const main = async () => {
 
   if (g260) {
     check('older: a 2.6-shaped save has no formula version, its lookups as expected, and /commanders still readable', g260.formula.status === 'unavailable' && failedGates(g260).length === 0 && g260.reports['/commanders'].status !== 'unsupported')
+  }
+
+  if (g260) {
+    const file = path.resolve(repo, OLDER.find((save) => save.label === 'G260 base').file)
+
+    check('older: a real 2.6 save is refused as a save from before 2.7, naming each of the fourteen columns the file lacks', g260.line.status === 'refused' && g260.line.reason === 'pre-2.7' && sameFields(g260.line.missing, await absentIn(file, LINE_COLUMNS)) && g260.line.missing.length === 14, JSON.stringify(g260.line))
+  } else {
+    console.log('SKIP  older: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
   }
 
   const source = path.resolve(repo, 'AuroraDB_270_base.db')

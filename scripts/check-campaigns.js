@@ -19,6 +19,7 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { routes: routeTable } = require('./lib/store-routes')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
 
@@ -1238,6 +1239,36 @@ const defineSuite = (m) => {
     })
   })
 
+  // The root store the recorder plugin runs against, by the table of calls of scripts/lib/store-routes.js: it answers the plugin's dispatch of `capabilities/preflight` with no options and its commits of the five history mutations by their full names with no options; any other call is recorded as not accepted, not applied and answered with undefined. `rejected()` lists those calls, for the test to assert that its run made none.
+  const recorderStore = (state, commits, onWatch) => {
+    const dispatches = routeTable([{ type: 'capabilities/preflight', root: false }])
+    const mutations = routeTable(['history/ended', 'history/failures', 'history/passed', 'history/recorded', 'history/resolved'].map((type) => ({ type, root: false })))
+
+    return {
+      store: { state, getters: { config: { store: {}, get: () => undefined, set: () => {} } }, watch: (_select, callback) => onWatch(callback), commit: (type, payload, options) => { if (mutations.take(type, options)) { commits.push([type, payload]) } }, dispatch: async (type, _payload, options) => (dispatches.take(type, options) ? null : undefined) },
+      dispatched: dispatches.calls,
+      committed: mutations.calls,
+      rejected: () => [...dispatches.rejected(), ...mutations.rejected()],
+    }
+  }
+
+  test('review', 'the recorder\'s store records and rejects, answering undefined, a dispatch or commit that is not an action or mutation of the root store, a prefixed name and a call with options, and answers the plugin\'s own calls', async () => {
+    const commits = []
+    const stub = recorderStore({}, commits, () => {})
+    const answers = [await stub.store.dispatch('not-an-action'), await stub.store.dispatch('peeks/capabilities/preflight'), await stub.store.dispatch('capabilities/preflight', null, { root: true }), await stub.store.dispatch('capabilities/preflight')]
+
+    stub.store.commit('not-an-action', 1)
+    stub.store.commit('peeks/history/ended', 2)
+    stub.store.commit('history/ended', 3, { root: true })
+    stub.store.commit('history/ended', 4)
+
+    assert.deepEqual(answers, [undefined, undefined, undefined, null])
+    assert.deepEqual(stub.dispatched.map(({ type, accepted }) => [type, accepted]), [['not-an-action', false], ['peeks/capabilities/preflight', false], ['capabilities/preflight', false], ['capabilities/preflight', true]])
+    assert.deepEqual(stub.committed.map(({ type, accepted }) => [type, accepted]), [['not-an-action', false], ['peeks/history/ended', false], ['history/ended', false], ['history/ended', true]])
+    assert.deepEqual(commits, [['history/ended', 4]])
+    assert.equal(stub.rejected().length, 6)
+  })
+
   test('review', 'a refused tab that already has a newer pass waiting for the recording does not start a second pass when the owner closes', async () => {
     await withBrowser(async ({ locks }) => {
       const owner = await m.tab()
@@ -1245,7 +1276,7 @@ const defineSuite = (m) => {
       const commits = []
       const state = { freshness: { generation: 1 }, database: null, savePath: 'C:/saves/a.db' }
       let watcher = null
-      const store = { state, getters: { config: { store: {}, get: () => undefined, set: () => {} } }, watch: (_select, callback) => { watcher = callback }, commit: (type, payload) => commits.push([type, payload]) }
+      const { store, rejected } = recorderStore(state, commits, (callback) => { watcher = callback })
       const open = (generation) => {
         state.freshness.generation = generation
         state.database = saveOf({ n: 100 })
@@ -1270,6 +1301,7 @@ const defineSuite = (m) => {
 
       assert.equal(resolved().length, 1, 'the save was recorded more than once')
       assert.equal(resolved()[0][1].generation, 2)
+      assert.deepEqual(rejected(), [], 'the recorder made calls the root store does not answer')
     })
   })
 
@@ -1280,7 +1312,7 @@ const defineSuite = (m) => {
       const commits = []
       const state = { freshness: { generation: 1 }, database: saveOf({ n: 100 }), savePath: 'C:/saves/a.db' }
       let watcher = null
-      const store = { state, getters: { config: { store: {}, get: () => undefined, set: () => {} } }, watch: (_select, callback) => { watcher = callback }, commit: (type, payload) => commits.push([type, payload]) }
+      const { store, rejected } = recorderStore(state, commits, (callback) => { watcher = callback })
 
       owner.owner.claimRecording({ database: 'C:/saves/a.db' })
       refused.plugin.default({ store, ownerGrace: 80 })
@@ -1292,6 +1324,7 @@ const defineSuite = (m) => {
       locks.close()
       await new Promise((resolve) => setTimeout(resolve, 300))
       assert.equal(commits.filter(([type]) => type === 'history/resolved').length, 1)
+      assert.deepEqual(rejected(), [], 'the recorder made calls the root store does not answer')
     })
   })
 

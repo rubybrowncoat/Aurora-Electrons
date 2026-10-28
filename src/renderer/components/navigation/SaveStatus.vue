@@ -12,6 +12,7 @@ import { mapGetters, mapState } from 'vuex'
 
 import { gameTime } from '../../utilities/aurora'
 import { describeRecovery } from '../../store/freshness'
+import { REFUSALS } from '../../utilities/capabilities'
 
 const TICK_MS = 5000
 
@@ -60,6 +61,8 @@ export default {
     ...mapGetters('capabilities', {
       capabilities: 'result',
       capabilityStatus: 'status',
+      capabilityLine: 'line',
+      refused: 'refused',
       reportOf: 'report',
     }),
     // The selected game's date at the last successful read, from its own StartYear and seconds, or null when no game is picked.
@@ -76,8 +79,16 @@ export default {
     pageReport () {
       return this.reportOf(this.$route.path)
     },
-    // What the check found short for the open page or the shell: '' when both are fully supported.
+    // The words a refusal of the save is told in: null while the save is not refused.
+    refusal () {
+      return this.refused ? REFUSALS[this.capabilityLine.reason] : null
+    },
+    // What the check found short for the open page or the shell: '' when both are fully supported; the refusal alone when the save is refused.
     capabilityText () {
+      if (this.refusal) {
+        return this.refusal.status
+      }
+
       const parts = []
 
       if (this.capabilityStatus === 'failed') {
@@ -95,7 +106,7 @@ export default {
       return parts.join(', ')
     },
     tone () {
-      if (this.status === 'failed' || this.recovery.state === 'missing' || this.recovery.state === 'unreadable' || this.failedInputs.length || (this.pageReport && this.pageReport.status === 'unsupported') || this.capabilityStatus === 'failed') {
+      if (this.status === 'failed' || this.recovery.state === 'missing' || this.recovery.state === 'unreadable' || this.failedInputs.length || this.refused || (this.pageReport && this.pageReport.status === 'unsupported') || this.capabilityStatus === 'failed') {
         return 'bad'
       }
 
@@ -183,11 +194,11 @@ export default {
 
       const reports = Object.values(this.capabilities.reports)
       const count = (status) => reports.filter((report) => report.status === status).length
-      const formula = this.capabilities.formula.status === 'unavailable' ? `not stated (${this.capabilities.formula.inputs.missing.join(', ')} absent)` : `${this.capabilities.formula.value}, assumed from the schema, not a verified version`
+      const formula = this.refusal ? this.refusal.status : this.capabilities.formula.status === 'unavailable' ? `Formula version: not stated (${this.capabilities.formula.inputs.missing.join(', ')} absent)` : `Formula version: ${this.capabilities.formula.value}, assumed from the schema, not a verified version`
       const gates = [...Object.values(this.capabilities.gates.bonuses), ...Object.values(this.capabilities.gates.components)]
       const unmatched = gates.filter((gate) => gate.status === 'unavailable').length
 
-      return `Capability check of database copy ${this.capabilityGeneration}: ${count('supported')} of ${reports.length} reports supported, ${count('degraded')} degraded, ${count('unsupported')} unsupported; ${unmatched} of ${gates.length} lookup rows not as expected. Formula version: ${formula}.`
+      return `Capability check of database copy ${this.capabilityGeneration}: ${count('supported')} of ${reports.length} reports supported, ${count('degraded')} degraded, ${count('unsupported')} unsupported; ${unmatched} of ${gates.length} lookup rows not as expected. ${formula}.`
     },
   },
   created () {

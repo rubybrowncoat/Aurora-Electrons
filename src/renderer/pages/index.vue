@@ -1,6 +1,7 @@
 <template>
   <div class="empires-page">
-    <v-card class="game-picker" :style="neutralStyle" outlined>
+    <unsupported-save v-if="refused" />
+    <v-card v-else class="game-picker" :style="neutralStyle" outlined>
       <v-card-title>Pick an empire</v-card-title>
       <template v-if="games.length">
         <v-card-subtitle>Picking one opens {{ targetTitle }}.</v-card-subtitle>
@@ -21,6 +22,7 @@ import { mapGetters, mapState } from 'vuex'
 import EmpireList from '../components/navigation/EmpireList.vue'
 import SavePanel from '../components/navigation/SavePanel.vue'
 import { sectionStyle } from '../components/navigation/section-style'
+import UnsupportedSave from '../components/page/UnsupportedSave.vue'
 import { activeAppearance } from '../utilities/appearance'
 import { pageByRoute } from '../utilities/navigation'
 
@@ -31,6 +33,7 @@ export default {
   components: {
     EmpireList,
     SavePanel,
+    UnsupportedSave,
   },
   computed: {
     ...mapState('empires', [
@@ -40,6 +43,9 @@ export default {
     ]),
     ...mapState('navigation', [
       'lastRacePage',
+    ]),
+    ...mapGetters('capabilities', [
+      'refused',
     ]),
     ...mapGetters([
       'database',

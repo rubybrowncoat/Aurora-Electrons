@@ -18,53 +18,73 @@ export default ({ store, ownerGrace }) => {
   const record = (database, to = taken) => {
     // A pass belongs to the copy of the save it was started for. The store's freshness generation counts the copies opened: once a newer one replaces this, the pass writes nothing more (its migration, registry and history writes all ask), because two saves in quick succession start two passes that can finish in either order.
     const generation = store.state.freshness.generation
-    const isCurrent = () => store.state.freshness.generation === generation && store.state.database === database
+    const isOpen = () => store.state.freshness.generation === generation && store.state.database === database
+    // Refusal is live state: a check that failed first can be retried into a refusal of the same copy while the pass reads, so every write the pass asks about (`recordHistory`'s guard) and its report ask again, and a pass whose copy was refused since ends as held, never as passed.
+    const isCurrent = () => isOpen() && !store.getters['capabilities/refused']
     const pass = { generation, status: 'running' }
     const from = taken + 1
     // The games whose snapshot this pass wrote.
     const saved = new Set()
 
     taken = Math.max(taken, to)
-    // Once per database: the lock is asked for when the save is first recorded, when its path is known.
-    claimRecording({ database: store.state.savePath || '', onOwner: own })
-
     latest = pass
 
-    // Open views refresh after each game's file is written, so a game that fails later in the pass doesn't leave them stale.
-    recordHistory(database, { storage: campaignStorage(store.getters.config), path: store.state.savePath, isCurrent, ownerGrace, onResolved: (GameID, resolution) => isCurrent() && store.commit('history/resolved', { GameID, resolution, generation }), onSaved: (GameID) => { saved.add(GameID); store.commit('history/recorded') } }).then(({ failed, superseded }) => {
-      // A pass that a newer copy replaced reports nothing: what it failed on belonged to the copy the app has left.
-      if (superseded || !isCurrent()) {
+    // The capability check of the copy (store/capabilities.js, started when the copy was opened) answers first: a save that is not of the Aurora line the app reads is refused, and nothing of it is recorded: no campaign is settled for it, no snapshot written and no recording lock taken. A check that has not answered or has failed refuses nothing.
+    store.dispatch('capabilities/preflight').then(() => {
+      // A pass the save was replaced under while the check was pending ends here: it neither claims the lock of the replacement's path nor opens any history storage.
+      if (!isOpen()) {
         pass.status = 'done'
         store.commit('history/ended', { from, to, generation, outcome: 'superseded' })
 
         return
       }
 
-      failed.forEach(({ GameID, stage, error }) => {
-        console.error(stage === 'registry' ? 'Empire history: the campaign registry could not be used' : stage === 'readonly' ? 'Empire history: another tab records, so this tab writes nothing' : `Empire history: couldn't ${stage} game ${GameID}'s snapshots`, error)
-      })
-
-      pass.status = failed.some(({ stage }) => stage === 'readonly') ? 'refused' : 'done'
-
-      store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
-      // Only the end of a pass confirms what it wrote, and a failure reported with it is read first (utilities/economy-digest.js `recordingStateOf`).
-      store.commit('history/passed', { GameIDs: [...saved], generation })
-      store.commit('history/ended', { from, to, generation, outcome: failed.some(({ stage }) => stage === 'readonly') ? 'refused' : failed.length ? 'failed' : 'passed' })
-    }).catch((error) => {
-      pass.status = 'done'
-
-      // A newer save replaced this one and stopped its reads.
-      if (!isCurrent()) {
-        store.commit('history/ended', { from, to, generation, outcome: 'superseded' })
+      if (isOpen() && store.getters['capabilities/refused']) {
+        pass.status = 'done'
+        store.commit('history/ended', { from, to, generation, outcome: 'held' })
 
         return
       }
 
-      console.error('Empire history: snapshot failed', error)
+      // Once per database: the lock is asked for when the save is first recorded, when its path is known.
+      claimRecording({ database: store.state.savePath || '', onOwner: own })
 
-      // The save couldn't be read at all (the game may have been writing it): no game was recorded.
-      store.commit('history/failures', [{ GameID: null, stage: 'read' }])
-      store.commit('history/ended', { from, to, generation, outcome: 'failed' })
+      // Open views refresh after each game's file is written, so a game that fails later in the pass doesn't leave them stale.
+      recordHistory(database, { storage: campaignStorage(store.getters.config), path: store.state.savePath, isCurrent, ownerGrace, onResolved: (GameID, resolution) => isCurrent() && store.commit('history/resolved', { GameID, resolution, generation }), onSaved: (GameID) => { saved.add(GameID); store.commit('history/recorded') } }).then(({ failed, superseded }) => {
+        // A pass that a newer copy replaced reports nothing: what it failed on belonged to the copy the app has left.
+        if (superseded || !isCurrent()) {
+          pass.status = 'done'
+          store.commit('history/ended', { from, to, generation, outcome: isOpen() ? 'held' : 'superseded' })
+
+          return
+        }
+
+        failed.forEach(({ GameID, stage, error }) => {
+          console.error(stage === 'registry' ? 'Empire history: the campaign registry could not be used' : stage === 'readonly' ? 'Empire history: another tab records, so this tab writes nothing' : `Empire history: couldn't ${stage} game ${GameID}'s snapshots`, error)
+        })
+
+        pass.status = failed.some(({ stage }) => stage === 'readonly') ? 'refused' : 'done'
+
+        store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
+        // Only the end of a pass confirms what it wrote, and a failure reported with it is read first (utilities/economy-digest.js `recordingStateOf`).
+        store.commit('history/passed', { GameIDs: [...saved], generation })
+        store.commit('history/ended', { from, to, generation, outcome: failed.some(({ stage }) => stage === 'readonly') ? 'refused' : failed.length ? 'failed' : 'passed' })
+      }).catch((error) => {
+        pass.status = 'done'
+
+        // A newer save replaced this one and stopped its reads, or the copy was refused meanwhile.
+        if (!isCurrent()) {
+          store.commit('history/ended', { from, to, generation, outcome: isOpen() ? 'held' : 'superseded' })
+
+          return
+        }
+
+        console.error('Empire history: snapshot failed', error)
+
+        // The save couldn't be read at all (the game may have been writing it): no game was recorded.
+        store.commit('history/failures', [{ GameID: null, stage: 'read' }])
+        store.commit('history/ended', { from, to, generation, outcome: 'failed' })
+      })
     })
   }
 

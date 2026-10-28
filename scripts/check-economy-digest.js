@@ -17,6 +17,7 @@ const { pathToFileURL } = require('url')
 const compiler = require('vue/compiler-sfc')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
+const { routes: routeTable } = require('./lib/store-routes')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 
@@ -1450,6 +1451,54 @@ const recordedSave = ({ n, wealth, raced = true }) => {
   }
 }
 
+// The root store the recorder plugin runs against, by the table of calls of scripts/lib/store-routes.js: it answers the plugin's dispatch of `capabilities/preflight` with no options and its commits of the history module's mutations by their full names with no options; any other call is recorded as not accepted, not applied and answered with undefined. `rejected()` lists those calls, for the check to assert that its run made none.
+const recorderStore = (state, mutations, { watch = () => {}, afterCommit = () => {} } = {}) => {
+  const dispatches = routeTable([{ type: 'capabilities/preflight', root: false }])
+  const commits = routeTable(Object.keys(mutations).map((name) => ({ type: `history/${name}`, root: false })))
+
+  return {
+    store: {
+      state,
+      getters: { config: { store: {}, get: () => undefined, set: () => {} } },
+      watch: (_select, callback) => watch(callback),
+      dispatch: async (type, _payload, options) => (dispatches.take(type, options) ? null : undefined),
+      commit: (type, payload, options) => {
+        if (!commits.take(type, options)) {
+          return
+        }
+
+        const name = type.slice('history/'.length)
+
+        mutations[name](state.history, payload)
+        afterCommit(name)
+      },
+    },
+    dispatched: dispatches.calls,
+    committed: commits.calls,
+    rejected: () => [...dispatches.rejected(), ...commits.rejected()],
+  }
+}
+
+check('recording-routes', 'the recorder\'s store records and rejects, answering undefined, a dispatch or commit that is not an action or mutation of the root store, a prefixed name and a call with options, and answers the plugin\'s own calls', async ({ m }) => {
+  const state = { history: m.historyStore.state() }
+  const stub = recorderStore(state, m.historyStore.mutations)
+  const answers = [await stub.store.dispatch('not-an-action'), await stub.store.dispatch('peeks/capabilities/preflight'), await stub.store.dispatch('capabilities/preflight', null, { root: true }), await stub.store.dispatch('capabilities/preflight')]
+
+  stub.store.commit('not-an-action', 1)
+  stub.store.commit('peeks/history/recorded', 2)
+  stub.store.commit('history/recorded', 3, { root: true })
+
+  const before = JSON.stringify(state.history)
+
+  stub.store.commit('history/recorded', 4)
+
+  assert.deepEqual(answers, [undefined, undefined, undefined, null])
+  assert.deepEqual(stub.dispatched.map(({ type, accepted }) => [type, accepted]), [['not-an-action', false], ['peeks/capabilities/preflight', false], ['capabilities/preflight', false], ['capabilities/preflight', true]])
+  assert.deepEqual(stub.committed.map(({ type, accepted }) => [type, accepted]), [['not-an-action', false], ['peeks/history/recorded', false], ['history/recorded', false], ['history/recorded', true]])
+  assert.equal(stub.rejected().length, 6)
+  assert.notEqual(JSON.stringify(state.history), before, 'the one accepted commit was not applied')
+})
+
 check('recording-gate', 'the digest compares and acknowledges only once the recorder has completed a pass that wrote the open save: while the pass runs, after a refused write and before any pass it is unconfirmed, and the older snapshot of the same game time is never taken for it', async ({ component, page, m }) => {
   const options = await component()
   const pageOptions = await page()
@@ -1460,20 +1509,7 @@ check('recording-gate', 'the digest compares and acknowledges only once the reco
   const state = { freshness: { generation: 0 }, database: null, savePath: 'C:/saves/a.db', GameID: 1, history: m.historyStore.state() }
   const watchers = []
   let ended = () => {}
-  const store = {
-    state,
-    getters: { config: { store: {}, get: () => undefined, set: () => {} } },
-    watch: (_select, callback) => { watchers.push(callback) },
-    commit: (type, payload) => {
-      const name = type.split('/')[1]
-
-      m.historyStore.mutations[name](state.history, payload)
-
-      if (name === 'failures') {
-        ended()
-      }
-    },
-  }
+  const { store, rejected } = recorderStore(state, m.historyStore.mutations, { watch: (callback) => { watchers.push(callback) }, afterCommit: (name) => { if (name === 'failures') { ended() } } })
 
   m.plugin.default({ store })
 
@@ -1626,6 +1662,7 @@ check('recording-gate', 'the digest compares and acknowledges only once the reco
   }
 
   assert.equal(m.d.buildDigest({ record: null, snapshots: [snap(3000)], gameTime: 3000, recording: '' }).state, 'none')
+  assert.deepEqual(rejected(), [], 'the recorder made calls the root store does not answer')
 })
 
 // ---- The planted faults ------------------------------------------------------------------------------------------------

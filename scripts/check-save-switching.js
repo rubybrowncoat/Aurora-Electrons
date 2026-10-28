@@ -3,6 +3,8 @@
 
   Each case builds a fresh app over two saves that share a game and race number (GameID 140, race 784) but are different campaigns: a copy of AuroraDB.db, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
 
+  A copy that is refused as a save of another Aurora line (the schema answered with the fourteen columns of the line left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
+
   Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and the parts and the mutations all run side by side (CHECK_JOBS at a time), each in a process of its own with its own fixtures. Run: node scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs ./AuroraDB.db.
 */
 const fs = require('fs')
@@ -1689,6 +1691,139 @@ const defineSuite = (m, fixtures, base) => {
     assert.equal(w.store.getters['capabilities/status'], 'failed')
   })
 
+  const LINE_COLUMNS = ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics', 'FCT_DesignPhilosophy.MaintenanceModules', 'FCT_Fleet.AutoLP', 'FCT_Population.AcademyNameThemeID', 'FCT_Population.BuildReplacements', 'FCT_Population.ReplacementCapacity', 'FCT_Population.UseAcademyNameTheme', 'FCT_Race.RandomClassName', 'FCT_Race.chkCometNames', 'FCT_Race.chkComets', 'FCT_Ship.MaxActiveResolution', 'FCT_Ship.SLRetire', 'FCT_ShipClassTemplate.CrewDesignEfficiency']
+  // The schema of a copy as a save of another Aurora line answers it: with the fourteen columns of the line left out.
+  const withoutLine = (answer) => [answer[0].filter((row) => !LINE_COLUMNS.includes(`${row.tbl}.${row.name}`)), ...answer.slice(1)]
+
+  test('a recording pass whose copy was replaced while its capability check was pending claims no recording lock, though the copy that replaced it is refused', async () => {
+    const held = installLocks()
+    let phase = 'normal'
+    let release = null
+    const gate = new Promise((resolve) => { release = resolve })
+    const w = await world({
+      recording: true,
+      onDatabase: (database) => {
+        const query = database.query.bind(database)
+        const mode = phase
+
+        // The schema of the copy opened in the gated phase is answered only once the gate opens; that of the copy opened in the refused phase is a save of another line.
+        database.query = async (sql, options) => {
+          const schema = /pragma_table_xinfo/.test(sql)
+
+          if (schema && mode === 'gated') {
+            await gate
+          }
+
+          const answer = await query(sql, options)
+
+          return schema && mode === 'refused' ? withoutLine(answer) : answer
+        }
+      },
+    })
+
+    phase = 'gated'
+    await w.store.dispatch('saves/select', b)
+    phase = 'refused'
+    await w.store.dispatch('saves/select', a)
+    await until(() => w.store.getters['capabilities/refused'], 'the copy that replaced the gated one to be refused')
+    release()
+    await sleep(1000)
+
+    assert.deepEqual([...held], [], 'a pass of a copy that was replaced claimed a recording lock')
+    assert.ok(w.store.getters['capabilities/refused'], 'the replacement is no longer refused')
+  })
+
+  test('a recording pass of a copy that is refused as a save of another Aurora line records nothing, claims no recording lock and settles no campaign', async () => {
+    const held = installLocks()
+    // The schema the copy answers for is the save's with the fourteen columns of the line left out: the check of the capabilities refuses it, as it does a real older save.
+    const w = await world({
+      recording: true,
+      onDatabase: (database) => {
+        const query = database.query.bind(database)
+
+        database.query = async (sql, options) => {
+          const answer = await query(sql, options)
+
+          return /pragma_table_xinfo/.test(sql) ? withoutLine(answer) : answer
+        }
+      },
+    })
+
+    await until(() => w.store.getters['capabilities/refused'], 'the copy to be refused')
+    await until(() => w.store.state.history.ended !== null, 'the pass of the refused copy to end')
+    await sleep(500)
+
+    assert.equal(w.store.state.history.ended.outcome, 'held', 'the pass of a refused copy did not end as held')
+    assert.deepEqual([...held], [], 'a pass of a refused copy claimed a recording lock')
+    assert.equal(w.store.getters.campaignId, null, 'a campaign was settled on a refused copy')
+    assert.deepEqual(Object.keys(w.store.state.history.campaigns), [], 'a refused copy was recorded')
+    assert.deepEqual(Object.keys(w.store.state.history.passes), [], 'a refused copy was recorded')
+  })
+
+  test('a recording pass that started after a failed capability check, and whose copy a retry then refuses while it reads, writes nothing, settles no campaign and does not end as passed', async () => {
+    let enter = null
+    let release = null
+    let schemas = 0
+    let instrumented = false
+    const entered = new Promise((resolve) => { enter = resolve })
+    const gate = new Promise((resolve) => { release = resolve })
+    const kept = () => JSON.stringify([...globalThis.__stores])
+    const w = await world({
+      recording: true,
+      onDatabase: (database) => {
+        if (instrumented) {
+          return
+        }
+
+        instrumented = true
+
+        const query = database.query.bind(database)
+        let inside = 0
+
+        // The first schema read (the capability check of the copy) fails; the ones after it answer as a save of another Aurora line. The fourth statement of the pass's read transaction waits: the retry comes while the pass reads.
+        database.query = async (sql, options) => {
+          if (/pragma_table_xinfo/.test(sql)) {
+            if (++schemas === 1) {
+              throw new Error('the save could not be read')
+            }
+
+            return withoutLine(await query(sql, options))
+          }
+
+          if (options && options.transaction && ++inside === 4) {
+            enter()
+            await gate
+          }
+
+          return query(sql, options)
+        }
+      },
+    })
+    let before = null
+    let revision = null
+
+    await captured('error', async () => {
+      await entered
+      assert.equal(w.store.getters['capabilities/status'], 'failed', 'the first check did not fail')
+      assert.equal(w.store.getters['capabilities/refused'], false, 'a failed check refused the copy')
+      await w.store.dispatch('capabilities/retry')
+      assert.ok(w.store.getters['capabilities/refused'], 'the retry did not refuse the copy')
+      before = kept()
+      revision = w.store.state.history.revision
+      release()
+      await until(() => w.store.state.history.ended !== null, 'the pass of the refused copy to end')
+      await sleep(500)
+    })
+
+    assert.equal(w.store.state.history.ended.outcome, 'held', 'a pass whose copy was refused while it read did not end as held')
+    assert.equal(kept(), before, 'a pass wrote after the copy was refused')
+    assert.equal(w.store.state.history.revision, revision, 'a snapshot was reported after the copy was refused')
+    assert.equal(w.store.getters.campaignId, null, 'a campaign was settled on a refused copy')
+    assert.deepEqual(Object.keys(w.store.state.history.campaigns), [], 'a refused copy was recorded')
+    assert.deepEqual(Object.keys(w.store.state.history.passes), [], 'a refused copy was confirmed as recorded')
+    assert.deepEqual(w.store.state.history.failures, [], 'the refusal was reported as a failure')
+  })
+
   test('a recording pass cut off by a switch reports nothing and records no failure', async () => {
     let enter = null
     let release = null
@@ -2096,6 +2231,9 @@ const MUTATIONS = [
   { name: 'a capability check that reports what a switch cut off', file: 'renderer/store/capabilities.js', find: 'if (!isRetired(error) && checks.get(database) === check && generation === rootState.freshness.generation && database === rootState.database) {', replace: 'if (true) {', fails: ['a capability check cut off by a switch'] },
   { name: 'a capability check that reports nothing', file: 'renderer/store/capabilities.js', find: 'if (!isRetired(error) && checks.get(database) === check && generation === rootState.freshness.generation && database === rootState.database) {', replace: 'if (false) {', fails: ['a capability check of the copy now open'] },
   { name: 'a recording pass that reports after it was replaced', file: 'renderer/plugins/history.js', find: 'if (superseded || !isCurrent()) {', replace: 'if (false) {', fails: ['a recording pass cut off by a switch'] },
+  { name: 'a recording pass that records a refused copy', file: 'renderer/plugins/history.js', find: 'if (isOpen() && store.getters[\'capabilities/refused\']) {', replace: 'if (false) {', fails: ['a recording pass of a copy that is refused'] },
+  { name: 'a recording pass that claims a lock after it was replaced', file: 'renderer/plugins/history.js', find: 'storage.\n      if (!isOpen()) {', replace: 'storage.\n      if (false) {', fails: ['a recording pass whose copy was replaced while'] },
+  { name: 'a recording pass that goes on after its copy was refused', file: 'renderer/plugins/history.js', find: 'const isCurrent = () => isOpen() && !store.getters[\'capabilities/refused\']', replace: 'const isCurrent = () => isOpen()', fails: ['a recording pass that started after a failed capability check'] },
   { name: 'a dev server that answers every copy from the newest', file: 'scripts/web/database-middleware.js', find: "const connection = typeof token === 'string' ? connections.get(token) : null", replace: 'const connection = [...connections.values()].pop()', fails: ['two tabs on one dev server'] },
   { name: 'a dev server that does not remember the copies a page released', file: 'scripts/web/database-middleware.js', find: '  released.add(token)\n', replace: '', fails: ['two tabs on one dev server', 'the dev server pushes out the least recently used'] },
   { name: 'a database that lets a suspended transaction commit after the retiring ended it', file: 'renderer/utilities/database.js', find: 'started.commit = () => (cancelled.has(started) ? Promise.reject(new DatabaseRetired()) : commit())', replace: 'started.commit = () => commit()', fails: ['a transaction still suspended past the retiring'] },

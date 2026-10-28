@@ -7,6 +7,8 @@
 
   With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them, that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
 
+  The store holds off while the save is refused as a save of another Aurora line (store/capabilities.js `refused`): a refused copy loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused (one synthetic check, and a mutation that leaves the hold out).
+
   The timings are wall time, so they run on a machine with no other heavy job (scripts/check-all.js runs this script after the others, alone, and the lane brief names it a run-alone suite); a run beside one fails the budget with medians several times the quiet ones (36 ms against 4.6 ms). Each timing therefore states, whether it passes or fails, the machine's condition over the time since the timings began (scripts/lib/machine-load.js): the share of all the processors that was busy, this check's own part of it and that of every other process. The condition is only reported, never used to skip or relax the budget.
 
   --no-mutations leaves the mutations out. --only=<text>[|<text>...] runs only the synthetic checks and the mutations whose names hold one of the texts, and reads no save: a focused run while working (the run that counts has neither).
@@ -17,6 +19,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { watchLoad, loadShare, describeLoad, processorTimes } = require('./lib/machine-load')
+const { routes: routeTable } = require('./lib/store-routes')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -133,12 +136,25 @@ const context = (database, GameID, RaceID, extra = {}) => ({ database, GameID, R
 // A database whose every read gives `rows`.
 const fixedDatabase = (rows) => ({ query: () => Promise.resolve([rows.map((item) => ({ ...item })), {}]) })
 
-// The store's state, mutations and action driven the way Vuex would, over a database and the root state's moving parts. `finished` lists the routes of the lines the store set, in the order it set them, and `onSet(route)`, which a check may replace, runs after each.
+// The store's state, mutations and action driven the way Vuex would, over a database and the root state's moving parts. `finished` lists the routes of the lines the store set, in the order it set them, and `onSet(route)`, which a check may replace, runs after each. `dispatch` and `commit` answer as a namespaced module's do, by the table of calls (scripts/lib/store-routes.js): the module's own actions and mutations by their names with no options, and the root's `capabilities/preflight` only with `{ root: true }`; any other call is recorded as not accepted, not applied, and answered with undefined. `dispatched` and `committed` are the records; `rejected()` lists the calls not accepted.
 const storeOver = (store) => {
   const state = store.state()
   const finished = []
-  const driven = { onSet: () => {} }
-  const commit = (name, payload) => {
+  const driven = { onSet: () => {}, preflight: async () => {} }
+  const dispatches = routeTable([...Object.keys(store.actions).map((type) => ({ type, root: false })), { type: 'capabilities/preflight', root: true }])
+  const commits = routeTable(Object.keys(store.mutations).map((type) => ({ type, root: false })))
+  const dispatch = (type, _payload, options) => {
+    if (!dispatches.take(type, options)) {
+      return undefined
+    }
+
+    return options ? driven.preflight() : Promise.resolve()
+  }
+  const commit = (name, payload, options) => {
+    if (!commits.take(name, options)) {
+      return
+    }
+
     store.mutations[name](state, payload)
 
     if (name === 'set') {
@@ -146,16 +162,22 @@ const storeOver = (store) => {
       driven.onSet(payload.route)
     }
   }
+
+  Object.assign(driven, { dispatched: dispatches.calls, committed: commits.calls, rejected: () => [...dispatches.rejected(), ...commits.rejected()], forgive: () => { dispatches.forgive(); commits.forgive() } })
   const separators = { value: 'Tick' }
   const rootState = { database: null, GameID: 1, RaceID: 10, StartYear: 2000, history: { revision: 0 } }
-  const rootGetters = { config: { get: () => separators.value }, historyRecorded: false, 'history/snapshotSummary': () => null }
+  const rootGetters = { config: { get: () => separators.value }, historyRecorded: false, 'history/snapshotSummary': () => null, 'capabilities/refused': false }
 
   return Object.assign(driven, {
     state,
     root: rootState,
     separators,
     finished,
-    load: (routes) => store.actions.load({ state, commit, rootState, rootGetters }, routes),
+    getters: rootGetters,
+    visible: () => store.getters.visible(state, {}, rootState, rootGetters),
+    dispatch,
+    commit,
+    load: (routes) => store.actions.load({ state, commit, dispatch, rootState, rootGetters }, routes),
   })
 }
 
@@ -362,6 +384,108 @@ const synthetic = (m) => {
 
       return database.log.length > sent ? true : 'no statement after the revision changed'
     }],
+    ['a refused save loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused', async (store, database) => {
+      await store.load(ROUTES)
+
+      const loaded = Object.keys(store.state.lines).length
+      const sent = database.log.length
+
+      store.getters['capabilities/refused'] = true
+      await store.load(ROUTES)
+
+      const held = same([loaded, Object.keys(store.state.lines).length, store.state.key, database.log.length - sent], [ROUTES.length, 0, null, 0])
+
+      store.getters['capabilities/refused'] = false
+      await store.load(ROUTES)
+
+      return held === true && Object.keys(store.state.lines).length === ROUTES.length ? true : `loaded ${loaded}, then lines ${Object.keys(store.state.lines).length}, key ${store.state.key}, statements ${database.log.length - sent}, then ${Object.keys(store.state.lines).length} (held: ${held})`
+    }],
+    ['the lines of the flyout are none once the copy is refused, though they were published before, and are those published again once it is not refused', async (store, database) => {
+      await store.load(ROUTES)
+
+      const published = store.visible()
+
+      store.getters['capabilities/refused'] = true
+
+      const masked = store.visible()
+
+      store.getters['capabilities/refused'] = false
+
+      return same([Object.keys(published).sort(), masked, store.visible() === store.state.lines, database.log.length > 0], [[...ROUTES].sort(), {}, true, true])
+    }],
+    ['the section flyout takes its lines from the getter that hides them while the copy is refused, and not from the state', async () => {
+      const layout = fs.readFileSync(path.join(rendererDirectory, 'layouts', 'default.vue'), 'utf8')
+      const viaGetter = /\.\.\.mapGetters\('peeks', \{\s+peekLines: 'visible',\s+\}\)/.test(layout)
+      const viaState = /mapState\('peeks'/.test(layout) || /:peeks="(?!peekLines")/.test(layout)
+
+      return viaGetter && !viaState ? true : `getter ${viaGetter}, state or another source ${viaState}`
+    }],
+    ['a refusal that is known only after the capability check answers, while the lines wait for it, loads no line and sends no statement', async (store, database) => {
+      let answer = () => {}
+
+      store.preflight = () => new Promise((resolve) => { answer = resolve })
+
+      const sent = database.log.length
+      const pending = store.load(ROUTES)
+
+      store.getters['capabilities/refused'] = true
+      answer()
+      await pending
+
+      return same([Object.keys(store.state.lines).length, database.log.length - sent], [0, 0])
+    }],
+    ['a refusal that is known while a line is being read publishes none of the lines read', async (store, database) => {
+      let open = null
+      let started = null
+      const gate = new Promise((resolve) => { open = resolve })
+      const reading = new Promise((resolve) => { started = resolve })
+
+      const slow = async (sql, options) => {
+        started()
+        await gate
+
+        return database.query(sql, options)
+      }
+
+      store.root.database = { query: slow }
+
+      const pending = store.load(ROUTES)
+
+      await reading
+      store.getters['capabilities/refused'] = true
+      open()
+      await pending
+
+      return same(store.state.lines, {})
+    }],
+    ['the capability check is asked for through the root route, as a namespaced module reaches the capabilities module, and the call is accepted', async (store) => {
+      await store.load(ROUTES)
+
+      return same(store.dispatched, [{ type: 'capabilities/preflight', options: { root: true }, accepted: true }])
+    }],
+    ['the adapter of the store records and rejects, answering undefined, the capability check asked for without the root route, a name that is not an action, a prefixed name, a root call of an action it does not know or of one of the module\'s own, and accepts the routed one and the module\'s own', async (store) => {
+      const calls = [['capabilities/preflight'], ['capabilities/preflight', null, {}], ['capabilities/preflight', null, { root: false }], ['capabilities/preflight', null, { root: true, extra: 1 }], ['capabilities/unknown', null, { root: true }], ['not-an-action'], ['peeks/capabilities/preflight'], ['peeks/capabilities/preflight', null, { root: true }], ['load', null, { root: true }], ['capabilities/preflight', null, { root: true }], ['load']]
+      const answers = calls.map(([type, payload, options]) => store.dispatch(type, payload, options))
+      const recorded = store.dispatched.map(({ type, options, accepted }) => [type, options, accepted])
+
+      store.forgive()
+
+      return same([answers.map((answer) => answer !== undefined), recorded.map(([, , accepted]) => accepted), recorded.slice(5, 7).map(([type]) => type), store.rejected()], [[false, false, false, false, false, false, false, false, false, true, true], [false, false, false, false, false, false, false, false, false, true, true], ['not-an-action', 'peeks/capabilities/preflight'], []])
+    }],
+    ['the adapter of the store applies a mutation of the module only by its own name and with no options, and records and applies none sent to the root, under another name or under a prefixed one', async (store) => {
+      store.commit('reset', 'wrong-root', { root: true })
+      store.commit('not-the-module/reset', 'wrong-namespace')
+      store.commit('not-an-action', 'unknown')
+      store.commit('peeks/reset', 'prefixed')
+
+      const wrong = store.state.key
+      const recorded = store.committed.map(({ type, accepted }) => [type, accepted])
+
+      store.forgive()
+      store.commit('reset', 'right')
+
+      return same([wrong, store.state.key, recorded, store.rejected()], [null, 'right', [['reset', false], ['not-the-module/reset', false], ['not-an-action', false], ['peeks/reset', false]], []])
+    }],
     ['the thousands separator setting loads the lines again with the new separator', async (store, database) => {
       await database.rows('update FCT_ShipClass set ColonistCapacity = 1200 where ShipClassID = 2')
       await store.load(['/information'])
@@ -395,7 +519,9 @@ const synthetic = (m) => {
 
     store.root.database = database
 
-    return run(store, database)
+    const result = await run(store, database)
+
+    return result === true && store.rejected().length ? `the run made calls the store does not answer: ${JSON.stringify(store.rejected())}` : result
   })))
 
   return all
@@ -459,6 +585,11 @@ const MUTATIONS = [
   ['the store ignores the separator', 'store/peeks.js', '${rootState.history.revision}:${separator}`', '${rootState.history.revision}`'],
   ['the store lets a failing peek reject the load', 'store/peeks.js', 'console.warn(`Menu line for ${route} failed`, error)', 'throw error'],
   ['the store drops one route\'s line (each line set replaces the lines before it)', 'store/peeks.js', 'state.lines = { ...state.lines, [route]: line }', 'state.lines = { [route]: line }', 'Store: a game change loads the lines again'],
+  ['the store loads the lines of a refused save', 'store/peeks.js', 'if (rootGetters[\'capabilities/refused\']) {', 'if (false) {', 'Store: a refused save loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused'],
+  ['the store does not wait for the capability check', 'store/peeks.js', "await dispatch('capabilities/preflight', null, { root: true })", '', 'Store: a refusal that is known only after the capability check answers, while the lines wait for it, loads no line and sends no statement'],
+  ['the store asks for the capability check without the root route', 'store/peeks.js', "dispatch('capabilities/preflight', null, { root: true })", "dispatch('capabilities/preflight')", 'Store: the capability check is asked for through the root route, as a namespaced module reaches the capabilities module, and the call is accepted'],
+  ['the store publishes the lines read after the save is refused', 'store/peeks.js', "&& !rootGetters['capabilities/refused']) {\n          commit('set', { route, line })", ") {\n          commit('set', { route, line })", 'Store: a refusal that is known while a line is being read publishes none of the lines read'],
+  ['the store shows the lines published before the copy was refused', 'store/peeks.js', "return rootGetters['capabilities/refused'] ? {} : state.lines", 'return state.lines', 'Store: the lines of the flyout are none once the copy is refused, though they were published before, and are those published again once it is not refused'],
 ]
 /* eslint-enable no-template-curly-in-string */
 
