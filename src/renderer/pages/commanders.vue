@@ -292,6 +292,10 @@
           <load-state :failed="structureState.failed" :error="structureState.error" :loading="structureState.loading" class="px-6" @retry="retryStructure" />
           <div v-if="structureNotice" class="panel-body caption text--secondary" data-structure-notice>{{ structureNotice }}</div>
           <template v-if="structureExportable">
+            <div class="panel-body d-flex align-center pt-0 branch-export">
+              <v-autocomplete v-model="structureBranch" :items="structureBranches" label="Branch" placeholder="Any command or formation" dense hide-details clearable class="branch-picker mt-0 pt-0" aria-label="Branch to export on its own" data-structure-branch />
+              <v-btn small text :disabled="!chosenBranch" class="ml-2" aria-label="Download the chosen branch as Markdown" data-structure-branch-markdown @click="downloadBranch"><v-icon small left>mdi-download</v-icon>Branch</v-btn>
+            </div>
             <div class="panel-body caption text--secondary" data-structure-summary>{{ structureSummary }}</div>
             <v-data-table :headers="structureHeaders" :items="structureRows" item-key="key" :items-per-page.sync="structureTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: structurePageSizes }" class="roster-table" data-structure-table>
               <template #[`item.Name`]="{ item }">
@@ -304,7 +308,7 @@
             </v-data-table>
           </template>
           <div class="panel-foot caption text--secondary">
-            The naval structure leaves out the shipping lines' fleets and ships unless Shipping lines is on, which lists them marked in their own column and in both exports. A fleet is not a post. A link to a parent that is missing, belongs to another race or loops is listed as its own top-level entry with a note, and a post whose holders cannot be told is not shown as vacant. The CSV holds one row per entry, with its path from the top. The Markdown file is named for the empire and lists every entry nested under its parent, after a Mermaid diagram of the admin commands, or of the formations that head others, which GitHub and Obsidian draw; an organisation of more than {{ diagramLimit }} such units is listed without the diagram.
+            The naval structure leaves out the shipping lines' fleets and ships unless Shipping lines is on, which lists them marked in their own column and in both exports. A fleet is not a post. A link to a parent that is missing, belongs to another race or loops is listed as its own top-level entry with a note, and a post whose holders cannot be told is not shown as vacant. The CSV holds one row per entry, with its path from the top. Both files are named for the empire. The Markdown file lists every entry nested under its parent, after a Mermaid diagram of the admin commands, or of the formations that head others, which GitHub and Obsidian draw; a diagram of more than {{ diagramLimit }} such units is left out. Branch exports one admin command or formation and everything under it as a Markdown file of its own, with its own diagram, so a large organisation is drawn a branch at a time.
           </div>
         </v-card>
       </template>
@@ -325,7 +329,7 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { AGE_NOTES, COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadGroundFormationPosts } from '../utilities/ground-formations'
-import { DIAGRAM_LIMIT, hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
+import { DIAGRAM_LIMIT, hierarchyBranches, hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { loadNavalHierarchy } from '../utilities/naval-hierarchy'
@@ -417,6 +421,7 @@ export default {
       ageNotes: AGE_NOTES,
       focusCommanderId: null,
       focusColonyId: null,
+      structureBranch: null,
     }
   },
   computed: {
@@ -429,6 +434,16 @@ export default {
       const race = game && game.Races.find((entry) => entry.RaceID === this.RaceID)
 
       return race ? race.RaceTitle : ''
+    },
+
+    // The branches of the listed structure that can be exported on their own (each admin command, or formation that heads others), as the branch picker offers them: the branch's name first, so the chosen one reads in the field, how many units its diagram draws or that it has too many to draw, and the entries above it, which the search also reads.
+    structureBranches() {
+      return this.structureExportable ? hierarchyBranches(this.structureModel, this.structureView).map((branch) => ({ value: branch.key, text: `${branch.name || `${branch.kind} ${branch.id}`} · ${branch.units > DIAGRAM_LIMIT ? `${this.count(branch.units)} units, too many to draw` : `${this.count(branch.units)} ${branch.units === 1 ? 'unit' : 'units'} drawn`}${branch.above ? ` · under ${branch.above}` : ''}` })) : []
+    },
+
+    // The branch to export: the one picked, while the listed structure still has it.
+    chosenBranch() {
+      return this.structureBranches.some((branch) => branch.value === this.structureBranch) ? this.structureBranch : null
     },
 
     separator() {
@@ -1083,12 +1098,17 @@ export default {
     retryStructure() {
       OPTIONAL_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
     },
-    // The text, file name and type of the chosen structure in a format ('csv' or 'markdown'), or null while there is nothing to export.
-    structureExport(format) {
-      return this.structureExportable ? hierarchyExport(this.structureModel, this.structureView, format, this.empireName) : null
+    // The text, file name and type of the chosen structure in a format ('csv' or 'markdown'), or of one of its branches as Markdown, or null while there is nothing to export.
+    structureExport(format, branch = null) {
+      return this.structureExportable ? hierarchyExport(this.structureModel, this.structureView, format, this.empireName, branch) : null
     },
-    downloadStructure(format) {
-      const file = this.structureExport(format)
+    downloadBranch() {
+      if (this.chosenBranch) {
+        this.downloadStructure('markdown', this.chosenBranch)
+      }
+    },
+    downloadStructure(format, branch = null) {
+      const file = this.structureExport(format, branch)
 
       if (!file) {
         return
@@ -1274,6 +1294,15 @@ export default {
 .commanders-page {
   td {
     font-variant-numeric: tabular-nums;
+  }
+
+  .branch-export {
+    max-width: 720px;
+  }
+
+  .branch-picker {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .bonus-chip {

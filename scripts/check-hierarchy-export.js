@@ -33,7 +33,7 @@ const { failure, isMarked, isSubjectThrow, through, harnessOwn, harnessStore, bo
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
-const UTILITIES = ['csv-cell', 'post-holders', 'naval-hierarchy', 'hierarchy-export', 'ground-formations', 'commanders']
+const UTILITIES = ['csv-cell', 'file-slug', 'post-holders', 'naval-hierarchy', 'hierarchy-export', 'ground-formations', 'commanders']
 const PAGE = 'pages/commanders'
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
@@ -352,7 +352,7 @@ const flowchartOf = (markdown) => {
     const node = /^\s*(\w+)\["([^"]*)"\]$/.exec(line)
     const arrow = /^\s*(\w+) --> (\w+)$/.exec(line)
 
-    if (node && !/[<>&`]|#(?!\d+;)/.test(node[2].replace(/<br>/g, ''))) {
+    if (node && !/[<>&`%]|#(?!\d+;)/.test(node[2].replace(/<br>/g, ''))) {
       nodes.push({ id: node[1], lines: node[2].split('<br>').map((part) => part.replace(/#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))) })
     } else if (arrow) {
       arrows.push([arrow[1], arrow[2]])
@@ -392,8 +392,8 @@ const navalRows = () => ({
     cmd(4, '"Quoted" Admin', 2),
     cmd(5, 'Orphan Admin', 99),
     cmd(6, 'Foreign Child', 300),
-    cmd(7, 'Loop Seven', 8),
-    cmd(8, 'Loop Eight', 7),
+    cmd(7, 'Loop Seven %%{init:', 8),
+    cmd(8, 'Loop Eight %%{init: {"theme":"dark"}}%%', 7),
     cmd(9, 'Self\nParent', 9),
     cmd(10, 'No Parent <Stored> #10 & `x`', null),
     cmd(11, null, 1),
@@ -431,7 +431,7 @@ const navalRows = () => ({
   commanders: [
     holder(1001, '=cmd()', 12, 1),
     holder(1002, '+Shared A', 12, 3),
-    holder(1003, 'Shared B', 12, 3),
+    holder(1003, 'Shared B %%{init: {"theme":"dark"}}%% %%{init:', 12, 3),
     holder(1004, 'Unsettled Admin', 12, 4, null),
     holder(2001, 'Captain One', 1, 40),
     holder(2002, 'Captain Two', 1, 42),
@@ -512,7 +512,7 @@ const pureSuite = async (mods, into) => {
   const { csvCell, csvLine } = mods['csv-cell']
   const { buildNavalHierarchy } = mods['naval-hierarchy']
   const { buildGroundFormations } = mods['ground-formations']
-  const { hierarchyRows, hierarchyCsv, hierarchyMarkdown, hierarchyExport, hierarchyNotice, HIERARCHY_COLUMNS, DIAGRAM_LIMIT } = mods['hierarchy-export']
+  const { hierarchyRows, hierarchyCsv, hierarchyMarkdown, hierarchyExport, hierarchyBranches, hierarchyNotice, HIERARCHY_COLUMNS, DIAGRAM_LIMIT } = mods['hierarchy-export']
   const { ageBound, rosterChoices, rosterFilter } = mods.commanders
 
   const built = await settle(() => buildNavalHierarchy(frozen(navalRows()), IDS))
@@ -636,7 +636,7 @@ const pureSuite = async (mods, into) => {
 
     return groundLines.length === GROUND_TREE.length && groundLines.every((line) => readMarkdown(line) !== null) && readMarkdown(groundLines[0]).includes('Ground One') && nestsAs(groundLines, parentsIn(GROUND_TREE.map((entry) => entry.id), (id) => ground.byId.get(id).children))
   })
-  await add('md-empire', 'the document is titled with the empire\'s name, shown as written, and its title, its summary and the Markdown file\'s name hold neither the game\'s id nor the race\'s; without a name to use, the title and the file name say the game and the race by id; the CSV keeps its name by id', () => {
+  await add('md-empire', 'the document is titled with the empire\'s name, shown as written, and its title, its summary and both files\' names hold neither the game\'s id nor the race\'s; an accented letter is its plain letter in a file name; without a name to use, the title and the file names say the game and the race by id', () => {
     const ids = { ...naval, GameID: 9431, RaceID: 9877 }
     const named = hierarchyExport(ids, 'naval', 'markdown', 'Aurelian *Star* Empire #1')
     const unnamed = hierarchyExport(ids, 'naval', 'markdown', '')
@@ -646,7 +646,10 @@ const pureSuite = async (mods, into) => {
     const both = (text) => numbersIn(text).includes(9431) && numbersIn(text).includes(9877)
     const title = titleOf(named.text)
 
-    return (title !== null && title.includes('Aurelian *Star* Empire #1') && groundTitle !== null && groundTitle.includes('Aurelian Empire') && without(headOf(named.text)) && without(named.fileName) && /aurelian/i.test(named.fileName) && /empire/i.test(named.fileName) && named.fileName.endsWith('.md') && named.type === 'text/markdown' && both(headOf(unnamed.text)) && same(numbersIn(unnamed.fileName), [9431, 9877]) && same(numbersIn(symbols.fileName), [9431, 9877]) && same(numbersIn(hierarchyExport(ids, 'naval', 'csv', 'Aurelian Empire').fileName), [9431, 9877])) || `title ${JSON.stringify(title)}, head ${JSON.stringify(headOf(named.text).slice(0, 200))}, files ${named.fileName} ${unnamed.fileName} ${symbols.fileName}`
+    const csvNamed = hierarchyExport(ids, 'naval', 'csv', 'Aurelian Empire')
+    const csvUnnamed = hierarchyExport(ids, 'naval', 'csv', '')
+
+    return (title !== null && title.includes('Aurelian *Star* Empire #1') && groundTitle !== null && groundTitle.includes('Aurelian Empire') && without(headOf(named.text)) && without(named.fileName) && /aurelian/i.test(named.fileName) && /empire/i.test(named.fileName) && named.fileName.endsWith('.md') && named.type === 'text/markdown' && both(headOf(unnamed.text)) && same(numbersIn(unnamed.fileName), [9431, 9877]) && same(numbersIn(symbols.fileName), [9431, 9877]) && without(csvNamed.fileName) && /aurelian/i.test(csvNamed.fileName) && /empire/i.test(csvNamed.fileName) && csvNamed.fileName.endsWith('.csv') && same(numbersIn(csvUnnamed.fileName), [9431, 9877]) && csvUnnamed.fileName.endsWith('.csv') && hierarchyExport(ids, 'naval', 'csv', 'Ærø Étoile Empire').fileName === 'aero-etoile-empire-naval-structure.csv') || `title ${JSON.stringify(title)}, head ${JSON.stringify(headOf(named.text).slice(0, 200))}, files ${named.fileName} ${unnamed.fileName} ${symbols.fileName} ${csvNamed.fileName} ${csvUnnamed.fileName} ${hierarchyExport(ids, 'naval', 'csv', 'Ærø Étoile Empire').fileName}`
   })
 
   // The diagram of the organisation, read back as Mermaid reads it.
@@ -655,7 +658,7 @@ const pureSuite = async (mods, into) => {
   const shownAs = (chart, order, nameOf) => chart.nodes.length === order.length && new Set(chart.nodes.map((node) => node.id)).size === order.length && chart.nodes.every((node, index) => node.lines.length === 2 && (nameOf(order[index]) ? node.lines[0] === nameOf(order[index]).replace(/\s*[\r\n]+\s*/g, ' ') : figuresIn(node.lines[0]).includes(Number(order[index].split(':')[1]))))
   const unreadable = (chart) => (chart ? `the diagram is not read at ${JSON.stringify(chart.invalid)}` : 'there is no diagram')
 
-  await add('md-diagram', 'the diagram draws each admin command once, in tree order, with its name as written (a line break read as a space) and the commanders serving in it, and an arrow from each command to each command under it; a quote, #, angle bracket, & or backtick in a name stays text', () => {
+  await add('md-diagram', 'the diagram draws each admin command once, in tree order, with its name as written (a line break read as a space) and the commanders serving in it, and an arrow from each command to each command under it; a quote, #, %, angle bracket, & or backtick in a name stays text, and a Mermaid directive in a name (%%{init: …}%%) is shown, not run', () => {
     const chart = flowchartOf(text)
 
     if (!chart || chart.invalid !== undefined) {
@@ -665,7 +668,7 @@ const pureSuite = async (mods, into) => {
     const expected = commandOrder.flatMap((key) => model.byKey.get(key).children.filter((child) => child.startsWith('command:')).map((child) => `${key}>${child}`)).sort()
     const holdersOf = (key) => chart.nodes[commandOrder.indexOf(key)].lines[1]
 
-    return (shownAs(chart, commandOrder, (key) => model.byKey.get(key).name) && same(arrowsOf(chart, commandOrder), expected) && expected.length === 5 && holdersOf('command:1').includes('=cmd()') && holdersOf('command:3').includes('Shared A') && holdersOf('command:3').includes('Shared B') && !holdersOf('command:2').includes('=cmd()')) || `nodes ${JSON.stringify(chart.nodes).slice(0, 300)}, arrows ${JSON.stringify(arrowsOf(chart, commandOrder))} against ${JSON.stringify(expected)}`
+    return (shownAs(chart, commandOrder, (key) => model.byKey.get(key).name) && same(arrowsOf(chart, commandOrder), expected) && expected.length === 5 && holdersOf('command:1').includes('=cmd()') && holdersOf('command:3').includes('Shared A') && holdersOf('command:3').includes('Shared B %%{init: {"theme":"dark"}}%% %%{init:') && !holdersOf('command:2').includes('=cmd()')) || `nodes ${JSON.stringify(chart.nodes).slice(0, 300)}, arrows ${JSON.stringify(arrowsOf(chart, commandOrder))} against ${JSON.stringify(expected)}`
   })
   await add('md-diagram-ground', 'the ground diagram draws the formations that head other formations, each once with its commander, and an arrow from each to each such formation under it', () => {
     const deeper = buildGroundFormations(frozen({ formations: [formation(1), formation(2, { ParentFormationID: 1 }), formation(3, { ParentFormationID: 2 }), formation(4, { ParentFormationID: 1 }), formation(5)] }), IDS)
@@ -687,6 +690,48 @@ const pureSuite = async (mods, into) => {
     const between = past.split('\n## ').slice(1, -1).join('\n')
 
     return (Number.isInteger(DIAGRAM_LIMIT) && DIAGRAM_LIMIT >= 1 && DIAGRAM_LIMIT <= 500 && atLimit !== null && atLimit.invalid === undefined && atLimit.nodes.length === DIAGRAM_LIMIT && atLimit.arrows.length === DIAGRAM_LIMIT - 1 && flowchartOf(past) === null && figuresIn(between).includes(DIAGRAM_LIMIT + 1) && outlineBullets(past).length === DIAGRAM_LIMIT + 1) || `limit ${DIAGRAM_LIMIT}, at the limit ${atLimit ? atLimit.nodes && atLimit.nodes.length : 'no diagram'}, past it ${JSON.stringify(between.slice(0, 300))}`
+  })
+
+  // A branch exported on its own: a unit and everything under it, the entries in the tree order of the model below the branch's head.
+  const subtree = (source, key) => [key, ...source.byKey.get(key).children.flatMap((child) => subtree(source, child))]
+  const keyOfBullet = (line) => { const found = line.match(/\((command|fleet|ship|formation) (\d+)[,)]/); return found ? `${found[1]}:${found[2]}` : null }
+
+  await add('md-branch', 'a branch exported on its own lists its head and every entry under it, in tree order, nested from the head down by both readers; its title names the empire and the head, its summary the entries above it, its diagram only its own commands and their arrows, and its file the empire, the structure and the head', () => {
+    const results = ['command:2', 'command:1'].map((key) => {
+      const file = needed(hierarchyExport(naval, 'naval', 'markdown', EMPIRE, key), `the export of ${key}`)
+      const order = subtree(model, key)
+      const lines = outlineBullets(file.text)
+      const chart = flowchartOf(file.text)
+      const commands = order.filter((item) => item.startsWith('command:'))
+      const expected = commands.flatMap((item) => model.byKey.get(item).children.filter((child) => child.startsWith('command:')).map((child) => `${item}>${child}`)).sort()
+
+      return { key, order, lines, chart, commands, expected, file, nested: nestsAs(lines, parentsIn(order, (item) => model.byKey.get(item).children)) }
+    })
+    const [second, root] = results
+    const fine = results.every(({ key, order, lines, chart, commands, expected, file, nested }) => same(lines.map(keyOfBullet), order) && nested === true && chart && chart.invalid === undefined && shownAs(chart, commands, (item) => model.byKey.get(item).name) && same(arrowsOf(chart, commands), expected) && titleOf(file.text) !== null && titleOf(file.text).includes(EMPIRE) && file.fileName === `test-empire-naval-structure-${key.replace(':', '-')}.md` && file.type === 'text/markdown' && !file.text.includes('\n## Loops'))
+
+    return (fine && second.order.length === 6 && root.order.length === 12 && titleOf(second.file.text).includes('Second, Fleet') && headOf(second.file.text).includes('under Root Admin') && !headOf(root.file.text).includes('under ') && hierarchyExport(naval, 'naval', 'markdown', EMPIRE, 'command:999') === null && hierarchyExport(naval, 'naval', 'csv', EMPIRE, 'command:2').text === hierarchyCsv(naval, 'naval')) || JSON.stringify(results.map(({ key, lines, nested, file, chart }) => ({ key, bullets: lines.map(keyOfBullet), nested, file: file.fileName, head: headOf(file.text).slice(0, 200), chart: chart && (chart.invalid || chart.nodes.length) })))
+  })
+  await add('branch-list', 'the branches offered are every admin command, or every formation that heads others, in tree order, each with its path from the top, the entries of its branch and the units its diagram draws', () => {
+    const navalBranches = hierarchyBranches(naval, 'naval')
+    const deeper = { supported: true, ...buildGroundFormations(frozen({ formations: [formation(1), formation(2, { ParentFormationID: 1 }), formation(3, { ParentFormationID: 2 }), formation(4, { ParentFormationID: 1 }), formation(5)] }), IDS) }
+    const groundBranches = hierarchyBranches(deeper, 'ground')
+    const groundKeys = (key) => [key, ...deeper.formations.find((item) => `formation:${item.id}` === key).children.flatMap((id) => groundKeys(`formation:${id}`))]
+    const groundUnits = (key) => groundKeys(key).filter((item) => deeper.formations.find((entry) => `formation:${entry.id}` === item).children.length > 0)
+    const navalFine = same(navalBranches.map((branch) => branch.key), NAVAL_ORDER.filter((key) => key.startsWith('command:'))) && navalBranches.every((branch) => branch.entries === subtree(model, branch.key).length && branch.units === subtree(model, branch.key).filter((key) => key.startsWith('command:')).length)
+    const groundFine = same(groundBranches.map((branch) => branch.key), ['formation:1', 'formation:2']) && groundBranches.every((branch) => branch.entries === groundKeys(branch.key).length && branch.units === groundUnits(branch.key).length)
+    const second = navalBranches.find((branch) => branch.key === 'command:2')
+
+    return (navalFine && groundFine && second && second.path === 'Root Admin / Second, Fleet' && second.above === 'Root Admin' && navalBranches[0].above === '' && second.entries === 6 && second.units === 2) || JSON.stringify({ naval: navalBranches.map(({ key, entries, units, path, above }) => ({ key, entries, units, path, above })), ground: groundBranches.map(({ key, entries, units }) => ({ key, entries, units })) })
+  })
+  await add('md-branch-limit', 'an organisation too large for one diagram is listed without one and says a branch can be exported; a branch of it within the limit is drawn whole, and the limit holds for a branch as well', () => {
+    const big = supporting(buildNavalHierarchy(frozen({ commands: [cmd(1, 'Top', 0), cmd(2, 'Large', 1), ...Array.from({ length: DIAGRAM_LIMIT - 30 }, (_item, index) => cmd(index + 10, `Small ${index + 10}`, 2)), ...Array.from({ length: 80 }, (_item, index) => cmd(index + 1000, `Other ${index + 1000}`, 1)), cmd(3, 'Huge', 1), ...Array.from({ length: DIAGRAM_LIMIT + 1 }, (_item, index) => cmd(index + 5000, `Huge ${index + 5000}`, 3))] }), IDS))
+    const whole = hierarchyMarkdown(big, 'naval', EMPIRE)
+    const large = flowchartOf(needed(hierarchyMarkdown(big, 'naval', EMPIRE, 'command:2'), 'the large branch'))
+    const huge = needed(hierarchyMarkdown(big, 'naval', EMPIRE, 'command:3'), 'the huge branch')
+    const said = (markdown) => markdown.split('\n## ').slice(1, -1).join('\n')
+
+    return (flowchartOf(whole) === null && /branch/i.test(said(whole)) && large !== null && large.invalid === undefined && large.nodes.length === DIAGRAM_LIMIT - 29 && large.arrows.length === DIAGRAM_LIMIT - 30 && flowchartOf(huge) === null && figuresIn(said(huge)).includes(DIAGRAM_LIMIT + 2) && outlineBullets(huge).length === DIAGRAM_LIMIT + 2) || `whole ${JSON.stringify(said(whole).slice(0, 200))}, large ${large ? large.nodes && large.nodes.length : 'no diagram'}, huge ${JSON.stringify(said(huge).slice(0, 200))}`
   })
 
   // The shipping lines' fleets and ships, listed when the model is built with them.
@@ -1000,7 +1045,7 @@ const harnessMixin = (mixin) => (mixin && mixin.persistedFields ? { ...mixin, me
 // The constructor of a page, for the checks that render it.
 const constructorOf = (options) => Vue.extend(options)
 
-const CONTROL_TAGS = ['v-select', 'v-text-field', 'v-switch', 'v-btn-toggle']
+const CONTROL_TAGS = ['v-select', 'v-autocomplete', 'v-text-field', 'v-switch', 'v-btn-toggle']
 
 const writeOf = (node) => (value) => {
   const data = needed(node, 'control to write to').data || {}
@@ -1330,6 +1375,33 @@ const pageSuite = async (variant, mods, into) => {
 
     return saved.length === 2 && needed(saved.find((item) => item.type === 'text/csv'), 'CSV download').text === hierarchyCsv(ground, 'ground') && needed(saved.find((item) => item.type === 'text/markdown'), 'Markdown download').text === hierarchyExport(ground, 'ground', 'markdown', EMPIRE).text && /ground/i.test(saved[0].file) && /ground/i.test(saved[1].file)
   })
+  await add('page-download-branch', 'a control offers each admin command as a branch, by its path; with one chosen, a button saves that branch as its own Markdown file, exactly the branch export named for the empire and the head, and with none chosen it saves nothing; the choice is not stored with the saved view', async () => {
+    const vm = withPeople({ navalTree: naval, groundTree: ground })
+    const picker = controls(vm).find((node) => { const items = attr(node, 'items'); return Array.isArray(items) && items.length > 0 && items[0] && items[0].value === 'command:1' })
+
+    if (!picker) {
+      return 'no control offers the branches'
+    }
+
+    const offered = attr(picker, 'items')
+    const moved = drive(vm, picker, 'command:2')
+    const saved = await clickAll(vm)
+    const expected = hierarchyExport(naval, 'naval', 'markdown', EMPIRE, 'command:2')
+
+    if (!expected) {
+      reset(vm)
+
+      return 'the branch export of command 2 is missing'
+    }
+
+    const branch = saved.find((item) => item.file === expected.fileName)
+
+    reset(vm)
+
+    const secondText = (offered.find((item) => item.value === 'command:2') || { text: '' }).text
+
+    return (same(offered.map((item) => item.value), NAVAL_ORDER.filter((key) => key.startsWith('command:'))) && secondText.startsWith('Second, Fleet') && secondText.includes('Root Admin') && saved.length === 3 && branch !== undefined && branch.text === expected.text && branch.type === 'text/markdown' && moved.persisted.length === 0) || `offered ${JSON.stringify(offered.slice(0, 3))}, saved ${JSON.stringify(saved.map((item) => item.file))}, stored ${JSON.stringify(moved.persisted)}`
+  })
   await add('page-structure-unsupported', 'a save without what the structure reads shows no table and no download, and the page says which tables or columns are missing', async () => {
     const missing = { supported: false, missing: ['FCT_Ship.ShippingLineID', 'FCT_Fleet'], GameID: GAME, RaceID: RACE }
     const vm = withPeople({ navalTree: missing, groundTree: ground })
@@ -1632,21 +1704,38 @@ const MUTANTS = [
   ['the notes are left empty', U('hierarchy-export'), '.filter((problem) => NOTE_KINDS.has(problem.kind))', '.filter(() => false)', ['csv-notes', 'csv-unresolved']],
   ['a name is written into Markdown as it is', U('hierarchy-export'), '.replace(/[\\\\`*_[\\]<>|#&]/g, (character) => `\\\\${character}`)', '', ['md-markup', 'md-names']],
   ['a line break in a name breaks the outline', U('hierarchy-export'), 'markdownText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \' \')', 'markdownText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \'\\n\')', ['md-names']],
-  ['the outline is not nested', U('hierarchy-export'), '${LEVEL.repeat(row.Depth)}- ${label}', '- ${label}', ['md-outline', 'md-ground', 'md-shipping-line']],
+  ['the outline is not nested', U('hierarchy-export'), '${LEVEL.repeat(row.Depth - base)}- ${label}', '- ${label}', ['md-outline', 'md-ground', 'md-shipping-line']],
   ['the list is indented two spaces a level', U('hierarchy-export'), 'const LEVEL = \'    \'', 'const LEVEL = \'  \'', ['md-outline', 'md-ground', 'md-shipping-line']],
-  ['each entry is nested a level deeper than its parent\'s child', U('hierarchy-export'), '${LEVEL.repeat(row.Depth)}- ${label}', '${LEVEL.repeat(row.Depth + 1)}- ${label}', ['md-outline', 'md-ground', 'md-shipping-line']],
+  ['each entry is nested a level deeper than its parent\'s child', U('hierarchy-export'), '${LEVEL.repeat(row.Depth - base)}- ${label}', '${LEVEL.repeat(row.Depth - base + 1)}- ${label}', ['md-outline', 'md-ground', 'md-shipping-line']],
   ['the title names the game and the race whatever the empire', U('hierarchy-export'), 'name ? `# ${markdownText(name)}: ${TREE_NOUNS[tree]}` : `# ${TREE_NAMES[tree]}`', '`# ${TREE_NAMES[tree]}`', ['md-empire']],
   ['the summary names the game and the race beside the empire', U('hierarchy-export'), '`${name ? \'\' : `Game ${model.GameID}, race ${model.RaceID}: `}${hierarchySummary', '`Game ${model.GameID}, race ${model.RaceID}: ${hierarchySummary', ['md-empire']],
   ['the empire\'s name is written into the title as it is', U('hierarchy-export'), '`# ${markdownText(name)}: ${TREE_NOUNS[tree]}`', '`# ${name}: ${TREE_NOUNS[tree]}`', ['md-empire']],
-  ['the Markdown file is named for the game and the race whatever the empire', U('hierarchy-export'), 'fileName: csv || !slug ?', 'fileName: true ?', ['md-empire']],
+  ['the files are named for the game and the race whatever the empire', U('hierarchy-export'), 'const prefix = slug ?', 'const prefix = false ?', ['md-empire', 'md-branch']],
   ['the diagram draws no arrow', U('hierarchy-export'), 'const arrows = units.flatMap(', 'const arrows = [].flatMap(', ['md-diagram', 'md-diagram-ground', 'md-diagram-limit']],
   ['an arrow leads from a unit to the unit above it', U('hierarchy-export'), '`  ${ids.get(entry.key)} --> ${ids.get(key)}`', '`  ${ids.get(key)} --> ${ids.get(entry.key)}`', ['md-diagram', 'md-diagram-ground']],
-  ['a name is written into the diagram as it is', U('hierarchy-export'), '.replace(/["#<>&`]/g, (character) => `#${character.charCodeAt(0)};`)', '', ['md-diagram']],
+  ['a name is written into the diagram as it is', U('hierarchy-export'), '.replace(/["#%<>&`]/g, (character) => `#${character.charCodeAt(0)};`)', '', ['md-diagram']],
+  ['a percent sign is written into the diagram as it is, so a name can hold a Mermaid directive', U('hierarchy-export'), '.replace(/["#%<>&`]/g,', '.replace(/["#<>&`]/g,', ['md-diagram']],
   ['a line break in a name breaks the diagram', U('hierarchy-export'), 'mermaidText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \' \')', 'mermaidText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \'\\n\')', ['md-diagram']],
   ['the diagram names no holder', U('hierarchy-export'), '<br>${mermaidText(serving)}`', '<br>`', ['md-diagram', 'md-diagram-ground']],
   ['the diagram is drawn past its limit', U('hierarchy-export'), 'if (units.length > DIAGRAM_LIMIT) {', 'if (false) {', ['md-diagram-limit']],
-  ['the ground diagram draws every formation', U('hierarchy-export'), ': entry.children.length > 0))', ': true))', ['md-diagram-ground']],
-  ['the page exports the Markdown without the empire\'s name', PAGE, 'format, this.empireName)', 'format)', ['page-download']],
+  ['the ground diagram draws every formation', U('hierarchy-export'), ': entry.children.length > 0)', ': true)', ['md-diagram-ground']],
+  ['the page exports the Markdown without the empire\'s name', PAGE, 'format, this.empireName, branch)', 'format, \'\', branch)', ['page-download']],
+  ['a branch runs on past its last entry, into the entries beside it', U('hierarchy-export'), 'index > start && row.Depth <= depth', 'index > start && row.Depth < depth', ['md-branch']],
+  ['a branch is nested from the top of the structure, not from its head', U('hierarchy-export'), '${LEVEL.repeat(row.Depth - base)}- ${label}', '${LEVEL.repeat(row.Depth)}- ${label}', ['md-branch']],
+  ['a branch\'s diagram draws the whole organisation', U('hierarchy-export'), 'diagramLines(model, tree, rows, !part)', 'diagramLines(model, tree, all, !part)', ['md-branch', 'md-branch-limit']],
+  ['a branch\'s file is named as the whole structure\'s', U('hierarchy-export'), '${part === null ? \'\' : `-${part.replace(\':\', \'-\')}`}', '', ['md-branch']],
+  ['an accented letter is dropped from a file name', U('file-slug'), '.normalize(\'NFKD\').replace(/[\\u0300-\\u036F]/g, \'\')', '', ['md-empire']],
+  ['a letter no decomposition reduces is dropped from a file name', U('file-slug'), '.replace(/[æøœßđðłþı]/g, (letter) => LETTERS[letter])', '', ['md-empire']],
+  ['a branch is placed at the top whatever is above it', U('hierarchy-export'), 'const place = branch.above.length ?', 'const place = false ?', ['md-branch']],
+  ['an unknown branch exports the whole structure', U('hierarchy-export'), 'if (branch !== null && !part) {\n    return null', 'if (false) {\n    return null', ['md-branch']],
+  ['the branch export is the whole structure', U('hierarchy-export'), 'const part = branch === null ? null : branchOf(all, branch)', 'const part = null', ['md-branch', 'md-branch-limit']],
+  ['a branch counts every entry as a unit to draw', U('hierarchy-export'), 'branch.units += unit ? 1 : 0', 'branch.units += 1', ['branch-list']],
+  ['a branch closes only at a shallower entry', U('hierarchy-export'), 'open[open.length - 1].depth >= row.Depth', 'open[open.length - 1].depth > row.Depth', ['branch-list']],
+  ['only the top-level units are offered as branches', U('hierarchy-export'), '    if (unit) {\n      const branch =', '    if (unit && row.Depth === 0) {\n      const branch =', ['branch-list', 'page-download-branch']],
+  ['the branch button saves the whole structure', PAGE, 'this.downloadStructure(\'markdown\', this.chosenBranch)', 'this.downloadStructure(\'markdown\')', ['page-download-branch']],
+  ['the branch button saves even with no branch chosen', PAGE, '      if (this.chosenBranch) {\n        this.downloadStructure', '      if (true) {\n        this.downloadStructure', ['page-download']],
+  ['the branch picker offers the branches without the entries above them', PAGE, '${branch.above ? ` · under ${branch.above}` : \'\'}', '', ['page-download-branch']],
+  ['the branch picker leads with the path, so the chosen branch does not read in the field', PAGE, 'text: `${branch.name || `${branch.kind} ${branch.id}`} · ', 'text: `${branch.path} · ', ['page-download-branch']],
   ['the empire is the first race of the game', PAGE, 'game && game.Races.find((entry) => entry.RaceID === this.RaceID)', 'game && game.Races[0]', ['page-download']],
   ['the empire is looked up in the first game of the list', PAGE, 'this.games.find((entry) => entry.GameID === this.GameID)', 'this.games[0]', ['page-download']],
   ['the file name has the game twice', U('hierarchy-export'), '-g${model.GameID}-r${model.RaceID}', '-g${model.GameID}-r${model.GameID}', ['export-file']],

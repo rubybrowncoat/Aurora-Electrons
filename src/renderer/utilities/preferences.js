@@ -5,6 +5,7 @@
 // The allowlist is the settings the app itself writes as preferences: the persisted-view fields (`mixins/persisted-view.js`, which keeps the registry of what every page and component declares, with the `normalise` and `valid` it restores them with), the theme policy and the named colour preset, the typeface and text size, and the two settings of the Number format and Computer-run empires panel. Nothing outside it is exported, and a key outside it is rejected on import. Not supported, and so never exported or imported: see EXCLUDED.
 
 import { raceKeyPrefix } from './campaign'
+import { fileSlug } from './file-slug'
 
 export const FORMAT = 'aurora-electrons-preferences'
 export const VERSION = 1
@@ -251,9 +252,9 @@ export const buildExport = (schema, store, source, categories, now = new Date())
   return { bundle, keys, skipped }
 }
 
-// A file name for an export: the empire's name, then the date.
+// A file name for an export: the empire's name (made a file name by `fileSlug`; 'app' when nothing of it is left), then the date.
 export const exportName = (source, now = new Date()) => {
-  const slug = String(source.raceName || 'app').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'app'
+  const slug = fileSlug(source.raceName) || 'app'
 
   return `aurora-electrons-preferences-${slug}-${now.toISOString().slice(0, 10)}.json`
 }
