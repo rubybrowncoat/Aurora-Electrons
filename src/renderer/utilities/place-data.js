@@ -163,22 +163,30 @@ order by FCT_ShipClass.Size desc`)).map((row) => {
   }
 })
 
-const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_RaceSysSurvey.Name as SystemName
+// The game lists every life pod of a system, whoever's it was: the race's own by ship name and survivors, another's by the class name its intelligence holds and the pod's id. The name and the crew of a foreign pod are never read.
+const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, (FCT_Lifepods.RaceID = ${context.RaceID}) as Own, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Lifepods
 ${known('FCT_Lifepods', context)}
+left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID and FCT_AlienClass.ViewRaceID = ${context.RaceID} and FCT_AlienClass.GameID = FCT_Lifepods.GameID
 where FCT_Lifepods.GameID = ${context.GameID}
-order by FCT_Lifepods.ShipName`)).map((row) => ({
-  key: place.lifepod(row.LifepodID),
-  kind: 'lifepod',
-  group: 'lifepod',
-  name: `Life pods: ${row.ShipName}`,
-  subtitle: `${Number.isFinite(row.Crew) ? `${row.Crew} ${row.Crew === 1 ? 'survivor' : 'survivors'}` : 'Survivors not recorded'} in ${row.SystemName}`,
-  icon: groupIcon('lifepod'),
-  SystemID: row.SystemID,
-  Xcor: row.Xcor,
-  Ycor: row.Ycor,
-  text: textOf('life pods', row.ShipName, row.SystemName),
-}))
+group by FCT_Lifepods.LifepodID
+order by OwnShipName, FCT_Lifepods.LifepodID`)).map((row) => {
+  const own = row.Own === 1
+  const name = `Life pods: ${own ? row.OwnShipName : `${row.AlienClassName || 'unknown class'} #${row.LifepodID}`}`
+
+  return {
+    key: place.lifepod(row.LifepodID),
+    kind: 'lifepod',
+    group: 'lifepod',
+    name,
+    subtitle: `${own ? (Number.isFinite(row.OwnCrew) ? `${row.OwnCrew} ${row.OwnCrew === 1 ? 'survivor' : 'survivors'}` : 'Survivors not recorded') : 'Alien life pods'} in ${row.SystemName}`,
+    icon: groupIcon('lifepod'),
+    SystemID: row.SystemID,
+    Xcor: row.Xcor,
+    Ycor: row.Ycor,
+    text: textOf(name, row.SystemName),
+  }
+})
 
 const loadAetherGates = async (database, context) => (await rows(database, `select FCT_AetherGates.AetherGateID, FCT_AetherGates.SystemID, FCT_AetherGates.Xcor, FCT_AetherGates.Ycor, FCT_RaceSysSurvey.Name as SystemName
 from FCT_AetherGates

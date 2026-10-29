@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-routes-gates.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791). The check copies it into a folder of its own and adds one life pod (the save holds none). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy.
+  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791). The check copies it into a folder of its own and adds one life pod of the race and two of another race, one of a class the race holds an alias for and one of a class it holds none for (the save holds no pod). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy. A pod of another race must show the race's alias for its class and its id and never its ship name or crew, which the game shows only the owner of the pod (check `pods`).
 
   Every planted fault must fail the checks it names by a wrong value or by the read error the page reports (`loadErrors.smallPlaces`), never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -23,6 +23,10 @@ const SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
 const GAME = 141
 const RACE = 791
 const ADDED_LIFEPOD = 900000001
+// The life pods added besides the race's own, each of another race with a ship name and a crew the race must not see: one whose class the race holds an alias for (an `FCT_AlienClass` row of the race, class 62894 'Apollo') and one whose class it holds none for.
+const FOREIGN_RACE = 785
+const ALIASED_POD = { id: 900000002, name: 'Hidden Zulu Pod', crew: 7771, classId: 62894 }
+const UNALIASED_POD = { id: 900000003, name: 'Hidden Alpha Pod', crew: 4242, classId: 1 }
 const DETAIL = process.argv.includes('--detail')
 const RENDERER = path.join(root, 'src', 'renderer')
 const FILES = {
@@ -60,6 +64,8 @@ const copies = () => {
   }
 
   edit.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, ShipName, Crew, Xcor, Ycor) values (${ADDED_LIFEPOD}, ${GAME}, ${RACE}, ${system.SystemID}, 'Added pod', 3, 1500, 2500)`)
+
+  ;[ALIASED_POD, UNALIASED_POD].forEach((pod) => edit.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, ClassID, ShipName, Crew, Xcor, Ycor) values (${pod.id}, ${GAME}, ${FOREIGN_RACE}, ${system.SystemID}, ${pod.classId}, '${pod.name}', ${pod.crew}, 1600, 2600)`))
   edit.close()
   COPIES = { intact: new Database(intactFile, { readonly: true }), system }
 
@@ -80,11 +86,13 @@ const closeCopies = () => {
 
 // ---------- what the page does with a copy ----------
 
-// The capability report of a copy as the real preflight gives it, and the page's small places read over it: { report, rows, error, loadError }. `loadError` is what the page reports for the read (`loadErrors.smallPlaces`, null for a read that succeeded) and `error` the message of the read when the page's own read threw; the page's code runs through the boundary of scripts/lib/fault-credit.js, so a failure of the harness (the store, the adapter) stops the run and only a throw of the page's read is taken as its reported error.
+// The capability report of a copy as the real preflight gives it, and the page's small places read over it: { report, rows, lifepodReads, error, loadError }. `lifepodReads` holds the rows the life pod read of the page got back from the copy, as the page's read asked for them (the harness's adapter notes them, as it does not run the page's code). `loadError` is what the page reports for the read (`loadErrors.smallPlaces`, null for a read that succeeded) and `error` the message of the read when the page's own read threw; the page's code runs through the boundary of scripts/lib/fault-credit.js, so a failure of the harness (the store, the adapter) stops the run and only a throw of the page's read is taken as its reported error.
 const readOf = async ({ caps, page }, db) => {
   const result = await caps.preflight(adapter(db))
   const store = { getters: { 'capabilities/result': result, 'capabilities/report': harnessOwn((route) => result.reports[route] || null), 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: harnessOwn(async () => {}) }
-  const vm = instantiate(page, { $store: store, database: adapter(db), GameID: GAME, RaceID: RACE, data: { loadErrors: {} }, boundary })
+  const lifepodReads = []
+  const recording = { query: async (sql) => { const read = await adapter(db).query(sql); lifepodReads.push(...read[0].filter((row) => 'LifepodID' in row)); return read } }
+  const vm = instantiate(page, { $store: store, database: recording, GameID: GAME, RaceID: RACE, data: { loadErrors: {} }, boundary })
   let rows = null
   let error = null
 
@@ -98,7 +106,7 @@ const readOf = async ({ caps, page }, db) => {
     error = thrown.message
   }
 
-  return { report: result.reports['/routes'], rows, error, loadError: vm.loadErrors.smallPlaces }
+  return { report: result.reports['/routes'], rows, lifepodReads, error, loadError: vm.loadErrors.smallPlaces }
 }
 
 // What the save itself says of the small places the race is offered, from SQL over the copy and never from the page: { [group]: [[place key, SystemID, Xcor, Ycor], ...] sorted by key }. The race's own waypoints (not those marked for deletion), every wreck, life pod and aether gate of the systems it knows, and the contacts other races' sensors give it that were detected at the game's time now (a contact is stored once for each way it was detected, so its tracks collapse into the highest UniqueID, the key a move order names).
@@ -143,7 +151,85 @@ const intactChecks = {
   },
 }
 
-const CHECKS = [intactChecks]
+const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// Whether a text carries a name or a figure whole, whatever its case.
+const carries = (text, value) => new RegExp(`(?<![\\w])${escaped(String(value))}(?![\\w])`, 'i').test(text)
+
+// The pods of the systems the race knows, from SQL over the copy: the owner, the ship name and crew the game shows only the owner, and the class name the race's own intelligence holds for the pod's class (null when it holds none).
+const podsOf = (db) => db.query(`select FCT_Lifepods.LifepodID, FCT_Lifepods.RaceID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, (select FCT_AlienClass.ClassName from FCT_AlienClass where FCT_AlienClass.GameID = ${GAME} and FCT_AlienClass.ViewRaceID = ${RACE} and FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID) as Alias from FCT_Lifepods where FCT_Lifepods.GameID = ${GAME} and FCT_Lifepods.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE}) order by FCT_Lifepods.LifepodID`).all()
+
+const podsChecks = {
+  id: 'pods',
+  name: 'a life pod of another race is read, shown and searched by the race\'s alias for its class and its id and never by its ship name or crew, and the race\'s own by its ship name and crew',
+  run: async ({ read, db }) => {
+    const { rows, lifepodReads } = read.intact
+    const pods = podsOf(db.intact)
+    const aliased = pods.find((pod) => pod.LifepodID === ALIASED_POD.id)
+    const unaliased = pods.find((pod) => pod.LifepodID === UNALIASED_POD.id)
+
+    if (!aliased || !aliased.Alias || !unaliased || unaliased.Alias) {
+      throw new HarnessError('the copy must hold one foreign pod of a class the race holds an alias for and one of a class it holds none for')
+    }
+
+    const shown = (pod) => {
+      const row = rows.find((place) => place.key === `lifepod:${pod.LifepodID}`)
+
+      assert.ok(row, `the pod ${pod.LifepodID} is offered`)
+
+      return row
+    }
+
+    const readOf = (pod) => {
+      const row = lifepodReads.find((item) => item.LifepodID === pod.LifepodID)
+
+      assert.ok(row, `the read of the page brings the pod ${pod.LifepodID}`)
+
+      return Object.values(row)
+    }
+
+    const foreign = pods.filter((pod) => pod.RaceID !== RACE)
+    const own = pods.filter((pod) => pod.RaceID === RACE)
+
+    assert.ok(foreign.length >= 2 && own.length >= 1, `the copy holds foreign pods and an own one to check: ${foreign.length} foreign, ${own.length} own`)
+    foreign.forEach((pod) => {
+      const row = shown(pod)
+      const fields = [row.name, row.subtitle, row.text]
+      const values = readOf(pod)
+
+      assert.ok(carries(row.name, pod.LifepodID), `the pod ${pod.LifepodID} of another race is named by its id: ${row.name}`)
+      assert.ok(carries(row.text, pod.LifepodID), `the search text of the pod ${pod.LifepodID} of another race holds its id: ${row.text}`)
+      assert.ok(!fields.some((field) => carries(field, pod.ShipName)), `the pod ${pod.LifepodID} of another race shows its ship name: ${fields.join(' | ')}`)
+      assert.ok(!fields.some((field) => carries(field, pod.Crew)), `the pod ${pod.LifepodID} of another race shows its crew of ${pod.Crew}: ${fields.join(' | ')}`)
+
+      if (pod.Alias) {
+        assert.ok(carries(row.name, pod.Alias), `the pod ${pod.LifepodID} of another race is named by the alias ${pod.Alias} of the race: ${row.name}`)
+        assert.ok(carries(row.text, pod.Alias), `the search text of the pod ${pod.LifepodID} holds the alias ${pod.Alias}: ${row.text}`)
+      }
+
+      assert.ok(!values.some((value) => String(value).toLowerCase() === pod.ShipName.toLowerCase()), `the read of the page brings the ship name of the pod ${pod.LifepodID} of another race`)
+      assert.ok(!values.includes(pod.Crew), `the read of the page brings the crew of ${pod.Crew} of the pod ${pod.LifepodID} of another race`)
+      assert.ok(!values.includes(pod.RaceID), `the read of the page brings the owner ${pod.RaceID} of the pod ${pod.LifepodID} of another race`)
+    })
+    own.forEach((pod) => {
+      const row = shown(pod)
+      const values = readOf(pod)
+      const token = /(\S+)\s+survivors?\b/.exec(row.subtitle)
+
+      assert.ok(values.includes(pod.ShipName) && values.includes(pod.Crew), `the read of the page brings the ship name and the crew of its own pod ${pod.LifepodID}`)
+      assert.ok(carries(row.name, pod.ShipName), `the own pod ${pod.LifepodID} is named by its ship name: ${row.name}`)
+      assert.ok(carries(row.text, pod.ShipName), `the search text of the own pod ${pod.LifepodID} holds its ship name: ${row.text}`)
+      assert.ok(token && /^\d+$/.test(token[1]) && Number(token[1]) === pod.Crew, `the own pod ${pod.LifepodID} shows its crew of ${pod.Crew}: ${row.subtitle}`)
+    })
+
+    // A pod of another race has no name to order by, so the foreign pods keep the order of their ids whatever their hidden names are.
+    const order = rows.filter((row) => row.group === 'lifepod').map((row) => Number(row.key.split(':')[1])).filter((id) => foreign.some((pod) => pod.LifepodID === id))
+
+    assert.deepEqual(order, foreign.map((pod) => pod.LifepodID), 'the pods of another race are listed by their ids, not by their hidden ship names')
+  },
+}
+
+const CHECKS = [intactChecks, podsChecks]
 
 // ---------- the faults and the rewrites ----------
 
@@ -155,16 +241,44 @@ const swap = (from, to) => (text) => {
   return text.replace(from, () => to)
 }
 
+const then = (...changes) => (text) => changes.reduce((given, change) => change(given), text)
+
 /* eslint-disable no-template-curly-in-string */
+const NAME_GATE = 'case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName'
+const CREW_GATE = 'case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew'
+const NAME_UNGATED = 'FCT_Lifepods.ShipName as OwnShipName'
+const CREW_UNGATED = 'FCT_Lifepods.Crew as OwnCrew'
+const NAME_CELL = '`Life pods: ${own ? row.OwnShipName : `${row.AlienClassName'
+const CREW_CELL = '${own ? (Number.isFinite(row.OwnCrew)'
+const textCell = (to) => swap('text: textOf(name, row.SystemName),\n  }\n})\n\nconst loadAetherGates', `${to},\n  }\n})\n\nconst loadAetherGates`)
+const CLASS_CELL = "`${row.AlienClassName || 'unknown class'} #${row.LifepodID}`"
+
 const FAULTS = [
   { name: 'the loader leaves the aether gates out', file: 'places', change: swap(', loadContacts(database, context), loadAetherGates(database, context)])', ', loadContacts(database, context)])'), fails: ['intact'] },
   { name: 'the loader leaves the wrecks out', file: 'places', change: swap('loadWrecks(database, context, count), loadLifepods', 'loadLifepods'), fails: ['intact'] },
   { name: 'the gates of a system the race does not know are offered', file: 'places', change: swap("${known('FCT_AetherGates', context)}\nwhere", 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_AetherGates.SystemID and FCT_RaceSysSurvey.RaceID = ${context.RaceID} and FCT_RaceSysSurvey.GameID = ${context.GameID}\nwhere'), fails: ['intact'] },
+  { name: 'the read brings the ship name of a pod of another race', file: 'places', change: swap(NAME_GATE, NAME_UNGATED), fails: ['pods'] },
+  { name: 'the read brings the crew of a pod of another race', file: 'places', change: swap(CREW_GATE, CREW_UNGATED), fails: ['pods'] },
+  { name: 'the pods of another race are ordered by their hidden ship names', file: 'places', change: swap('order by OwnShipName, FCT_Lifepods.LifepodID', 'order by FCT_Lifepods.ShipName, FCT_Lifepods.LifepodID'), fails: ['pods'] },
+  { name: 'a pod of another race is named by its ship name', file: 'places', change: then(swap(NAME_GATE, NAME_UNGATED), swap(NAME_CELL, '`Life pods: ${true ? row.OwnShipName : `${row.AlienClassName')), fails: ['pods'] },
+  { name: 'a pod of another race shows its crew', file: 'places', change: then(swap(CREW_GATE, CREW_UNGATED), swap(CREW_CELL, '${true ? (Number.isFinite(row.OwnCrew)')), fails: ['pods'] },
+  { name: 'the search text of a pod of another race holds its ship name', file: 'places', change: then(swap(NAME_GATE, NAME_UNGATED), textCell('text: textOf(name, row.OwnShipName, row.SystemName)')), fails: ['pods'] },
+  { name: 'the search text of a pod of another race lacks its id', file: 'places', change: textCell("text: textOf('life pods', own ? row.OwnShipName : row.AlienClassName, row.SystemName)"), fails: ['pods'] },
+  { name: 'a pod of another race loses the alias of its class', file: 'places', change: swap(CLASS_CELL, "`${'unknown class'} #${row.LifepodID}`"), fails: ['pods'] },
+  { name: 'a pod of another race loses its id', file: 'places', change: swap(CLASS_CELL, "`${row.AlienClassName || 'unknown class'}`"), fails: ['pods'] },
+  { name: 'the crew of a pod of the race is shown tenfold', file: 'places', change: swap('`${row.OwnCrew} ${row.OwnCrew === 1', '`${row.OwnCrew}0 ${row.OwnCrew === 1'), fails: ['pods'] },
+  { name: 'the owner of a pod is told the wrong way round', file: 'places', change: swap('const own = row.Own === 1', 'const own = row.Own !== 1'), fails: ['pods'] },
+  { name: 'the read brings the owner of a pod of another race', file: 'places', change: swap('(FCT_Lifepods.RaceID = ${context.RaceID}) as Own,', '(FCT_Lifepods.RaceID = ${context.RaceID}) as Own, FCT_Lifepods.RaceID as PodRaceID,'), fails: ['pods'] },
+  { name: 'the read brings the owner of a pod of another race in place of the ownership flag', file: 'places', change: then(swap('(FCT_Lifepods.RaceID = ${context.RaceID}) as Own,', 'FCT_Lifepods.RaceID as Own,'), swap('const own = row.Own === 1', 'const own = row.Own === context.RaceID')), fails: ['pods'] },
 ]
 
-// Rewrites that say the same thing: the gate load first.
+// Rewrites that say the same thing: the gate load first, the owner test in parentheses, another word for a class that is not known and the system of a pod put ahead of what is said of it.
 const BENIGN = [
   { name: 'the gate load first', file: 'places', change: swap('const lists = await Promise.all([loadWaypoints(database, context), loadWrecks(database, context, count), loadLifepods(database, context), loadContacts(database, context), loadAetherGates(database, context)])', 'const lists = await Promise.all([loadAetherGates(database, context), loadWaypoints(database, context), loadWrecks(database, context, count), loadLifepods(database, context), loadContacts(database, context)])') },
+  { name: 'the owner test of a pod in parentheses', file: 'places', change: swap('const own = row.Own === 1', 'const own = (row.Own === 1)') },
+  { name: 'the life pod read with its keywords in capitals', file: 'places', change: swap("\nfrom FCT_Lifepods\n${known('FCT_Lifepods', context)}", "\nFROM FCT_Lifepods\n${known('FCT_Lifepods', context)}") },
+  { name: 'another word for the class of a pod that is not known', file: 'places', change: swap(CLASS_CELL, "`${row.AlienClassName || 'unidentified class'} #${row.LifepodID}`") },
+  { name: 'the system of a pod put ahead of what is said of it', file: 'places', change: then(swap('subtitle: `${own ?', 'subtitle: `in ${row.SystemName}: ${own ?'), swap("'Alien life pods'} in ${row.SystemName}`", "'Alien life pods'}`")) },
 ]
 /* eslint-enable no-template-curly-in-string */
 
