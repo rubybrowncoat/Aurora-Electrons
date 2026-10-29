@@ -1684,25 +1684,15 @@ const defineSuite = (m) => {
     }
   })
 
-  test('review', 'a write the store refuses is thrown in the window that asked and a change listener hears only this window\'s changes of its key', async () => {
+  test('review', 'a write the store refuses is thrown in the window that asked', async () => {
     const { window, finish } = await hostedStores()
 
     try {
       const a = new (window())()
-      const heard = []
 
       a.set('x', { inner: 1 })
       assert.throws(() => a.set('y', undefined), /delete/)
       assert.equal(a.has('y'), false)
-
-      const stop = a.onDidChange('x', (value, previous) => heard.push([value, previous]))
-
-      a.set('other', 1)
-      a.set('x', { inner: 1 })
-      a.set('x', { inner: 2 })
-      stop()
-      a.set('x', { inner: 3 })
-      assert.deepEqual(heard, [[{ inner: 2 }, { inner: 1 }]])
     } finally {
       finish()
     }
@@ -2181,7 +2171,6 @@ const MUTATIONS = [
   { name: 'the host writes a whole store without comparing it to what the caller read', file: 'main/store-host.js', find: 'if (JSON.stringify(store.store) !== base) {', replace: 'if (false) {', fails: ['a whole-store change that another window wrote under'] },
   { name: 'a whole-store change is written without the host\'s check', file: 'preload/store-client.js', find: "if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {", replace: "if (!this.call('write', next)) {", fails: ['a whole-store change that another window wrote under'] },
   { name: 'a whole-store change is made only once', file: 'preload/store-client.js', find: 'const ATTEMPTS = 50', replace: 'const ATTEMPTS = 1', fails: ['a whole-store change that another window wrote under'] },
-  { name: 'a change listener is not told of a write', file: 'preload/store-client.js', find: "this.call('set', key, value)\n    this.changed()", replace: "this.call('set', key, value)", fails: ['a write the store refuses'] },
   { name: 'a path is set with the store\'s own set, which makes lists of numeric segments', file: 'main/store-host.js', find: '  const next = store.store\n\n  setPath(next, key, value)\n  store.store = next', replace: '  store.set(key, value)', fails: ['two windows share one settings store'] },
   { name: 'an error of the host is not thrown in the window', file: 'preload/store-client.js', find: 'if (!answer || !answer.ok) {', replace: 'if (false) {', fails: ['a write the store refuses'] },
   { name: 'an attach merges over the settings it read before', file: 'campaign-attach.js', find: 'mergeSettings(isObject(all.campaign) ? all.campaign[campaign.id] : undefined, source.settings).settings', replace: 'mergeSettings(undefined, source.settings).settings', fails: ['attaching a history from before campaigns keeps a setting'] },

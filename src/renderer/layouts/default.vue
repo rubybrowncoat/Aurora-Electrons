@@ -154,9 +154,8 @@ export default {
       flyoutId: null,
       paletteOpen: false,
 
-      // WATCHED CONFIG
+      // The NPR setting of the settings store in force: Settings puts a new store in place after every write, and the `config` watcher reads it from there.
       spyNPR: false,
-      unsubscribeSpyNPR: null,
     }
   },
   computed: {
@@ -318,31 +317,12 @@ export default {
     this.loadEmpires()
   },
   mounted() {
-    // CONFIG CHANGE SUBSCRIPTION
-    const mutationReturn = {}
-    this.configDidChange({
-      key: 'spyNPR',
-      callback: (value) => {
-        this.spyNPR = value
-      },
-
-      returnant: mutationReturn,
-    })
-
-    if (mutationReturn.unsubscribe) {
-      this.unsubscribeSpyNPR = mutationReturn.unsubscribe
-    }
-
     window.addEventListener('keydown', this.onKeydown)
     window.addEventListener('mouseup', this.onMouseup)
   },
   beforeDestroy () {
     if (this.system) {
       this.system.stop()
-    }
-
-    if (this.unsubscribeSpyNPR) {
-      this.unsubscribeSpyNPR()
     }
 
     window.removeEventListener('keydown', this.onKeydown)
@@ -353,9 +333,6 @@ export default {
   methods: {
     ...mapMutations('snackbar', [
       'setActive',
-    ]),
-    ...mapMutations([
-      'configDidChange',
     ]),
 
     ...mapActions('snackbar', ['activateSnackbar']),

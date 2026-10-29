@@ -1,6 +1,4 @@
-// Web mode stand-in for `electron-store`: dot-path get/set/delete/onDidChange and the whole `store`, persisted in localStorage. Each store (`cwd` and `name`, default 'config' as in electron-store) gets its own key, like electron-store's separate files.
-
-const listeners = {}
+// Web mode stand-in for `electron-store`: dot-path get/set/delete and the whole `store`, persisted in localStorage. Each store (`cwd` and `name`, default 'config' as in electron-store) gets its own key, like electron-store's separate files.
 
 // What the store holds, as a plain read. An absent value, storage the browser does not let the page read, or a value that is not valid JSON (or is JSON null, false or 0) reads as an empty store, which the app's settings and history readers depend on to start. A store opened with `strict: true` (a writer of whole files that must never replace one it could not read: utilities/scenario-records.js) reads as electron-store's does instead: a present value that is not valid JSON throws, naming the store, and a present value is returned as parsed, whatever it is, for the caller's own shape check to refuse; only an absent value, or storage the browser does not let the page read, is empty.
 const read = (storageKey, strict = false) => {
@@ -103,36 +101,16 @@ export default class Store {
 
   set (key, value) {
     const store = read(this.storageKey, this.strict)
-    const oldValue = getPath(store, key)
 
     setPath(store, key, value)
     write(this.storageKey, store)
-
-    const listenerKey = `${this.storageKey}:${key}`
-
-    ;(listeners[listenerKey] || []).forEach((callback) => callback(value, oldValue))
   }
 
   delete (key) {
     const store = read(this.storageKey, this.strict)
-    const oldValue = getPath(store, key)
 
     deletePath(store, key)
     write(this.storageKey, store)
-
-    const listenerKey = `${this.storageKey}:${key}`
-
-    ;(listeners[listenerKey] || []).forEach((callback) => callback(undefined, oldValue))
-  }
-
-  onDidChange (key, callback) {
-    const listenerKey = `${this.storageKey}:${key}`
-
-    listeners[listenerKey] = [...(listeners[listenerKey] || []), callback]
-
-    return () => {
-      listeners[listenerKey] = listeners[listenerKey].filter((listener) => listener !== callback)
-    }
   }
 }
 

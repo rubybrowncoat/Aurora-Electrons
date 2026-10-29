@@ -140,7 +140,7 @@
                   <div class="body-2">Export</div>
                   <div class="caption text--secondary">{{ exportNote }}</div>
                 </div>
-                <div class="transfer__choices transfer__choices--stacked" role="group" aria-label="Categories to export">
+                <div class="transfer__choices" role="group" aria-label="Categories to export">
                   <v-checkbox v-for="category in categories" :key="category.id" v-model="exportCategories" :value="category.id" class="transfer__choice" dense hide-details :data-export-category="category.id">
                     <template #label>
                       <span>{{ category.title }}<span class="caption text--secondary d-block">{{ category.note }}</span></span>
@@ -1028,16 +1028,10 @@ export default {
   gap: 8px;
 }
 
+// The categories to export and to import, one per line, each with its note under its title.
 .transfer__choices {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 32px;
-}
-
-// The categories to export, one per line, each with its note under its title.
-.transfer__choices--stacked {
   flex-direction: column;
-  flex-wrap: nowrap;
   gap: 8px;
 }
 
