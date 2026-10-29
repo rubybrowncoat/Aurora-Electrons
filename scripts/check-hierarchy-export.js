@@ -652,6 +652,20 @@ const pureSuite = async (mods, into) => {
     return (title !== null && title.includes('Aurelian *Star* Empire #1') && groundTitle !== null && groundTitle.includes('Aurelian Empire') && without(headOf(named.text)) && without(named.fileName) && /aurelian/i.test(named.fileName) && /empire/i.test(named.fileName) && named.fileName.endsWith('.md') && named.type === 'text/markdown' && both(headOf(unnamed.text)) && same(numbersIn(unnamed.fileName), [9431, 9877]) && same(numbersIn(symbols.fileName), [9431, 9877]) && without(csvNamed.fileName) && /aurelian/i.test(csvNamed.fileName) && /empire/i.test(csvNamed.fileName) && csvNamed.fileName.endsWith('.csv') && same(numbersIn(csvUnnamed.fileName), [9431, 9877]) && csvUnnamed.fileName.endsWith('.csv') && hierarchyExport(ids, 'naval', 'csv', 'Ærø Étoile Empire').fileName === 'aero-etoile-empire-naval-structure.csv') || `title ${JSON.stringify(title)}, head ${JSON.stringify(headOf(named.text).slice(0, 200))}, files ${named.fileName} ${unnamed.fileName} ${symbols.fileName} ${csvNamed.fileName} ${csvUnnamed.fileName} ${hierarchyExport(ids, 'naval', 'csv', 'Ærø Étoile Empire').fileName}`
   })
 
+  await add('export-file-length', 'an empire of a name of more than 240 characters gives every export a name of at most 120 characters: its name cut at a word, then the structure, the branch\'s kind and id and the extension whole', () => {
+    const long = `${'The Most Serene and Everlasting Imperial Commonwealth of the Seven Radiant Suns '.repeat(3)}Empire`
+    const cut = 'the-most-serene-and-everlasting-imperial-commonwealth-of-the'
+    const files = [
+      [hierarchyExport(naval, 'naval', 'csv', long), `${cut}-naval-structure.csv`],
+      [hierarchyExport(naval, 'naval', 'markdown', long), `${cut}-naval-structure.md`],
+      [hierarchyExport(naval, 'naval', 'markdown', long, 'command:2'), `${cut}-naval-structure-command-2.md`],
+      [hierarchyExport(groundModel, 'ground', 'csv', long), `${cut}-ground-structure.csv`],
+      [hierarchyExport(groundModel, 'ground', 'markdown', long, 'formation:1'), `${cut}-ground-structure-formation-1.md`],
+    ]
+
+    return (long.length >= 240 && files.every(([file, expected]) => file !== null && file.fileName === expected && file.fileName.length <= 120)) || JSON.stringify(files.map(([file]) => file && file.fileName))
+  })
+
   // The diagram of the organisation, read back as Mermaid reads it.
   const commandOrder = NAVAL_ORDER.filter((key) => key.startsWith('command:'))
   const arrowsOf = (chart, order) => chart.arrows.map(([from, to]) => `${order[chart.nodes.findIndex((node) => node.id === from)]}>${order[chart.nodes.findIndex((node) => node.id === to)]}`).sort()
@@ -1726,6 +1740,7 @@ const MUTANTS = [
   ['a branch\'s file is named as the whole structure\'s', U('hierarchy-export'), '${part === null ? \'\' : `-${part.replace(\':\', \'-\')}`}', '', ['md-branch']],
   ['an accented letter is dropped from a file name', U('file-slug'), '.normalize(\'NFKD\').replace(/[\\u0300-\\u036F]/g, \'\')', '', ['md-empire']],
   ['a letter no decomposition reduces is dropped from a file name', U('file-slug'), '.replace(/[æøœßđðłþı]/g, (letter) => LETTERS[letter])', '', ['md-empire']],
+  ['a long name is not cut, so a file name runs past what a download takes', U('file-slug'), 'if (slug.length <= SLUG_LIMIT) {', 'if (true) {', ['export-file-length']],
   ['a branch is placed at the top whatever is above it', U('hierarchy-export'), 'const place = branch.above.length ?', 'const place = false ?', ['md-branch']],
   ['an unknown branch exports the whole structure', U('hierarchy-export'), 'if (branch !== null && !part) {\n    return null', 'if (false) {\n    return null', ['md-branch']],
   ['the branch export is the whole structure', U('hierarchy-export'), 'const part = branch === null ? null : branchOf(all, branch)', 'const part = null', ['md-branch', 'md-branch-limit']],

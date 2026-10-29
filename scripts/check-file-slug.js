@@ -1,5 +1,5 @@
 /*
-  Checks the name a file of the app's exports is given from the empire's name (src/renderer/utilities/file-slug.js), and the preferences export that names its file with it (utilities/preferences.js `exportName`; the command structure's exports are checked by check-hierarchy-export.js): an accented letter is its plain letter, so "Ærø Étoile Empire" is saved as `aero-etoile-empire` and not `r-toile-empire`, every other character a hyphen, and a name with nothing of the Latin alphabet left gives the file the caller's fallback.
+  Checks the name a file of the app's exports is given from the empire's name (src/renderer/utilities/file-slug.js), and the preferences export that names its file with it (utilities/preferences.js `exportName`; the command structure's exports are checked by check-hierarchy-export.js): an accented letter is its plain letter, so "Ærø Étoile Empire" is saved as `aero-etoile-empire` and not `r-toile-empire`, every other character a hyphen, a name with nothing of the Latin alphabet left gives the file the caller's fallback, and a long name is cut to 60 characters at a word, so that a browser does not cancel the download of a file whose name is too long.
 
   bun scripts/check-file-slug.js [--no-mutations] [mutant:<N> ...]
 
@@ -32,6 +32,15 @@ const CHECKS = [
     assert.equal(preferences.exportName({ raceName: '帝国' }, DAY), 'aurora-electrons-preferences-app-2026-10-29.json')
     assert.equal(preferences.exportName({}, DAY), 'aurora-electrons-preferences-app-2026-10-29.json')
   }],
+  ['a long name is cut to 60 characters at the last hyphen that fits (a single word at 60), counted after the letters are spelled out, and the preferences file keeps its date and extension', ({ slug, preferences }) => {
+    assert.equal(slug.fileSlug('Æ'.repeat(200)), 'ae'.repeat(30))
+    assert.equal(slug.fileSlug(`Ærø ${'Æ'.repeat(40)}`), 'aero')
+    assert.equal(slug.fileSlug('The Most Serene and Everlasting Imperial Commonwealth of the'), 'the-most-serene-and-everlasting-imperial-commonwealth-of-the')
+    assert.equal(slug.fileSlug('The Most Serene and Everlasting Imperial Commonwealth of the Seven Radiant Suns'), 'the-most-serene-and-everlasting-imperial-commonwealth-of-the')
+    assert.equal(slug.fileSlug('The Most Serene and Everlasting Imperial Commonwealth of Radiance'), 'the-most-serene-and-everlasting-imperial-commonwealth-of')
+    assert.equal(slug.fileSlug('A'.repeat(240)), 'a'.repeat(60))
+    assert.equal(preferences.exportName({ raceName: 'Empire '.repeat(40) }, DAY), 'aurora-electrons-preferences-empire-empire-empire-empire-empire-empire-empire-empire-2026-10-29.json')
+  }],
 ]
 
 // The planted faults: the file, the text to find (exactly once) and what replaces it. Each must make a check fail.
@@ -42,6 +51,9 @@ const MUTATIONS = [
   ['a hyphen is left at either end', 'file-slug', '.replace(/^-+|-+$/g, \'\')', ''],
   ['the preferences file keeps its own slug, which drops accented letters', 'preferences', 'const slug = fileSlug(source.raceName) || \'app\'', 'const slug = String(source.raceName || \'app\').toLowerCase().replace(/[^a-z0-9]+/g, \'-\').replace(/^-+|-+$/g, \'\') || \'app\''],
   ['the preferences file has no fallback', 'preferences', 'fileSlug(source.raceName) || \'app\'', 'fileSlug(source.raceName)'],
+  ['a long name is not cut', 'file-slug', 'if (slug.length <= SLUG_LIMIT) {', 'if (true) {'],
+  ['a long name is cut in the middle of a word', 'file-slug', 'slug.slice(0, end > 0 ? end : SLUG_LIMIT)', 'slug.slice(0, SLUG_LIMIT)'],
+  ['a long name loses the whole word that ends at the limit', 'file-slug', 'slug.lastIndexOf(\'-\', SLUG_LIMIT)', 'slug.lastIndexOf(\'-\', SLUG_LIMIT - 1)'],
 ]
 
 const modulesOf = async (sources = {}) => {
