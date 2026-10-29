@@ -2,8 +2,12 @@
   <v-card class="panel component-calculator" data-summary="The share of a colony's construction capacity that builds a ship class's manufactured components by a deadline." elevation="1">
     <div class="panel-head">
       <span>Component calculator<provenance-mark rule="production.componentPlan" /></span>
-      <v-btn small text :disabled="!hasEdits" @click="resetStock">Reset stock</v-btn>
+      <span class="d-flex align-center">
+        <v-chip x-small label color="warning" class="mr-2" data-wip-chip>WIP</v-chip>
+        <v-btn small text :disabled="!hasEdits" @click="resetStock">Reset stock</v-btn>
+      </span>
     </div>
+    <wip-notice title="The component calculator" panel />
     <div v-if="!classes.length" class="pa-4 text--secondary">The race has no ship class to take components from.</div>
     <div v-else-if="!colonies.length" class="pa-4 text--secondary">The race has no colony with construction capacity to build components.</div>
     <template v-else>
@@ -62,6 +66,7 @@ import { mapGetters } from 'vuex'
 
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import StatTiles from '../page/StatTiles.vue'
+import WipNotice from '../page/WipNotice.vue'
 import countFormat from '../../mixins/count-format'
 import { gameTime } from '../../utilities/aurora'
 import { planRun, requirements, stockWith } from '../../utilities/component-calc'
@@ -101,7 +106,7 @@ const wholeNumber = (text) => {
 
 export default {
   name: 'ComponentCalculator',
-  components: { ProvenanceMark, StatTiles },
+  components: { ProvenanceMark, StatTiles, WipNotice },
   mixins: [countFormat],
   props: {
     // What the page read: { classes, parts, stock, minerals } as `sourcesOf` shapes them.
