@@ -3,7 +3,7 @@
 
   bun scripts/check-deficit-sites.js [--no-mutations] [--no-saves]
 
-  The utility is run on deposits, colonies, jump points and mines worked by hand, at a carrier speed where one day is 86,400,000 km. What the shortlist explains: the amount, accessibility and distance of a deposit and the four delays of its first delivery (deployment, extraction of a first load, route out and back, depletion) as figures of their own. What changes the rank: a farther site, a slower carrier, a smaller load, a slower build and a ground that gives way to a carrier's limit each move a site past another. What is never listed: a deposit on a body the race has not surveyed (the loader runs on a small in-memory database of its own, with a body only another race surveyed, a body nobody surveyed and a body in a system the race has no survey of), a deposit under a known alien colony, a deposit with nothing left. What is unknown: a site with no explored route, no explored way back, no destination, speed, load, builder, mine type or number of mines has an unknown first delivery, never 0, and is listed after the ranked; a failed read is named and the rest stands. The panel's script runs as a pseudo instance over scripts/lib/page-loader.js with a change of speed, load and drive recalculating the rows, and its template and the page are read as text.
+  The utility is run on deposits, colonies, jump points and mines worked by hand, at a carrier speed where one day is 86,400,000 km. What the shortlist explains: the amount, accessibility and distance of a deposit and the four delays of its first delivery (deployment, extraction of a first load, route out and back, depletion) as figures of their own. What changes the rank: a farther site, a slower carrier, a smaller load, a slower build and a ground that gives way to a carrier's limit each move a site past another. What is never listed: a deposit on a body the race has not surveyed (the loader runs on a small in-memory database of its own, with a body only another race surveyed, a body nobody surveyed and a body in a system the race has no survey of), a deposit under a known alien colony, a deposit with nothing left. What is unknown: a site with no explored route, no explored way back, no destination, speed, load, builder, mine type or number of mines has an unknown first delivery, never 0, and is listed after the ranked; a failed read is named and the rest stands. The panel's script runs as a pseudo instance over scripts/lib/page-loader.js with a change of speed, load and drive recalculating the rows, and its template and the page are read as text. The table draws a page of sites at a time and offers no page of every site: hundreds of rows drawn at once make each later frame of the window take seconds (FU-80).
 
   The saves (saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loaders, compared with raw counts of the survey tables, and the ranking of real deposits: its order, its arrival times, the routes compared with an independent search of the explored jump points, and the sites the race already works.
 
@@ -649,6 +649,14 @@ const pure = (ctx) => {
 
     return keys.length === 8 && new Set(keys).size === 8 && /tableView\('deficitSites\w+'/.test(componentText) ? true : short(keys)
   })
+  add('panel-template: the table draws a page of sites at a time and offers no page of every site: hundreds of rows drawn at once make each later frame of the window take seconds', () => {
+    const vm = mount({ supply: supplied() })
+    const table = (componentText.match(/<v-data-table\b[^>]*>/) || [''])[0]
+    const sizes = vm.pageSizes || []
+    const paged = table.includes(':items-per-page.sync="sitesTable.itemsPerPage"') && table.includes(':footer-props="{ itemsPerPageOptions: pageSizes }"') && !/disable-pagination|hide-default-footer/.test(table)
+
+    return paged && sizes.length > 0 && sizes.every((size) => Number.isInteger(size) && size > 0 && size <= 60) && sizes.includes(vm.sitesTable.itemsPerPage) ? true : short([table, sizes, vm.sitesTable])
+  })
 
   return statements
 }
@@ -1045,6 +1053,8 @@ const MUTATIONS = [
   { name: 'a failure of the sites panel\'s reads counted with the forecasts\'', file: P, find: 'return CORE_INPUTS.filter((key) => this.loadErrors[key])', replace: 'return Object.keys(INPUT_LABELS).filter((key) => this.loadErrors[key])', fails: ['page'] },
   { name: 'the sites panel\'s reads in flight not shown as loading', file: P, find: 'loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS)', replace: 'loading: false', fails: ['page'] },
   { name: 'the sources a required input of the page', file: C, find: 'key === \'siteDeposits\' || key === \'deploymentSources\'', replace: 'key === \'siteDeposits\'', fails: ['page'] },
+  { name: 'the sites table drawn whole, with no pages', file: V, find: ':items-per-page.sync="sitesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" dense', replace: 'dense disable-pagination hide-default-footer', fails: ['panel-template'] },
+  { name: 'a page of every site offered', file: V, find: 'const PAGE_SIZES = [15, 30, 60]', replace: 'const PAGE_SIZES = [15, 30, 60, -1]', fails: ['panel-template'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 

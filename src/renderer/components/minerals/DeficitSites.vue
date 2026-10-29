@@ -54,7 +54,7 @@
       </div>
       <div class="px-4 pb-2 caption text--secondary">{{ summaryText }}</div>
       <div v-for="text in problemTexts" :key="text" class="px-4 pb-2 caption warning--text" data-deficit-problem>Not read: {{ text }}.</div>
-      <v-data-table :headers="headers" :items="items" item-key="key" :custom-sort="sortNullLast" :sort-by.sync="sitesTable.sortBy" :sort-desc.sync="sitesTable.sortDesc" dense disable-pagination hide-default-footer no-data-text="No surveyed deposit of the mineral is left to list.">
+      <v-data-table :headers="headers" :items="items" item-key="key" :custom-sort="sortNullLast" :sort-by.sync="sitesTable.sortBy" :sort-desc.sync="sitesTable.sortDesc" :items-per-page.sync="sitesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" dense no-data-text="No surveyed deposit of the mineral is left to list.">
         <template #[`item.order`]="{ item }">
           <span class="font-weight-medium text-no-wrap">{{ item.rank === null ? '—' : item.rank }}<provenance-mark :result="item.rankResult" /></span>
         </template>
@@ -117,6 +117,9 @@ const HEADERS = [
 const TON_COLUMNS = ['amount', 'accessibility', 'extraction', 'delivered']
 const DAY_COLUMNS = ['deployment', 'firstLoad', 'roundTrip', 'depletion', 'firstDelivery']
 
+// Rows per page, with no page of every row: a mineral can have hundreds of surveyed deposits, and drawn at once their rows (some 40 elements each) make every later frame of the Mineral Outlook take seconds to composite, so a hover or a repaint holds the window that long.
+const PAGE_SIZES = [15, 30, 60]
+
 // What each state of a site reads as.
 const STATE_VIEW = {
   delivering: { label: 'Delivers by mass driver now', icon: 'mdi-rocket-launch-outline', color: 'success' },
@@ -145,7 +148,7 @@ export default {
       cargo: { key: 'deficitSitesCargo', default: null, scope: 'race', normalise: normaliseSpeed },
       drive: { key: 'deficitSitesDrive', default: DEFAULT_BASIS.drive, scope: 'race', valid: (value) => value === null || DRIVE_IDS.includes(value) },
       lagrange: { key: 'deficitSitesLagrange', default: DEFAULT_BASIS.lagrange, scope: 'race', normalise: (stored) => (typeof stored === 'boolean' ? stored : undefined) },
-      sitesTable: tableView('deficitSitesTable', { sortBy: ['order'], sortDesc: false }),
+      sitesTable: tableView('deficitSitesTable', { sortBy: ['order'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
     }),
   ],
   props: {
@@ -167,7 +170,7 @@ export default {
     runway: { type: Object, default: null },
   },
   data() {
-    return { headers: HEADERS, tonColumns: TON_COLUMNS, dayColumns: DAY_COLUMNS, drives: DRIVES }
+    return { headers: HEADERS, tonColumns: TON_COLUMNS, dayColumns: DAY_COLUMNS, drives: DRIVES, pageSizes: PAGE_SIZES }
   },
   computed: {
     mineralName() {
