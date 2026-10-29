@@ -167,6 +167,8 @@ const productionResult = (row) => {
   return missing.length ? unavailable({ rule: 'cmcPolicy.production', missing }) : ofRule({ rule: 'cmcPolicy.production', value: true, inputs: { present } })
 }
 
+const OUTPUT_INPUTS = { Amount: 'the amount of the deposit', CivilianMineCount: 'the number of civilian mining complexes on the colony', MineProduction: 'the race\'s mine production', Accessibility: 'the accessibility of the deposit', RadiationModifier: 'the body\'s radiation level', GovernorBonus: 'the value of the commander\'s bonus', SectorBonus: 'the value of the commander\'s bonus' }
+
 const OUTPUT_COLUMNS = { Amount: 'FCT_MineralDeposit.Amount', CivilianMineCount: 'FCT_PopulationInstallations.Amount', MineProduction: 'FCT_Race.MineProduction', Accessibility: 'FCT_MineralDeposit.Accessibility', RadiationModifier: 'FCT_SystemBody.RadiationLevel', GovernorBonus: 'FCT_CommanderBonuses.BonusValue', SectorBonus: 'FCT_CommanderBonuses.BonusValue' }
 
 // What the complexes dig a year over the body's deposits (`deposits`: the colony's `surface` rows). A deposit with nothing left gives nothing; one whose amount is not recorded makes the output unavailable. The colony's own mines are left out: the surface rate is taken with the civilian capacity alone.
@@ -176,7 +178,7 @@ const outputResult = (deposits) => {
   }
 
   const live = deposits.filter((row) => !(Number.isFinite(row.Amount) && row.Amount <= 0))
-  const missing = [...new Set(live.flatMap((row) => Object.keys(OUTPUT_COLUMNS).filter((column) => !Number.isFinite(row[column])).map((column) => (row.BonusWithheld && (column === 'GovernorBonus' || column === 'SectorBonus') ? row.BonusWithheld : OUTPUT_COLUMNS[column]))))]
+  const missing = [...new Set(live.flatMap((row) => Object.keys(OUTPUT_COLUMNS).filter((column) => !Number.isFinite(row[column])).map((column) => (row.BonusWithheld && (column === 'GovernorBonus' || column === 'SectorBonus') ? row.BonusWithheld : OUTPUT_INPUTS[column]))))]
 
   if (missing.length) {
     return unavailable({ rule: 'cmcPolicy.output', missing })

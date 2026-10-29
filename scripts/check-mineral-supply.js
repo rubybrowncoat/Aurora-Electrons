@@ -64,6 +64,9 @@ const check = (name, result, detail = '') => {
 const SHORT_LIMIT = Number(process.env.SHORT_LIMIT) || 300
 const DROPPED = new Set(['rule', 'inputs', 'assumptions', 'row', 'route'])
 
+// A table or column name as the tooltip would show it: the missing inputs of an unavailable result are prose.
+const RAW_POINTER = /\b(?:FCT|DIM|VIR)_|\b[A-Za-z]+\.[A-Za-z]+\b/
+
 const short = (value) => {
   const text = JSON.stringify(value, (key, item) => (DROPPED.has(key) ? undefined : item))
 
@@ -404,7 +407,7 @@ const pure = (ctx) => {
     const at = (choice, over = {}) => siteOf(supply({ surface: [surface(2, 'Mine', { CivilianMineCount: 20, PurchaseCivilianMinerals: choice, MassDriverExport: choice === 1 ? 1 : 0 })], routes: [to, colony(2, 'Mine', { ...toward(to), ...over })], flows: ledger([move(2, 12, 40)]) }), 2)
     const unknowns = [at(null), at(null, { Drivers: 1 })]
 
-    return unknowns.every((site) => isUnavailable(site.packetOutput) && isUnavailable(site.local) && isUnavailable(site.supply) && site.packetOutput.inputs.missing.some((text) => text.includes('PurchaseCivilianMinerals'))) ? true : short(unknowns.map((site) => [site.packetOutput, site.local, site.supply]))
+    return unknowns.every((site) => isUnavailable(site.packetOutput) && isUnavailable(site.local) && isUnavailable(site.supply) && site.packetOutput.inputs.missing.some((text) => text.includes('purchase setting')) && [site.packetOutput, site.local, site.supply].every((result) => result.inputs.missing.every((text) => !RAW_POINTER.test(text)))) ? true : short(unknowns.map((site) => [site.packetOutput, site.local, site.supply]))
   })
   add('cmcunknown: a purchase choice that is stored, tax or buy, leaves every figure known', () => {
     const to = colony(1, 'Home', { Drivers: 1 })
@@ -1148,6 +1151,7 @@ const MUTATIONS = [
   { name: 'a destination that is none, gone or the colony itself shipping stock', file: U, find: '} else if (reach === false || source === false) {', replace: '} else if (source === false) {', fails: ['route'] },
   { name: 'bought output of a destination of another race kept in the site\'s stock', file: U, find: 'const packets = Boolean(civilian) && reach === true', replace: 'const packets = Boolean(civilian) && reach === true && target !== \'foreign\'', fails: ['route', 'conservation'] },
   { name: 'a purchase choice that is not stored taken as stored', file: U, find: 'const policyMissing = complexes.some((row) => row.PurchaseCivilianMinerals === null || row.PurchaseCivilianMinerals === undefined)', replace: 'const policyMissing = false', fails: ['cmcunknown'] },
+  { name: 'a purchase choice that is not stored named by its saved column in the missing inputs', file: U, find: "const POLICY_COLUMN = 'the colony\\'s civilian mineral purchase setting'", replace: "const POLICY_COLUMN = 'FCT_Population.PurchaseCivilianMinerals'", fails: ['cmcunknown'] },
   { name: 'a purchase choice that is not stored leaves the packet output known', file: U, find: '} else if (policyMissing && reach !== false) {\n      packetOutput', replace: '} else if (false) {\n      packetOutput', fails: ['cmcunknown'] },
   { name: 'a purchase choice that is not stored with no destination leaves the packet output unknown', file: U, find: '} else if (policyMissing && reach !== false) {\n      packetOutput', replace: '} else if (policyMissing) {\n      packetOutput', fails: ['cmcunknown'] },
   { name: 'a purchase choice that is not stored leaves the stock added known', file: U, find: 'const local = policyMissing ? unavailable({ rule: \'mineralSupply.localStock\', missing: [POLICY_COLUMN] }) : combine(', replace: 'const local = combine(', fails: ['cmcunknown'] },

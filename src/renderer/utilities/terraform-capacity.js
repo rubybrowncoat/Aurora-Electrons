@@ -158,7 +158,7 @@ const orbitalGroups = (ships, admins) => {
 
   return [...groups.values()].map((group) => {
     if (group.parent === null) {
-      return { ...group, admin: null, adminGap: 'the fleet\'s command association (FCT_Fleet.ParentCommandID)' }
+      return { ...group, admin: null, adminGap: 'the fleet\'s command association' }
     }
 
     const chain = navalAdminChain(admins, group.system, group.parent)

@@ -202,12 +202,12 @@ const lifetimeOfDeposit = (deposit, rate) => combine({
 
 const openResult = (deposit) => unavailable({ rule: 'cmcCandidate.reserve', missing: [`${DEPOSIT_COLUMNS.join(' or ')} of the ${mineralName(deposit.MaterialID)} deposit`] })
 
-const COMPLEX_COLUMNS = 'FCT_PopulationInstallations.Amount, DIM_PlanetaryInstallation.CivilianInstallation, MiningProductionValue'
+const COMPLEX_COLUMNS = 'the number and type of the installations on the body'
 
 // A colony on the body with an installation whose count or kind is not recorded leaves the number of complexes on the body unknown, so the body may not be free of them: it is listed as possible and stays unknown in every figure. A body with no installation row has no complex.
 const countOpen = (body) => body.complexGaps > 0
 
-const countResult = (rule) => unavailable({ rule, missing: [`${COMPLEX_COLUMNS} of an installation on the body`] })
+const countResult = (rule) => unavailable({ rule, missing: [COMPLEX_COLUMNS] })
 
 // One candidate body's row, or null when the body is no candidate. `ctx` holds the race, the parsed settings and the entered results of them.
 const rowOf = (body, ctx) => {

@@ -562,21 +562,21 @@ const defineCases = (modules) => {
   invariant('terraforming', 'a plan that adds a gas DIM_Gases holds no figures of is unknown and names the gas, not priced with zeros', () => {
     const assessment = assessWith(airless(), withoutGas(20))
 
-    assert.deepEqual(assessment.missing, ['DIM_Gases row of gas 20'])
+    assert.deepEqual(assessment.missing, ['the properties of gas 20'])
     assert.equal(assessment.plan, null)
   })
 
   invariant('terraforming', 'a gas row without its figures (a boiling point, say) is as missing as an absent row', () => {
     const assessment = assessWith(airless(), (id) => (id === 20 ? { AtmosGasName: 'Aestusium', GHGas: 1 } : GASES[id]))
 
-    assert.deepEqual(assessment.missing, ['DIM_Gases row of gas 20'])
+    assert.deepEqual(assessment.missing, ['the properties of gas 20'])
   })
 
   invariant('terraforming', 'a plan the full table rejects as making things worse is unknown, not worse, when it adds a gas the table lacks', () => {
     const body = earthlike({ SurfaceTemp: 200, BaseTemp: 180 })
 
     assert.equal(assessWith(body, (id) => GASES[id]).reason, 'Terraforming would make it worse', 'control: the complete table rejects this plan')
-    assert.deepEqual(assessWith(body, withoutGas(20)).missing, ['DIM_Gases row of gas 20'])
+    assert.deepEqual(assessWith(body, withoutGas(20)).missing, ['the properties of gas 20'])
   })
 
   invariant('terraforming', 'a gas the plan does not add is not asked for: the plan stands without its row', () => {
@@ -918,7 +918,7 @@ const defineCases = (modules) => {
     const kills = commanders.killsResult({ Name: 'A', KillTonnageMilitary: 100, KillTonnageCommercial: null })
 
     assert.equal(kills.status, 'unavailable')
-    assert.ok(kills.inputs.missing[0].includes('KillTonnageCommercial'))
+    assert.ok(kills.inputs.missing[0].includes('commercial tonnage'))
     assert.equal(commanders.medalsResult({ Name: 'A', Medals: null, MedalCount: null }).value, 0)
     assert.equal(commanders.medalsResult({ Name: 'A', Medals: 'Star', MedalCount: 2 }).value, 2)
     assert.equal(commanders.medalsResult({ Name: 'A', Medals: 'Star', MedalCount: null }).status, 'unavailable')

@@ -325,6 +325,8 @@ const alteredChecks = async (capabilities, source) => {
     const noFormationReads = await alteredCopy(source, 'formationreads', ['alter table FCT_GroundUnitFormation drop column ReplacementTemplateID'])
     const noTechType = await alteredCopy(source, 'techtype', ['alter table DIM_TechType drop column Description'])
     const noObsolete = await alteredCopy(source, 'obsolete', ['alter table FCT_GroundUnitFormationTemplate drop column Obsolete'])
+    const noBuild = await alteredCopy(source, 'nobuild', ['alter table DIM_PlanetaryInstallation drop column NoBuild'])
+    const noDelay = await alteredCopy(source, 'delay', ['alter table FCT_Ship drop column SensorDelay'])
     const noUnits = await alteredCopy(source, 'units', ['alter table FCT_GroundUnitFormationElement drop column Units'])
     const noFormationShip = await alteredCopy(source, 'formationship', ['alter table FCT_GroundUnitFormation drop column ShipID'])
     const noOrbit = await alteredCopy(source, 'orbit', ['alter table FCT_SystemBody drop column Bearing'])
@@ -337,7 +339,7 @@ const alteredChecks = async (capabilities, source) => {
     const noPanelReads = await alteredCopy(source, 'panel', ['alter table FCT_ShipClass drop column MinimumFuel', 'alter table FCT_Race drop column MSPProduction'])
     const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, noHeadquarters, productionRenamed, noGates)
+    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noBuild, noDelay, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, noHeadquarters, productionRenamed, noGates)
     copies.push(noUnits, noFormationShip)
     copies.push(noGame, pre27, sevenDropped)
 
@@ -426,6 +428,8 @@ const alteredChecks = async (capabilities, source) => {
     const two = (await preflightOf(capabilities, twoRenamed)).result
     const formationReads = (await preflightOf(capabilities, noFormationReads)).result
     const obsolete = (await preflightOf(capabilities, noObsolete)).result
+    const unbuildable = (await preflightOf(capabilities, noBuild)).result
+    const undelayed = (await preflightOf(capabilities, noDelay)).result
     const units = (await preflightOf(capabilities, noUnits)).result
     const formationShip = (await preflightOf(capabilities, noFormationShip)).result
     const onlyFormations = (result, route, key) => result.reports[route].status === 'degraded' && result.reports[route].missing.length === 0 && result.reports[route].degraded.length === 1 && result.reports[route].degraded[0].key === key
@@ -436,6 +440,57 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_Population.Duranium dropped (a column built by name) makes /mineral-outlook unsupported, naming the field', mineral.reports['/mineral-outlook'].status === 'unsupported' && mineral.reports['/mineral-outlook'].missing.some((entry) => entry.fields.includes('FCT_Population.Duranium')) && mineral.reports['/finances'].status === 'supported', JSON.stringify(mineral.reports['/mineral-outlook'].missing))
     check('altered: a column only the ground formations read dropped (FCT_GroundUnitFormation.ReplacementTemplateID) degrades /map and /survey-progress by their formation inputs and leaves neither unsupported', onlyFormations(formationReads, '/map', 'groundFormations') && onlyFormations(formationReads, '/survey-progress', 'formations') && formationReads.reports['/map'].degraded[0].fields.includes('FCT_GroundUnitFormation.ReplacementTemplateID'), JSON.stringify([formationReads.reports['/map'], formationReads.reports['/survey-progress']]))
     check('altered: the same column dropped makes no other report unsupported', Object.values(formationReads.reports).filter((report) => report.status === 'unsupported').length === 0, notSupported(formationReads).map((report) => `${report.route} ${report.status}`).join(', '))
+    const buildGaps = [['/colony-outlook', 'bootstrapSources'], ['/mineral-outlook', 'deploymentSources']]
+    const buildNamed = ([route, key]) => onlyFormations(unbuildable, route, key) && unbuildable.reports[route].degraded[0].fields.includes('DIM_PlanetaryInstallation.NoBuild')
+
+    check('altered: DIM_PlanetaryInstallation.NoBuild dropped (the flag that says whether a mine can be built) degrades /colony-outlook and /mineral-outlook by their mine inputs only, naming the column, and neither is unsupported', buildGaps.every(buildNamed) && Object.values(unbuildable.reports).every((report) => report.status !== 'unsupported'), JSON.stringify(buildGaps.map(([route]) => unbuildable.reports[route])))
+
+    {
+      const directory = mutatedCopy('utilities/capabilities.js', "const BUILDABILITY_READS = 'DIM_PlanetaryInstallation(CivilianInstallation NoBuild)'", "const BUILDABILITY_READS = 'DIM_PlanetaryInstallation(CivilianInstallation)'")
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+        const reports = (await preflightOf(mutant, noBuild)).result.reports
+
+        check('altered: a copy of the code in which the mine inputs do not read the build flag leaves /colony-outlook and /mineral-outlook supported on a save without the column, as the check above must notice', buildGaps.every(([route]) => reports[route].status === 'supported'), buildGaps.map(([route]) => reports[route].status).join())
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
+
+    const DELAY_ROUTES = ['/colony-outlook', '/logistics', '/hauling', '/information', '/routes']
+    const COMMAND_INPUTS = [['/production', 'page'], ['/habitability', 'BodyDetail']]
+    const readsCommand = (mods) => COMMAND_INPUTS.every(([route, key]) => mods.INPUTS[route].some((input) => input.key === key && (input.reads.FCT_Fleet || []).includes('ParentCommandID')))
+    const reportNames = (result, route, field) => [...result.reports[route].missing, ...result.reports[route].degraded].some((entry) => entry.fields.includes(field))
+
+    check('altered: FCT_Ship.SensorDelay dropped (the delay a fleet starts with) is named by /colony-outlook, /logistics, /hauling, /information and /routes, which time a route with it', DELAY_ROUTES.every((route) => reportNames(undelayed, route, 'FCT_Ship.SensorDelay')), DELAY_ROUTES.map((route) => `${route} ${undelayed.reports[route].status}`).join(', '))
+    check('reads: the command a terraformer fleet belongs to (FCT_Fleet.ParentCommandID) is read by the page input of /production and the body detail input of /habitability, which price the terraformers\' admin bonus', readsCommand(capabilities))
+
+    for (const [label, from, to, result, routes, field] of [['the start delay reads', "const START_DELAY_READS = 'FCT_Ship(SensorDelay)'", "const START_DELAY_READS = ''", noDelay, DELAY_ROUTES, 'FCT_Ship.SensorDelay']]) {
+      const directory = mutatedCopy('utilities/capabilities.js', from, to)
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+        const reports = (await preflightOf(mutant, result)).result
+
+        check('altered: a copy of the code without ' + label + ' no longer names ' + field + ' on a save without it, as the check above must notice', routes.some((route) => !reportNames(reports, route, field)), routes.map((route) => `${route} ${reports.reports[route].status}`).join(', '))
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
+
+    {
+      const directory = mutatedCopy('utilities/capabilities.js', "const FLEET_COMMAND_READS = 'FCT_Fleet(ParentCommandID)'", "const FLEET_COMMAND_READS = ''")
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+        check('reads: a copy of the code without the fleet command reads leaves /production and /habitability without them, as the check above must notice', !readsCommand(mutant))
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
+
     check('altered: FCT_GroundUnitFormationTemplate.Obsolete dropped (a column the loader goes without) degrades /map and /survey-progress by their formation inputs only, and neither is unsupported', onlyFormations(obsolete, '/map', 'groundFormations') && onlyFormations(obsolete, '/survey-progress', 'formations') && Object.values(obsolete.reports).every((report) => report.status !== 'unsupported'), notSupported(obsolete).map((report) => `${report.route} ${report.status}`).join(', '))
 
     // The observation of the formations (an opt-in of Survey Progress and of the recorder behind History) reads columns of the formations and their elements that no required read of those two pages needs: a save without one leaves each page in service, degraded by the observation read, whether or not the observation is chosen.

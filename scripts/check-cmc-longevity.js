@@ -63,6 +63,9 @@ const check = (name, result, detail = '') => {
 const SHORT_LIMIT = Number(process.env.SHORT_LIMIT) || 300
 const DROPPED = new Set(['rule', 'inputs', 'assumptions', 'body', 'row'])
 
+// A table or column name as the tooltip would show it: the missing inputs of an unavailable result are prose.
+const RAW_POINTER = /\b(?:FCT|DIM|VIR)_|\b[A-Za-z]+\.[A-Za-z]+\b/
+
 const short = (value) => {
   const text = JSON.stringify(value, (key, item) => (DROPPED.has(key) ? undefined : item))
 
@@ -323,7 +326,7 @@ const pure = (ctx) => {
       const control = byName(rank([counted, marginal], { ranking }), 'Counted')
       const figures = [row.reserve, row.accessibility, row.lifetime, row.score, row.potentialResult, ...row.lines.map((line) => line.rate)]
 
-      if (row.status !== 'possible' || row.rank !== null || row.headlineRank !== null || row.longevityRank !== null || row.potential !== null || !figures.every(unknown) || !row.reserve.inputs.missing.length || row.possibleBecause.length !== 1 || names(result).slice(-1)[0] !== 'Hidden' || byName(result, 'Marginal').rank !== 1) {
+      if (row.status !== 'possible' || row.rank !== null || row.headlineRank !== null || row.longevityRank !== null || row.potential !== null || !figures.every(unknown) || !row.reserve.inputs.missing.length || !row.reserve.inputs.missing.every((text) => !RAW_POINTER.test(text)) || row.possibleBecause.length !== 1 || names(result).slice(-1)[0] !== 'Hidden' || byName(result, 'Marginal').rank !== 1) {
         problems.push(`${ranking}: ${short(row)}`)
       }
 
@@ -1349,6 +1352,7 @@ const MUTATIONS = [
   { name: 'the mining value of a complex not returned by the race read', file: P, find: 'ComplexMining: race.ComplexMining, ', replace: '', fails: ['read'] },
   { name: 'the mining value of a complex taken over every installation, not the civilian ones', file: P, find: ' where DIM_PlanetaryInstallation.CivilianInstallation = 1) as ComplexMining', replace: ') as ComplexMining', fails: ['read'] },
   { name: 'the deposit read tracked under another name', file: P, find: 'get: tracked(\'deposits\'', replace: 'get: tracked(\'deposit\'', fails: ['read'] },
+  { name: 'an unknown complex count named by its saved columns in the missing inputs', file: U, find: "const COMPLEX_COLUMNS = 'the number and type of the installations on the body'", replace: "const COMPLEX_COLUMNS = 'FCT_PopulationInstallations.Amount, DIM_PlanetaryInstallation.CivilianInstallation'", fails: ['unknown'] },
   { name: 'the complex count gaps ignored', file: U, find: 'const countOpen = (body) => body.complexGaps > 0', replace: 'const countOpen = () => false', fails: ['unknown'] },
   { name: 'a body with an unknown complex count keeping its headline rank', file: U, find: 'const potentialResult = unsure ? combine(', replace: 'const potentialResult = false ? combine(', fails: ['unknown'] },
   { name: 'the complex count gaps not carried to the body', file: P, find: 'complexGaps: sum(own, \'ComplexGaps\'),', replace: 'complexGaps: 0,', fails: ['read'] },

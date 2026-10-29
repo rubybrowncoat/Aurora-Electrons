@@ -134,9 +134,9 @@ const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // The yearly terraforming capacity of `terraformers` as a result. A missing race rate or speed setting, or a count that is not a positive number, makes it unavailable; a rate of 0 (a race without the tech) is a real capacity of 0.
 export const terraformCapacityResult = (rules, terraformers) => {
-  const inputs = [['FCT_Race.TerraformingRate', isNumber(rules.TerraformingRate)], ['FCT_Game.TerraformingSpeed', isNumber(rules.TerraformingSpeed)], ['terraformers', isNumber(terraformers) && terraformers > 0]]
-  const present = inputs.filter(([, known]) => known).map(([name]) => name)
-  const missing = inputs.filter(([, known]) => !known).map(([name]) => name)
+  const inputs = [['FCT_Race.TerraformingRate', 'the race\'s terraforming rate', isNumber(rules.TerraformingRate)], ['FCT_Game.TerraformingSpeed', 'the game\'s terraforming speed', isNumber(rules.TerraformingSpeed)], ['terraformers', 'terraformers', isNumber(terraformers) && terraformers > 0]]
+  const present = inputs.filter(([, , known]) => known).map(([name]) => name)
+  const missing = inputs.filter(([, , known]) => !known).map(([, words]) => words)
 
   if (missing.length) {
     return unavailable({ rule: 'habitability.terraformRate', missing, present })

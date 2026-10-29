@@ -116,7 +116,7 @@ const cargoResult = (cargo, materialId) => {
 const resultsAt = (colony, packets, materialId) => stockAndInbound(colony, packets, MINERALS.find((item) => item.id === materialId))
 
 const driverText = (where) => `the number of mass drivers or their driver value at ${where}`
-const POLICY_COLUMN = 'FCT_Population.PurchaseCivilianMinerals'
+const POLICY_COLUMN = 'the colony\'s civilian mineral purchase setting'
 
 // Whether a colony's stored destination is one a packet reaches: true when it names a colony that exists and is not the colony itself, false when it names none, a colony that is gone or the colony itself (a packet to itself lands in its own stock), null when the field is not stored. Owner, system and drivers at the destination are never asked: the destination picker offers fewer colonies than a stored destination may be.
 const reachOf = (colony) => {

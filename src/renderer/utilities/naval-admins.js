@@ -2,11 +2,11 @@ import { loadJumpLinks } from './jump-graph'
 import { navalAdminRadius, navalAdminRequiredRanks, systemsWithinJumps } from './minerals'
 
 // An assigned commander whose rank cannot be evaluated (no rank, no rank row or no priority) leaves what the command's required rank and its eligibility depend on unknown: the command, and every command above it, whose required rank counts it.
-const RANK_UNEVALUABLE = 'the rank of a naval admin commander in this command or below it (FCT_Commander.RankID, FCT_Ranks.Priority) is not in the save'
+const RANK_UNEVALUABLE = 'the rank of a naval admin commander in this command or below it is not in the save'
 // Why a command's bonus cannot be applied down its chain when the save lacks the officers' ranks.
-const RANKS_UNKNOWN = 'the ranks of the naval admin commanders (FCT_Commander.RankID and FCT_Ranks are not in the save)'
+const RANKS_UNKNOWN = 'the ranks of the naval admin commanders are not in the save'
 // Why a command's bonus cannot be applied when its commander has the bonus row and the row, or the command type's share, holds no value.
-const BONUS_UNKNOWN = 'the value of a naval admin commander\'s bonus, or the share of its command type (FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType)'
+const BONUS_UNKNOWN = 'the value of a naval admin commander\'s bonus, or the share of its command type'
 const NO_BLOCKED = new Set()
 
 // The command-type shares a bonus can come from (`DIM_NavalAdminCommandType` columns).

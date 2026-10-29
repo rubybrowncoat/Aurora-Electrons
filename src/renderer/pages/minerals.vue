@@ -1041,7 +1041,7 @@ export default {
         }
 
         const potentialResult = body.bare ? unavailable({ rule: 'minerals.bodyPotential', missing: ['A recorded deposit'] }) : bodyPotentialResult(passing, body.unreadable)
-        const perMine = body.bare ? unavailable({ rule: 'minerals.perMine', missing: ['A recorded deposit'] }) : body.unreadable ? unavailable({ rule: 'minerals.perMine', missing: [`Amount or Accessibility of ${this.counted(body.unreadable, 'deposit', 'deposits')}`] }) : perMineResult(raceRules.MineProduction, passing)
+        const perMine = body.bare ? unavailable({ rule: 'minerals.perMine', missing: ['A recorded deposit'] }) : body.unreadable ? unavailable({ rule: 'minerals.perMine', missing: [`The amount or accessibility of ${this.counted(body.unreadable, 'deposit', 'deposits')}`] }) : perMineResult(raceRules.MineProduction, passing)
         const potential = valueOrNull(potentialResult)
 
         return {

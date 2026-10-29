@@ -315,8 +315,8 @@ export const commanderCounts = (people, unsettled = 0) => {
       ...type,
       total: rows.length,
       idle: idleOf(rows).length,
-      totalResult: countOf({ rule: COUNT, value: rows.length, unknown: untyped + unsettled, missing: `CommanderType of ${untyped} commanders, status of ${unsettled}`, units: 'commanders' }),
-      idleResult: countOf({ rule: UNASSIGNED, value: idleOf(rows).length, unknown: lacking, missing: `CommandType of ${lacking} ${type.plural.toLowerCase()}`, units: 'commanders' }),
+      totalResult: countOf({ rule: COUNT, value: rows.length, unknown: untyped + unsettled, missing: `the type of ${untyped} commanders, the status of ${unsettled}`, units: 'commanders' }),
+      idleResult: countOf({ rule: UNASSIGNED, value: idleOf(rows).length, unknown: lacking, missing: `the post of ${lacking} ${type.plural.toLowerCase()}`, units: 'commanders' }),
     }
   })
 
@@ -326,14 +326,14 @@ export const commanderCounts = (people, unsettled = 0) => {
     untyped,
     noPost,
     unsettled,
-    totalResult: countOf({ rule: COUNT, value: people.length, unknown: unsettled, missing: `RetireStatus or Prisoner of ${unsettled} commanders`, units: 'commanders' }),
-    idleResult: countOf({ rule: UNASSIGNED, value: idleOf(people).length, unknown: noPost + unsettled, missing: `CommandType of ${noPost} commanders, status of ${unsettled}`, units: 'commanders' }),
+    totalResult: countOf({ rule: COUNT, value: people.length, unknown: unsettled, missing: `the retirement or prisoner status of ${unsettled} commanders`, units: 'commanders' }),
+    idleResult: countOf({ rule: UNASSIGNED, value: idleOf(people).length, unknown: noPost + unsettled, missing: `the post of ${noPost} commanders, the status of ${unsettled}`, units: 'commanders' }),
     types,
   }
 }
 
 // Whether a commander is unassigned, as a result of 'commanders.unassigned' (value true or false): unavailable when the post is not stored.
-export const assignmentResult = (person) => (postUnknown(person) ? unavailable({ rule: UNASSIGNED, missing: [`CommandType of ${person.Name}`] }) : ofRule({ rule: UNASSIGNED, value: person.CommandType === 0, inputs: { present: ['CommandType'] } }))
+export const assignmentResult = (person) => (postUnknown(person) ? unavailable({ rule: UNASSIGNED, missing: [`the post of ${person.Name}`] }) : ofRule({ rule: UNASSIGNED, value: person.CommandType === 0, inputs: { present: ['CommandType'] } }))
 
 // A stored bonus value of a commander as a result of 'commanders.bonusValue': unavailable when the row holds no value. `description` names the bonus.
 export const bonusValueResult = (person, bonusId, description) => {
@@ -479,9 +479,9 @@ export const governorReview = (colonies, administrators, names = {}) => {
   const requirementGaps = outcomes.filter((outcome) => outcome.requirementGap).length
 
   coverage.results = {
-    vacant: countOf({ rule: VACANT, value: coverage.vacant, unknown: popGaps, missing: `Population of ${popGaps} colonies without a governor`, units: 'colonies' }),
+    vacant: countOf({ rule: VACANT, value: coverage.vacant, unknown: popGaps, missing: `the population of ${popGaps} colonies without a governor`, units: 'colonies' }),
     improvements: countOf({ rule: GOVERNOR, value: rows.length, unknown: unrated.length, missing: `${unrated.length} colonies cannot be rated`, units: 'colonies' }),
-    idle: countOf({ rule: UNASSIGNED, value: idle.length, unknown: coverage.noPostAdmins, missing: `CommandType of ${coverage.noPostAdmins} administrators`, units: 'administrators' }),
+    idle: countOf({ rule: UNASSIGNED, value: idle.length, unknown: coverage.noPostAdmins, missing: `the post of ${coverage.noPostAdmins} administrators`, units: 'administrators' }),
     eligible: countOf({ rule: GOVERNOR, value: coverage.eligibleIdle, unknown: requirementGaps, missing: `the required bonus of ${requirementGaps} colonies`, units: 'administrators' }),
   }
 
@@ -503,10 +503,12 @@ export const captainlessShips = (ships) => {
   return { value, unknown, result: countOf({ rule: CAPTAINLESS, value, unknown, missing: `the class modules of ${unknown} ships without a captain`, units: 'ships' }) }
 }
 
+const SHIP_INPUTS = { RankRequired: 'the rank the class requires', Terraformers: 'the number of terraformers', MiningModules: 'the number of mining modules', Harvesters: 'the number of harvesters', SciencePosts: 'the number of science posts', GeoSurvey: 'the geological survey strength', GravSurvey: 'the gravitational survey strength' }
+
 // The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else half their captain's. Secondary officers rank one below the captain. A class whose module counts or required rank are not stored has no post. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
 export const specialistPost = (ship, blocked = NONE) => {
   const where = ship.ClassName || `class of ship ${ship.ShipID}`
-  const lacking = (columns) => columns.filter((column) => !isKnownNumber(ship[column])).map((column) => `${column} of ${where}`)
+  const lacking = (columns) => columns.filter((column) => !isKnownNumber(ship[column])).map((column) => `${SHIP_INPUTS[column] || column} of ${where}`)
   const post = (value) => {
     const missing = [...lacking(['RankRequired']), ...(blocked.has(value.bonusId) ? [`the save's row for bonus ${value.bonusId}, ${value.label}`] : [])]
 
@@ -592,7 +594,7 @@ export const shipSuggestions = (ships, officers, names = {}, blocked = NONE) => 
     const atRank = better.filter(({ officer }) => officer.RankLevel === post.level)
     const unranked = better.filter(({ officer }) => !isKnownNumber(officer.RankLevel))
     const best = atRank[0]
-    const gaps = [...bonusGaps, ...unranked.map(({ officer }) => `RankLevel of ${officer.Name}`)]
+    const gaps = [...bonusGaps, ...unranked.map(({ officer }) => `the rank level of ${officer.Name}`)]
 
     if (!best && holder) {
       if (gaps.length) {
@@ -702,17 +704,17 @@ export const bonusSuggestionCount = (governors, ships, research) => {
 
 // A former commander's kills in tonnes, as a result of 'commanders.kills': the military and commercial tonnage added; unavailable when either column is not stored.
 export const killsResult = (person) => {
-  const missing = ['KillTonnageMilitary', 'KillTonnageCommercial'].filter((column) => !isKnownNumber(person[column])).map((column) => `${column} of ${person.Name}`)
+  const missing = [['KillTonnageMilitary', 'the military tonnage destroyed by'], ['KillTonnageCommercial', 'the commercial tonnage destroyed by']].filter(([column]) => !isKnownNumber(person[column])).map(([, words]) => `${words} ${person.Name}`)
 
   return missing.length ? unavailable({ rule: KILLS, missing }) : ofRule({ rule: KILLS, value: Number(person.KillTonnageMilitary) + Number(person.KillTonnageCommercial), inputs: { present: ['KillTonnageMilitary', 'KillTonnageCommercial'] } })
 }
 
 // Medals a commander holds, as a result of 'commanders.medals': the awards added, 0 for a commander with no award rows (`Medals` null), unavailable for awards with no stored amount.
-export const medalsResult = (person) => (person.Medals === null || person.Medals === undefined ? ofRule({ rule: MEDALS, value: 0, inputs: { present: ['no award rows'] } }) : isKnownNumber(person.MedalCount) ? ofRule({ rule: MEDALS, value: Number(person.MedalCount), inputs: { present: ['NumAwarded'] } }) : unavailable({ rule: MEDALS, missing: [`NumAwarded of the medals of ${person.Name}`] }))
+export const medalsResult = (person) => (person.Medals === null || person.Medals === undefined ? ofRule({ rule: MEDALS, value: 0, inputs: { present: ['no award rows'] } }) : isKnownNumber(person.MedalCount) ? ofRule({ rule: MEDALS, value: Number(person.MedalCount), inputs: { present: ['NumAwarded'] } }) : unavailable({ rule: MEDALS, missing: [`the number of awards of the medals of ${person.Name}`] }))
 
 // A commander's age in years, as a result of 'commanders.age': the species' graduation age plus the years from `CareerStart` to `until` (a game time), to one decimal. `untilName` names `until` when it is missing. Unavailable naming the graduation age, career start or end time that is not stored.
 export const ageResult = (person, until, untilName = 'the game time') => {
-  const missing = [...(isKnownNumber(person.GraduationAge) ? [] : [`graduation age of ${person.Name}`]), ...(isKnownNumber(person.CareerStart) ? [] : [`CareerStart of ${person.Name}`]), ...(isKnownNumber(until) ? [] : [untilName])]
+  const missing = [...(isKnownNumber(person.GraduationAge) ? [] : [`the graduation age of ${person.Name}`]), ...(isKnownNumber(person.CareerStart) ? [] : [`the career start of ${person.Name}`]), ...(isKnownNumber(until) ? [] : [untilName])]
 
   return missing.length ? unavailable({ rule: AGE, missing }) : ofRule({ rule: AGE, value: roundToDecimal(Number(person.GraduationAge) + (Number(until) - Number(person.CareerStart)) / SECONDS_PER_YEAR, 1), inputs: { present: ['graduation age', 'CareerStart', untilName] } })
 }
@@ -796,7 +798,7 @@ export const formerGroupCounts = (former, held, unsettled = 0) => {
 
   former.forEach((person) => counts[person.kind]++)
 
-  const own = (kind) => countOf({ rule: GROUP, value: counts[kind], unknown: unsettled, missing: `RetireStatus or Prisoner of ${unsettled} commanders`, units: 'commanders' })
+  const own = (kind) => countOf({ rule: GROUP, value: counts[kind], unknown: unsettled, missing: `the retirement or prisoner status of ${unsettled} commanders`, units: 'commanders' })
 
   return { prisoner: own('prisoner'), retired: own('retired'), dead: own('dead'), held: countOf({ rule: GROUP, value: held.length, units: 'commanders' }) }
 }

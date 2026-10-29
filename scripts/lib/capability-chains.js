@@ -46,18 +46,19 @@ const results = async (mods, { database, race }) => {
   const ranksless = Object.values(await naval.loadNavalAdmins(database, { ...race, bonusId: 6, share: 'Industrial', ranks: false }))
   const lone = Object.values(await naval.loadNavalAdmins(oneCommand, { ...race, bonusId: 6, share: 'Industrial', ranks: false }))
   const withheld = Object.values(await naval.loadNavalAdmins(database, { ...race, bonusId: 6, share: 'Industrial', ranks: false, blocked: new Set([6]) }))
-  const unknownRanks = adminOf({ Eligible: null, Unknown: 'the ranks of the naval admin commanders (FCT_Commander.RankID and FCT_Ranks are not in the save)' })
+  const RANK_GAP = /ranks? of (?:a|the) naval admin commanders?/
+  const unknownRanks = adminOf({ Eligible: null, Unknown: 'the ranks of the naval admin commanders are not in the save' })
   const unknown = { 1: unknownRanks }
   const known = { 1: adminOf() }
   const blocked = new Set([6])
   const out = []
   const holds = (statement, held) => out.push([statement, Boolean(held)])
 
-  holds('without the ranks, loadNavalAdmins runs on the copy and every command has an unknown chain naming FCT_Commander.RankID with no rank verdict', [...ranksless, ...lone].every((admin) => admin.Eligible === null && /FCT_Commander\.RankID/.test(admin.Unknown)) && lone.length === 1)
-  holds('the chain of an in-range command with unknown ranks is unknown, null and not 1', minerals.navalAdminChain(unknown, 5, 1).bonus === null && /RankID/.test(minerals.navalAdminChain(unknown, 5, 1).unknown) && minerals.navalAdminChainBonus(unknown, 5, 1) === null)
+  holds('without the ranks, loadNavalAdmins runs on the copy and every command has an unknown chain naming the officer ranks with no rank verdict', [...ranksless, ...lone].every((admin) => admin.Eligible === null && RANK_GAP.test(admin.Unknown)) && lone.length === 1)
+  holds('the chain of an in-range command with unknown ranks is unknown, null and not 1', minerals.navalAdminChain(unknown, 5, 1).bonus === null && RANK_GAP.test(minerals.navalAdminChain(unknown, 5, 1).unknown) && minerals.navalAdminChainBonus(unknown, 5, 1) === null)
   holds('the chain of a command out of range or of a known one is a number', minerals.navalAdminChain(unknown, 9, 1).bonus === 1 && Math.abs(minerals.navalAdminChain(known, 5, 1).bonus - 1.01) < 1e-9)
   holds('a race with no command carrying the bonus has the chain 1 whatever its ranks', minerals.navalAdminChain({}, 5, 0).bonus === 1)
-  holds('an orbital miner under unknown ranks is unavailable, naming the ranks', !isAvailable(outlook.orbitalRateResult(orbitalRow, unknown)) && /RankID/.test(text(outlook.orbitalRateResult(orbitalRow, unknown))))
+  holds('an orbital miner under unknown ranks is unavailable, naming the ranks', !isAvailable(outlook.orbitalRateResult(orbitalRow, unknown)) && RANK_GAP.test(text(outlook.orbitalRateResult(orbitalRow, unknown))))
   holds('an orbital miner under a known chain is available and a body too wide to mine is a real 0', isAvailable(outlook.orbitalRateResult(orbitalRow, known)) && outlook.orbitalRateResult({ ...orbitalRow, Diameter: 5000 }, unknown).value === 0)
   holds('the unlogged mining of a colony with an unknown orbital miner is unknown, and the outlook has no flow for that mineral', (() => {
     const totals = minerals.unloggedMining({ surface: [], orbital: [{ ...orbitalRow, MassDriverExport: 1 }], navalAdmins: unknown })
@@ -69,7 +70,7 @@ const results = async (mods, { database, race }) => {
     const basis = logistics.harvesterBasis(row, { admin: logistics.harvesterAdminBonus(unknown, row), adminGap: logistics.harvesterAdminGap(unknown, row) })
     const sound = logistics.harvesterBasis(row, { admin: logistics.harvesterAdminBonus(known, row), adminGap: logistics.harvesterAdminGap(known, row) })
 
-    return basis.unknown && basis.gaps.some((gap) => /RankID/.test(gap)) && basis.perYear === null && !sound.unknown && sound.perYear > 0
+    return basis.unknown && basis.gaps.some((gap) => RANK_GAP.test(gap)) && basis.perYear === null && !sound.unknown && sound.perYear > 0
   })())
   holds('a fleet\'s survey rate under unknown ranks is unavailable naming the ranks, never the rate with a multiplier of 1', (() => {
     const ship = { ShipID: 1, Survey: 1, GeoSensors: 5, GravSensors: 5, CurrentCrew: 100, ClassCrew: 100, CrewMorale: 1, Damaged: 0 }
@@ -77,7 +78,7 @@ const results = async (mods, { database, race }) => {
     const unavailableRate = survey.fleetSurveyRate([ship], 'geo', { speed: 100, admin: chain.bonus, adminGap: chain.unknown })
     const sound = survey.fleetSurveyRate([ship], 'geo', { speed: 100, admin: 1, adminGap: null })
 
-    return !isAvailable(unavailableRate) && /RankID/.test(text(unavailableRate)) && (isAvailable(sound) || !/RankID|naval admin/.test(text(sound)))
+    return !isAvailable(unavailableRate) && RANK_GAP.test(text(unavailableRate)) && (isAvailable(sound) || !/naval admin/.test(text(sound)))
   })())
   holds('a colony\'s terraforming rate under unknown ranks is unavailable naming the ranks, and its installations\' share does not hide the gap', (() => {
     const modifier = { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }
@@ -86,7 +87,7 @@ const results = async (mods, { database, race }) => {
     const rate = terraform.terraformBreakdown({ raceRate: 2, speed: 100, source: colony, admins: unknown })
     const installations = terraform.terraformBreakdown({ raceRate: 2, speed: 100, source: { ...colony, ships: [] }, admins: unknown })
 
-    return !isAvailable(rate.rate) && /RankID/.test(text(rate.rate)) && !isAvailable(rate.orbital) && /RankID/.test(text(rate.orbital)) && isAvailable(installations.installations) && isAvailable(installations.rate)
+    return !isAvailable(rate.rate) && RANK_GAP.test(text(rate.rate)) && !isAvailable(rate.orbital) && RANK_GAP.test(text(rate.orbital)) && isAvailable(installations.installations) && isAvailable(installations.rate)
   })())
   holds('a blocked Mining bonus nulls the bonus of the surface and orbital rows and names the lookup, leaving everything else', (() => {
     const [surface] = miningData.gateMiningRows([surfaceRow], blocked)

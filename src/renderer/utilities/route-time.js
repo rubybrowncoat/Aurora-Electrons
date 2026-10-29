@@ -350,7 +350,7 @@ const delayHigh = (delay) => (delay !== null && typeof delay === 'object' ? dela
 // What a flight lacks where the nebula caps it and the thinnest armour of the fleet is not known, or the cap is 0.
 export const NEBULA_GAP = 'a speed above 0 in every system of the route, which the nebula caps by the thinnest armour of the fleet'
 
-const START_DELAY_GAP = 'the delay the fleet starts with (FCT_Ship.SensorDelay)'
+const START_DELAY_GAP = 'the delay the fleet starts with'
 
 // What the squadron transit's timing counts: the shock only, the scatter of the arrival being by a drive range the save does not give here.
 export const SQUADRON_ASSUMPTION = 'a squadron transit scatters the arrival by up to the range of the jump drive, which is not known, so the flight after it is counted from the jump point'

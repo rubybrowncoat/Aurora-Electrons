@@ -153,6 +153,12 @@ const FUEL_SITE_READS = [
 // What the mass driver and mineral stock loaders of the colonies read (utilities/mineral-supply.js, utilities/msp-supply.js, utilities/colony-minerals.js), whose queries build their columns by name.
 const spaced = (name) => name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
 
+const BUILDABILITY_READS = 'DIM_PlanetaryInstallation(CivilianInstallation NoBuild)'
+
+const START_DELAY_READS = 'FCT_Ship(SensorDelay)'
+
+const FLEET_COMMAND_READS = 'FCT_Fleet(ParentCommandID)'
+
 const MASS_DRIVER_READS = 'DIM_PlanetaryInstallation(MassDriverValue) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* GameID MassDriverDest PopulationID RaceID) FCT_PopulationInstallations(Amount)'
 
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
@@ -161,6 +167,7 @@ const EXTRA_READS = Object.freeze({
   '/production': Object.freeze({
     colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue GroundTrainingValue)',
     procurementSources: 'FCT_ShipDesignComponents(Size Cost)',
+    page: FLEET_COMMAND_READS,
   }),
   '/warnings': Object.freeze({
     page: `DIM_PlanetaryInstallation(ConstructionValue OrdnanceProductionValue FighterProductionValue) ${STOCKPILES}`,
@@ -172,12 +179,15 @@ const EXTRA_READS = Object.freeze({
   '/habitability': Object.freeze({
     gases: 'DIM_Gases(GasID Name BoilingPoint GHGas AntiGHGas Dangerous DangerousLevel)',
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
+    BodyDetail: FLEET_COMMAND_READS,
   }),
-  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
+  '/logistics': Object.freeze({ page: START_DELAY_READS, colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
   '/minerals': Object.freeze({ page: 'FCT_IndustrialProjects(* Amount GameID PopulationID RaceID) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* Reserve* GameID PopulationID RaceID) FCT_ShipyardTask(* CompletedBP GameID PopulationID RaceID TaskTypeID TotalBP)' }),
-  '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_SystemBody(Xcor)', page: MASS_DRIVER_READS }),
-  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS }),
-  '/information': Object.freeze({ shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
+  '/colony-outlook': Object.freeze({ bootstrapSources: BUILDABILITY_READS, page: START_DELAY_READS }),
+  '/routes': Object.freeze({ page: START_DELAY_READS }),
+  '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
+  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS }),
+  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
     classUsage: 'FCT_Ship(ShipClassID GameID RaceID Destroyed)',
@@ -271,6 +281,11 @@ const markerColumns = (route, key, table, marker) => {
   return used || (MARKER_COLUMNS[table] || []).map((name) => `${marker.slice(0, -1)}${name}`)
 }
 
+// The labels of the inputs that only the reads above hold, for a key the generated reads do not list because the scan finds no read of it: { [key]: label }.
+const EXTRA_ONLY_LABELS = Object.freeze({ page: 'the page\'s other reads', BodyDetail: 'the body detail' })
+
+const inputsOf = (route, inputs) => [...Object.entries(inputs), ...Object.keys(EXTRA_READS[route] || {}).filter((key) => !(key in inputs) && EXTRA_ONLY_LABELS[key]).map((key) => [key, { label: EXTRA_ONLY_LABELS[key], reads: '' }])]
+
 const inputOf = (route, key, input) => {
   const generated = parseReads(input.reads)
   const extra = EXTRA_READS[route] && EXTRA_READS[route][key] ? parseReads(EXTRA_READS[route][key]).reads : {}
@@ -286,7 +301,7 @@ const inputOf = (route, key, input) => {
 }
 
 // Every input of every report: { [route]: [{ key, label, reads: { [table]: [column] }, markers, resolved: { [table]: { [marker]: [column] } }, tolerated, optional }] }, the app shell's reads under 'shell'.
-export const INPUTS = Object.freeze(Object.fromEntries(Object.entries(READS).map(([route, inputs]) => [route, Object.entries(inputs).map(([key, input]) => inputOf(route, key, input))])))
+export const INPUTS = Object.freeze(Object.fromEntries(Object.entries(READS).map(([route, inputs]) => [route, inputsOf(route, inputs).map(([key, input]) => inputOf(route, key, input))])))
 
 export const REPORT_ROUTES = Object.freeze(Object.keys(INPUTS).filter((route) => route !== 'shell'))
 

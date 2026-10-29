@@ -555,7 +555,7 @@ const BREAKDOWN_CHECKS = {
           const orbital = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: colony, admins }).orbital
 
           assert.equal(orbital.status, 'unavailable', colony.PopName)
-          assert.ok(/BonusValue/.test(missingOf(orbital)), `${colony.PopName}: ${missingOf(orbital)}`)
+          assert.ok(/bonus, or the share of its command type/.test(missingOf(orbital)), `${colony.PopName}: ${missingOf(orbital)}`)
         }
       } finally {
         copy.close()
@@ -583,7 +583,7 @@ const BREAKDOWN_CHECKS = {
         const row = { Diameter: 1, MaximumOrbitalMiningDiameter: 2, SystemID: found.system, NavalAdminCommandID: found.command }
 
         assert.equal(navalAdminChain(admins, found.system, found.command).bonus, null)
-        assert.ok(/BonusValue/.test(orbitalChainGap(row, admins)), String(orbitalChainGap(row, admins)))
+        assert.ok(/bonus, or the share of its command type/.test(orbitalChainGap(row, admins)), String(orbitalChainGap(row, admins)))
         assert.equal(orbitalMinerRate(row, admins), null)
       } finally {
         copy.close()
@@ -604,7 +604,7 @@ const BREAKDOWN_CHECKS = {
 
         assert.ok(lost.colonies[4].ships.length > 0 && lost.colonies[4].ships.every((ship) => ship.ParentCommandID === null))
         assert.equal(orbitalOf(lost).status, 'unavailable')
-        assert.ok(/ParentCommandID/.test(missingOf(orbitalOf(lost))), missingOf(orbitalOf(lost)))
+        assert.ok(/command association/.test(missingOf(orbitalOf(lost))) && !/FCT_|ParentCommandID/.test(missingOf(orbitalOf(lost))), missingOf(orbitalOf(lost)))
         assert.ok(none.colonies[4].ships.every((ship) => ship.ParentCommandID === 0))
         assert.equal(orbitalOf(none).status, 'estimated', missingOf(orbitalOf(none)))
       } finally {
@@ -633,6 +633,7 @@ const BREAKDOWN_FAULTS = [
   { label: 'a present bonus row without a value read as 1 (governor)', from: 'governor: row.BonusUnknown ? null : bonusOf(row.GovernorBonus, row.GovernorRows, row.GovernorKnown)', to: 'governor: row.BonusUnknown ? null : row.GovernorBonus ?? 1', fails: ['bonus value missing: governor and sector'] },
   { label: 'a present bonus row without a value read as 1 (sector)', from: 'sector: row.BonusUnknown || !isNumber(row.SectorID) ? null : row.SectorID === 0 ? 1 : bonusOf(row.SectorBonus, row.SectorRows, row.SectorKnown)', to: 'sector: row.BonusUnknown ? null : row.SectorBonus ?? 1', fails: ['bonus value missing: governor and sector'] },
   { label: 'a damage row without a count read as no damage', from: '|| (row.DamageRows > 0 && !isNumber(row.Damaged))', to: '', fails: ['damage count missing'] },
+  { module: 'terraform-capacity', label: 'an unknown fleet command named by its saved column', from: "adminGap: 'the fleet\\'s command association'", to: "adminGap: 'FCT_Fleet.ParentCommandID'", fails: ['fleet command missing'] },
   { label: 'an unknown fleet command read as commandless', from: 'const key = isNumber(ship.ParentCommandID) ? ship.ParentCommandID : null', to: 'const key = ship.ParentCommandID || 0', fails: ['fleet command missing'] },
   { label: 'an explicit commandless fleet read as unknown', from: 'const key = isNumber(ship.ParentCommandID) ? ship.ParentCommandID : null', to: 'const key = ship.ParentCommandID || null', fails: ['fleet command missing'] },
   { label: 'an unknown sector association read as no sector', from: 'row.BonusUnknown || !isNumber(row.SectorID) ? null : row.SectorID === 0 ? 1 : bonusOf(', to: 'row.BonusUnknown ? null : bonusOf(', fails: ['sector association missing'] },

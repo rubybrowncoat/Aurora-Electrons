@@ -460,7 +460,7 @@ export const planGasGaps = (species, plan, gasInfo) => {
     return !info || !GAS_FIELDS.every((field) => Number.isFinite(info[field]))
   }).map(([id]) => id)
 
-  return [...new Set(ids)].map((id) => `DIM_Gases row of gas ${id}`)
+  return [...new Set(ids)].map((id) => `the properties of gas ${id}`)
 }
 
 // The atmosphere a plan ends with, as a body would hold it, for pricing the colony after terraforming.

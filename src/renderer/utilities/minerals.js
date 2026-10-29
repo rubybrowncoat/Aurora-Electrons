@@ -6,6 +6,7 @@ import { combine, ofRule, registerRule, unavailable, valueOrNull } from './prove
 
 const MINERALS_VERSIONS = ['2.7.x']
 const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
+const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']
 
 // The rules of the Minerals page's deposit scores, site ranking, distances and stockpile checks, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The flow, forecast and runway rules are registered further down; the colony stock rules in colony-minerals.js.
 registerRule({
@@ -187,7 +188,7 @@ export const depositPotentialResult = (deposit) => {
 }
 
 // A body's potential: the mean over the 11 minerals of the potential of its `deposits` (those in view), a mineral without one counting as 0. `unreadable` is how many of the body's deposits have no recorded amount or accessibility: with any, the mean is unknown.
-export const bodyPotentialResult = (deposits, unreadable = 0) => (unreadable ? unavailable({ rule: 'minerals.bodyPotential', missing: [`Amount or Accessibility of ${unreadable} ${unreadable === 1 ? 'deposit' : 'deposits'}`] }) : ofRule({ rule: 'minerals.bodyPotential', value: deposits.reduce((total, deposit) => total + depositPotential(deposit), 0) / MINERALS.length, inputs: { present: DEPOSIT_COLUMNS } }))
+export const bodyPotentialResult = (deposits, unreadable = 0) => (unreadable ? unavailable({ rule: 'minerals.bodyPotential', missing: [`The amount or accessibility of ${unreadable} ${unreadable === 1 ? 'deposit' : 'deposits'}`] }) : ofRule({ rule: 'minerals.bodyPotential', value: deposits.reduce((total, deposit) => total + depositPotential(deposit), 0) / MINERALS.length, inputs: { present: DEPOSIT_COLUMNS } }))
 
 // `depositValue` as a provenance result. A deposit under the minimum amount is worth 0, a known figure that needs no accessibility; one without a recorded amount, or without an accessibility when the amount passes, has no value.
 export const depositValueResult = (deposit, minimumAmount = DEPOSIT_MINIMUM_AMOUNT) => {
@@ -220,7 +221,7 @@ export const bestSiteResult = (site, potential, unranked = 0) => {
   const assumptions = unranked ? [`${unranked} untapped ${unranked === 1 ? 'deposit' : 'deposits'} with no recorded amount, accessibility or mining left out of the ranking`] : []
 
   if (!site) {
-    return unranked ? unavailable({ rule: 'minerals.siteOrder', missing: DEPOSIT_COLUMNS, assumptions }) : null
+    return unranked ? unavailable({ rule: 'minerals.siteOrder', missing: DEPOSIT_INPUTS, assumptions }) : null
   }
 
   return combine({ rule: 'minerals.siteOrder', parts: { potential }, compute: () => site, assumptions })
