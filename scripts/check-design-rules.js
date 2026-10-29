@@ -1212,7 +1212,7 @@ const evaluatorChecks = (library, data) => {
       return firstFailure(
         ...problems,
         expectThat('a warhead with no tech has no cost or its size is lost', isAvailable(warhead.msp) && !isAvailable(warhead.bp) && !isAvailable(warhead.minerals)),
-        expectThat('an engine with no tech has a cost, or its size is lost', isAvailable(engine.msp) && near(engine.msp.value, 6) && !isAvailable(engine.bp) && engine.reasons.join().includes('engineTech')),
+        expectThat('an engine with no tech has a cost, or its size is lost', isAvailable(engine.msp) && near(engine.msp.value, 6) && !isAvailable(engine.bp) && engine.reasons.join().includes('engine technology') && !/engineTech|fuelTech|maxThrust/.test(engine.reasons.join())),
         expectThat('the speed of an engine with no tech is not unavailable', !isAvailable(evaluate(noEngineTech).figures.speed) && evaluate(noEngineTech).figures.speed.value === null),
         expectThat('an engine designed from its techs is not feasible', designed.verdict === 'feasible' && near(optionOf(designed, 'engine').bp.value, library.roundHalfEven(expected.cost, 4)) && near(optionOf(designed, 'engine').msp.value, 6))
       )

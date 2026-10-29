@@ -21,7 +21,7 @@ const { inParallel, runChild } = require('./lib/check-pool')
 
 const rendererDirectory = path.resolve(__dirname, '..', 'src', 'renderer')
 const MODULES = ['glossary', 'navigation', 'provenance']
-const RULE_MODULES = ['logistics', 'research', 'colony-minerals', 'haul-plan', 'mineral-outlook', 'design-rules', 'minerals', 'colonization', 'commanders', 'route-time']
+const RULE_MODULES = ['logistics', 'research', 'colony-minerals', 'haul-plan', 'mineral-outlook', 'design-rules', 'minerals', 'colonization', 'commanders', 'route-time', 'colonies']
 const COPIED = ['utilities', path.join('components', 'page')]
 
 const HELP_PANEL = path.join('components', 'page', 'HelpPanel.vue')
@@ -139,7 +139,7 @@ const synthetic = (m, tree) => {
   const { TERMS, LINKS, PAGE_HELP, GAME_VERSION, VERSION_STATUS, VERSION_STATUS_TEXT, OLDER_THAN_GAME_BEFORE, helpFor, helpRoutes } = m.glossary
   const read = (file) => fs.readFileSync(path.join(tree, file), 'utf8')
   const panel = () => read(HELP_PANEL)
-  const { provenance, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime } = m
+  const { provenance, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime, colonies } = m
   const definitionOf = (id) => (TERMS.find((item) => item.id === id) || { definition: '' }).definition
   const says = (id, ...phrases) => phrases.map((phrase) => [`${id} definition`, definitionOf(id).includes(phrase) ? '' : `does not say "${phrase}"`])
   const planners = helpRoutes()
@@ -266,8 +266,14 @@ const synthetic = (m, tree) => {
     }],
 
     ['no unavailable result names a table or column among its missing inputs, as the provenance mark shows them', async () => {
-      const code = /\b(?:FCT|DIM|VIR)_\w+|\b[A-Za-z]+\.[A-Za-z]+\b/
-      const results = [['no site to rank', minerals.bestSiteResult(null, null, 1)], ['unreadable deposits on a body', minerals.bodyPotentialResult([], 2)], ['no mine production', minerals.perMineResult(null, [{ Amount: 1, Accessibility: 1 }])], ['no mass drivers', minerals.massDriverRateResult(null)], ['no terraforming rate', colonization.terraformCapacityResult({}, 0)], ['no starting delay', routeTime.waitResult(null, routeTime.timingGaps({ speed: 1, shock: 1, startDelay: null }))], ['no post', commanders.assignmentResult({ Name: 'Ada', CommandType: null })], ['no award count', commanders.medalsResult({ Name: 'Ada', Medals: 1, MedalCount: null })], ['no career start', commanders.ageResult({ Name: 'Ada', GraduationAge: null, CareerStart: null }, null)], ['no class rank', commanders.specialistPost({ ClassName: 'Hydra', Terraformers: null, RankRequired: null })]]
+      // A table or column name, qualified or bare (a CamelCase word such as PopulationGrowthModifier, or a word that is a key of the row the result was made from), as the mark would print it: a ship or a class name of the test data is one capitalised word and passes.
+      const code = /\b(?:FCT|DIM|VIR)_\w+|\b[A-Za-z]+\.[A-Za-z]+\b|\b[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b|\b[a-z]+[A-Z][A-Za-z0-9]*\b/
+      const wholeColony = { Radius: 6000, HydroExt: 50, TidalLock: 0, BodyClass: 1, PopulationDensityModifier: 1, PopulationGrowthModifier: 1, PopulationGrowthBonus: 0, RadiationLevel: 0, Population: 1, BodyPopulation: 1, PopName: 'Eden' }
+      const growthless = { ...wholeColony, PopulationGrowthModifier: null }
+      const densityless = { ...wholeColony, PopulationDensityModifier: null }
+      const capacityOf = (colony) => colonies.bodyCapacityResult(colony)
+      const member = (colony) => ({ colony, inboundColonists: 0, capacity: capacityOf(colony), cap: capacityOf(colony) })
+      const results = [['no site to rank', minerals.bestSiteResult(null, null, 1)], ['unreadable deposits on a body', minerals.bodyPotentialResult([], 2)], ['no mine production', minerals.perMineResult(null, [{ Amount: 1, Accessibility: 1 }])], ['no mass drivers', minerals.massDriverRateResult(null)], ['no terraforming rate', colonization.terraformCapacityResult({}, 0)], ['no starting delay', routeTime.waitResult(null, routeTime.timingGaps({ speed: 1, shock: 1, startDelay: null }))], ['no post', commanders.assignmentResult({ Name: 'Ada', CommandType: null })], ['no award count', commanders.medalsResult({ Name: 'Ada', Medals: 1, MedalCount: null })], ['no career start', commanders.ageResult({ Name: 'Ada', GraduationAge: null, CareerStart: null }, null)], ['no class rank', commanders.specialistPost({ ClassName: 'Hydra', Terraformers: null, RankRequired: null })], ['no growth modifier', colonies.growthRateResult(growthless, capacityOf(wholeColony))], ['no density modifier', capacityOf(densityless)], ['a growth rate over a capacity without density', colonies.growthRateResult(wholeColony, capacityOf(densityless))], ['a projection with no growth modifier', colonies.projectionResults([member(growthless)], 10)[0]], ['a projection beside a colony with no density modifier', colonies.projectionResults([member(wholeColony), member(densityless)], 10)[0]], ['no population', colonies.crowdingResult({ Population: null, BodyPopulation: 1 }, capacityOf(wholeColony))]]
 
       return firstProblem(results.flatMap(([label, result]) => [[label, result && result.status === 'unavailable' ? '' : 'is not unavailable'], ...(result ? result.inputs.missing : []).map((text) => [label, code.test(text) ? `says "${code.exec(text)[0]}"` : ''])]))
     }],
@@ -434,6 +440,8 @@ const MUTATIONS = [
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a missing site input named by its saved column', path.join('utilities', 'minerals.js'), "const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']", "const DEPOSIT_INPUTS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']", ['no unavailable result names a table or column']],
   ['a missing starting delay named by its saved column', path.join('utilities', 'route-time.js'), "const START_DELAY_GAP = 'the delay the fleet starts with'", "const START_DELAY_GAP = 'the delay the fleet starts with (FCT_Ship.SensorDelay)'", ['no unavailable result names a table or column']],
+  ['a missing post named by its bare column', path.join('utilities', 'commanders.js'), 'missing: [`the post of $' + '{person.Name}`]', 'missing: [`CommandType of $' + '{person.Name}`]', ['no unavailable result names a table or column']],
+  ['a missing growth modifier named by its bare column', path.join('utilities', 'colonies.js'), "PopulationGrowthModifier: 'the species\\' population growth modifier'", "PopulationGrowthModifier: 'PopulationGrowthModifier'", ['no unavailable result names a table or column']],
   ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://aurora4x.com/.', ['no registered rule cites a glossary link']],
   ['the help card speaks to the reader', HELP_PANEL, 'Definitions kept in the app', 'Your definitions kept in the app', ['the help speaks in the impersonal voice']],
   ['a page overview speaks to the reader', GLOSSARY, 'overview: \'Production Recap lists every job', 'overview: \'Your Production Recap lists every job', ['the help speaks in the impersonal voice']],

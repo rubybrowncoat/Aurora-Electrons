@@ -775,6 +775,7 @@ const normaliseMissileEngine = (engine, engines) => {
 
   if (engine.thrust !== undefined) {
     unknownKeys(engine, ['sizeMsp', 'thrust', 'engineTech', 'fuelTech', 'maxThrust'], 'engine')
+    const ENGINE_TECH_WORDS = { engineTech: 'engine technology', fuelTech: 'fuel consumption technology', maxThrust: 'greatest thrust technology' }
 
     const thrust = amountOf(engine.thrust, 'engine.thrust')
     const techs = { engineTech: techOf(engine.engineTech, 'engine.engineTech'), fuelTech: techOf(engine.fuelTech, 'engine.fuelTech'), maxThrust: techOf(engine.maxThrust, 'engine.maxThrust') }
@@ -786,7 +787,7 @@ const normaliseMissileEngine = (engine, engines) => {
     const lacking = Object.keys(techs).filter((name) => techs[name] === null)
 
     if (lacking.length) {
-      return { missing: true, storedMsp: roundHalfEven(sizeMsp * engines, 4), reason: `the ${lacking.join(', ')} of the engine design are not known` }
+      return { missing: true, storedMsp: roundHalfEven(sizeMsp * engines, 4), reason: `the ${lacking.map((name) => ENGINE_TECH_WORDS[name]).join(', ')} of the engine design are not known` }
     }
 
     const { cost, power, fuelEfficiency } = missileEngineDesign({ sizeMsp, thrust, ...techs })

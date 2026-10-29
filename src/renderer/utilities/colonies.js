@@ -117,9 +117,14 @@ const finite = (value) => typeof value === 'number' && Number.isFinite(value)
 
 const unique = (list) => [...new Set(list)]
 
+// The words for the colony figures a result can lack, by the field of the colony row that holds them.
+const FIELD_WORDS = { Radius: 'the body\'s radius', HydroExt: 'the body\'s hydrographic extent', TidalLock: 'whether the body is tidally locked', BodyClass: 'the body\'s class', RadiationLevel: 'the body\'s radiation level', LowGravity: 'whether the body has low gravity', PopulationDensityModifier: 'the species\' population density modifier', PopulationGrowthModifier: 'the species\' population growth modifier', PopulationGrowthBonus: 'the colony\'s population growth bonus', Population: 'the colony\'s population', BodyPopulation: 'the population of the body', ReqInf: 'the infrastructure the colony requires', Infrastructure: 'the infrastructure of the colony', InfrastructureCost: 'the cost of an infrastructure installation', InstallationWorkers: 'the workers the installations need', YardWorkers: 'the workers the yards need' }
+
+const wordsOf = (name) => FIELD_WORDS[name] || name
+
 // A result of `rule` for a colony: unavailable naming the `required` columns of `source` that are not numbers (and what its unavailable `parts` lack), otherwise `compute(values)` of the parts' values, at the weakest status of the rule and its parts.
 const derive = ({ rule, source = {}, required = [], parts = {}, compute, units }) => {
-  const missing = required.filter((name) => !finite(source[name]))
+  const missing = required.filter((name) => !finite(source[name])).map(wordsOf)
   const present = required.filter((name) => finite(source[name]))
 
   if (!missing.length) {
@@ -261,7 +266,7 @@ export const projectionResults = (members, years, uncapped = null) => {
   const rule = 'colonies.populationProjection'
   const partsOf = (member) => (member === uncapped ? { capacity: member.capacity } : { capacity: member.capacity, cap: member.cap })
   const lacks = members.map((member) => {
-    const own = PROJECTION_COLUMNS.filter((name) => !finite(member.colony[name]))
+    const own = PROJECTION_COLUMNS.filter((name) => !finite(member.colony[name])).map(wordsOf)
     const parts = Object.entries(partsOf(member)).filter(([, part]) => !isAvailable(part)).flatMap(([name, part]) => (part.inputs.missing.length ? part.inputs.missing : [name]))
 
     return unique([...own, ...(finite(member.inboundColonists) ? [] : ['colonists on their way']), ...parts])

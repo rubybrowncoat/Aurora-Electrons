@@ -170,7 +170,7 @@ import { bestStabilisation, stabilisationDays, stabilisationMultiplier, timeLeft
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { jumpPointLabel } from '../utilities/places'
-import { describeResult, describeRule, unavailable, valueOrNull } from '../utilities/provenance'
+import { describeResult, describeRule, fieldWords, unavailable, valueOrNull } from '../utilities/provenance'
 import { gateGaps, loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
@@ -300,7 +300,7 @@ export default {
 
     // Why the stabilisation ships and every figure built on them are left out: the unconfirmed lookup rows and the missing columns of the ships' read.
     withheld() {
-      return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${field}`)]
+      return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)]
     },
 
     // The quickest usable ship (`ship`, a ship row) and the multiplier the times use (`result`, unavailable when no ship can time a stabilisation).
@@ -488,7 +488,7 @@ export default {
     },
 
     infrastructureMissing() {
-      return this.missingInfrastructureFields.map((field) => `the save lacks ${field}`)
+      return this.missingInfrastructureFields.map((field) => `the save lacks ${fieldWords(field)}`)
     },
 
     // The charted jump points with what the save says of each (utilities/jump-infrastructure.js) and the words of the table: a figure the save cannot give reads Unknown and sorts last.

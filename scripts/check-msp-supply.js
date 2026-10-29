@@ -625,10 +625,10 @@ const pure = (ctx) => {
     return one.notCounted.some((entry) => entry.kind === 'packets' && /Uridium/.test(entry.text)) && near(one.ledger.high.credited.Duranium, 10) && one.ledger.high.credited.Uridium === 0 ? true : short([one.notCounted, one.ledger.high.credited])
   })
   add('unknown: a source that could not be read is named and what rests on it is listed, not counted as nothing', () => {
-    const none = rowOf(rowsOf({ pairs: [pair(1, { Duranium: 0 })], packetRows: null, surface: null, orbital: null, plan: null, needs: null, problems: [{ source: 'packetRows', text: 'the position and speed of each packet could not be read' }, { source: 'needs', text: 'the build queues could not be read' }] }), 1)
+    const none = rowOf(rowsOf({ pairs: [pair(1, { Duranium: 0 })], packetRows: null, surface: null, orbital: null, plan: null, needs: null, problems: [{ source: 'packetRows', text: 'the position and speed of each packet could not be read' }, { source: 'needs', text: 'the build queues could not be read (no such column: FCT_IndustrialProjects.Duranium)' }] }), 1)
     const kinds = new Set(none.notCounted.map((entry) => entry.kind))
 
-    return ['packets', 'mining', 'hauls', 'queue'].every((kind) => kinds.has(kind)) && none.low.result.status === 'unavailable' ? true : short([...kinds, none.low.result.status])
+    return ['packets', 'mining', 'hauls', 'queue'].every((kind) => kinds.has(kind)) && none.low.result.status === 'unavailable' && none.low.result.inputs.missing.join() === 'the queue needs of the input minerals' ? true : short([...kinds, none.low.result.status, none.low.result.inputs.missing])
   })
   add('unknown: every figure of a row carries a result with a rule, unavailable or not', () => {
     const { one } = limited()
@@ -1203,6 +1203,7 @@ const MUTATIONS = [
   { name: 'the retry of the page that reads again only a failed read', file: P, find: 'MSP_INPUTS.forEach((key) => this.$asyncComputed[key].update())', replace: 'MSP_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())', fails: ['optional'] },
   { name: 'the maintenance draw protected by the reserve', file: U, find: 'const allowed = NAMES.map((name) => held[name] / PER_MSP[name])', replace: 'const allowed = NAMES.map((name) => Math.max(0, held[name] - (exporter ? exporter.reserve[name] : 0)) / PER_MSP[name])', fails: ['export'] },
   { name: 'the export that ignores the reserve', file: U, find: 'const surplus = Object.fromEntries(NAMES.map((name) => [name, Math.max(0, held[name] - exporter.reserve[name])]))', replace: 'const surplus = Object.fromEntries(NAMES.map((name) => [name, Math.max(0, held[name])]))', fails: ['export'] },
+  { name: 'the queue-first figure naming the failed read as it was stored', file: U, find: "missing: ['the queue needs of the input minerals'] })", replace: "missing: notCounted.filter((entry) => entry.kind === 'queue').map((entry) => entry.text) })", fails: ['unknown'] },
   { name: 'the queue-first run that skips the queue', file: U, find: 'const low = colony.queue ? simulate({ ...colony, days }) : null', replace: 'const low = colony.queue ? simulate({ ...colony, queue: null, days }) : null', fails: ['queue'] },
   { name: 'the limiting mineral of the supplied output not named', file: U, find: 'limiting: run.limiting, delivery: deliveryOf(groups)', replace: 'limiting: null, delivery: deliveryOf(groups)', fails: ['limiting'] },
   { name: 'the conditional delivery of the stock-only output not named', file: U, find: 'limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups)', replace: 'limiting: allocation.stockOnly.limiting, delivery: null', fails: ['limiting'] },

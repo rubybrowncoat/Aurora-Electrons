@@ -21,7 +21,11 @@ const MODIFIERS = { PopulationID: 1, OrdnanceProduction: 2, OverallProductionMod
 const MUTATIONS = [
   ['lagrange', 'its unverified list is disconnected from the capability check', "return gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] })", "return false ? gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] }) : []"],
   // eslint-disable-next-line no-template-curly-in-string
-  ['lagrange', 'its withheld list ignores the missing ship columns', 'return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${field}`)]', 'return [...this.unverified]'],
+  ['lagrange', 'its withheld list ignores the missing ship columns', 'return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)]', 'return [...this.unverified]'],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['lagrange', 'its infrastructure read shows the columns as stored', 'this.missingInfrastructureFields.map((field) => `the save lacks ${fieldWords(field)}`)', 'this.missingInfrastructureFields.map((field) => `the save lacks ${field}`)'],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['lagrange', 'its withheld list shows the ship columns as stored', 'this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)', 'this.missingShipFields.map((field) => `the save lacks ${field}`)'],
   ['commanders', 'its roster parses the bonuses without the blocked set', 'parseBonuses(commander.Bonuses, this.blockedBonuses)', 'parseBonuses(commander.Bonuses)'],
   ['logistics', 'its fuel total adds the harvesters that have no figure', 'production: refineries === null || harvesters === null ? null : refineries + harvesters', 'production: (refineries ?? 0) + harvestersKnown'],
   ['logistics', 'its fuel balance ignores an unknown harvested total', 'const fuelNet = fuel.production === null ? null : fuel.production - fuel.high', 'const fuelNet = fuel.refineries === null ? null : (fuel.refineries + fuel.harvestersKnown) - fuel.high'],
@@ -111,7 +115,10 @@ const lagrangeResults = async (context, fixtures, mutate) => {
   const crewless = page(fixtures.noCrew, { database })
   const read = await crewless.runAsync('ships')
 
-  holds('a save without FCT_Ship.CurrentCrew names the field in the missing ship columns, and withholds the ships', crewless.missingShipFields.includes('FCT_Ship.CurrentCrew') && crewless.withheld.some((reason) => reason.includes('FCT_Ship.CurrentCrew')) && crewless.unverified.length === 0)
+  holds('a save without FCT_Ship.CurrentCrew names the field in the missing ship columns, and withholds the ships in words', crewless.missingShipFields.includes('FCT_Ship.CurrentCrew') && crewless.withheld.includes('the save lacks the current crew of ship') && crewless.withheld.every((reason) => !/FCT_|[A-Z][a-z]+[A-Z]/.test(reason)) && crewless.best.result.inputs.missing.every((reason) => !/FCT_|[A-Z][a-z]+[A-Z]/.test(reason)) && crewless.unverified.length === 0)
+  const slowContacts = page(fixtures.noContactSpeed)
+
+  holds('a save without FCT_Contacts.Speed names the field in the missing infrastructure columns, and passes them to the infrastructure read in words', slowContacts.missingInfrastructureFields.includes('FCT_Contacts.Speed') && slowContacts.infrastructureMissing.join() === 'the save lacks the speed of contacts')
   holds('a save without FCT_Ship.CurrentCrew gives no best ship, and the ships are not read', unavailable(crewless) && Array.isArray(read) && read.length === 0 && database.queries.length === 0)
   holds('the map of the systems still evaluates while the ships are withheld', Array.isArray(crewless.mapNodes) && Array.isArray(renamed.mapNodes) && Array.isArray(none.mapNodes))
 
@@ -299,6 +306,7 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
       renamed3: await copy('bonus3', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 3"]),
       retyped29: await copy('component29', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"]),
       noCrew: await copy('crew', ['alter table FCT_Ship drop column CurrentCrew']),
+      noContactSpeed: await copy('contactspeed', ['alter table FCT_Contacts drop column Speed']),
       noRank: await copy('rank', ['alter table FCT_Commander drop column RankID']),
       renamed6: await copy('bonus6', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"]),
     }

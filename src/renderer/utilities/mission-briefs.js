@@ -429,14 +429,14 @@ export const propulsionAlternative = (row, classFigures = null) => {
   const payload = pinned ? ofRule({ rule: 'brief.classPayloadSpace', value: space, units: 'HS', inputs: { present: ['class size', 'engine sizes', 'tank sizes'] }, assumptions: basis.assumptions }) : envelope({ value: space, status: stateOf(STATUS.ASSUMED), rule: 'brief.setPayloadSpace', units: 'HS', inputs: { present: ['hull', 'engines', 'fuel tanks'] }, assumptions: basis.assumptions })
   const rangeBn = row.provenance ? row.provenance.rangeBn : null
   const endurance = row.provenance ? row.provenance.enduranceDays : null
-  const stored = (name, rule, units, figure) => {
+  const stored = (name, rule, units, figure, words = name) => {
     if (!classFigures) {
       return unavailable({ rule, units, missing: [CLASS_NOT_READ] })
     }
 
     const value = figure(classFigures)
 
-    return value === null ? unavailable({ rule, units, missing: [`The save stores no ${name} for this class`] }) : ofRule({ rule, value, units, inputs: { present: [name] } })
+    return value === null ? unavailable({ rule, units, missing: [`The save stores no ${words} for this class`] }) : ofRule({ rule, value, units, inputs: { present: [name] } })
   }
   const figures = {
     sizeHS: size,
@@ -457,9 +457,9 @@ export const propulsionAlternative = (row, classFigures = null) => {
     },
     payloadHS: payload,
     costBP: row.provenance ? row.provenance.cost : unknownFigure('The cost is not known', 'BP'),
-    cargoTons: pinned ? stored('CargoCapacity', 'brief.classCargo', 'tons', (known) => (known.cargoCapacity === null ? null : cargoTonsOfCapacity(known.cargoCapacity))) : unknownFigure(SET_WITHOUT.cargoTons, 'tons'),
-    hangarHS: pinned ? stored('ParasiteCapacity', 'brief.classHangar', 'HS', (known) => (known.hangarCapacity === null ? null : hangarHSOfCapacity(known.hangarCapacity))) : unknownFigure(SET_WITHOUT.hangarHS, 'HS'),
-    deploymentMonths: pinned ? stored('PlannedDeployment', 'brief.classDeployment', 'months', (known) => known.plannedDeployment) : unknownFigure(SET_WITHOUT.deploymentMonths, 'months'),
+    cargoTons: pinned ? stored('CargoCapacity', 'brief.classCargo', 'tons', (known) => (known.cargoCapacity === null ? null : cargoTonsOfCapacity(known.cargoCapacity)), 'cargo capacity') : unknownFigure(SET_WITHOUT.cargoTons, 'tons'),
+    hangarHS: pinned ? stored('ParasiteCapacity', 'brief.classHangar', 'HS', (known) => (known.hangarCapacity === null ? null : hangarHSOfCapacity(known.hangarCapacity)), 'hangar capacity') : unknownFigure(SET_WITHOUT.hangarHS, 'HS'),
+    deploymentMonths: pinned ? stored('PlannedDeployment', 'brief.classDeployment', 'months', (known) => known.plannedDeployment, 'planned deployment') : unknownFigure(SET_WITHOUT.deploymentMonths, 'months'),
   }
 
   if (pinned) {

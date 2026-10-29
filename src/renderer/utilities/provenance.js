@@ -174,6 +174,13 @@ const spaced = (name) => name.replace(/^(FCT|DIM|VIR)_/, '').replace(/([a-z0-9])
 
 export const inputWords = (table, column) => (column ? `the ${spaced(column)} of ${spaced(table)}` : `the ${spaced(table)} data`)
 
+// A capability field ('Table.Column', 'Table.*' or 'Table (table)', see utilities/capabilities.js) in words, for a missing input that a note shows.
+export const fieldWords = (field) => {
+  const [table, column] = field.replace(/ \(table\)$/, '.*').split('.')
+
+  return inputWords(table, column === '*' ? '' : column)
+}
+
 // The assumption of a figure whose rule cannot be matched to the save: a save normally states the game rules it was played under, but a damaged one can lack the columns that tell.
 export const UNVERIFIED_SAVE = 'The save does not state which game rules it was played under, so the rule is not checked against the save'
 

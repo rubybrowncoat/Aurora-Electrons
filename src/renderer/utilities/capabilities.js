@@ -185,7 +185,7 @@ const EXTRA_READS = Object.freeze({
   '/minerals': Object.freeze({ page: 'FCT_IndustrialProjects(* Amount GameID PopulationID RaceID) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* Reserve* GameID PopulationID RaceID) FCT_ShipyardTask(* CompletedBP GameID PopulationID RaceID TaskTypeID TotalBP)' }),
   '/colony-outlook': Object.freeze({ bootstrapSources: BUILDABILITY_READS, page: START_DELAY_READS }),
   '/routes': Object.freeze({ page: START_DELAY_READS }),
-  '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
+  '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_MineralDeposit(Accessibility Amount) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
   '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS }),
   '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
   '/designed-tech': Object.freeze({
@@ -282,7 +282,7 @@ const markerColumns = (route, key, table, marker) => {
 }
 
 // The labels of the inputs that only the reads above hold, for a key the generated reads do not list because the scan finds no read of it: { [key]: label }.
-const EXTRA_ONLY_LABELS = Object.freeze({ page: 'the page\'s other reads', BodyDetail: 'the body detail' })
+const EXTRA_ONLY_LABELS = Object.freeze({ page: 'the page\'s other reads', BodyDetail: 'the body detail', DeficitSites: 'the deficit sites' })
 
 const inputsOf = (route, inputs) => [...Object.entries(inputs), ...Object.keys(EXTRA_READS[route] || {}).filter((key) => !(key in inputs) && EXTRA_ONLY_LABELS[key]).map((key) => [key, { label: EXTRA_ONLY_LABELS[key], reads: '' }])]
 

@@ -617,7 +617,7 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
       production,
       stockOnly: { result: result('mspSupply.stockOnly', perYear(allocation.stockOnly.made), ['the colony\'s stock of the input minerals', 'the colony\'s production'], ['No mining, packet or haul is counted']), limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups) },
       high: figure(allocation.high, allocation.highGroups, 'mspSupply.supplied'),
-      low: allocation.low ? figure(allocation.low, allocation.lowGroups, 'mspSupply.supplied') : { result: unavailable({ rule: 'mspSupply.supplied', missing: notCounted.filter((entry) => entry.kind === 'queue').map((entry) => entry.text) }), limiting: null, delivery: null },
+      low: allocation.low ? figure(allocation.low, allocation.lowGroups, 'mspSupply.supplied') : { result: unavailable({ rule: 'mspSupply.supplied', missing: ['the queue needs of the input minerals'] }), limiting: null, delivery: null },
       deliveries,
       notCounted,
       balance: Math.max(allocation.stockOnly.residual, allocation.high.residual, allocation.low ? allocation.low.residual : 0),

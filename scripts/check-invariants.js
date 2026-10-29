@@ -804,6 +804,7 @@ const defineCases = (modules) => {
     assert.equal(review.coverage.status[1], 'unknown')
     assert.equal(review.coverage.status[2], 'unknown')
     assert.equal(review.unrated.length, 2)
+    assert.deepEqual(review.unrated.map((entry) => entry.result.inputs.missing), [['the required bonus of Mars'], ['the population of Venus']])
     assert.equal(review.coverage.vacant, 1)
     assert.equal(review.coverage.results.vacant.status, 'estimated')
   })

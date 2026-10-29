@@ -374,14 +374,15 @@ const keyOf = (person, required, names) => {
 }
 
 const REQUIRED_COLUMNS = ['BonusOne', 'BonusTwo', 'BonusThree']
+const REQUIRED_WORDS = { BonusOne: 'the required bonus', BonusTwo: 'the second required bonus', BonusThree: 'the third required bonus' }
 
 // How one colony stands: 'unknown' (what it lacks in `gaps`), 'unrated' (no required bonus set), 'no-candidate', 'not-stronger' or 'improvement'. A colony with no stored requirement, a governor not among the administrators, or a governor or candidate whose bonus has no value cannot be rated.
 const governorOutcome = (colony, byId, idle, names) => {
   const name = colony.PopName
   const vacant = !colony.GovernorID
   const popGap = vacant && !isKnownNumber(colony.Population)
-  const requirementGaps = (colony.BonusOne > 0 ? REQUIRED_COLUMNS : REQUIRED_COLUMNS.slice(0, 1)).filter((column) => !isKnownNumber(colony[column])).map((column) => `${column} of ${name}`)
-  const gaps = [...(popGap ? [`Population of ${name}`] : []), ...requirementGaps]
+  const requirementGaps = (colony.BonusOne > 0 ? REQUIRED_COLUMNS : REQUIRED_COLUMNS.slice(0, 1)).filter((column) => !isKnownNumber(colony[column])).map((column) => `${REQUIRED_WORDS[column]} of ${name}`)
+  const gaps = [...(popGap ? [`the population of ${name}`] : []), ...requirementGaps]
 
   if (gaps.length) {
     return { colony, status: 'unknown', gaps, popGap, requirementGap: requirementGaps.length > 0 }

@@ -152,7 +152,9 @@ const known = (value) => Number.isFinite(value)
 const flag = (value) => (value === 1 || value === true ? true : value === 0 || value === false ? false : null)
 
 // A stored figure as the save has it, or unavailable naming the column it lacks.
-const observed = (name, value, units) => (known(value) ? ofRule({ rule: OBSERVED, value, inputs: { present: [name] }, units }) : unavailable({ rule: OBSERVED, missing: [name], units }))
+const OBSERVED_WORDS = { CrewMorale: 'the crew\'s morale', CurrentCrew: 'the ship\'s crew', CurrentMaintSupplies: 'the maintenance supplies aboard', Fuel: 'the fuel aboard', GradePoints: 'the crew\'s grade points', LastOverhaul: 'the time of the last overhaul', LastShoreLeave: 'the time of the last shore leave', OverhaulFactor: 'the overhaul factor' }
+
+const observed = (name, value, units) => (known(value) ? ofRule({ rule: OBSERVED, value, inputs: { present: [name] }, units }) : unavailable({ rule: OBSERVED, missing: [OBSERVED_WORDS[name] || name], units }))
 
 const seen = new WeakSet()
 

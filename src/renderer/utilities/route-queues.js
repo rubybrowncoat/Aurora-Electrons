@@ -38,7 +38,7 @@ export const loadRouteQueues = async (database, { GameID, RaceID }) => {
   const [fleet, order, conditional, standing] = await Promise.all(['FCT_Fleet', 'FCT_MoveOrders', 'FCT_FleetConditionalOrder', 'FCT_FleetStandingOrder'].map((table) => columnsOf(database, table)))
 
   if (!conditional.has('FleetID')) {
-    return { ...NOTHING, reason: 'The save has no conditional orders table (FCT_FleetConditionalOrder), so route signatures are not supported for it.' }
+    return { ...NOTHING, reason: 'The save has no conditional orders table, so route signatures are not supported for it.' }
   } else if (!['FleetID', 'FleetName', 'CycleMoves', 'RaceID', 'GameID'].every((name) => fleet.has(name)) || !REQUIRED_ORDER_COLUMNS.every((name) => order.has(name))) {
     return { ...NOTHING, reason: 'The save lacks a column the stored orders are read from.' }
   }

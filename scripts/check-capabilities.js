@@ -326,6 +326,7 @@ const alteredChecks = async (capabilities, source) => {
     const noTechType = await alteredCopy(source, 'techtype', ['alter table DIM_TechType drop column Description'])
     const noObsolete = await alteredCopy(source, 'obsolete', ['alter table FCT_GroundUnitFormationTemplate drop column Obsolete'])
     const noBuild = await alteredCopy(source, 'nobuild', ['alter table DIM_PlanetaryInstallation drop column NoBuild'])
+    const noXcor = await alteredCopy(source, 'xcor', ['alter table FCT_SystemBody drop column Xcor'])
     const noDelay = await alteredCopy(source, 'delay', ['alter table FCT_Ship drop column SensorDelay'])
     const noUnits = await alteredCopy(source, 'units', ['alter table FCT_GroundUnitFormationElement drop column Units'])
     const noFormationShip = await alteredCopy(source, 'formationship', ['alter table FCT_GroundUnitFormation drop column ShipID'])
@@ -339,7 +340,7 @@ const alteredChecks = async (capabilities, source) => {
     const noPanelReads = await alteredCopy(source, 'panel', ['alter table FCT_ShipClass drop column MinimumFuel', 'alter table FCT_Race drop column MSPProduction'])
     const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noBuild, noDelay, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, noHeadquarters, productionRenamed, noGates)
+    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noBuild, noDelay, noXcor, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, noHeadquarters, productionRenamed, noGates)
     copies.push(noUnits, noFormationShip)
     copies.push(noGame, pre27, sevenDropped)
 
@@ -430,6 +431,7 @@ const alteredChecks = async (capabilities, source) => {
     const obsolete = (await preflightOf(capabilities, noObsolete)).result
     const unbuildable = (await preflightOf(capabilities, noBuild)).result
     const undelayed = (await preflightOf(capabilities, noDelay)).result
+    const noPosition = (await preflightOf(capabilities, noXcor)).result
     const units = (await preflightOf(capabilities, noUnits)).result
     const formationShip = (await preflightOf(capabilities, noFormationShip)).result
     const onlyFormations = (result, route, key) => result.reports[route].status === 'degraded' && result.reports[route].missing.length === 0 && result.reports[route].degraded.length === 1 && result.reports[route].degraded[0].key === key
@@ -453,6 +455,22 @@ const alteredChecks = async (capabilities, source) => {
         const reports = (await preflightOf(mutant, noBuild)).result.reports
 
         check('altered: a copy of the code in which the mine inputs do not read the build flag leaves /colony-outlook and /mineral-outlook supported on a save without the column, as the check above must notice', buildGaps.every(([route]) => reports[route].status === 'supported'), buildGaps.map(([route]) => reports[route].status).join())
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
+
+    const xcorNamed = (result) => result.reports['/mineral-outlook'].status === 'unsupported' && result.reports['/mineral-outlook'].missing.some((entry) => entry.fields.includes('FCT_SystemBody.Xcor'))
+
+    check('altered: FCT_SystemBody.Xcor dropped (the position the deficit sites are placed by) makes /mineral-outlook unsupported, naming the column, as its deficit sites are a required input', xcorNamed(noPosition), `${noPosition.reports['/mineral-outlook'].status}`)
+
+    {
+      const directory = mutatedCopy('utilities/capabilities.js', "BodyDetail: 'the body detail', DeficitSites: 'the deficit sites'", "BodyDetail: 'the body detail'")
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+        check('altered: a copy of the code in which the deficit sites input is not kept leaves /mineral-outlook ' + (await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].status + ' on a save without the position, as the check above must notice', !xcorNamed((await preflightOf(mutant, noXcor)).result))
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
@@ -709,6 +727,7 @@ const consumerResults = async (mods, source, refusedFile) => {
   holds('a modifier row of a blocked bonus loses that column only', gated.OverallProductionModifier === null && gated.OverallGroundUnitModifier === null && gated.ShipyardBuildRate === 4)
   holds('a modifier row is as read while no bonus is blocked', mixin.gateModifier(modifiers, new Set()).OverallProductionModifier === 1.5)
   holds('a colony capacity with the Production bonus blocked is unavailable and names the lookup', !isAvailableResult(mixin.capacityResult(gated, 'ordnance', new Set([5]))) && mixin.capacityResult(gated, 'ordnance', new Set([5])).inputs.missing.join().includes('bonus 5'))
+  holds('a colony capacity with the Production bonus blocked or a rate not stored names what it lacks in words, not by the columns of the modifier row', [mixin.capacityResult(gated, 'construction', new Set([5])), mixin.capacityResult({ ...gated, ConstructionProduction: null }, 'ordnance', new Set())].every((result) => !isAvailableResult(result) && result.inputs.missing.length > 0 && result.inputs.missing.every((text) => !/[a-z][A-Z]|^[A-Z][a-z]+[A-Z]/.test(text))))
   holds('a colony capacity is the product while no bonus is blocked', mixin.capacityResult(modifiers, 'ordnance', new Set()).value === 9)
   holds('a colony capacity of a colony the read does not cover is unavailable', !isAvailableResult(mixin.capacityResult(undefined, 'ordnance', new Set())))
 
@@ -832,6 +851,7 @@ const mutatedCopy = (file, from, to) => {
 }
 
 const MUTATIONS = [
+  ['a missing capacity term named by its column of the modifier row', 'mixins/production-modifiers.js', '.map((term) => TERM_WORDS[term] || term)', ''],
   ['commanders.js reads a blocked bonus', 'utilities/commanders.js', 'blocked.has(Number(id)) || value === undefined', 'value === undefined'],
   ['the production modifiers ignore a blocked bonus', 'mixins/production-modifiers.js', '(blocked.has(Number(id)) ? { ...gated, [column]: null } : gated)', 'gated'],
   ['the capacity result ignores a blocked bonus', 'mixins/production-modifiers.js', 'const lookup = blocked.has(5) ?', 'const lookup = false ?'],

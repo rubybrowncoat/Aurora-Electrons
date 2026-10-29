@@ -18,6 +18,9 @@ const CAPACITY_TERMS = {
   fighter: ['FighterProduction', 'OverallProductionModifier', 'FighterProductionPower'],
 }
 
+// The words for the terms a capacity lacks, by the column of the modifier row that holds them.
+const TERM_WORDS = { ConstructionProduction: 'the race\'s construction production', OrdnanceProduction: 'the race\'s ordnance production', FighterProduction: 'the race\'s fighter production', OverallProductionModifier: 'the colony\'s overall production modifier', ConstructionPower: 'the construction rating of the installations', EngineerProductionModifier: 'the engineers\' production modifier', GroundConstructionPower: 'the ground construction rating of the installations', OrdnanceProductionPower: 'the ordnance rating of the installations', FighterProductionPower: 'the fighter rating of the installations' }
+
 const CAPACITY = {
   construction: (modifiers) => (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower),
   ordnance: (modifiers) => modifiers.OrdnanceProduction * modifiers.OverallProductionModifier * modifiers.OrdnanceProductionPower,
@@ -41,7 +44,7 @@ export const capacityResult = (modifiers, kind, blocked) => {
     return unavailable({ rule: 'production.populationCapacity', missing: ['the colony\'s production modifiers', ...lookup] })
   }
 
-  const missing = terms.filter((term) => !isNumber(modifiers[term]))
+  const missing = terms.filter((term) => !isNumber(modifiers[term])).map((term) => TERM_WORDS[term] || term)
   const present = terms.filter((term) => isNumber(modifiers[term]))
 
   return missing.length || lookup.length ? unavailable({ rule: 'production.populationCapacity', missing: [...missing, ...lookup], present }) : ofRule({ rule: 'production.populationCapacity', value: CAPACITY[kind](modifiers), inputs: { present } })
