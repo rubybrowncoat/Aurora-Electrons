@@ -2,7 +2,7 @@
 //
 // A bundle is `{ format, version, exportedAt, source: { gameId, raceId, gameName, raceName }, categories }`. `categories` holds only the categories chosen, each as `{ app?: { <key>: value }, race?: { <key>: value } }`. An `app` key is stored as it is; a `race` key is stored under `campaign.<campaign id>.race.<RaceID>.` of the empire it was exported from (the campaign is the app's own record of a campaign, see `utilities/campaign.js`), and travels without that prefix, so an import joins it to the prefix of the empire it is imported into. The source ids and names are there to tell the person which empire the file came from; they never decide where a key goes, and the campaign id never leaves the installation.
 //
-// The allowlist is the settings the app itself writes as preferences: the persisted-view fields (`mixins/persisted-view.js`, which keeps the registry of what every page and component declares, with the `normalise` and `valid` it restores them with), the theme policy and the named colour preset, the typeface and text size, and the Display panel's two settings. Nothing outside it is exported, and a key outside it is rejected on import. Not supported, and so never exported or imported: see EXCLUDED.
+// The allowlist is the settings the app itself writes as preferences: the persisted-view fields (`mixins/persisted-view.js`, which keeps the registry of what every page and component declares, with the `normalise` and `valid` it restores them with), the theme policy and the named colour preset, the typeface and text size, and the two settings of the Number format and Computer-run empires panel. Nothing outside it is exported, and a key outside it is rejected on import. Not supported, and so never exported or imported: see EXCLUDED.
 
 import { raceKeyPrefix } from './campaign'
 
@@ -157,7 +157,7 @@ const checkDeclared = (declarations) => (value) => {
 //   policy: `{ key, values }`, the settings key of the theme policy and the policies this version has.
 //   accents (optional): `{ key, values }`, the settings key of how the section accents are drawn and the modes this version has; without it the setting is not part of the allowlist.
 //   font: `{ key, read }`, the settings key of the typeface and text size and `readFont` of utilities/appearance-font.js, which says whether a value names a typeface and a text size this version offers.
-//   separators: the thousands separators the Display panel offers.
+//   separators: the thousands separators the Number format and Computer-run empires panel offers.
 export const buildSchema = ({ declarations, appearance, policy, accents = null, font, separators }) => {
   const fields = new Map()
   const add = (category, scope, key, check) => fields.set(`${category}:${scope}:${key}`, { category, scope, key, check })

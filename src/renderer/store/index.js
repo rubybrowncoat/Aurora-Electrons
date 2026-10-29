@@ -10,6 +10,9 @@ import { releaseRecording } from '../utilities/recording-owner'
 
 const configConfiguration = {}
 
+// The window's settings store (src/preload/store-client.js), kept out of Vue's reactivity as the database is: the object keeps answers of its own (where its file is, once asked), and in the reactive state a read that fills one would be a change of the state outside a mutation, which the strict store refuses. Replacing it (`reinstantiateConfig`) is what the pages react to.
+const openConfig = () => markRaw(new Config(configConfiguration))
+
 // No game or race picked: what the app starts with, and what a new save starts with.
 const selection = () => ({
   GameID: null,
@@ -26,7 +29,7 @@ const selection = () => ({
 
 export const state = () => {
   return {
-    config: new Config(configConfiguration),
+    config: openConfig(),
     database: null,
     // The save this window shows, as the main process says (it alone decides it, and it changes only by `openSave`), and why it couldn't be opened (null while it can).
     savePath: null,
@@ -136,7 +139,7 @@ export const mutations = {
 export const actions = {
   reinstantiateConfig ({ commit }) {
     commit('replaceConfig', {
-      config: new Config(configConfiguration),
+      config: openConfig(),
     })
   },
 

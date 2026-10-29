@@ -3,7 +3,58 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format, the theme, how strongly the nine sections are coloured, the colour preset, the typeface and the text size. Use it to set the app up, to have the theme follow the operating system, to tone the section colours down or switch them off, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="How every page writes large numbers, and whether the computer-run empires are listed beside the players' ones. Use it to pick the thousands separator and to open the data of the NPR empires." elevation="1">
+            <div class="panel-head"><span>Number format and Computer-run empires</span></div>
+            <div class="panel-body">
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Thousands separator</div>
+                  <div class="caption text--secondary">How every page writes large numbers.</div>
+                </div>
+                <v-select :value="separatorName" :items="separatorOptions" aria-label="Thousands separator" class="setting__control" dense outlined hide-details @change="setSeparator" />
+              </div>
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Computer-run empires</div>
+                  <div class="caption text--secondary">Lists the NPR empires on the Empires page beside the players' ones, so their data can be opened, and adds the Rivals chart to Empire History.</div>
+                </div>
+                <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
+              </div>
+            </div>
+            <div class="panel-foot caption text--secondary">Both apply at once and are kept in the settings file; About shows where it is.</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" md="6" class="d-flex flex-column">
+          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts each page has remembered. Use it to clear them and bring every page back to its defaults." elevation="1">
+            <div class="panel-head">
+              <span>Remembered views</span>
+              <v-chip small>{{ count(totalCount) }} {{ totalCount === 1 ? 'value' : 'values' }}</v-chip>
+            </div>
+            <div class="panel-body">
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">{{ empireName || 'This empire' }}</div>
+                  <div class="caption text--secondary">{{ empireNote }}</div>
+                </div>
+                <v-btn outlined :disabled="!empireCount" @click="ask('empire')">Reset</v-btn>
+              </div>
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Every empire and the app-wide views</div>
+                  <div class="caption text--secondary">{{ allNote }}</div>
+                </div>
+                <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
+              </div>
+            </div>
+            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the number format and Computer-run empires, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <v-row>
+        <v-col cols="12" class="d-flex flex-column">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as the theme, how strongly the nine sections are coloured, the colour preset, the typeface and the text size. Use it to set the app up, to have the theme follow the operating system, to tone the section colours down or switch them off, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting" data-theme-policy>
@@ -70,48 +121,8 @@
                 <appearance-file v-if="detail" :entry="detail" :kept="detailKept" @use-font="useFont" />
               </div>
               <font-choice class="setting setting--block" :config="config" @changed="reinstantiateConfig" />
-              <div class="setting">
-                <div class="setting__text">
-                  <div class="body-2">Thousands separator</div>
-                  <div class="caption text--secondary">How every page writes large numbers.</div>
-                </div>
-                <v-select :value="separatorName" :items="separatorOptions" aria-label="Thousands separator" class="setting__control" dense outlined hide-details @change="setSeparator" />
-              </div>
-              <div class="setting">
-                <div class="setting__text">
-                  <div class="body-2">Computer-run empires</div>
-                  <div class="caption text--secondary">Lists the NPR empires on the Empires page beside the players' ones, so their data can be opened, and adds the Rivals chart to Empire History.</div>
-                </div>
-                <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
-              </div>
             </div>
-            <div class="panel-foot caption text--secondary">The theme (Light, Dark or System) applies at once. System follows the operating system and changes with it; a named preset replaces the theme until a theme is chosen again, and the theme is kept meanwhile. The lamp in the app bar sets the opposite of the mode drawn now as Light or Dark, so it ends System or a named preset too. The section accents apply at once and are kept whatever preset is chosen; the nine sections keep their labels, icons and places with the accents restrained or off. A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts each page has remembered. Use it to clear them and bring every page back to its defaults." elevation="1">
-            <div class="panel-head">
-              <span>Remembered views</span>
-              <v-chip small>{{ count(totalCount) }} {{ totalCount === 1 ? 'value' : 'values' }}</v-chip>
-            </div>
-            <div class="panel-body">
-              <div class="setting">
-                <div class="setting__text">
-                  <div class="body-2">{{ empireName || 'This empire' }}</div>
-                  <div class="caption text--secondary">{{ empireNote }}</div>
-                </div>
-                <v-btn outlined :disabled="!empireCount" @click="ask('empire')">Reset</v-btn>
-              </div>
-              <div class="setting">
-                <div class="setting__text">
-                  <div class="body-2">Every empire and the app-wide views</div>
-                  <div class="caption text--secondary">{{ allNote }}</div>
-                </div>
-                <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
-              </div>
-            </div>
-            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
+            <div class="panel-foot caption text--secondary">The theme (Light, Dark or System) applies at once. System follows the operating system and changes with it; a named preset replaces the theme until a theme is chosen again, and the theme is kept meanwhile. The lamp in the app bar sets the opposite of the mode drawn now as Light or Dark, so it ends System or a named preset too. The section accents apply at once and are kept whatever preset is chosen; the nine sections keep their labels, icons and places with the accents restrained or off. A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
       </v-row>
@@ -129,7 +140,7 @@
                   <div class="body-2">Export</div>
                   <div class="caption text--secondary">{{ exportNote }}</div>
                 </div>
-                <div class="transfer__choices" role="group" aria-label="Categories to export">
+                <div class="transfer__choices transfer__choices--stacked" role="group" aria-label="Categories to export">
                   <v-checkbox v-for="category in categories" :key="category.id" v-model="exportCategories" :value="category.id" class="transfer__choice" dense hide-details :data-export-category="category.id">
                     <template #label>
                       <span>{{ category.title }}<span class="caption text--secondary d-block">{{ category.note }}</span></span>
@@ -266,7 +277,7 @@ import { CATEGORIES, MAX_BYTES, adoptBackup, buildExport, buildSchema, commitImp
 
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
-// The settings the Display panel holds, and the Game Log's saved presets, which are written by hand and not a view. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
+// The settings the Display and the Number format and Computer-run empires panels hold, and the Game Log's saved presets, which are written by hand and not a view. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
 const APP_SETTINGS = [...APPEARANCE_SETTINGS, 'darkMode', 'spyNPR', 'selectedSeparator', 'logPresets']
 
 // The theme policies as the Theme control offers them.
@@ -781,7 +792,7 @@ export default {
     },
 
     ask(scope) {
-      this.pending = scope === 'empire' ? { scope, title: `Reset what ${this.empireName || 'this empire'}'s pages remember?`, text: `${this.count(this.empireCount)} ${values(this.empireCount)} go back to each page's defaults. The app-wide views and the other empires' stay.` } : { scope, title: 'Reset every remembered view?', text: `${this.count(this.totalCount)} ${values(this.totalCount)} go back to each page's defaults, for every empire and app-wide. The Display settings, mutes, pinned systems and clusters stay.` }
+      this.pending = scope === 'empire' ? { scope, title: `Reset what ${this.empireName || 'this empire'}'s pages remember?`, text: `${this.count(this.empireCount)} ${values(this.empireCount)} go back to each page's defaults. The app-wide views and the other empires' stay.` } : { scope, title: 'Reset every remembered view?', text: `${this.count(this.totalCount)} ${values(this.totalCount)} go back to each page's defaults, for every empire and app-wide. The Display settings, the number format and Computer-run empires, mutes, pinned systems and clusters stay.` }
     },
 
     reset() {
@@ -1021,6 +1032,13 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 32px;
+}
+
+// The categories to export, one per line, each with its note under its title.
+.transfer__choices--stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .transfer__choice {

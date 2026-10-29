@@ -11,7 +11,7 @@ const EMPIRE_ROOTS = ['campaign', 'game']
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
-// The app-wide keys a reset clears: every top-level key but the empires' and the settings in `appSettings` (the Display settings) and the kept budgets.
+// The app-wide keys a reset clears: every top-level key but the empires' and the settings in `appSettings` (those of the Display and the Number format and Computer-run empires panels) and the kept budgets.
 export const appViews = (store, appSettings) => Object.keys(store).filter((key) => !EMPIRE_ROOTS.includes(key) && !appSettings.includes(key) && !KEPT_APP_KEYS.includes(key))
 
 // The keys a reset clears for each empire of each campaign with any stored: [{ campaignId, RaceID, keys }], ids as stored (strings).

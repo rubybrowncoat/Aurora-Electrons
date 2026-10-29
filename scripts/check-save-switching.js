@@ -25,13 +25,13 @@ const RACE = 784
 const FLAG = 'probe-flag.png'
 const SAVE = path.join(repo, 'AuroraDB.db')
 
-// The packages the sources import. The real sequelize and sqlite3 open the real files; the others are as small as the cases allow.
+// The packages the sources import. The real sequelize and sqlite3 open the real files; the others are as small as the cases allow. electron-store keeps its stores in `globalThis.__stores`, except while a case sets `globalThis.__SettingsClient`: every store opened then is that class's, the window's own store client (src/preload/store-client.js) built by the case.
 const STUBS = {
   'electron-store': `
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 const walk = (object, key) => String(key).split('.').reduce((found, part) => (found === undefined || found === null ? undefined : found[part]), object)
 export default class Config {
-  constructor (options = {}) { this.key = \`\${options.cwd || ''}|\${options.name || 'config'}\` }
+  constructor (options = {}) { if (globalThis.__SettingsClient) { return new globalThis.__SettingsClient(options) } this.key = \`\${options.cwd || ''}|\${options.name || 'config'}\` }
   get path () { return this.key }
   get store () { return clone(globalThis.__stores.get(this.key)) || {} }
   set store (value) { globalThis.__stores.set(this.key, clone(value)) }
@@ -52,6 +52,7 @@ export default class Config {
 const MODULES = [
   'main/saves',
   'main/launch',
+  'preload/store-client',
   'renderer/store/index',
   'renderer/store/saves',
   'renderer/store/empires',
@@ -1653,6 +1654,53 @@ const defineSuite = (m, fixtures, base) => {
     assert.deepEqual(warnings.filter((line) => line.includes('Closing the replaced database failed')), [])
   })
 
+  test('the settings store kept in the store is not made reactive, so a read that fills its own cache (where the file is, which About shows) changes nothing of the state in strict mode', async () => {
+    const Vue = requireHere('vue')
+    const Vuex = requireHere('vuex')
+    const root = m['renderer/store/index']
+    const FILE = 'C:/Users/player/AppData/Roaming/aurora-electrons/config.json'
+    const asked = []
+    const thrown = []
+    const paths = []
+
+    Vue.use(Vuex)
+    // The window's own store client, as the preload hands it to the app, over a host that knows where the settings file is.
+    globalThis.__SettingsClient = m['preload/store-client'].createStoreClient((request) => {
+      asked.push(request.op)
+
+      return { ok: true, value: request.op === 'path' ? FILE : undefined }
+    })
+
+    let lines = null
+
+    try {
+      lines = await captured('error', async () => {
+        // Strict, as the app's store is in development (app/store.js): a change of the state outside a mutation is an error.
+        const store = new Vuex.Store({ strict: true, state: root.state, getters: root.getters, mutations: root.mutations, actions: root.actions })
+        const read = () => {
+          try {
+            paths.push(store.getters.config.path)
+          } catch (error) {
+            thrown.push(error.message)
+          }
+        }
+
+        read()
+        read()
+        // A settings change on Settings puts a new store in its place, which About reads the same way.
+        await store.dispatch('reinstantiateConfig')
+        read()
+      })
+    } finally {
+      delete globalThis.__SettingsClient
+    }
+
+    assert.deepEqual(lines.filter((line) => line.includes('do not mutate vuex store state')), [], 'the read was taken for a change of the state')
+    assert.deepEqual(thrown, [], 'a read of the path threw')
+    assert.deepEqual(paths, [FILE, FILE, FILE])
+    assert.equal(asked.filter((op) => op === 'path').length, 2, 'each settings store asks where its file is once and keeps the answer, so a read fills its cache')
+  })
+
   test('a capability check cut off by a switch is not reported as a failure, and nothing is shown for it', async () => {
     const { DatabaseRetired } = m['renderer/utilities/retired']
     const w = await world({})
@@ -2228,6 +2276,8 @@ const MUTATIONS = [
   { name: 'a database that does not wait for its open transactions', file: 'renderer/utilities/database.js', find: '      transactions.add(ended)\n', replace: '', fails: ['a transaction that ends while its database is retiring'] },
   { name: 'a database that refuses the statement that ends a transaction', file: 'renderer/utilities/database.js', find: '/^\\s*(commit|rollback)\\b/i', replace: '/^never$/', fails: ['a transaction that ends while its database is retiring'] },
   { name: 'a store that makes the database reactive', file: 'renderer/store/index.js', find: 'markRaw(cacheQueries(resetDatabase(storagePath)))', replace: 'cacheQueries(resetDatabase(storagePath))', fails: ['the database kept in the store'] },
+  { name: 'a store that makes the settings store reactive', file: 'renderer/store/index.js', find: 'const openConfig = () => markRaw(new Config(configConfiguration))', replace: 'const openConfig = () => new Config(configConfiguration)', fails: ['the settings store kept in the store'] },
+  { name: 'a store that makes the settings store it puts in place reactive', file: 'renderer/store/index.js', find: "    commit('replaceConfig', {\n      config: openConfig(),", replace: "    commit('replaceConfig', {\n      config: new Config(configConfiguration),", fails: ['the settings store kept in the store'] },
   { name: 'a capability check that reports what a switch cut off', file: 'renderer/store/capabilities.js', find: 'if (!isRetired(error) && checks.get(database) === check && generation === rootState.freshness.generation && database === rootState.database) {', replace: 'if (true) {', fails: ['a capability check cut off by a switch'] },
   { name: 'a capability check that reports nothing', file: 'renderer/store/capabilities.js', find: 'if (!isRetired(error) && checks.get(database) === check && generation === rootState.freshness.generation && database === rootState.database) {', replace: 'if (false) {', fails: ['a capability check of the copy now open'] },
   { name: 'a recording pass that reports after it was replaced', file: 'renderer/plugins/history.js', find: 'if (superseded || !isCurrent()) {', replace: 'if (false) {', fails: ['a recording pass cut off by a switch'] },
