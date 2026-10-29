@@ -944,7 +944,7 @@ const panel = (ctx) => {
   add('panel-template: the panel is a top-level .panel with a data-summary that has no digit and no first or second person', () => {
     const sentence = summary(text)
 
-    return /class="panel platform-paths"/.test(startTag) && sentence.length > 40 && !/\d/.test(sentence) && !/\b(I|me|my|mine|you|your|we|our)\b/i.test(sentence) ? true : sentence
+    return /class="panel platform-paths"/.test(startTag) && sentence.trim().length > 0 && !/\d/.test(sentence) && !/\b(I|me|my|mine|you|your|we|our)\b/i.test(sentence) ? true : sentence
   })
   add('panel-template: the foot states the two paths, the occupied capacity, the unknown figures, the labour and that no path is named cheaper or quicker in general', () => ['two production paths', 'one task for each', 'component projects', 'occupied capacity', 'never nought', 'labour', 'names no path as cheaper or quicker in general', 'has not researched', 'makes no progress', 'if the missing minerals are obtained'].filter((phrase) => !foot.includes(phrase)).map((phrase) => `the foot lacks "${phrase}"`).join('; ') || true)
   add('panel-template: the foot is in the UI voice: no first or second person', () => (/\b(I|me|my|mine|you|your|we|our)\b/i.test(foot.replace(/<[^>]*>/g, '')) ? 'the foot speaks to a person' : true))

@@ -25,7 +25,7 @@
       <template v-if="forecastReady">
         <stat-tiles :tiles="tiles" compact class="mt-2" />
 
-        <v-card v-if="focusRow" class="panel" data-summary="How long the chosen mineral will last at current rates, with projected stockpile and mining output, to decide when to expand supply or cut use." elevation="1">
+        <v-card v-if="focusRow" class="panel" data-summary="How long the chosen mineral will last at current rates, with projected stockpile and mining output." elevation="1">
           <div class="panel-head">
             <span>{{ focusRow.name }} outlook</span>
             <span class="d-flex align-center flex-wrap">
@@ -64,7 +64,7 @@
             </div>
           </div>
         </v-card>
-        <v-card class="panel" data-summary="For every mineral, its stock, production, use and how long the stock will last, to see which minerals are heading for a shortage." elevation="1">
+        <v-card class="panel" data-summary="For every mineral, its stock, production, use and how long the stock will last." elevation="1">
           <div class="panel-head">
             <span>Mineral runway<provenance-mark rule="mineral.runway" label /></span>
             <v-chip small>{{ coverageLabel }}</v-chip>
@@ -105,10 +105,10 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is modelled, not measured, from the industry queue, the refineries, the maintenance facilities and the shipyards over the next 12 months (see Mineral uses).' }} Click a row to see its outlook.
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is modelled, not measured, from the industry queue, the refineries, the maintenance facilities and the shipyards over the next 12 months (see Mineral uses).' }} Click a row to see its outlook. Use the table to see which minerals are heading for a shortage.
           </div>
         </v-card>
-        <v-card class="panel" data-summary="The purposes that use minerals, observed in the game's ledger or modelled from the save when there is none, each with a switch to leave it out of the runway." elevation="1">
+        <v-card class="panel" data-summary="The purposes that use minerals, observed in the game's ledger or modelled from the save, each with a switch to leave it out of the runway." elevation="1">
           <div class="panel-head">
             <span>Mineral uses<provenance-mark rule="mineral.flowPerYear" label /></span>
             <v-chip small>{{ hasLedger ? 'Observed in the ledger' : 'Modelled, no ledger' }}</v-chip>
@@ -141,7 +141,7 @@
         <v-dialog v-model="flowsOpen" max-width="960" scrollable content-class="mineral-outlook">
           <v-card>
             <div class="panel-head">
-              <span>Where minerals come from and go<provenance-mark rule="mineral.flowPerYear" label /></span>
+              <span>Mineral sources and uses<provenance-mark rule="mineral.flowPerYear" label /></span>
               <span class="d-flex align-center">
                 <v-btn-toggle v-model="flowsView" mandatory dense>
                   <v-btn value="chart" small><v-icon small>mdi-chart-bar</v-icon></v-btn>
@@ -172,7 +172,7 @@
         </v-dialog>
       </template>
 
-      <v-card v-if="depositsReady" class="panel" data-summary="Each deposit worked by mines and miners, with its yield and when it will run down, to plan new deposits before the old ones empty." elevation="1">
+      <v-card v-if="depositsReady" class="panel" data-summary="Each deposit worked by mines and miners, with its yield and when it will run down." elevation="1">
         <div class="panel-head">
           <span>Deposits being mined<provenance-mark rule="mineral.depositForecast" label /></span>
           <span class="d-flex align-center">
@@ -229,7 +229,7 @@
           </template>
         </v-data-table>
         <div class="panel-foot caption text--secondary">
-          Rates include governor, sector, commander and naval-admin bonuses. Orbital mining is the workbook's formula with the crew share and is an estimate: in the sampled saves it matched the ledger at the last completed increment while a deposit's accessibility was flat (one save has an unexplained earlier discrepancy), and the ledger ran up to two 0.01 steps of accessibility above it for a deposit mined below half its original amount, so it may read low there. A short crew, a damaged module, a miner with no commander and one outside any naval admin command are unobserved. Timeline: solid until half mined, lighter while accessibility falls, across {{ horizon }} years.
+          Use it to plan new deposits before the old ones empty. Rates include governor, sector, commander and naval-admin bonuses. Orbital mining is an estimate that follows the game's formula with the crew share. It may read low once a deposit is mined below half its original amount. A short crew, a damaged module, a miner with no commander and one outside any naval admin command are unobserved. Timeline: solid until half mined, lighter while accessibility falls, across {{ horizon }} years.
         </div>
       </v-card>
     </v-container>

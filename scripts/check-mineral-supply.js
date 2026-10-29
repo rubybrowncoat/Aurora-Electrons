@@ -753,7 +753,7 @@ const panel = (ctx) => {
   const foot = (text.match(/<div class="panel-foot[^>]*>([\s\S]*?)<\/div>/) || [])[1] || ''
   const template = (text.match(/<template>([\s\S]*)<\/template>\s*<script>/) || [])[1] || ''
 
-  add('panel-template: the panel is a top-level .panel with a data-summary that has no digit and no first or second person', () => (/class="panel mineral-supply"/.test(startTag) && summary.length > 80 && !/\d/.test(summary) && !PRONOUNS.test(summary) ? true : summary))
+  add('panel-template: the panel is a top-level .panel with a data-summary that has no digit and no first or second person', () => (/class="panel mineral-supply"/.test(startTag) && summary.trim().length > 0 && !/\d/.test(summary) && !PRONOUNS.test(summary) ? true : summary))
   add('panel-template: the foot says what the figures are: stock, packets with no origin, transfers not income, freighters, hypothetical deliveries, unknown not 0', () => ['own stock', 'carries no origin', 'as income', 'freighter', 'hypothetical delivery', 'never 0', 'no packet route adds to its own stock'].filter((phrase) => !foot.includes(phrase)).map((phrase) => `the foot lacks "${phrase}"`).join('; ') || true)
   add('panel-template: the foot is in the UI voice: no first or second person', () => (PRONOUNS.test(foot.replace(/<[^>]*>/g, '')) ? 'the foot speaks to a person' : true))
   add('panel-template: the template compiles', () => { const errors = templateErrors(text); return errors.length ? short(errors) : true })

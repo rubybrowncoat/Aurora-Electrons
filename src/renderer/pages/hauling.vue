@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, from the nearest colony with stock to spare, and what each freighter class takes to carry them." elevation="1" data-hauling-plan>
+        <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, and the freighters that carry them." elevation="1" data-hauling-plan>
           <div class="panel-head">
             <span>Hauling plan<provenance-mark rule="hauling.planTonnes" label /></span>
             <span class="d-flex align-center flex-wrap plan-tools">
@@ -84,14 +84,14 @@
           </div>
           <resource-reserves :key="`${GameID}-${RaceID}`" embedded kind="minerals" :colonies="colonies" :plan="plan" :timed="plannedDays" />
           <div class="panel-foot caption text--secondary">
-            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged; a class has no commander, governor or sector, so its Logistics bonuses count as 1 and a real ship may load faster; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round; each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
+            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed, with loading and unloading as Transport times them, fully crewed and undamaged. A class has no commander, governor or sector, so its Logistics bonuses count as 1 and a real ship may load faster. A tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals. The best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round. Each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
           </div>
           <div class="panel-foot caption text--secondary" data-propagation-basis>
             A class's round trip is flown cycle after cycle for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading as waits; the round trip on the saved positions stands beside it with the throughput between them. A haul to anything else, to a system with no survey, to a body whose orbit does not rebuild to within a kilometre, or by a class that is not faster than the body, keeps the saved positions and says why.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1" data-hauling-routes>
+        <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, cycle time, yearly moves and fuel." elevation="1" data-hauling-routes>
           <div class="panel-head">
             <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
@@ -180,7 +180,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Fleets Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders: straight to each destination where it is now (a body, jump point, Lagrange point, survey location, waypoint, fleet, contact, wreck or life pod), and through the jump points and Lagrange points the orders take. Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed. Loading and unloading follow the docs' cargo-handling time as Transport times it: every ship works at once and the slowest sets the stop's time, each at the strength of its undamaged cargo shuttle bays (a craft of 500 t or less counts as one) times the race's cargo handling technology and the Logistics bonuses of its commander, of the naval administration over the system where it loads, of the colony's governor and a quarter of the sector commander's excess, plus the technology once more at a colony with a spaceport or cargo shuttle station, which no bonus multiplies. A ship over 500 t with no undamaged bays can load or unload only at such a colony, and a route where a ship can't is named with the reason and left out of the totals; so is a route where it isn't known whether a ship can. A bonus the save cannot settle counts as 1, so the time errs long; a crew short of the class's is applied once, and no crew aboard stops loading; refuelling and overhauls aren't counted. {{ versionNote }}
+            Use it to see what each route carries and costs. The fleets are those Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders: straight to each destination where it is now (a body, jump point, Lagrange point, survey location, waypoint, fleet, contact, wreck or life pod), and through the jump points and Lagrange points the orders take. Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed. Loading and unloading follow the game's cargo-handling time as Transport times it. Every ship works at once and the slowest sets the stop's time. Each ship works at the strength of its undamaged cargo shuttle bays (a craft of 500 t or less counts as one) times the race's cargo handling technology and the Logistics bonuses of its commander, of the naval administration over the system where it loads, of the colony's governor and a quarter of the sector commander's excess. A colony with a spaceport or cargo shuttle station adds the technology once more, which no bonus multiplies. A ship over 500 t with no undamaged bays can load or unload only at such a colony, and a route where a ship can't is named with the reason and left out of the totals; so is a route where it isn't known whether a ship can. A bonus the save cannot settle counts as 1, so the time errs long; a crew short of the class's is applied once, and no crew aboard stops loading; refuelling and overhauls aren't counted. {{ versionNote }}
           </div>
           <div class="panel-foot caption text--secondary" data-fleet-basis>
             A fleet sails at its set speed, held to the effective maximum of its slowest ship under its own power (from the undamaged engines, the overhaul and the mass of a ship it tows), and at that maximum when the fleet is set to it. Each ship burns fuel at its own engine power scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet that can't be profiled, or whose every hold is in a hangar or under tow, is left out of the totals with the reason.
@@ -199,7 +199,7 @@
 
         <v-row>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="What the repeating routes bring to each colony every year, by cargo. Use it to see which colonies depend most on hauling." elevation="1">
+            <v-card class="panel" data-summary="What the repeating routes bring to each colony every year, by cargo." elevation="1">
               <div class="panel-head"><span>Deliveries by destination<provenance-mark rule="hauling.deliveries" label /></span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :sort-by.sync="deliveriesTable.sortBy" :sort-desc.sync="deliveriesTable.sortDesc" :items-per-page.sync="deliveriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.destination`]="{ item }">
@@ -207,11 +207,11 @@
                 </template>
                 <template #[`item.amount`]="{ item }">{{ item.kind === 'colonists' ? `${count(item.amount)} people` : tons(item.amount) }}<provenance-mark :result="item.result" /></template>
               </v-data-table>
-              <div class="panel-foot caption text--secondary">Each unload is credited with the cargo the fleet holds when it gets there, so a route that unloads at several colonies counts every hold it delivers.</div>
+              <div class="panel-foot caption text--secondary">Use it to see which colonies depend most on hauling. Each unload is credited with the cargo the fleet holds when it gets there, so a route that unloads at several colonies counts every hold it delivers.</div>
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="Freighter classes with their capacity, speed and yearly distance and fuel. Use it to compare which classes haul most efficiently." elevation="1">
+            <v-card class="panel" data-summary="Freighter classes with their capacity, speed and yearly distance and fuel." elevation="1">
               <div class="panel-head"><span>Freighter classes<provenance-mark rule="hauling.classYear" label /></span></div>
               <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.ClassName`]="{ item }">
@@ -224,7 +224,7 @@
                 <template #[`item.gkm`]="{ item }">{{ count(item.gkm) }}</template>
                 <template #[`item.fuel`]="{ item }">{{ litres(item.fuel) }}</template>
               </v-data-table>
-              <div class="panel-foot caption text--secondary">Per ship: billion km a year at top speed, and litres a year at full power.</div>
+              <div class="panel-foot caption text--secondary">Use it to compare which classes haul most efficiently. Figures are per ship: billion km a year at top speed, and litres a year at full power.</div>
             </v-card>
           </v-col>
         </v-row>

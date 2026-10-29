@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel diagnostic" data-diagnostic data-summary="The fire and boarding events the race's game log holds for a recent stretch of game time, how far the log covers that stretch, and the checks the game itself offers for a stalled short interval. It lists evidence and never names a cause." elevation="1" :data-state="diagnosis ? diagnosis.state : null" :data-verdict="diagnosis ? diagnosis.verdict : null">
+  <v-card class="panel diagnostic" data-diagnostic data-summary="Fire and boarding events in the game log for a recent stretch of game time." elevation="1" :data-state="diagnosis ? diagnosis.state : null" :data-verdict="diagnosis ? diagnosis.verdict : null">
     <div class="panel-head">
       <div class="subtitle-2">Short-interval checklist<provenance-mark v-if="diagnosis" :result="diagnosis.results.events" label /></div>
       <v-select :value="seconds" :items="windows" item-text="text" item-value="seconds" label="Window" dense outlined hide-details class="diagnostic-window" data-diagnostic-window @change="(value) => $emit('window', value)" />
@@ -70,14 +70,14 @@
       <ul class="diagnostic-list">
         <li v-for="entry in pointers" :key="entry.id" :data-pointer="entry.id">
           <span class="diagnostic-name" data-pointer-name>{{ entry.term }}</span>
-          <span class="caption text--secondary" data-pointer-version> Release {{ entry.versions }}, reviewed {{ entry.reviewed }}</span>
+          <span class="caption text--secondary" data-pointer-version> Reviewed {{ entry.reviewed }}</span>
           <div data-pointer-definition>{{ entry.definition }}</div>
         </li>
       </ul>
     </div>
 
     <div class="panel-foot caption text--secondary">
-      The window ends at the newest increment of the open save. A state of partial means the window meets a gap, an increment that may still change, or a failed read; the events listed are those observed, and others may exist. An event carries the state of its own increment. A cause of a stall stays unknown unless the player records one. The app only reads the save and gives the game no order.
+      The panel lists evidence and never names a cause: the events the game log holds, how far the log covers the window, and the checks the game itself offers for a stalled short interval. The window ends at the newest increment of the open save. A state of partial means the window meets a gap, an increment that may still change, or a failed read. The events listed are those observed, and others may exist. An event carries the state of its own increment. A cause of a stall stays unknown unless the player records one.
     </div>
   </v-card>
 </template>

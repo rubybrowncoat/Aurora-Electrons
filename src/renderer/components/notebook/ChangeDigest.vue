@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel notebook-digest" data-summary="What the saves the app observed show of the economy since the last acknowledged save: installations and ships of the race, stockpiles that ran out or are back, the treasury, followed colonies and project notes, grouped by the object they are about. Only the net change between two observed saves is shown, with the saves that were never observed named as gaps; acknowledged changes stay hidden." elevation="1">
+  <v-card class="panel notebook-digest" data-summary="Changes to the economy shown by the saves the app observed, since the last acknowledged save." elevation="1">
     <div class="panel-head">
       <span>Economic changes since the last acknowledgment</span>
       <span class="caption text--secondary" data-digest-caption>{{ caption }}</span>
@@ -37,7 +37,7 @@
         </div>
         <v-alert v-if="message" :type="messageType" outlined dense class="mt-2" data-digest-message>{{ message }}</v-alert>
 
-        <div class="caption text--secondary mt-3" data-digest-limits>The digest compares two saves the app observed on this branch and says nothing of what happened between them: a build that finished and was spent, a stockpile that ran out and refilled, or a note edited and edited back leaves no trace, and the saves in between that were never open while the app ran are gaps. A rise in installations or ships is what the save shows beyond the boundary, not a record of what finished. A bottleneck here is a sum over the colonies reaching none or recovering, so one colony may still run dry under a positive sum. The acknowledgment belongs to this race on this branch: another branch, another race or another campaign never reads it, a fork starts with none, and an open save from before the boundary or from another history is not compared. Acknowledging writes only the app's settings, never the save.</div>
+        <div class="caption text--secondary mt-3" data-digest-limits>The digest groups the changes by the object they are about: installations and ships of the race, stockpiles that ran out or are back, the treasury, followed colonies and project notes. Only the net change between two observed saves is shown, and saves that were never observed are named as gaps. Acknowledged changes stay hidden. The digest says nothing of what happened between two observed saves: a build that finished and was spent, a stockpile that ran out and refilled, or a note edited and edited back leaves no trace. A rise in installations or ships is what the save shows beyond the boundary, not a record of what finished. A bottleneck here is a sum over the colonies reaching none or recovering, so one colony may still run dry under a positive sum. The acknowledgment belongs to this race on this branch: another branch, another race or another campaign never reads it, a fork starts with none, and an open save from before the boundary or from another history is not compared. Acknowledging writes only the app's settings, never the save.</div>
       </template>
     </div>
   </v-card>

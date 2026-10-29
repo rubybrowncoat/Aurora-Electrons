@@ -21,7 +21,7 @@
 
           <stat-tiles :tiles="tiles" />
 
-          <v-card class="panel" data-summary="Every alien race met, with its status, communication and diplomatic standing. Select one to study it in detail." elevation="1">
+          <v-card class="panel" data-summary="Every alien race met, with its status, communication and diplomatic standing." elevation="1">
             <div class="panel-head">
               <span>Known races<provenance-mark v-for="rule in RACE_RULES" :key="rule" :rule="rule" /></span>
             </div>
@@ -90,7 +90,7 @@
               </v-col>
             </v-row>
 
-            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species observed for the selected race. Switch views to see each kind." elevation="1">
+            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species observed for the selected race." elevation="1">
               <div class="panel-head">
                 <span>Observed<provenance-mark v-for="rule in DETAIL_RULES[detailView]" :key="rule" :rule="rule" /></span>
                 <v-btn-toggle v-model="detailView" mandatory dense class="flex-wrap">
@@ -504,7 +504,7 @@ export default {
         {
           key: 'diplomacy',
           title: 'Diplomatic points',
-          summary: 'How the diplomatic points of the selected race have moved over time, against the levels where treaties and statuses change.',
+          summary: 'The diplomatic points of the selected race over time, against the levels where treaties and statuses change.',
           note: `${recordedNote} Dashed lines are where treaties and statuses change.${gapNote(diplomacy)}`,
           results: [diplomacy],
           data: { datasets: [line('Diplomatic points', pointsOf(diplomacy), 0)] },
@@ -513,7 +513,7 @@ export default {
         {
           key: 'fleet',
           title: 'Ships tracked',
-          summary: 'How many ships of the selected race have been tracked in service and destroyed, and their tonnage, over time. It shows how its fleet has grown.',
+          summary: 'The ships of the selected race tracked in service and destroyed, and their tonnage, over time.',
           note: !this.selectedShips.length ? 'No ships tracked.' : `${isAvailable(fleet) ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'The fleet cannot be rebuilt.'}${gapNote(fleet)}`,
           results: [fleet],
           data: {

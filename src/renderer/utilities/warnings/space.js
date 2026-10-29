@@ -6,7 +6,7 @@ import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { amount, anyOf, bodyText, categoriesOf, checksOf, figure, lacking, listWords, rowsOf, signatureOf, systemText, tokenWords, unknownCell, verdictRows } from './common'
 
-export const group = { key: 'space', title: 'Contacts and space', summary: 'Intruders, hazards and finds in surveyed space, such as rifts, lifepods, wrecks and ancient constructs, that may need a response.' }
+export const group = { key: 'space', title: 'Contacts and space', summary: 'Intruders, hazards and finds in surveyed space that may need a response.' }
 
 const SECONDS_PER_TWO_WEEKS = 1209600
 

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel shipping-runway" data-summary="When the treasury runs out under civilian shipping scenarios: contracts delayed, government transports instead of contracts, and new contracts, set against the no-change runway and the budget obligations that are not shipping. Logged amounts are kept apart from the estimates of a scenario, and the spread across the windows shows how uncertain the cash flow is." elevation="1">
+  <v-card class="panel shipping-runway" data-summary="When the treasury runs out under civilian shipping scenarios." elevation="1">
     <div class="panel-head">
       <span>Treasury runway under shipping scenarios<provenance-mark rule="shippingRunway.exhaustion" label /></span>
       <v-btn-toggle v-model="horizon" mandatory dense aria-label="Horizon in years">
@@ -186,7 +186,7 @@
 
       <div class="caption text--secondary mt-3">The observed past rate of the treasury is the Stock rates panel of <router-link to="/history">Empire History</router-link>{{ historyRecorded ? '' : ', which is empty while history does not record this race' }}; it is not repeated here.</div>
     </div>
-    <div class="panel-foot caption text--secondary">Every scenario holds the window's rates from now on, with the civilian shipping flows replaced as stated and every other flow as logged. The tax rate is the one set now: the save keeps no earlier rate, so a rate changed within the window or since splits the logged contracts wrongly. Changes the log does not hold are outside the figures, as Treasury against the log shows, and so is the cap of the treasury at twice the annual wealth. The fares of new contracts come from the Civilian shipping-line payouts panel, for the game versions its rates are published for. Government transports are never taken as free: the running cost is entered, and a blank one gives no figure. The spread across the windows shows how far the exhaustion moves with the window the rates are scaled from; it is not a probability.</div>
+    <div class="panel-foot caption text--secondary">Each scenario is set against the no-change runway and the budget obligations that are not shipping. It holds the window's rates from now on, with the civilian shipping flows replaced as stated and every other flow as logged. Logged amounts stay apart from the estimates of a scenario. The tax rate is the one set now: the save keeps no earlier rate, so a rate changed within the window splits the logged contracts wrongly. Changes the log does not hold, and the cap of the treasury at twice the annual wealth, are outside the figures, as Treasury against the log shows. The fares of new contracts come from the Civilian shipping-line payouts panel, wherever its rates are published. Government transports are never taken as free: enter the running cost, and a blank one gives no figure. The spread across the windows shows how far the exhaustion moves with the window the rates are scaled from. It is not a probability.</div>
   </v-card>
 </template>
 

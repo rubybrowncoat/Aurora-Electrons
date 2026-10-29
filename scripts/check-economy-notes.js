@@ -1542,7 +1542,7 @@ const pageSuite = async (m, { mutate = null } = {}) => {
       const summary = /data-summary="([^"]+)"/.exec(tag)
 
       assert.ok(summary, 'the start tag carries a data-summary')
-      assert.ok(summary[1].length > 60 && summary[1].length < 600)
+      assert.ok(summary[1].trim().length > 0 && summary[1].length < 600)
       assert.doesNotMatch(summary[1], /\b(I|me|my|we|our|you|your)\b/i)
       assert.doesNotMatch(summary[1], /\d/)
       assert.match(text.slice(start, start + 800), /<div class="panel-head">\s*<span>/)

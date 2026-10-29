@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel history-colonies" data-summary="The colonies of this race that the app follows through its history: each one's population, installations and stockpiles, one reading per save read while the app is open. Nothing is kept for a colony until it is chosen, the size of the record is estimated before choosing, and a colony that has left the save or changed hands is shown as that, never as zero." elevation="1">
+  <v-card class="panel history-colonies" data-summary="The colonies the app follows through the race's history." elevation="1">
     <div class="panel-head">
       <span>Colony series</span>
       <span class="caption text--secondary" data-colony-caption>{{ caption }}</span>
@@ -32,7 +32,7 @@
         </div>
 
         <div v-if="message" class="caption mt-2" data-colony-message>{{ message }}</div>
-        <div class="caption text--secondary mt-2" data-colony-limits>Following starts with the open save and records one reading for each save read after it while the app is open. A save that was not read leaves its interval unobserved, and nothing is filled in for it. A colony that is not in a save is recorded as gone, one held by another race or on another body as not the colony that was chosen, and one that could not be read as not read; none of them is a zero. Stopping keeps what was recorded and adds nothing after it. Each branch keeps its own record, seeded from the branch it forked from up to the fork and never merged. Saves are only read, never changed.</div>
+        <div class="caption text--secondary mt-2" data-colony-limits>Following starts with the open save and records one reading for each save read after it while the app is open, including the colony's population, installations and stockpiles. Nothing is kept for a colony until it is chosen, and the size of the record is estimated before choosing. A save that was not read leaves its interval unobserved, and nothing is filled in for it. A colony that left the save or changed hands is shown as gone, one held by another race or on another body as not the colony that was chosen, and one that could not be read as not read. None of them is a zero. Stopping keeps what was recorded and adds nothing after it. Each branch keeps its own record, seeded from the branch it forked from up to the fork and never merged. Saves are only read, never changed.</div>
       </template>
     </div>
   </v-card>

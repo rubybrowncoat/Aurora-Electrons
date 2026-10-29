@@ -6,7 +6,7 @@
       <template v-if="ready">
         <change-digest :config="config" :campaign="resolved" :race-id="RaceID" :game-time="GameTime" :notes="digestNotes" :names="installationNames" :start-year="StartYear" :separator="separator" :history-revision="historyRevision" :recording="recording" />
 
-        <v-card class="panel notebook-form" data-summary="A note on one body, colony, fleet or tech, with a status and the next action to take. It keeps the economy's projects in one place; a note gives the game no order and writes nothing to the save." elevation="1">
+        <v-card class="panel notebook-form" data-summary="A note on one body, colony, fleet or tech, with a status and the next action to take." elevation="1">
           <div class="panel-head">
             <span>{{ draft.uuid ? 'Edit note' : 'New note' }}</span>
             <span class="caption text--secondary" data-note-count>{{ caption }}</span>
@@ -42,7 +42,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel notebook-list" data-summary="The notes kept for this race, filtered by system. A note whose object has gone stays readable as stale, with the name it last had, and is never moved to another object by its name." elevation="1">
+        <v-card class="panel notebook-list" data-summary="The notes kept for this race, filtered by system." elevation="1">
           <div class="panel-head">
             <span>Project notes</span>
             <v-select v-model="filterSystem" :items="systemFilter" item-value="value" label="System" dense outlined hide-details class="notebook__filter" data-note-filter>
@@ -83,7 +83,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel notebook-tags" data-summary="Short personal tags on single bodies of the systems the race knows, shared with the Galaxy Map. The filter lists the bodies with one tag, and a tag whose body has gone stays listed as stale." elevation="1">
+        <v-card class="panel notebook-tags" data-summary="Short personal tags on single bodies of the systems the race knows, shared with the Galaxy Map." elevation="1">
           <div class="panel-head">
             <span>Body tags</span>
             <v-select :value="tagFilterValue" :items="tagOptions" item-value="value" label="Tag" dense outlined hide-details class="notebook__filter" data-tag-filter @change="tagFilter = $event">

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel fleet-stations" data-summary="The station and the supply base the player intends for each fleet, kept as local notes and set beside where the fleet is and the orders saved for it. Use it to see which fleets are off station and what to set in the game; a note gives the game no order." elevation="1">
+  <v-card class="panel fleet-stations" data-summary="The station and supply base noted for each fleet, set beside where the fleet is." elevation="1">
     <div class="panel-head">
       <span>Fleet stations and supply bases</span>
       <v-chip v-if="view && !view.error && !repositoryError && scope" small data-station-count>{{ count(notesCount) }} {{ notesCount === 1 ? 'note' : 'notes' }}<provenance-mark rule="fleetStation.notes" /></v-chip>
@@ -225,7 +225,7 @@
       <div v-for="note in view.notes" :key="note.uuid" class="px-4 caption text--secondary mt-1" data-station-unreadable>{{ note.reason }}</div>
 
       <div class="panel-foot caption text--secondary" data-station-limits>
-        A note is the player's own: it is kept for this campaign, race and branch unless shared, and never gives an order. The fleet a note names is the fleet only where the save shows it or the player confirmed it: an ID can be given again, so another fleet, waypoint or colony holding the ID is never compared and never takes the note. A fleet in the orbit of the station's body is on station whatever the body's coordinates; a fleet that is only at the same position is on station within the distance the game takes for one point, and is not followed when the body moves. A deleted station or base leaves the note stale, with the name it last had.
+        Use it to see which fleets are off station and what to set in the game. A note is the player's own: it is kept for this campaign, race and branch unless shared, and gives the game no order. The fleet a note names counts as that fleet only where the save shows it or the player confirmed it. An ID can be given again, so another fleet, waypoint or colony holding the ID is never compared and never takes the note. A fleet in the orbit of the station's body is on station whatever the body's coordinates. A fleet only at the same position is on station within the distance the game takes for one point, and is not followed when the body moves. A deleted station or base leaves the note stale, with the name it last had.
       </div>
     </template>
   </v-card>

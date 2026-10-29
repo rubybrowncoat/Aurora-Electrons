@@ -148,10 +148,10 @@ const synthetic = (m, tree) => {
   return [
     ['the registry has planner routes to cover', async () => (planners.length >= 20 ? true : `${planners.length} routes`)],
 
-    ['every planner route of the registry has help with terms and links', async () => firstProblem(planners.map((route) => {
+    ['every planner route of the registry has help with an overview, usage notes, terms and links', async () => firstProblem(planners.map((route) => {
       const help = helpFor(route)
 
-      return [route, !help ? 'no entry' : help.terms.length === 0 ? 'no terms' : help.links.length === 0 ? 'no links' : '']
+      return [route, !help ? 'no entry' : !text(help.overview) ? 'no overview' : !Array.isArray(help.usage) || help.usage.length < 4 || !help.usage.every(text) ? 'fewer than four usage notes' : help.terms.length === 0 ? 'no terms' : help.links.length === 0 ? 'no links' : '']
     }))],
 
     ['no help is kept for a route the registry does not list as a planner', async () => firstProblem(Object.keys(PAGE_HELP).map((route) => [route, planners.includes(route) ? '' : 'not a planner route of the registry']))],
@@ -237,6 +237,7 @@ const synthetic = (m, tree) => {
 
     ['the help speaks in the impersonal voice', async () => firstProblem([
       ...TERMS.flatMap((item) => [item.term, item.units, item.definition].map((value) => [`term ${item.id}`, voiceProblem(value)])),
+      ...Object.entries(PAGE_HELP).flatMap(([route, entry]) => [entry.overview, ...entry.usage].map((value) => [`help ${route}`, voiceProblem(value)])),
       ...LINKS.flatMap((item) => [item.title, item.source, item.covers, item.gameVersion].map((value) => [`link ${item.id}`, voiceProblem(value)])),
       ...Object.values(VERSION_STATUS_TEXT).map((value) => ['status words', voiceProblem(value)]),
       ...templateText(panel()).map((value) => ['card', voiceProblem(value)]),
@@ -408,8 +409,8 @@ const MUTATIONS = [
   ['a planner page loses its entry', GLOSSARY, '\'/lagrange\': {', '\'/lagrange-gone\': {', ['every planner route of the registry has help', 'no help is kept for a route']],
   ['a planner page is added to the registry with no entry', path.join('utilities', 'navigation.js'), '  { route: \'/\', section: null,', '  { route: \'/new-planner\', section: \'design\', tab: \'New\', title: \'New Planner\', icon: \'mdi-help\', blurb: \'x\', keywords: \'x\' },\n  { route: \'/\', section: null,', ['every planner route of the registry has help']],
   ['a page names a term that is not defined', GLOSSARY, '[\'game-log\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', '[\'game-log-missing\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', ['every term and link a page names exists']],
-  ['a term is no longer shown on any page', GLOSSARY, '\'/log\': { terms: [\'game-log\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', '\'/log\': { terms: [\'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', ['every term and link is shown on some page']],
-  ['the runway term leaves the Mineral Outlook', GLOSSARY, '\'/mineral-outlook\': { terms: [\'runway\', ', '\'/mineral-outlook\': { terms: [', ['mapped to the pages that show them']],
+  ['a term is no longer shown on any page', GLOSSARY, 'terms: [\'game-log\', \'production-cycle\'', 'terms: [\'production-cycle\'', ['every term and link is shown on some page']],
+  ['the runway term leaves the Mineral Outlook', GLOSSARY, 'terms: [\'runway\', \'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', 'terms: [\'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', ['mapped to the pages that show them']],
   ['a term loses its reviewed date', GLOSSARY, 'versions: GAME_VERSION, reviewed })', 'versions: GAME_VERSION })', ['every term has a name']],
   ['a term loses its version label', GLOSSARY, 'units, definition, versions: GAME_VERSION, ', 'units, definition, ', ['every term has a name', 'the glossary is reviewed against the game version']],
   ['a term loses its local definition', GLOSSARY, 'units, definition, versions', 'units, definition: \'\', versions', ['every term has a name']],
@@ -419,14 +420,16 @@ const MUTATIONS = [
   ['a link is http', GLOSSARY, '\'https://aurora4x.com/\'', '\'http://aurora4x.com/\'', ['every link address is https']],
   ['a link loses its reviewed date', GLOSSARY, 'Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })', 'Object.freeze({ reached: REVIEWED, written: null, ...fields })', ['every link has a title']],
   ['a link loses its version label', GLOSSARY, 'gameVersion: \'Live discussion, not tied to one release\', ', '', ['every link has a title']],
-  ['an old tutorial is marked current', GLOSSARY, 'written: \'2023-03\', gameVersion: \'C# edition, March 2023; no release number given\', status: VERSION_STATUS.OLDER }),\n  link({ id: \'tutorial-gameplay\'', 'written: \'2023-03\', gameVersion: \'C# edition, March 2023; no release number given\', status: VERSION_STATUS.CURRENT }),\n  link({ id: \'tutorial-gameplay\'', ['material written before any 2.7 release is marked older']],
   ['the older words stop saying older', GLOSSARY, 'Written for an older release: rules and menus may differ', 'Rules and menus may differ', ['the older status reads as older']],
-  ['a link claims to verify a formula', GLOSSARY, 'An index of written and video tutorials, playthroughs, forums and the wiki.', 'Verifies the formulas, with tutorials, playthroughs, forums and the wiki.', ['no link text claims to verify a figure']],
+  ['a link claims to verify a formula', GLOSSARY, 'Reference pages on game terms;', 'Verifies the formulas; reference pages on game terms;', ['no link text claims to verify a figure']],
   ['a link names a rule', GLOSSARY, 'link({ id: \'community-forum\', ', 'link({ rule: \'finances.treasury\', id: \'community-forum\', ', ['no entry names a rule or a verification']],
   ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
-  ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://7w1.github.io/posts/resources/.', ['no registered rule cites a glossary link']],
-  ['the help card speaks to the reader', HELP_PANEL, 'Definitions of the terms and units on this page', 'Your definitions of the terms and units on this page', ['the help speaks in the impersonal voice']],
+  ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://aurora4x.com/.', ['no registered rule cites a glossary link']],
+  ['the help card speaks to the reader', HELP_PANEL, 'Definitions kept in the app', 'Your definitions kept in the app', ['the help speaks in the impersonal voice']],
+  ['a page overview speaks to the reader', GLOSSARY, 'overview: \'Production Recap lists every job', 'overview: \'Your Production Recap lists every job', ['the help speaks in the impersonal voice']],
+  ['a page usage note is blank', GLOSSARY, '    usage: [\n      \'Show picks', '    usage: [\n      \'\',\n      \'Show picks', ['every planner route of the registry has help with an overview']],
+  ['a page loses its overview', GLOSSARY, 'overview: \'Production Recap lists every job', 'about: \'Production Recap lists every job', ['every planner route of the registry has help with an overview']],
   ['the shortage rule starts counting packets on their way', path.join('utilities', 'colony-minerals.js'), 'state: stockState(values, exporting)', 'state: stockState({ ...values, stock: values.stock + values.inbound }, exporting)', ['a mineral shortage is']],
   ['the shortage rule wants two tons', path.join('utilities', 'colony-minerals.js'), 'if (needs - stock >= 1) {', 'if (needs - stock >= 2) {', ['a mineral shortage is']],
   ['the haul plan stops counting packets as held', path.join('utilities', 'haul-plan.js'), 'const held = mineral.stock + mineral.inbound', 'const held = mineral.stock', ['a hauling shortfall counts']],

@@ -45,7 +45,7 @@
 
         <stat-tiles class="mt-1" :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Every known component design in the chosen category, with its figures. Filter and sort it to pick a design, and tick two or more to compare." elevation="1">
+        <v-card class="panel" data-summary="Every known component design in the chosen category, with its figures." elevation="1">
           <div class="panel-head">
             <span>{{ categoryName }}</span>
             <span class="text--secondary body-2">{{ count(rows.length) }} of {{ count(categoryRows.length) }} shown<provenance-mark rule="designedTech.count" /></span>
@@ -121,7 +121,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="selected.length > 1" class="panel" data-summary="The designs picked side by side, with differences tinted and the best and worst marked. Use it to choose between similar components." elevation="1">
+        <v-card v-if="selected.length > 1" class="panel" data-summary="The designs picked side by side, with differences tinted and the best and worst marked." elevation="1">
           <div class="panel-head">
             <span>Compare {{ selected.length }} designs</span>
             <span class="head-tools">

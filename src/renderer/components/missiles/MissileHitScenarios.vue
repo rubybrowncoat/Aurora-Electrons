@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel missile-hit" data-summary="The hit chance of the race's missile designs and of one proposed missile against a target whose speed, missile jammer and tactical modifier are entered here. It separates the raw chance, the chance capped at 100 and the whole-number roll, and shows where speed, terminal guidance and ECCM decide a result." elevation="1">
+  <v-card class="panel missile-hit" data-summary="The hit chance of the race's missile designs and of one proposed missile against a typed target." elevation="1">
     <div class="panel-head">
       <span>Missile hit chance<provenance-mark :rule="rules.raw" /></span>
       <span class="text--secondary body-2">{{ count(rows.length) }} {{ rows.length === 1 ? 'missile' : 'missiles' }} · follows the filters and search above</span>

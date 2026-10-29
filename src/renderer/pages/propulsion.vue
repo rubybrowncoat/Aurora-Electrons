@@ -121,7 +121,7 @@
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
-        <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship the engines and fuel take, with the saved class beside them. A row opens to the engine as the game would build it and the tanks that hold its fuel. A mark beside speed, burn, range, endurance and BP says whether the figure is confirmed, estimated, assumed or unavailable, and the CSV keeps it." elevation="1">
+        <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship they take." elevation="1">
           <div class="panel-head">
             <span>Propulsion sets<v-chip v-if="result && result.run.incomplete && !searching" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip><v-chip v-if="propulsionAssumptions.length" x-small color="warning" outlined class="ml-2" data-tech="hypothetical-chip">Hypothetical tech</v-chip></span>
             <span class="d-flex align-center flex-wrap">
@@ -231,13 +231,13 @@
             <div v-for="line in basisRows" :key="line.label" class="provenance-basis__line"><provenance-mark :result="line.result" label /><span class="font-weight-medium">{{ line.label }}</span> {{ basisText(line.result) }}</div>
           </div>
           <div class="panel-foot caption text--secondary">
-            Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sizes step by 0.1 HS to 10 HS, by 0.25 HS to 20 HS and by 1 HS above, from the end of the stretch before, and every step is a whole number of thousandths, so no step drifts and each value is tried once. A researched limit that falls between two steps is not tried unless the Engines menu says so; then it is tried once, as the first or last value. The sweep line shows the values and the combinations before the counts that cannot reach the speed or fit the share are dropped, and a field that is wrong stops the search. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; its speed is confirmed when the save stores the same speed. A figure with nothing to work from, such as the range of a class without engines, shows a dash and is unavailable, never 0.
+            A row opens to the engine as the game would build it and the tanks that hold its fuel. A mark beside speed, burn, range, endurance and BP says whether the figure is confirmed, estimated, assumed or unavailable, and the CSV keeps it. Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sizes step by 0.1 HS to 10 HS, by 0.25 HS to 20 HS and by 1 HS above, from the end of the stretch before, and every step is a whole number of thousandths, so no step drifts and each value is tried once. A researched limit that falls between two steps is not tried unless the Engines menu says so; then it is tried once, as the first or last value. The sweep line shows the values and the combinations before the counts that cannot reach the speed or fit the share are dropped, and a field that is wrong stops the search. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; its speed is confirmed when the save stores the same speed. A figure with nothing to work from, such as the range of a class without engines, shows a dash and is unavailable, never 0.
           </div>
         </v-card>
 
         <mission-brief-panel :draft="briefDraft" :identity="briefOpening" :saved="briefSaved" :ahead="briefAhead" :selected="briefEntry ? briefEntry.uuid : null" :dirty="briefDirty" :can-save="briefCanSave" :problems="briefProblems" :evaluation="briefEvaluation" :preview="briefPreview" :accepted="briefAccepted" :presets="briefPresets" :size-unit="briefSizeUnit" :message="briefNotice" :conflict="briefConflict" :pending="pendingBrief" @select="selectBrief" @new="newBrief" @preset="previewBriefPreset" @field="setBriefField" @axes="setBriefAxes" @invalid="setBriefInvalid" @size-unit="briefSizeUnit = $event" @toggle="toggleBriefItem" @apply="applyBriefPreview" @cancel-preview="cancelBriefPreview" @save="saveBriefDraft(false)" @save-over="saveBriefDraft(true)" @remove="removeBrief" @move="moveBriefHere" @discard="discardPendingBrief" @keep="keepPendingBrief" />
 
-        <v-card class="panel" data-summary="The sets no other beats on the share of the ship the propulsion takes against speed or range, to see what extra speed or range costs in hull." elevation="1">
+        <v-card class="panel" data-summary="The sets no other beats on the share of the ship the propulsion takes against speed or range." elevation="1">
           <div class="panel-head">
             <span>Trade-off</span>
             <span class="d-flex align-center flex-wrap">
@@ -270,10 +270,10 @@
               <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ item.cost === null ? '—' : count(item.cost, 1) }}</span><provenance-mark :result="item.provenance.cost" /></template>
             </v-data-table>
           </div>
-          <div class="panel-foot caption text--secondary">A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures, with the saved class first, and the mark beside each figure keeps its status: a saved class's figures are observed, a designed set's BP is an estimate.</div>
+          <div class="panel-foot caption text--secondary">Use it to see what extra speed or range costs in hull. A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures, with the saved class first, and the mark beside each figure keeps its status: a saved class's figures are observed, a designed set's BP is an estimate.</div>
         </v-card>
 
-        <v-card class="panel" data-summary="The sets that meet the targets and that no other set beats on every axis picked from BP, propulsion tonnage, speed, range, endurance and payload, each axis taken as least or most as picked, so efficient alternatives can be weighed against one another without a score that hides the trade. Sets with the same figures stay side by side." data-pareto="panel" elevation="1">
+        <v-card class="panel" data-summary="The sets that meet the targets and that no other set beats on every axis picked." data-pareto="panel" elevation="1">
           <div class="panel-head">
             <span>Efficient sets<v-chip v-if="efficientProvisional && !searching" x-small color="warning" outlined class="ml-2" data-pareto="provisional-chip">Provisional</v-chip></span>
           </div>
@@ -317,12 +317,12 @@
               </td>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">A set is listed when no other set that meets the targets is as good on every axis picked and better on one; no score is added up. Each axis is taken as least or most as picked. A set with a figure that is not known on a picked axis takes no part, and is counted above. The comparison covers every set the search evaluated that meets the targets, not only the sets the table above lists, and stays provisional while the search has stopped early or when more sets are efficient than the comparison holds. Sets with the same figures on every axis picked are kept under the first found; open a row to read them. The payload is the hull, the same for every set of one search, so it never tells two sets apart. Changing an axis runs the search again.</div>
+          <div class="panel-foot caption text--secondary">The axes are BP, propulsion tonnage, speed, range, endurance and payload, each taken as least or most as picked, so efficient alternatives are weighed against one another without a score that hides the trade. A set is listed when no other set that meets the targets is as good on every axis picked and better on one; no score is added up. Each axis is taken as least or most as picked. A set with a figure that is not known on a picked axis takes no part, and is counted above. The comparison covers every set the search evaluated that meets the targets, not only the sets the table above lists, and stays provisional while the search has stopped early or when more sets are efficient than the comparison holds. Sets with the same figures on every axis picked are kept under the first found; open a row to read them. The payload is the hull, the same for every set of one search, so it never tells two sets apart. Changing an axis runs the search again.</div>
         </v-card>
 
         <v-row>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="The stock fuel tanks that hold the chosen set's fuel in the fewest HS, with their litres and cost, to fit the fuel a range or endurance needs." elevation="1">
+            <v-card class="panel" data-summary="The stock fuel tanks that hold the chosen set's fuel in the fewest HS." elevation="1">
               <div class="panel-head">
                 <span>Fuel tanks</span>
                 <v-chip v-if="selectedRow" small>{{ selectedSetLabel }}</v-chip>
@@ -357,11 +357,11 @@
                 </tbody>
               </v-simple-table>
               <div v-if="selectedRow && selectedRow.tankPackage" class="panel-body pt-3 caption text--secondary"><provenance-mark :result="selectedRow.provenance.tanks" label /><span class="ml-2">{{ tankPackageText(selectedRow) }}</span></div>
-              <div class="panel-foot caption text--secondary">Tanks are picked from the stock tanks the race holds: the package with the fewest HS that holds the litres the set needs, then the fewest BP, then the fewest tanks. Two tanks of a smaller size can beat one of a larger size, so the choice is never greedy by size. A package is met within a relative 1e-9 of the litres; the spare litres are what the whole tanks add. When the table behind the search runs out on a very large request the package is marked not proved. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
+              <div class="panel-foot caption text--secondary">Use it to fit the fuel a range or endurance needs. Each pick shows its litres and cost. Tanks are picked from the stock tanks the race holds: the package with the fewest HS that holds the litres the set needs, then the fewest BP, then the fewest tanks. Two tanks of a smaller size can beat one of a larger size, so the choice is never greedy by size. A package is met within a relative 1e-9 of the litres; the spare litres are what the whole tanks add. When the table behind the search runs out on a very large request the package is marked not proved. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="How fast the chosen set burns its fuel and how long it lasts at full power, half power and the cruise share, to see what a slower cruise buys." elevation="1">
+            <v-card class="panel" data-summary="How fast the chosen set burns its fuel, and how long it lasts at full power, half power and the cruise share." elevation="1">
               <div class="panel-head">
                 <span>Burn and endurance</span>
                 <v-chip v-if="selectedRow" small>{{ selectedSetLabel }}</v-chip>
@@ -387,12 +387,12 @@
                   </tr>
                 </tbody>
               </v-simple-table>
-              <div class="panel-foot caption text--secondary">The engines burn their power times the fuel per engine power hour every hour, scaled by the share of power in use, so a slower cruise lengthens the endurance and leaves the range as it is. The range is the fuel over the burn at full power, times the speed, times 3,600.</div>
+              <div class="panel-foot caption text--secondary">Use it to see what a slower cruise buys. The engines burn their power times the fuel per engine power hour every hour, scaled by the share of power in use, so a slower cruise lengthens the endurance and leaves the range as it is. The range is the fuel over the burn at full power, times the speed, times 3,600.</div>
             </v-card>
           </v-col>
         </v-row>
 
-        <v-card class="panel" data-summary="The jump drives the game would add to the finished hull, military and commercial, with their size, cost, crew and the ships they move." elevation="1">
+        <v-card class="panel" data-summary="The jump drives the game would add to the finished hull, military and commercial." elevation="1">
           <div class="panel-head">
             <span>Jump drive</span>
             <v-chip v-if="selectedRow" small>Hull with the propulsion: {{ count(jumpHullHS, 2) }} HS</v-chip>
@@ -433,7 +433,7 @@
               <div v-if="jumpAssumptions.length" class="warning--text" data-tech="jump-hypothetical">{{ jumpAssumptions.join('; ') }}. The figures above rest on it and are not the race's today.</div>
             </div>
           </template>
-          <div class="panel-foot caption text--secondary">A drive for a ship of S HS is S over (efficiency × the larger of 1 and (S / 20) to the power 0.25) HS. Its cost is S over the efficiency, times the squadron size and radius cost multipliers, times 5; its crew is twice its size, rounded; its HTK is the square root of its size, cut to a whole number. A commercial drive is five times the size and moves five times the ships. The game's automatic design starts from the hull's size, rounded up (a fifth of it for a commercial drive), and grows the drive by 1 HS until it moves the hull with the drive aboard. It uses the race's highest efficiency tech and the default squadron size and radius techs, whatever else the race has researched, and it leaves the armour as it is.</div>
+          <div class="panel-foot caption text--secondary">Each drive shows its size, cost, crew and the ships it moves. A drive for a ship of S HS is S over (efficiency × the larger of 1 and (S / 20) to the power 0.25) HS. Its cost is S over the efficiency, times the squadron size and radius cost multipliers, times 5; its crew is twice its size, rounded; its HTK is the square root of its size, cut to a whole number. A commercial drive is five times the size and moves five times the ships. The game's automatic design starts from the hull's size, rounded up (a fifth of it for a commercial drive), and grows the drive by 1 HS until it moves the hull with the drive aboard. It uses the race's highest efficiency tech and the default squadron size and radius techs, whatever else the race has researched, and it leaves the armour as it is.</div>
         </v-card>
       </template>
     </v-container>

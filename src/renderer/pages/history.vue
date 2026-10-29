@@ -40,9 +40,9 @@
         The latest save couldn't be read for a snapshot (the game may have been writing it), so this history is missing it. The app tries again at the next save. The console has the details.
       </v-alert>
 
-      <v-card v-if="campaignView" class="panel history-campaign" data-summary="Which campaign this save belongs to, the branches of its recorded timeline, the saves attached to it, and any history still waiting for an answer on where it belongs. Saves are matched by what they hold, never by where they sit on disk." elevation="1">
+      <v-card v-if="campaignView" class="panel history-campaign" data-summary="Which campaign this save belongs to, its branches and the saves attached to it." elevation="1">
         <div class="panel-head">
-          <span>Campaign<v-chip v-if="campaignView.carriedOver" x-small outlined class="ml-2" title="The history recorded before campaigns were told apart was assumed to belong to this campaign">carried over</v-chip></span>
+          <span>Campaign<v-chip v-if="campaignView.carriedOver" x-small outlined class="ml-2" title="History recorded before campaigns were tracked is assumed to belong to this campaign">carried over</v-chip></span>
           <span class="caption text--secondary">{{ campaignView.title }}</span>
         </div>
         <div class="panel-body">
@@ -101,7 +101,7 @@
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
         </v-alert>
 
-        <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Every race recorded in this game on one chosen measure over time, to see who is ahead of the race and who is catching up." elevation="1">
+        <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Every race recorded in this game on one chosen measure over time." elevation="1">
           <div class="panel-head">
             <span>Rivals<provenance-mark :rule="rivals.rule" /> <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
             <span class="legend">
@@ -164,7 +164,7 @@
         </v-card>
       </template>
 
-      <v-card class="panel history-milestones" data-summary="Notes pinned to an exact game time, each with a type and, if wanted, a link to a colony, system, fleet, ship or log event. A marker sits at the exact time on every chart whatever the samples are, the nearest sample is shown beside it, and a link to an object that has gone stays on the note as unresolved and is never moved to another object by name." elevation="1">
+      <v-card class="panel history-milestones" data-summary="Notes pinned to an exact game time, each with a type and an optional link to an object." elevation="1">
         <div class="panel-head">
           <span>Milestones</span>
           <span class="caption text--secondary" data-milestone-count>{{ milestoneCaption }}</span>
@@ -251,7 +251,7 @@
 
       <colony-series :database="database" :config="config" :game-id="GameID" :race-id="RaceID" :game-time="GameTime" :resolved="resolved" :view="colonyBudget" :cap="retentionView.profile.cap" :date="date" :separator="separator" @changed="colonyChanges++" />
 
-      <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is, with the colony series, the game log's event archive and the observation record kept beside it. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned. A cap on the events the archive keeps cuts the oldest ones when the race is next captured." elevation="1">
+      <v-card class="panel history-retention" data-summary="How many samples the race's history keeps, how far apart they are and how large the record is." elevation="1">
         <div class="panel-head">
           <span>Retention</span>
           <span class="caption text--secondary">{{ retentionView.sampling }}</span>
@@ -286,7 +286,7 @@
             </table>
           </div>
 
-          <div class="caption text--secondary mt-2" data-retention-limits>A profile applies only to samples that are observed or still kept. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed. A backup taken before a clear still holds what the clear removed. A Merge restore brings back the removed snapshots and any event archive or observation record the clear removed whole; a record of either that the clear only cut is kept as it is under Merge and comes back with a Replace restore.</div>
+          <div class="caption text--secondary mt-2" data-retention-limits>A retention profile caps the samples one series keeps, and applies only to samples that are observed or still kept. The record covers the colony series, the game log's event archive and the observation record kept beside it. A cap on the events the archive keeps cuts the oldest ones when the race is next captured. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed. A backup taken before a clear still holds what the clear removed. A Merge restore brings back the removed snapshots and any event archive or observation record the clear removed whole; a record of either that the clear only cut is kept as it is under Merge and comes back with a Replace restore.</div>
 
           <v-alert v-if="retentionChange" type="warning" outlined dense class="mt-3" data-retention-confirm>
             <div>Change the retention profile from {{ retentionChange.current.label }} ({{ count(retentionChange.current.cap, 0) }}) to {{ retentionChange.picked.label }} ({{ count(retentionChange.picked.cap, 0) }})?</div>
@@ -313,7 +313,7 @@
         </div>
       </v-card>
 
-      <v-card class="panel history-backup" data-summary="A file of the campaigns, the history of each race and what it knows of the others, and the planners' annotations, to keep or to move to another computer. A restore shows what it would add, keep and replace for each campaign and branch before anything is written, and keeps a copy of what it touches first. The save is never touched." elevation="1">
+      <v-card class="panel history-backup" data-summary="A file of the campaigns, the race histories and the planners' annotations, to keep or to move to another computer." elevation="1">
         <div class="panel-head">
           <span>Backup</span>
           <span class="caption text--secondary">Export the history, or restore it from a file</span>
@@ -1469,7 +1469,7 @@ export default {
         key: 'minerals',
         title: 'Mineral stockpiles',
         rules: ['history.stockpile', 'history.mineralChange'],
-        summary: 'Stockpiles of the selected minerals over time, in tonnes or as the percent change from the first snapshot of the span, to spot shortages and surpluses before they hold up production and to compare how fast the minerals move. Each mineral keeps its own colour.',
+        summary: 'Stockpiles of the selected minerals over time.',
         compare: { scales: MINERAL_SCALES, resetDisabled: this.span === 0, csvDisabled: !this.mineralIds.length || !this.snapshots.length },
         picker: {
           model: this.mineralIds,
@@ -1527,7 +1527,7 @@ export default {
           key: 'population',
           title: 'Population',
           rules: ['history.population', 'history.colonies'],
-          summary: 'How the population and number of colonies have grown over the years, to show whether the expansion keeps pace.',
+          summary: 'The population and the number of colonies over the years.',
           data: { datasets: [line('Population', pick('population'), 0), line('Colonies', pick('colonies'), 1, 'y1')] },
           series: [field('population', 'M people'), field('colonies', 'colonies')],
           options: this.options({ y: people, y1: (value) => `${value}` }),
@@ -1536,7 +1536,7 @@ export default {
           key: 'wealth',
           title: 'Wealth',
           rules: ['history.treasury', 'history.income'],
-          summary: 'The treasury and annual income over time, to show whether the race is saving, spending or running short.',
+          summary: 'The treasury and annual income over time.',
           data: { datasets: [line('Treasury', pick('wealth'), 0), line('Annual income', pick('income'), 1, 'y1')] },
           series: [field('wealth', 'wealth'), field('income', 'wealth/yr')],
           options: this.options({ y: compact, y1: compact }),
@@ -1545,7 +1545,7 @@ export default {
           key: 'fleet',
           title: 'Fleet tonnage',
           rules: ['history.fleetTonnage'],
-          summary: 'The military and commercial tonnage fielded over time, to show how the fleet has grown or shrunk.',
+          summary: 'The military and commercial tonnage fielded over time.',
           data: { datasets: [line('Military', pick('militaryTons'), 0), line('Commercial', pick('commercialTons'), 1)] },
           series: [field('militaryTons', 't'), field('commercialTons', 't')],
           options: this.options({ y: (value) => `${compact(value)} t` }),
@@ -1554,7 +1554,7 @@ export default {
           key: 'research',
           title: 'Research and exploration',
           rules: ['history.research', 'history.systems'],
-          summary: 'The research output and the number of systems known over time, to show how fast the race advances and explores.',
+          summary: 'The research output and the number of systems known over time.',
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
           series: [field('research', 'RP'), field('systems', 'systems')],
           options: this.options({ y: compact, y1: (value) => `${value}` }),
@@ -1564,7 +1564,7 @@ export default {
           key: 'installations',
           title: 'Installations',
           rules: ['history.installations'],
-          summary: 'How many installations of the selected types have been built over time, to track industrial growth.',
+          summary: 'How many installations of the selected types have been built over time.',
           picker: { model: this.chosenInstallations, options: this.installationOptions, change: this.setInstallations },
           extraNotes: this.installationNotes,
           data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => valueOrNull(installationResult(snapshot, id, this.installationNames[id] || `installation ${id}`))), index)) },
@@ -1575,7 +1575,7 @@ export default {
           key: 'logistics',
           title: 'Fuel and maintenance supplies',
           rules: ['history.stockpile'],
-          summary: 'The fuel and maintenance supply stocks over time, to show whether the fleets can keep operating.',
+          summary: 'The fuel and maintenance supply stocks over time.',
           data: { datasets: [line('Fuel (L)', pick('fuel'), 0), line('MSP', pick('msp'), 1, 'y1')] },
           series: [field('fuel', 'L'), field('msp', 'MSP')],
           options: this.options({ y: (value) => `${compact(value)} L`, y1: compact }),

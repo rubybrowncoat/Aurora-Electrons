@@ -54,7 +54,7 @@
         <div class="resource-reserves__form">
           <v-text-field v-for="resource in resources" :key="resource.key" v-model="draft.reserves[resource.key]" :label="`${resource.label} (${resource.unit})`" dense outlined hide-details class="resource-reserves__reserve" :data-reserve-input="resource.key" />
         </div>
-        <div class="resource-reserves__title mt-3">Timed withdrawals and refills: the day counts from now</div>
+        <div class="resource-reserves__title mt-3">Withdrawals and refills, in days from now</div>
         <div v-for="(line, index) in draft.plans" :key="index" class="resource-reserves__form mb-2" :data-reserve-plan="index">
           <v-text-field v-model="line.label" label="Label" :counter="labelLength" dense outlined hide-details class="resource-reserves__label" />
           <v-select v-model="line.resource" :items="resourceItems" label="Resource" dense outlined hide-details class="resource-reserves__resource" />
@@ -124,7 +124,7 @@
           <td :colspan="columns.length" class="pa-3" :data-reserve-detail="item.key">
             <div class="resource-reserves__regions">
               <section class="resource-reserves__region" data-reserve-minimums>
-                <div class="resource-reserves__title">Three minimums, kept apart</div>
+                <div class="resource-reserves__title">Game minimum, class minimum and player reserve</div>
                 <div class="resource-reserves__line"><span class="text--secondary">Game minimum:</span> {{ gameText(item) }}</div>
                 <div class="resource-reserves__line"><span class="text--secondary">Class minimum (reference figure):</span> {{ classText(item) }}</div>
                 <div class="resource-reserves__line"><span class="text--secondary">Player reserve:</span> {{ playerText(item) }}</div>
@@ -176,7 +176,7 @@
       <div v-for="note in read.notes" :key="note.uuid" class="px-4 caption text--secondary mt-1" data-reserve-unreadable>{{ note.reason }}</div>
 
       <div class="panel-foot caption text--secondary" data-reserve-limits>
-        The game minimum is the reserve the save stores for a colony's mineral; a colony has none for fuel or maintenance supplies. The class minimum is what a ship class keeps back when it gives fuel or supplies, read as it is from the classes in service, and is no minimum of a colony's stock; when some classes record none it is shown as at least the figure. The player reserve is the player's own record: it is not in the save, and nothing in the game stops a ship or a mass driver from taking it. Each source's stock is spent once over the days: deliveries on a day arrive first, then the withdrawals in the order of the scenario names, then production; a withdrawal takes what the stock holds above the reserve and is not retried. The refineries draw on the colony's Sorium (1 t for 2,000 L of fuel) and the maintenance facilities on its Duranium, Uridium and Gallicite, the same stocks as the planned withdrawals and after them, so a mineral exported leaves less to make from; a colony whose production cannot be worked out is listed as not known on the minerals it would use. A day is a daily tick, so a delivery or withdrawal due on day 0 counts on day 1. A haul takes what its source gives on the day it leaves and delivers that on the day its time gives, never before it leaves, and a delivery on the day of departure is spent only after the source of the haul has given it; hauls that wait on each other in a cycle deliver a day later; the colony a haul delivers to is listed with it. A delivery with no time, one after the period, one whose haul leaves after the period and a withdrawal after the period are listed apart and not counted. A record is held to its colony only while the save shows it is that colony or the player confirmed it.
+        Use it to see on which day a planned withdrawal would leave a colony short. The player's records are local and give the game no order. The game minimum is the reserve the save stores for a colony's mineral; a colony has none for fuel or maintenance supplies. The class minimum is what a ship class keeps back when it gives fuel or supplies, read as it is from the classes in service, and is no minimum of a colony's stock; when some classes record none it is shown as at least the figure. The player reserve is the player's own record: it is not in the save, and nothing in the game stops a ship or a mass driver from taking it. Each source's stock is spent once over the days: deliveries on a day arrive first, then the withdrawals in the order of the scenario names, then production; a withdrawal takes what the stock holds above the reserve and is not retried. The refineries draw on the colony's Sorium (1 t for 2,000 L of fuel) and the maintenance facilities on its Duranium, Uridium and Gallicite, the same stocks as the planned withdrawals and after them, so a mineral exported leaves less to make from; a colony whose production cannot be worked out is listed as not known on the minerals it would use. A day is a daily tick, so a delivery or withdrawal due on day 0 counts on day 1. A haul takes what its source gives on the day it leaves and delivers that on the day its time gives, never before it leaves, and a delivery on the day of departure is spent only after the source of the haul has given it; hauls that wait on each other in a cycle deliver a day later; the colony a haul delivers to is listed with it. A delivery with no time, one after the period, one whose haul leaves after the period and a withdrawal after the period are listed apart and not counted. A record is held to its colony only while the save shows it is that colony or the player confirmed it.
       </div>
     </template>
   </v-card>
@@ -194,8 +194,8 @@ import { mineralFeeds, supplyFeeds } from '../../utilities/resource-feeds'
 import { LABEL_LENGTH, NOTE_LENGTH, PLANS_PER_RECORD, PLAN_KINDS, SCENARIO_LENGTH, confirmSource, deleteReserve, entriesForLedger, noteChoices, rebaseReserve, saveReserve, scenarioNames } from '../../utilities/resource-reserves'
 
 const SUMMARIES = {
-  supplies: 'The fuel and the maintenance supplies each colony holds, set beside the minimum of the game, the minimum of the ship classes and the reserve the player keeps. Use it to see on which day a planned withdrawal would leave a colony short; the records are local and give the game no order.',
-  minerals: 'The minerals each colony holds with the packets and hauls on their way, set beside the reserve the game stores, the minimum of the ship classes and the reserve the player keeps. Use it to see on which day a planned withdrawal would leave a colony short; the records are local and give the game no order.',
+  supplies: 'The fuel and maintenance supplies each colony holds, set beside the minimums and the reserve the player keeps.',
+  minerals: 'The minerals each colony holds with the packets and hauls on their way, set beside the reserves.',
 }
 
 const TITLES = { supplies: 'Reserves and timed ledger: fuel and maintenance supplies', minerals: 'Reserves and timed ledger: minerals' }

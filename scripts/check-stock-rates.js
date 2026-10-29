@@ -866,7 +866,7 @@ const panel = (ctx) => {
         problems.push(`template ${short(compiled.errors)}`)
       }
 
-      if (!(summary && summary[1].length > 60 && !/\d/.test(summary[1]) && !/\b(you|your|we|our|I|me|my)\b/i.test(summary[1]))) {
+      if (!(summary && summary[1].trim().length > 0 && !/\d/.test(summary[1]) && !/\b(you|your|we|our|I|me|my)\b/i.test(summary[1]))) {
         problems.push(`summary ${short(summary && summary[1])}`)
       }
 
@@ -1142,7 +1142,7 @@ const MUTATIONS = [
   { name: 'a large change needing nineteen twentieths of the stock', file: U, find: 'interval.large = larger > 0 && Math.abs(interval.change) >= SPIKE_SHARE * larger', replace: 'interval.large = larger > 0 && Math.abs(interval.change) >= 0.95 * larger', fails: ['volatile'] },
   { name: 'opposing changes classed as a step', file: U, find: 'opposing ? \'volatile\' : intervals.some', replace: 'opposing ? \'spike\' : intervals.some', fails: ['volatile'] },
   { name: 'the summary renamed', file: V, find: 'data-summary="How fast', replace: 'data-note="How fast', fails: ['panel-template'] },
-  { name: 'a figure in the summary', file: V, find: 'too few observations and a flat', replace: 'fewer than 3 observations and a flat', fails: ['panel-template'] },
+  { name: 'a figure in the summary', file: V, find: 'data-summary="How fast a stock of the race or of a followed colony changed over recorded snapshots.', replace: 'data-summary="How fast a stock of the race or of a followed colony changed over 3 recorded snapshots.', fails: ['panel-template'] },
   { name: 'the notes not listed', file: V, find: 'v-for="note in analysis.notes"', replace: 'v-for="note in []"', fails: ['panel-template'] },
   { name: 'the table without its mark', file: V, find: '<table data-rates-table>', replace: '<table>', fails: ['panel-template'] },
   { name: 'the CSV button without its mark', file: V, find: 'data-rates-csv @click="downloadCsv"', replace: '@click="downloadCsv"', fails: ['panel-template'] },

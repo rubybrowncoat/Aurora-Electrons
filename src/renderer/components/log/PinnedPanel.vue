@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel pinned" data-summary="The events pinned on this branch of the campaign, kept as copies so that each stays readable after the save no longer holds it. Each shows whether the open save still holds it, a note of its own, and a way to unpin it." elevation="1">
+  <v-card class="panel pinned" data-summary="The events pinned on this branch, kept as copies." elevation="1">
     <div class="panel-head">
       <div class="subtitle-2">Pinned <span v-if="!unavailable" class="caption text--secondary">{{ count(entries.length) }} on this branch</span></div>
     </div>
@@ -25,7 +25,7 @@
     </div>
     <div v-if="message" class="px-4 pb-2 error--text caption" role="alert">{{ message }}</div>
     <div class="panel-foot caption text--secondary">
-      A pin finds its event by its content (the time, type, message and places), never by its place in the save, and holds a copy. One pin covers a group of identical events. A pin on this branch is shown only with this campaign and race, and a branch forked later starts with the pins of the events that had happened by the fork.
+      A pin holds a copy, so the event stays readable after the save no longer holds it. Each pin shows whether the open save still holds the event, carries a note of its own and can be unpinned. A pin finds its event by its content (the time, type, message and places), never by its place in the save. One pin covers a group of identical events. A pin on this branch is shown only with this campaign and race, and a branch forked later starts with the pins of the events that had happened by the fork.
     </div>
   </v-card>
 </template>

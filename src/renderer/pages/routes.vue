@@ -46,7 +46,7 @@
                 <v-btn outlined aria-label="Route options" v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon>Options<span v-if="activeOptionCount">&nbsp;({{ activeOptionCount }})</span></v-btn>
               </template>
               <v-card class="pa-4">
-                <div class="subtitle-2">As a fleet's movement settings</div>
+                <div class="subtitle-2">Movement settings</div>
                 <v-checkbox v-for="option in optionList" :key="option.key" :input-value="options[option.key]" dense hide-details @change="(value) => setOption(option.key, value)">
                   <template #label>
                     <div>
@@ -73,7 +73,7 @@
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
-            <v-card class="panel" data-summary="The known systems shaded by distance from the first stop, with the planned route drawn across them. Click a system to extend the route." elevation="1">
+            <v-card class="panel" data-summary="The known systems shaded by distance from the first stop, with the planned route drawn across them." elevation="1">
               <div class="panel-head">
                 <span>Route map<provenance-mark rule="route.reachShade" /></span>
                 <span class="legend">
@@ -92,7 +92,7 @@
           </v-col>
         </v-row>
 
-        <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way. It shows how long the whole journey will take." data-leg-detail elevation="1">
+        <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way." data-leg-detail elevation="1">
           <div class="panel-head">
             <span>Route detail<provenance-mark rule="route.detailTotal" label /></span>
           </div>
@@ -134,7 +134,7 @@
           <div class="panel-foot caption text--secondary">Times are flying {{ speedText }}, counted from the first stop. {{ shockFoot }}<provenance-mark :result="speedResult" /></div>
         </v-card>
 
-        <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time. Click a row to add it as a stop." elevation="1" data-distance-panel>
+        <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time." elevation="1" data-distance-panel>
           <div class="panel-head">
             <span>Distances from {{ origin ? origin.name : '—' }}<provenance-mark rule="route.reachableCount" label /></span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />

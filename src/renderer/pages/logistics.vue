@@ -20,7 +20,7 @@
         <template v-if="view === 'fuel'">
           <v-row>
             <v-col cols="12" lg="5">
-              <v-card class="panel" data-summary="The fuel the refineries and harvesters make each year set against what the ships burn. Use it to see whether the supply keeps up with demand." elevation="1">
+              <v-card class="panel" data-summary="The fuel the refineries and harvesters make each year, set against what the ships burn." elevation="1">
                 <div class="panel-head"><span>Fuel balance per year</span></div>
                 <div class="panel-body">
                   <div v-for="group in fuelBalance" :key="group.label" class="balance-group">
@@ -41,7 +41,7 @@
               </v-card>
             </v-col>
             <v-col cols="12" lg="7">
-              <v-card class="panel" data-summary="Estimated yearly fuel burn for each ship class, two ways. Use it to find the classes that drain the fuel the most." elevation="1">
+              <v-card class="panel" data-summary="Estimated yearly fuel burn for each ship class, two ways." elevation="1">
                 <div class="panel-head">
                   <span>Burn by class<provenance-mark rule="logistics.fullPowerBurn" label /></span>
                   <span class="legend">
@@ -57,7 +57,7 @@
             </v-col>
           </v-row>
 
-          <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each colony. Use it to see where fuel is made and where Sorium is about to run out." elevation="1">
+          <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each colony." elevation="1">
             <div class="panel-head">
               <span>Colony fuel and refineries<provenance-mark rule="logistics.refineryOutput" label /></span>
               <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining<template v-if="refineryTotals.unknown"> · {{ refineryTotals.unknown }} not known</template></v-chip>
@@ -93,11 +93,11 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              A refinery makes {{ litres(raceFuelProduction) }} a year, times the colony's production modifiers (governor, sector, workers, species), using a tonne of Sorium per 2,000 L. Refining stops when the Sorium runs out.
+              Use it to see where fuel is made and where Sorium is about to run out. A refinery makes {{ litres(raceFuelProduction) }} a year, times the colony's production modifiers (governor, sector, workers, species), using a tonne of Sorium per 2,000 L. Refining stops when the Sorium runs out.
             </div>
           </v-card>
 
-          <v-card class="panel" data-summary="Tanker ships with the fuel each holds, its class minimum, local reserve and servable surplus, or why it cannot serve. Use it to tell stored fuel from fuel free to give, and to keep a reserve back on a ship or on a ship class." elevation="1" data-donor-panel>
+          <v-card class="panel" data-summary="Tanker ships with the fuel each holds, and the fuel free to give or why it cannot serve." elevation="1" data-donor-panel>
             <div class="panel-head">
               <span>Tankers and fuel service<provenance-mark rule="fuelService.eligibleSurplus" label /></span>
               <v-chip v-if="donorReport" small data-donor-chip><span data-donor-value="ships">{{ donorReport.totals.ships }}</span> {{ donorReport.totals.ships === 1 ? 'tanker' : 'tankers' }} · <span data-donor-value="chip">{{ litres(donorReport.totals.stored.value) }}</span> stored</v-chip>
@@ -144,16 +144,16 @@
               </v-data-table>
               <fuel-reserves :key="`${GameID}-${RaceID}`" @reserves="fuelReserves = $event" />
               <div class="panel-foot caption text--secondary">
-                Stored fuel is the fuel aboard now and no restriction lowers it. The class minimum is the fuel the game keeps in a donor, and the local reserve a level the player keeps aboard, kept as a record for a ship or for a ship class: a ship's own record holds over its class's, and a ship with none reads as none set. The eligible surplus is the whole litres above the larger of the two, given only when the ship has the Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0 and fuel above the class minimum, and a rate under 20,000 LPH serves recipients of 20 HS or less only. A ship that cannot serve is shown with the reason, not as empty. A ship with no engines is a service site and has no range of its own. The damaged systems are read from the ship; no saved game has one yet. The ship's refuel mode is not read. {{ versionNote }}
+                Use it to tell stored fuel from fuel free to give, and to keep a reserve back on a ship or on a ship class. Stored fuel is the fuel aboard now, and no restriction lowers it. The class minimum is the fuel the game keeps in a donor, and the local reserve a level the player keeps aboard, kept as a record for a ship or for a ship class: a ship's own record holds over its class's, and a ship with none reads as none set. The eligible surplus is the whole litres above the larger of the two, given only when the ship has the Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0 and fuel above the class minimum, and a rate under 20,000 LPH serves recipients of 20 HS or less only. A ship that cannot serve is shown with the reason, not as empty. A ship with no engines is a service site and has no range of its own. The damaged systems are read from the ship; no saved game has one yet. The ship's refuel mode is not read. {{ versionNote }}
               </div>
             </template>
           </v-card>
 
-          <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with the rate each works at, the fuel that fits into its tanks and the deposit over a chosen period, and how soon its tanks fill or its deposit runs out. Use it to judge which harvesters are worth keeping where they are." elevation="1">
+          <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with the rate each works at, its tank room and deposit, and when its tanks fill or its deposit runs out." elevation="1">
             <div class="panel-head">
               <span>Sorium harvesters<provenance-mark rule="logistics.harvesterOutput" label /><provenance-mark rule="logistics.harvesterObtainable" /></span>
               <span class="d-flex align-center">
-                <v-chip small class="mr-3">{{ formulaVersion ? 'Rates follow the 2.7 rules' : 'Rates are estimates' }}</v-chip>
+                <v-chip small class="mr-3">{{ formulaVersion ? 'Rates follow the game rules' : 'Rates are estimates' }}</v-chip>
                 <span class="caption text--secondary mr-2">Fits over</span>
                 <v-btn-toggle v-model="harvesterHorizon" mandatory dense>
                   <v-btn v-for="option in horizonOptions" :key="option.years" :value="option.years" small>{{ option.label }}</v-btn>
@@ -204,13 +204,13 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Rate is what a harvester makes while it works: each undamaged module at the racial Fuel Production rate, times the commander's and naval admin Mining bonuses (a fleet with no command takes the race's root command), the deposit's accessibility and the share of crew aboard when short-crewed. It is not fuel that fits. The fuel that fits over the chosen period is held to the Sorium in the deposit and to the room in the undamaged tanks, and a ship with any room left keeps harvesting. The deposit is the gas giant or super-Jovian at the fleet's coordinates; where the race has not surveyed it the output is unknown (—), not 0. Ships over one deposit share it, and the fall in accessibility once less than half of it is left is not applied. {{ versionNote }}
+              Use it to judge which harvesters are worth keeping where they are. Rate is what a harvester makes while it works: each undamaged module at the racial Fuel Production rate, times the commander's and naval admin Mining bonuses (a fleet with no command takes the race's root command), the deposit's accessibility and the share of crew aboard when short-crewed. It is not fuel that fits. The fuel that fits over the chosen period is held to the Sorium in the deposit and to the room in the undamaged tanks, and a ship with any room left keeps harvesting. The deposit is the gas giant or super-Jovian at the fleet's coordinates; where the race has not surveyed it the output is unknown (—), not 0. Ships over one deposit share it, and the fall in accessibility once less than half of it is left is not applied. {{ versionNote }}
             </div>
           </v-card>
         </template>
 
         <template v-else-if="view === 'maintenance'">
-          <v-card class="panel" data-summary="The places where ships are maintained, a colony with maintenance facilities or a ship with maintenance modules, with their supply stock, production and upkeep. Open a row to see its capacity sources, the stock providers in the order they are drawn, and what each ship takes. Use it to spot locations that will run short of maintenance supplies." elevation="1">
+          <v-card class="panel" data-summary="The colonies and ships that maintain ships, with their supply stock, production and upkeep." elevation="1">
             <div class="panel-head">
               <span>Maintenance locations<provenance-mark rule="logistics.maintenanceLocation" label /></span>
               <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
@@ -274,13 +274,13 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              {{ groupingText }} Ships use supplies where their location is: the stock of its colonies first (the fullest colony first), then the supply ships there (the fullest first), then their own. The supply caption is the whole stock of the supply ships; their class minimums show in the open row. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity × the economic modifier / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}. Production here counts the minerals in stock alone; the panel below adds mining, packets and hauls on the days they arrive.
+              Use it to spot locations that will run short of maintenance supplies. Open a row to see its capacity sources, the stock providers in the order they are drawn, and what each ship takes. {{ groupingText }} Ships use supplies where their location is: the stock of its colonies first (the fullest colony first), then the supply ships there (the fullest first), then their own. The supply caption is the whole stock of the supply ships; their class minimums show in the open row. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity × the economic modifier / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}. Production here counts the minerals in stock alone; the panel below adds mining, packets and hauls on the days they arrive.
             </div>
           </v-card>
 
           <msp-supply :key="`${GameID}-${RaceID}`" :rows="mspSupplyTable" :state="mspSupplyState" :problems="mspSupply ? mspSupply.problems : []" :years="mspHorizon" :horizons="mspHorizonOptions" @years="mspHorizon = $event" @retry="retryMspSupply" />
 
-          <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships carrying maintenance supplies, with how much each holds. Use it to see how much spare stock could be sent to a colony in need." elevation="1">
+          <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships carrying maintenance supplies, with how much each holds." elevation="1">
             <div class="panel-head">
               <span>Supply ships</span>
               <v-chip small>{{ count(supplyTotal.value) }} MSP above their minimums<template v-if="supplyTotal.unknown"> · {{ supplyTotal.unknown }} not known<provenance-mark :result="supplyTotal.result" /></template></v-chip>

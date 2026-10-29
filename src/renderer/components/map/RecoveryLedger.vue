@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel recovery-ledger" data-summary="The life pods and the wrecks in the systems the race knows, each with the status the player gives it: pending, acknowledged or a personal recovery. Use it to keep track of what is worth a recovery; a status is a note, and gives the game no order." elevation="1">
+  <v-card class="panel recovery-ledger" data-summary="The life pods and wrecks in the systems the race knows, each with a status." elevation="1">
     <div class="panel-head">
       <span>Recovery ledger</span>
       <v-chip v-if="view && scope && !view.error && !repositoryError" small data-recovery-count>{{ count(presentRows.length) }} in the save, {{ count(keptCount) }} with a status</v-chip>
@@ -81,7 +81,7 @@
       <div v-if="view.notes.length" class="px-4 caption text--secondary" data-recovery-notes>{{ view.notes.length }} {{ view.notes.length === 1 ? 'status' : 'statuses' }} written by another version of the app or not valid {{ view.notes.length === 1 ? 'is' : 'are' }} not listed.</div>
 
       <div class="px-4 py-3 caption text--secondary" data-recovery-foot>
-        A status is the player's own note for this race on this branch of the campaign: it gives the game no order and changes nothing in the save. Pending means no status was kept. An object that is no longer in the save is listed as no longer observed with its status as it was kept: the save does not say why it is gone, so no outcome is assumed, and the same id and details seen again are the same object again. What a wreck holds and how long a pod's life support lasts are not shown; a field the race cannot see is shown as Unknown. {{ observationRule }}
+        Use it to keep track of what is worth a recovery. A status is the player's own note for this race on this branch: it gives the game no order and changes nothing in the save. The statuses are pending (none kept), acknowledged and a personal recovery. An object that is no longer in the save is listed as no longer observed, with its status as it was kept. The save does not say why it is gone, so no outcome is assumed, and the same ID and details seen again are the same object again. What a wreck holds and how long a pod's life support lasts are not shown; a field the race cannot see is shown as Unknown. {{ observationRule }}
       </div>
     </template>
   </v-card>

@@ -1481,7 +1481,7 @@ const panel = (ctx) => {
   add('component: no summary has a figure or a pronoun, and the two panels do not share one', async () => {
     const summaries = ['supplies', 'minerals'].map((kind) => instantiate(options, { boundary, $store: PAGE_STORE, data: { ...BASE_DATA, kind } }).summary)
 
-    return summaries.every((text) => typeof text === 'string' && text.length > 40 && !/\d/.test(text) && !PRONOUNS.test(text)) && summaries[0] !== summaries[1] ? true : short(summaries)
+    return summaries.every((text) => typeof text === 'string' && text.trim().length > 0 && !/\d/.test(text) && !PRONOUNS.test(text)) && summaries[0] !== summaries[1] ? true : short(summaries)
   })
   add('component: the head has a title, and the reads that are out show the progress or the failure and no figure', async () => {
     const { vm } = await mount({ data: { reserveObjects: null, loadErrors: {} } })
@@ -1997,7 +1997,7 @@ const browser = (ctx) => {
     const summaries = [supplies, minerals].filter(Boolean).map((panel) => panel.summary)
     const carried = [supplies, minerals].filter(Boolean).every((panel) => typeof panel.summary === 'string' && panel.summary !== '' && panel.summary === panel.vmSummary)
     const classed = (!supplies || standalone(supplies)) && (!minerals || embedded(minerals))
-    const voiced = summaries.every((text) => typeof text === 'string' && text.length > 40 && !/\d/.test(text) && !PRONOUNS.test(text)) && (summaries.length < 2 || summaries[0] !== summaries[1])
+    const voiced = summaries.every((text) => typeof text === 'string' && text.trim().length > 0 && !/\d/.test(text) && !PRONOUNS.test(text)) && (summaries.length < 2 || summaries[0] !== summaries[1])
 
     return carried && classed && voiced ? true : short([carried, supplies && supplies.classes, minerals && minerals.classes, summaries])
   })

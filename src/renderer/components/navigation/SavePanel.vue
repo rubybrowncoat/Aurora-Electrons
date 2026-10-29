@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel save-panel" data-summary="The save this window shows and the saves opened before it. Use it to open another save file, return to an earlier one, or retry one that could not be reached or read." elevation="1" data-save-panel>
+  <v-card class="panel save-panel" data-summary="The save this window shows and the saves opened before it." elevation="1" data-save-panel>
     <div class="panel-head">
       <span>Save</span>
       <v-btn small outlined :disabled="busy" data-save-choose @click="choose"><v-icon small left>mdi-folder-open-outline</v-icon>Open a save…</v-btn>
@@ -43,7 +43,7 @@
       </v-list-item>
     </v-list>
     <div v-else-if="loaded" class="panel-body text--secondary pt-0">No other saves opened yet.</div>
-    <div class="panel-foot text--secondary caption">A save is only read: opening one never moves, copies or edits the file. A save already open in another window is brought to the front instead of opened twice.</div>
+    <div class="panel-foot text--secondary caption">Use it to open another save file, return to an earlier one, or retry one that could not be reached or read. A save is only read: opening one never moves, copies or edits the file. A save already open in another window is brought to the front instead of opened twice.</div>
   </v-card>
 </template>
 

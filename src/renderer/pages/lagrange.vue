@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="A map of the known systems, shaded by how many stable Lagrange points each has. Use it to see where the ships can already jump between points and where more would help." elevation="1">
+        <v-card class="panel" data-summary="A map of the known systems, shaded by how many stable Lagrange points each has." elevation="1">
           <div class="panel-head">
             <span>Lagrange map<provenance-mark rule="lagrange.pointCounts" /></span>
             <span class="legend">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="bodiesPanel" class="panel" data-summary="The planets and moons that have, or could be given, a stable Lagrange point, and how long stabilising each would take. Use it to choose which to stabilise." elevation="1">
+        <v-card ref="bodiesPanel" class="panel" data-summary="The planets and moons that have, or could be given, a stable Lagrange point, with the time to stabilise each." elevation="1">
           <div class="panel-head">
             <span>Planets and moons<provenance-mark rule="lagrange.stabilisationDays" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -67,11 +67,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A ship with a jump point stabilisation module takes 60 / √mass months (of 30 days) at the body, times 2 − its captain's Production bonus, and longer when under-crewed (class crew / crew aboard). In a fleet the quickest ship counts; ships don't add up. Planets and moons of 0.25 Earth masses or more qualify. {{ timesNote }} Systems are generated with a stable point at every super-jovian and every gas giant above 200 Earth masses.<provenance-mark :result="best.result" />
+            Use it to choose which bodies to stabilise. A ship with a jump point stabilisation module takes 60 / √mass months (of 30 days) at the body, times 2 − its captain's Production bonus, and longer when under-crewed (class crew / crew aboard). In a fleet the quickest ship counts; ships don't add up. Planets and moons of 0.25 Earth masses or more qualify. {{ timesNote }} Systems are generated with a stable point at every super-jovian and every gas giant above 200 Earth masses.<provenance-mark :result="best.result" />
           </div>
         </v-card>
 
-        <v-card v-if="shipRows.length" class="panel" data-summary="Ships with a jump point stabilisation module, their captains and crews, and what each is doing now. It shows which ship to send to stabilise a point." elevation="1">
+        <v-card v-if="shipRows.length" class="panel" data-summary="Ships with a jump point stabilisation module, with their captains, crews and current activity." elevation="1">
           <div class="panel-head">
             <span>Stabilisation ships<provenance-mark rule="lagrange.stabilisationMultiplier" label /></span>
           </div>
@@ -101,7 +101,7 @@
           </v-data-table>
         </v-card>
 
-        <v-card v-if="infrastructureRows.length" class="panel" data-jump-infrastructure data-summary="Each jump point the race has charted, with whether it is a gate, the stabilisation orders of its fleets and the mines, buoys and detected objects at it. Use it to see where the race holds and watches its jump points, and to open a point on the map." elevation="1">
+        <v-card v-if="infrastructureRows.length" class="panel" data-jump-infrastructure data-summary="Each jump point the race has charted, with its gate status, stabilisation orders, mines, buoys and detected objects." elevation="1">
           <div class="panel-head">
             <span>Jump point infrastructure<provenance-mark rule="jumpInfrastructure.stabilisation" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -139,7 +139,7 @@
             <template #[`footer.page-text`]="{ pageStart, pageStop, itemsLength }">{{ pageStart }}-{{ pageStop }} of <span data-jump-total>{{ itemsLength }}</span></template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Every jump point the race has charted in a system it knows. A stabilised jump point is a gate: the save records no other state, so the Gate column shows both, and a builder of none, or one the save does not give, is not recorded. Stabilisation shows only the orders of the race's own fleets; another race's work is not known, and no time left is given because the order's time has no known unit. Minefields and Buoys count the race's own stationary missile salvos within 1 km of the point, one for each salvo and not for the missiles in it; a salvo of a design with a second stage is taken as a mine. Another race's stationary salvos are known only as contacts: Detected counts those detected now, once each, and neither their kind nor any that went undetected is known, so none detected is not none there. Probes are ordinary ships that the save does not mark, so no probe count is given. {{ unknownText }} is never 0.
+            Use it to see where the race holds and watches its jump points, and to open a point on the map. Every jump point the race has charted in a system it knows. A stabilised jump point is a gate: the save records no other state, so the Gate column shows both, and a builder of none, or one the save does not give, is not recorded. Stabilisation shows only the orders of the race's own fleets; another race's work is not known, and no time left is given because the order's time has no known unit. Minefields and Buoys count the race's own stationary missile salvos within 1 km of the point, one for each salvo and not for the missiles in it; a salvo of a design with a second stage is taken as a mine. Another race's stationary salvos are known only as contacts. Detected counts those detected now, once each, and neither their kind nor any that went undetected is known, so none detected is not none there. Probes are ordinary ships that the save does not mark, so no probe count is given. {{ unknownText }} is never 0.
           </div>
         </v-card>
       </template>

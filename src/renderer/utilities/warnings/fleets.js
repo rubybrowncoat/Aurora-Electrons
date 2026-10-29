@@ -2,7 +2,7 @@ import { linkTo, place } from '../deep-links'
 import { isKnownNumber } from '../math'
 import { TRAINING_COMMAND, TRAINING_JOINS, allOf, amount, anyOf, bodyText, checksOf, figure, lacking, needInputs, needsCell, needsSignature, needWords, readMiningSites, rowsOf, systemText, verdictRows } from './common'
 
-export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so they can be given something to do.' }
+export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out.' }
 
 export const IDLE_FLEETS_KEY = 'idle-fleets'
 

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel route-desires" data-summary="The routes the player wants between two colonies, kept as local records apart from the observed routes and set against them: whether a capable fleet runs each, and what its capacity covers. A record gives the game no order." elevation="1" data-route-desires>
+  <v-card class="panel route-desires" data-summary="The routes wanted between two colonies, set against the observed routes." elevation="1" data-route-desires>
     <div class="panel-head">
       <span>Desired routes</span>
       <v-chip v-if="read && !read.error && !repositoryError && scope" small data-desire-count><span><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</span></v-chip>
@@ -84,7 +84,7 @@
         </template>
       </v-data-table>
       <div v-for="note in read.notes" :key="note.uuid" class="px-4 py-1 caption text--secondary" data-desire-note-unlisted>{{ note.reason }}</div>
-      <div class="panel-foot caption text--secondary">A desired route is the player's own record: it is never derived from stock, reserves or production, and it changes nothing in the observed routes. Capacity counts what the capable fleets of the observed routes that carry the cargo between the two colonies deliver to the second colony; an unknown cycle is shown as not known, never as uncovered.</div>
+      <div class="panel-foot caption text--secondary">A desired route is the player's own record and gives the game no order. It is never derived from stock, reserves or production, and it changes nothing in the observed routes. Capacity counts what the capable fleets of the observed routes that carry the cargo between the two colonies deliver to the second colony. An unknown cycle is shown as not known, never as uncovered.</div>
     </template>
   </v-card>
 </template>

@@ -66,7 +66,7 @@
               <v-btn outlined :disabled="!!busy || !links.list.length" v-bind="attrs" v-on="on"><v-icon small left>mdi-vector-polyline</v-icon>Free layout</v-btn>
             </template>
             <v-card class="pa-4">
-              <div class="subtitle-2">Let the links pull the systems into place</div>
+              <div class="subtitle-2">Link length</div>
               <v-radio-group v-model="linkLength" dense hide-details class="mt-2">
                 <v-radio v-for="option in linkLengths" :key="option.value" :value="option.value" :label="option.text" />
               </v-radio-group>
@@ -85,7 +85,7 @@
         </div>
       </div>
 
-      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks, among them the personal tags on bodies. Use it to see the race's reach, plan where to go next and lay the map out." elevation="1">
+      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks." elevation="1">
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
@@ -200,7 +200,7 @@
         </div>
         <div class="panel-foot caption text--secondary">
           <span class="panel-foot__text">
-            Positions are the game's galactic map, in its units; markers grow with the people living there<provenance-mark rule="map.markerSize" />. Counts in brackets are systems on the map<provenance-mark rule="map.legendCount" />. Shift-click or shift-drag to select several systems; right-click one for a quick menu. A tag can be put on any body of a known system, surveyed or not (the ruins and constructs marked here also need the body surveyed). It stays on that body, never moves to another by its name, and never changes a cluster or a border.
+            Use it to see the race's reach, plan where to go next and lay the map out. Positions are the game's galactic map, in its units; markers grow with the people living there<provenance-mark rule="map.markerSize" />. Counts in brackets are systems on the map<provenance-mark rule="map.legendCount" />. Shift-click or shift-drag to select several systems; right-click one for a quick menu. A tag can be put on any body of a known system, surveyed or not (the ruins and constructs marked here also need the body surveyed). It stays on that body, never moves to another by its name, and never changes a cluster or a border.
             <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until the map is saved.</template>
           </span>
           <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a list to turn them on and off. -->

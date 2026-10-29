@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel history-rates" data-summary="How fast one stock of the race or of a followed colony (fuel, maintenance supplies, a mineral, the treasury) changed over a chosen window of recorded snapshots, per game year, with how many observations the rate rests on and, only where the observations support it, an estimate of when the stock would reach zero. A step from a transfer or spending, too few observations and a flat or rising stock are told apart, and an estimate is never a guarantee that a stock runs out." elevation="1">
+  <v-card class="panel history-rates" data-summary="How fast a stock of the race or of a followed colony changed over recorded snapshots." elevation="1">
     <div class="panel-head">
       <span>Stock rates<provenance-mark v-for="rule in rules" :key="rule" :rule="rule" /></span>
       <span class="caption text--secondary" data-rates-caption>{{ caption }}</span>
@@ -63,7 +63,7 @@
         </div>
       </template>
 
-      <div class="caption text--secondary mt-3" data-rates-limits>A rate comes from the snapshots the app recorded, never from what happened between two saves. Observations at one game time count once, and a stock that was not recorded is left out, never read as 0. A colony that left the save, changed hands or could not be read is not an observation. A depletion estimate is shown only for a steady decline over at least {{ minSamples }} observations, with no step and no large opposing changes (deliveries, transfers or spending that cancel) in the window, and its date is the last observation plus the years the estimate gives; it is an estimate from the window chosen, not a prediction that the stock runs out. Every export names the campaign, the branch, the game, the race and its ID and, for a colony, its PopulationID.</div>
+      <div class="caption text--secondary mt-3" data-rates-limits>Rates are per game year over the chosen window of recorded snapshots, with the number of observations each rests on. A rate comes from the snapshots the app recorded, never from what happened between two saves. Observations at one game time count once, and a stock that was not recorded is left out, never read as 0. A colony that left the save, changed hands or could not be read is not an observation. A step from a transfer or spending, too few observations and a flat or rising stock are told apart. A depletion estimate is shown only for a steady decline over at least {{ minSamples }} observations, with no step and no large opposing changes (deliveries, transfers or spending that cancel) in the window. Its date is the last observation plus the years the estimate gives. It is an estimate from the window chosen, not a prediction that the stock runs out. Every export names the campaign, the branch, the game, the race and its ID and, for a colony, its PopulationID.</div>
     </div>
   </v-card>
 </template>

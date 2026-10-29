@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel colony-worksheet" data-summary="The bodies selected in the table side by side: the colony cost and the population limit of one species and the amount and accessibility of each of the eleven minerals, every column sortable. Use it to compare candidate bodies on their raw figures; no score combines them." elevation="1">
+  <v-card class="panel colony-worksheet" data-summary="The bodies selected in the table side by side, with colony cost, population limit and minerals." elevation="1">
     <div class="panel-head">
       <span>Colony comparison<provenance-mark :rule="depositRule" label /></span>
       <span class="d-flex align-center flex-wrap controls">
@@ -34,7 +34,7 @@
         </tr>
       </tbody>
     </v-simple-table>
-    <div v-if="!loading && items.length" class="panel-foot caption text--secondary">The cost is the species' colony cost on the body at the worst of its orbit, the limit the people the body holds before growth stops; both are the figures of the body detail for the same species. A figure that cannot be worked out shows a dash and names what is missing. Deposits show for bodies the race has surveyed; an unsurveyed body keeps its deposits unknown, and a surveyed body with no deposit of a mineral holds none of it. Amounts and accessibilities are as of the save; later ground surveys and mining change them. The columns are raw figures and are never combined into a score.</div>
+    <div v-if="!loading && items.length" class="panel-foot caption text--secondary">Use it to compare candidate bodies on their raw figures; every column sorts. The cost is the species' colony cost on the body at the worst of its orbit, and the limit is the number of people the body holds before growth stops. Both are the figures of the body detail for the same species. A figure that cannot be worked out shows a dash and names what is missing. Deposits show for bodies the race has surveyed. An unsurveyed body keeps its deposits unknown, and a surveyed body with no deposit of a mineral holds none of it. Amounts and accessibilities are as of the save; later ground surveys and mining change them. The columns are raw figures and are never combined into a score.</div>
   </v-card>
 </template>
 

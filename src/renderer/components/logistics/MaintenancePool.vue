@@ -102,7 +102,7 @@
       </div>
 
       <div class="pool-block caption" data-pool-section="settled">
-        <div class="pool-title">How the game's rules were read</div>
+        <div class="pool-title">Rules used</div>
         <div v-for="point in points" :key="point.key" :data-pool-point="point.key"><span class="font-weight-medium">{{ point.title }}.</span> {{ point.text }}</div>
       </div>
     </template>

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel stop-list" data-summary="The places the route visits, in order, with the leg to the next stop. Add, change, remove or reorder them to plan the journey." elevation="1">
+  <v-card class="panel stop-list" data-summary="The places the route visits, in order, with the leg to the next stop." elevation="1">
     <div class="panel-head">
       <span>Stops<provenance-mark rule="route.travelTime" label /></span>
       <span class="stop-list__tools">

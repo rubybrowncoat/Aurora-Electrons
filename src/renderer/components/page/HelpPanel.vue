@@ -15,9 +15,16 @@
       </template>
 
       <div class="help__body">
-        <p class="help__lead">Definitions of the terms and units on this page, kept in the app and reviewed on {{ reviewed }} against game version {{ version }}.</p>
+        <h3 class="help__heading">About this page</h3>
+        <p class="help__overview" data-help-overview>{{ help.overview }}</p>
+
+        <h3 class="help__heading">Using this page</h3>
+        <ul class="help__usage" data-help-usage>
+          <li v-for="(line, index) in help.usage" :key="index">{{ line }}</li>
+        </ul>
 
         <h3 class="help__heading">Terms and units</h3>
+        <p class="help__lead">Definitions kept in the app, so they read the same without a network.</p>
         <dl class="help__terms">
           <div v-for="entry in help.terms" :key="entry.id" class="help__term" :data-term="entry.id">
             <dt>{{ entry.term }}<span v-if="entry.units" class="help__units">{{ entry.units }}</span></dt>
@@ -26,7 +33,7 @@
         </dl>
 
         <h3 class="help__heading">Learning links</h3>
-        <p class="help__note">Links open in the browser and point to public material the app does not copy. They explain terms and workflows and are no source for any figure; the mark beside a figure states how far it holds. Every definition above stands on its own when a link is down.</p>
+        <p class="help__note">Links open in the browser. They explain terms and workflows and are no source for any figure; the mark beside a figure states how far it holds.</p>
         <ul class="help__links">
           <li v-for="item in help.links" :key="item.id" class="help__link" :data-link="item.id">
             <external-link :href="item.url">{{ item.title }}</external-link>
@@ -47,7 +54,7 @@
 </template>
 
 <script>
-import { GAME_VERSION, REVIEWED, VERSION_STATUS, VERSION_STATUS_TEXT, helpFor } from '../../utilities/glossary'
+import { VERSION_STATUS, VERSION_STATUS_TEXT, helpFor } from '../../utilities/glossary'
 import ExternalLink from '../ExternalLink.vue'
 
 // Where the button sits below the app bar, and its size.
@@ -58,15 +65,13 @@ const BUTTON_SIZE = 22
 const MAX_WIDTH = 380
 const MAX_SHARE = 0.4
 
-// The help of the open page: a button at the top of the strip the section ticks use, and a drawer of the page's glossary terms and learning links. The drawer is a right-hand application drawer under the app bar and above the footer, so it takes its width out of the page (`$vuetify.application.right`, which the page container, the app bar, the footer, this button and the section ticks all keep clear of) instead of covering controls. The terms are defined in utilities/glossary.js, so it reads the same without a network; the links are pointers with their own review date and game version, kept apart from the provenance marks that say how far a figure holds. The drawer is no section of the page (it is not a `.panel`), so the section ticks do not list it.
+// The help of the open page: a button at the top of the strip the section ticks use, and a drawer of the page's overview, usage notes, glossary terms and learning links. The drawer is a right-hand application drawer under the app bar and above the footer, so it takes its width out of the page (`$vuetify.application.right`, which the page container, the app bar, the footer, this button and the section ticks all keep clear of) instead of covering controls. The terms are defined in utilities/glossary.js, so it reads the same without a network; the links are pointers with their own review date, kept apart from the provenance marks that say how far a figure holds. The drawer is no section of the page (it is not a `.panel`), so the section ticks do not list it.
 export default {
   name: 'HelpPanel',
   components: { ExternalLink },
   data () {
     return {
       open: false,
-      reviewed: REVIEWED,
-      version: GAME_VERSION,
       statusText: VERSION_STATUS_TEXT,
       statusIcon: { [VERSION_STATUS.OLDER]: 'mdi-history', [VERSION_STATUS.CURRENT]: 'mdi-check', [VERSION_STATUS.UNKNOWN]: 'mdi-help' },
     }
@@ -243,6 +248,7 @@ export default {
 }
 
 .help__lead,
+.help__overview,
 .help__note {
   margin: 0 0 8px;
   color: var(--ae-muted);
@@ -254,6 +260,15 @@ export default {
   font-weight: 600;
   letter-spacing: .04em;
   text-transform: uppercase;
+}
+
+.help__usage {
+  margin: 0 0 8px;
+  padding-left: 18px;
+
+  li {
+    margin-bottom: 4px;
+  }
 }
 
 .help__terms,

@@ -54,7 +54,7 @@
 
         <v-row>
           <v-col cols="12" xl="7">
-            <v-card class="panel" data-summary="Each mineral with what lies in the ground, what is mined, what is held and which colonies are short, to pick the one to focus on." elevation="1">
+            <v-card class="panel" data-summary="Each mineral with what lies in the ground, what is mined, what is held and which colonies are short." elevation="1">
               <div class="panel-head">
                 <span>By mineral<provenance-mark rule="minerals.colonyStock" /></span>
                 <router-link v-if="focus" :to="outlookLink" class="body-2">{{ focus.name }} runway in Mineral Outlook</router-link>
@@ -109,15 +109,15 @@
                 </tbody>
               </v-simple-table>
               <div class="panel-foot caption text--secondary">
-                Click a mineral to focus the page on it, and again for all minerals. In the ground counts the deposits in the chosen systems that pass the options, split by accessibility; a deposit is mined when a colony on the body has mines or orbital miners are there, and untapped when nobody mines it and no known alien colony holds the body. Colonies short need more for their build queue than they hold; below reserve hold less than the reserve set for them.
+                Use it to pick the mineral to focus on: click a mineral to focus the page on it, and click again for all minerals. In the ground counts the deposits in the chosen systems that pass the options, split by accessibility; a deposit is mined when a colony on the body has mines or orbital miners are there, and untapped when nobody mines it and no known alien colony holds the body. Colonies short need more for their build queue than they hold; below reserve hold less than the reserve set for them.
                 A dash is a figure the save does not record, never 0: hover its mark for what is missing.
               </div>
             </v-card>
           </v-col>
           <v-col cols="12" xl="5">
-            <v-card class="panel" data-summary="A map of the known systems sized by how much of the chosen mineral their deposits hold, to see where it lies and how reachable it is." elevation="1">
+            <v-card class="panel" data-summary="A map of the known systems sized by how much of the chosen mineral their deposits hold." elevation="1">
               <div class="panel-head">
-                <span>Where it lies</span>
+                <span>Deposits by system</span>
                 <span class="legend">
                   <span v-for="band in bands" :key="band.id" class="legend-item"><span class="dot" :style="{ background: bandColors[band.id] }" />{{ band.label }}</span>
                   <span class="legend-item"><span class="dot" :style="{ background: mutedColor }" />None or out of reach</span>
@@ -132,7 +132,7 @@
           </v-col>
         </v-row>
 
-        <v-card class="panel" data-summary="Surveyed bodies with mineral deposits, their accessibility and mining potential, to choose where to open new mines or send miners." elevation="1">
+        <v-card class="panel" data-summary="Surveyed bodies with mineral deposits, with their accessibility and mining potential." elevation="1">
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} deposits` : 'Bodies with deposits' }}<provenance-mark rule="minerals.potential" /></span>
             <span class="head-tools">
@@ -279,11 +279,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A mine digs {{ mineProductionText }} a year at accessibility 1 with the race's mining tech, times the deposit's accessibility, before the colony's own modifiers; an automated mine digs the same and a civilian mining complex ten times as much. Accessibility holds until a deposit is down to half its original amount, then falls with what is left, to {{ ACCESSIBILITY_FLOOR }} when it is empty. {{ orbitalLimitNote }} Untapped: nobody mines the body and no known alien colony holds it; a colony without mines counts as untapped. Distance is the charted route from the nearest colony of {{ SUPPLY_BASE_MILLIONS }} million people or more. A dash is a figure the save does not record, never 0: hover its mark for what is missing.
+            Use it to choose where to open new mines or send miners. A mine digs {{ mineProductionText }} a year at accessibility 1 with the race's mining tech, times the deposit's accessibility, before the colony's own modifiers; an automated mine digs the same and a civilian mining complex ten times as much. Accessibility holds until a deposit is down to half its original amount, then falls with what is left, to {{ ACCESSIBILITY_FLOOR }} when it is empty. {{ orbitalLimitNote }} Untapped: nobody mines the body and no known alien colony holds it; a colony without mines counts as untapped. Distance is the charted route from the nearest colony of {{ SUPPLY_BASE_MILLIONS }} million people or more. A dash is a figure the save does not record, never 0: hover its mark for what is missing.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Surveyed bodies that could host a civilian mining complex, with their reserve, accessibility and the years assumed complexes would take to dig them out, ranked by the page's headline order or by an optional longevity preference with editable weights, to compare short-lived and long-lived sites." elevation="1">
+        <v-card class="panel" data-summary="Surveyed bodies that could host a civilian mining complex, with their reserve and accessibility." elevation="1">
           <div class="panel-head">
             <span>Civilian mining candidates<provenance-mark rule="minerals.cmcCandidate" /></span>
             <span class="head-tools body-2">
@@ -376,12 +376,12 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A candidate is a surveyed body in reach of its star, with no complex on it yet, that holds more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better; a body with such a deposit whose amount or accessibility is not recorded is listed as possible and stays unknown, and so is a body with a colony whose civilian installations are not fully recorded, as it may already hold a complex. The game's other conditions are not checked here. The headline order is the one of the deposits table: mining potential, then accessibility, then amount. The longevity order is a preference of the player: the weighted mean of the reserve, accessibility and lifetime terms, each between 0 and 1, where every contribution is the term times its weight over the sum of the weights and the contributions add up to the score. The lifetime is how long the assumed complexes would take to dig out the qualifying deposits, the longest of them. Neither order is the game's choice of where a complex is founded, which follows its own scoring and a dice roll, and nothing here predicts it.
+            A candidate is a surveyed body in reach of its star, with no complex on it yet, that holds more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better. A body with such a deposit whose amount or accessibility is not recorded is listed as possible and stays unknown. So is a body with a colony whose civilian installations are not fully recorded, as it may already hold a complex. The game's other conditions are not checked here. Bodies are ranked by the headline order or by an optional longevity preference with editable weights, which compares short-lived and long-lived sites. The years assumed are the years the complexes would take to dig a body out. The headline order is the one of the deposits table: mining potential, then accessibility, then amount. The longevity order is a preference of the player: the weighted mean of the reserve, accessibility and lifetime terms, each between 0 and 1, where every contribution is the term times its weight over the sum of the weights and the contributions add up to the score. The lifetime is how long the assumed complexes would take to dig out the qualifying deposits, the longest of them. Neither order is the game's choice of where a complex is founded, which follows its own scoring and a dice roll, and nothing here predicts it.
             A dash is a figure the save does not record or a field left blank, never 0: hover its mark for what is missing.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="What each colony holds, reserves and needs of minerals, to find shortages and stock that can be moved." elevation="1">
+        <v-card class="panel" data-summary="What each colony holds, reserves and needs of minerals." elevation="1">
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} in the colonies` : 'Minerals in the colonies' }}<provenance-mark rule="minerals.colonyStock" /></span>
             <v-text-field v-model="colonySearch" label="Search" placeholder="Colony or system" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
@@ -443,12 +443,12 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Freighters, load and unload to reserve orders and mass drivers move only what a colony holds above its reserve. Industrial projects, shipyards and ground training draw on the whole stock, reserve included, so a reserve keeps a queue's minerals from being carried off but never holds them back from it. A mass driver sends up to {{ count(MASS_DRIVER_TONS) }} t a year to the colony set as its destination, and nothing with none set; packets bound for a colony that is gone are lost. Queue needs are what the colony's industrial projects (paused and queued ones too) and shipyard tasks that build, repair or refit still need; a scrap task needs no minerals. Expand a colony for each mineral and the nearest colony with stock free to move.
+            Use it to find shortages and stock that can be moved. Freighters, load and unload to reserve orders and mass drivers move only what a colony holds above its reserve. Industrial projects, shipyards and ground training draw on the whole stock, reserve included, so a reserve keeps a queue's minerals from being carried off but never holds them back from it. A mass driver sends up to {{ count(MASS_DRIVER_TONS) }} t a year to the colony set as its destination, and nothing with none set; packets bound for a colony that is gone are lost. Queue needs are what the colony's industrial projects (paused and queued ones too) and shipyard tasks that build, repair or refit still need; a scrap task needs no minerals. Expand a colony for each mineral and the nearest colony with stock free to move.
             A dash is a figure the save does not record, never 0: hover its mark for what is missing. A colony with nothing queued needs 0.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Each colony whose civilian mining complexes produce: whether the race buys or taxes their output, where a bought output is shipped by mass driver and what holds the transfer back, to review the policy colony by colony." elevation="1">
+        <v-card class="panel" data-summary="Each colony whose civilian mining complexes produce, with whether the race buys or taxes their output." elevation="1">
           <div class="panel-head">
             <span>Civilian mining policy<provenance-mark rule="cmcPolicy.choice" /></span>
             <span class="head-tools body-2">
@@ -517,7 +517,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A row for each colony of the race whose civilian mining complexes produce, in every system whatever the view<span v-if="policyAudit.idle">; {{ counted(policyAudit.idle, 'colony', 'colonies') }} with complexes that produce nothing {{ policyAudit.idle === 1 ? 'is' : 'are' }} left out, as the game neither charges nor pays for them</span>. A bought output goes to the colony's stockpile, or by mass driver to its destination when that colony exists; a taxed output reaches no stockpile, and an NPR keeps its output at no charge. {{ policyRatesNote }} The bought output leaves in a packet of its own whatever the source's drivers can send, so a destination alone does not show what arrives: the output is set against the drivers' capacity, which limits the stock above the reserve, only where both are known. A destination the game never offers (another race's colony, another system, the colony itself) is invalid, and a missing mass driver at either end is listed apart. If switched is hypothetical: the choice is made in the game, and nothing here changes the save. Acknowledging a taxed colony as intended is kept for this race and colony, can be withdrawn and leaves the row listed.
+            Use it to review the policy colony by colony, including where a bought output is shipped by mass driver and what holds the transfer back. A row for each colony of the race whose civilian mining complexes produce, in every system whatever the view<span v-if="policyAudit.idle">; {{ counted(policyAudit.idle, 'colony', 'colonies') }} with complexes that produce nothing {{ policyAudit.idle === 1 ? 'is' : 'are' }} left out, as the game neither charges nor pays for them</span>. A bought output goes to the colony's stockpile, or by mass driver to its destination when that colony exists; a taxed output reaches no stockpile, and an NPR keeps its output at no charge. {{ policyRatesNote }} The bought output leaves in a packet of its own whatever the source's drivers can send, so a destination alone does not show what arrives: the output is set against the drivers' capacity, which limits the stock above the reserve, only where both are known. A destination the game never offers (another race's colony, another system, the colony itself) is invalid, and a missing mass driver at either end is listed apart. If switched is hypothetical: the choice is made in the game, and nothing here changes the save. Acknowledging a taxed colony as intended is kept for this race and colony, can be withdrawn and leaves the row listed.
             A dash is a figure the save does not record, never 0: hover its mark for what is missing.
           </div>
         </v-card>

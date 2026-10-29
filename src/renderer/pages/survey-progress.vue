@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="A map of the known systems, shaded by how much survey work each has left. Use it to pick where to send the survey ships next." elevation="1">
+        <v-card class="panel" data-summary="A map of the known systems, shaded by how much survey work each has left." elevation="1">
           <div class="panel-head">
             <span>Survey map</span>
             <span class="legend">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, the points left and how long the ships there would take. It shows which systems still need surveying." elevation="1">
+        <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, with the points left and the time the ships there would take." elevation="1">
           <div class="panel-head">
             <span>Systems<provenance-mark rule="survey.bodyPoints" /></span>
             <span class="d-flex align-center">
@@ -77,14 +77,14 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Survey points left: each gravitational location takes the system's points per location (more around a heavier primary), and a body takes its radius / 10 for a geological survey (radius / 100 for a gas giant or superjovian), at least 1. Time is survey time for the ships already in the system; travel between targets isn't counted. Fleets with one sensor type work their own survey in parallel; a fleet with both sensors does one target at a time, so its time is shared between the two surveys, in whichever split finishes the system soonest.
+            Use it to see which systems still need surveying. Survey points left: each gravitational location takes the system's points per location (more around a heavier primary), and a body takes its radius / 10 for a geological survey (radius / 100 for a gas giant or superjovian), at least 1. Time is survey time for the ships already in the system; travel between targets isn't counted. Fleets with one sensor type work their own survey in parallel; a fleet with both sensors does one target at a time, so its time is shared between the two surveys, in whichever split finishes the system soonest.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Survey fleets, where they are, what they are doing and how fast they survey. It shows whether the survey ships are used well." elevation="1">
+        <v-card class="panel" data-summary="Survey fleets, where they are, what they are doing and how fast they survey." elevation="1">
           <div class="panel-head">
             <span>Survey fleets</span>
-            <v-chip small>{{ formulaVersion ? 'Rates follow the 2.7 rules' : 'Rates are estimates' }}</v-chip>
+            <v-chip small>{{ formulaVersion ? 'Rates follow the game\'s rules' : 'Rates are estimates' }}</v-chip>
           </div>
           <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.FleetName`]="{ item }">
@@ -112,11 +112,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Points a day: the undamaged sensors' rating × 24 h × the officer factor (the science officer's Survey bonus while the ship's Science Department is undamaged, times half the captain's bonus; 1 for a ship without a captain) × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The mark beside a rate shows how far it can be trusted: hover for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
+            Use it to see whether the survey ships are used well. Points a day: the undamaged sensors' rating × 24 h × the officer factor (the science officer's Survey bonus while the ship's Science Department is undamaged, times half the captain's bonus; 1 for a ship without a captain) × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The mark beside a rate shows how far it can be trusted: hover for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
           </div>
         </v-card>
 
-        <v-card v-if="groundRows.length" class="panel" data-summary="Bodies with mineral potential that could be surveyed on the ground, with progress and time left. It shows where ground survey teams would pay off." elevation="1">
+        <v-card v-if="groundRows.length" class="panel" data-summary="Bodies with mineral potential that could be surveyed on the ground, with progress and time left." elevation="1">
           <div class="panel-head">
             <span>Ground surveys</span>
             <v-chip small>{{ groundRows.length }} {{ groundRows.length === 1 ? 'body' : 'bodies' }} with potential</v-chip>
@@ -143,11 +143,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times the square of its commander's Survey multiplier (the game applies the multiplier twice) and the game's survey speed. The multiplier is the commander's bonus, which counts for nothing when the formation with its subordinates is larger than its headquarters can command, and each commander above at the same colony raises it by a quarter of the bonus beyond 1. It can raise the body's mineral deposits; the potential is what the geological survey found.
+            Use it to see where ground survey teams would pay off. A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times the square of its commander's Survey multiplier (the game applies the multiplier twice) and the game's survey speed. The multiplier is the commander's bonus, which counts for nothing when the formation with its subordinates is larger than its headquarters can command, and each commander above at the same colony raises it by a quarter of the bonus beyond 1. It can raise the body's mineral deposits; the potential is what the geological survey found.
           </div>
         </v-card>
 
-        <v-card v-if="deployment" class="panel" data-deploy="panel" data-summary="The race's geological survey and xenoarchaeology formations, each once, with whether it is idle, busy, embarked, at a place that is not resolved or at work that is not known, the known targets it could serve and the troop lifts it needs. It shows which specialists are free to redeploy and where known work waits; no order is issued." elevation="1">
+        <v-card v-if="deployment" class="panel" data-deploy="panel" data-summary="The race's geological survey and xenoarchaeology formations, each once, with their state and the known targets they could serve." elevation="1">
           <div class="panel-head">
             <span>Specialist deployments</span>
             <v-chip small>{{ count(deployTotals.formations) }} {{ deployTotals.formations === 1 ? 'formation' : 'formations' }}</v-chip>
@@ -209,11 +209,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Each geological survey or xenoarchaeology formation is listed once, with the capability its actual elements give; a formation with both ratings is one row. A formation is busy when it is stationed at a colony on a body with work for its role: ground survey potential left, for a geological formation, or a ruin whose builders are not yet identified or an ancient construct that is not active, for a xenoarchaeology one (a construct is work but no listed target). The game puts such a formation to work by itself, with no order, and the save stores no task for a formation, so the state is read from the location; it was read against the game's rules for both surveys. The commander's multiplier is not applied, so a formation the game would give no rating through its commander may show busy without making progress. The game requires a body to be surveyed by the race for a geological survey, so a geological formation at a colony on a body the race has not surveyed shows idle. It does not for a ruin, so a xenoarchaeology formation at a colony on a ruin outside the known targets (a body the race has not surveyed, a system it does not know or a ruin with no installations count stored), or when the ruins or the constructs could not be read, shows an activity that is not known, and so does a formation with a rating the save leaves unknown where a target is; it counts as neither idle nor free to redeploy. A colony needs no minimum population: an outpost with no residents counts. An embarked formation is aboard a ship and does no survey work; a formation whose place is not stored or not found has no state to give. The idle formations are packed together into the troop ships' bays, the largest first, and each formation with an activity that is not known is judged alone; a formation no bay holds is shown as that, never as transportable, and where the troop ships stand is not read. {{ count(deployTotals.others) }} {{ deployTotals.others === 1 ? 'formation of the race is' : 'formations of the race are' }} no geological or xenoarchaeology specialist, or {{ deployTotals.others === 1 ? 'has' : 'have' }} a rating the save leaves unknown. No assignment is issued.
+            Use it to see which specialists are free to redeploy and where known work waits. Each geological survey or xenoarchaeology formation is listed once, with the capability its actual elements give; a formation with both ratings is one row. A formation is busy when it is stationed at a colony on a body with work for its role: ground survey potential left, for a geological formation, or a ruin whose builders are not yet identified or an ancient construct that is not active, for a xenoarchaeology one (a construct is work but no listed target). The game puts such a formation to work by itself, with no order, and the save stores no task for a formation, so the state is read from the location; it was read against the game's rules for both surveys. The commander's multiplier is not applied, so a formation the game would give no rating through its commander may show busy without making progress. The game requires a body to be surveyed by the race for a geological survey, so a geological formation at a colony on a body the race has not surveyed shows idle. It does not for a ruin, so a xenoarchaeology formation at a colony on a ruin outside the known targets (a body the race has not surveyed, a system it does not know or a ruin with no installations count stored), or when the ruins or the constructs could not be read, shows an activity that is not known, and so does a formation with a rating the save leaves unknown where a target is; it counts as neither idle nor free to redeploy. A colony needs no minimum population: an outpost with no residents counts. An embarked formation is aboard a ship and does no survey work; a formation whose place is not stored or not found has no state to give. The idle formations are packed together into the troop ships' bays, the largest first, and each formation with an activity that is not known is judged alone; a formation no bay holds is shown as that, never as transportable, and where the troop ships stand is not read. {{ count(deployTotals.others) }} {{ deployTotals.others === 1 ? 'formation of the race is' : 'formations of the race are' }} no geological or xenoarchaeology specialist, or {{ deployTotals.others === 1 ? 'has' : 'have' }} a rating the save leaves unknown. No assignment is issued.
           </div>
         </v-card>
 
-        <v-card v-if="deployment" class="panel" data-targets="panel" data-summary="The known bodies where a geological survey or a xenoarchaeology formation has work, with the colony there, the work left and whether a formation is already at it. It shows where idle specialists would pay off; a body or ruin the race has not surveyed is never listed." elevation="1">
+        <v-card v-if="deployment" class="panel" data-targets="panel" data-summary="The known bodies where a geological survey or xenoarchaeology formation has work." elevation="1">
           <div class="panel-head">
             <span>Survey targets</span>
             <span class="d-flex align-center">
@@ -231,11 +231,11 @@
             <template #[`item.status`]="{ item }"><span :class="{ 'text--secondary': item.status !== 'unstaffed' }">{{ targetStatus(item.status) }}</span></template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Targets are the bodies the race has surveyed in systems it knows: bodies with ground survey potential left, the same as the Ground surveys table, for geological formations, and ruins whose builders the race has not identified, for xenoarchaeology ones. A body or ruin the race has not surveyed is not known and is never listed. A formation can only work at a colony of the race, so a body with no colony needs one first; a colony counts as a candidate whatever its population, an outpost with no residents included. {{ ruinSummary }}
+            Use it to see where idle specialists would pay off. Targets are the bodies the race has surveyed in systems it knows: bodies with ground survey potential left, the same as the Ground surveys table, for geological formations, and ruins whose builders the race has not identified, for xenoarchaeology ones. A body or ruin the race has not surveyed is not known and is never listed. A formation can only work at a colony of the race, so a body with no colony needs one first; a colony counts as a candidate whatever its population, an outpost with no residents included. {{ ruinSummary }}
           </div>
         </v-card>
 
-        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map. Each formation can also be compared, element by element, with its original or replacement template, which shows what it is short of or holds over, its mass and the troop bay it needs. When observation is switched on, each row also says since when the formation has been seen where it is and as it is." elevation="1">
+        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once, by role: geological survey, xenoarchaeology or other." elevation="1">
           <div class="panel-head">
             <span>Ground formations</span>
             <span v-if="formationModel" class="d-flex align-center">
@@ -340,7 +340,7 @@
             <div class="panel-foot caption text--secondary">
               {{ remoteDefinition }}
               Of {{ count(formationTotals.formations) }} {{ remoteOnly ? (formationTotals.formations === 1 ? 'formation in scope (remote, or at a colony the save does not hold)' : 'formations in scope (remote, or at a colony the save does not hold)') : (formationTotals.formations === 1 ? 'formation' : 'formations') }}, {{ count(formationTotals.placed) }} {{ formationTotals.placed === 1 ? 'is' : 'are' }} in a system the race has named and {{ count(formationTotals.unplaced) }} {{ formationTotals.unplaced === 1 ? 'has' : 'have' }} none (the row says why; no place is guessed). {{ count(formationTotals.geo) }} geological and {{ count(formationTotals.xeno) }} xenoarchaeology, {{ count(formationTotals.both) }} of them both and listed once, {{ count(formationTotals.other) }} other{{ formationTotals.unknown ? `, ${count(formationTotals.unknown)} with a role not known` : '' }}. In the whole race {{ count(formationTotals.remote) }} {{ formationTotals.remote === 1 ? 'is' : 'are' }} remote, {{ count(formationTotals.atColonies) }} at colonies{{ formationTotals.remoteUnknown ? ` and ${count(formationTotals.remoteUnknown)} at a colony the save does not hold` : '' }}.
-              Each row expands to the formation's actual elements against the template chosen above, class by class: the units short and over, the mass actual and intended, and whether the formation fits one troop bay now and at the intended mass. A template's obsolescence is its own flag and is separate from whether the replacement template differs from the original; an obsolete template with an STO class is a replacement review, never a direct upgrade. A formation with no usable template, or with no element rows, is not compared and no deficit is worked out for it.
+              Use it to find the forces stationed at no colony and where they are. Each row expands to the formation's actual elements against the template chosen above, class by class: the units short and over, the mass actual and intended, and whether the formation fits one troop bay now and at the intended mass. A template's obsolescence is its own flag and is separate from whether the replacement template differs from the original; an obsolete template with an STO class is a replacement review, never a direct upgrade. A formation with no usable template, or with no element rows, is not compared and no deficit is worked out for it.
               <div v-if="observationKey" class="mt-2" data-observe="note">
                 {{ observationRule }} <span data-observe="record">{{ observationNote }}</span>
               </div>

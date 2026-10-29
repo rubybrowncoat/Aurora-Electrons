@@ -15,7 +15,7 @@
 
         <stat-tiles :tiles="tiles" />
 
-        <v-card v-if="view === 'yards'" class="panel" data-summary="Every shipyard of the race once, with the tasks it is working, the upgrade or retool in progress and the price to add a slipway. Use it to find idle yards and to see what keeps each one busy." elevation="1">
+        <v-card v-if="view === 'yards'" class="panel" data-summary="Every shipyard of the race once, with its tasks, its upgrade or retool and its slipway price." elevation="1">
           <div class="panel-head">
             <span>Shipyards<provenance-mark rule="production.shipyardUpgradeFinish" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -128,11 +128,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A yard appears once, with every task it works. A task's time left is the Production Recap's: the build points not yet done over the colony's shipyard rate for the task's class. The activity is the yard's own upgrade or retool; a continual upgrade's time is approximate. A retool holds no slipway, so the free slipways are the slipways less the tasks. The add-slipway price is the yard's capacity over 500 tons times 120 times the race's shipyard operations, a tenth of it at a commercial or repair yard. Obsolete marks a yard tooled for a class that is marked obsolete.<provenance-mark rule="shipyardGrowth.slipwayPrice" />
+            Use it to find idle yards and to see what keeps each one busy. A yard appears once, with every task it works. A task's time left is the Production Recap's: the build points not yet done over the colony's shipyard rate for the task's class. The activity is the yard's own upgrade or retool; a continual upgrade's time is approximate. A retool holds no slipway, so the free slipways are the slipways less the tasks. The add-slipway price is the yard's capacity over 500 tons times 120 times the race's shipyard operations, a tenth of it at a commercial or repair yard. Obsolete marks a yard tooled for a class that is marked obsolete.<provenance-mark rule="shipyardGrowth.slipwayPrice" />
           </div>
         </v-card>
 
-        <v-card v-if="view === 'growth'" class="panel" data-summary="What it costs, in build points and in time, to add a slipway or capacity to one shipyard, and how the yard's own modification rate sets that time. Use it to compare the upgrades and to size a continual target." elevation="1">
+        <v-card v-if="view === 'growth'" class="panel" data-summary="What it costs, in build points and time, to add a slipway or capacity to one shipyard." elevation="1">
           <div class="panel-head">
             <span>Yard growth<provenance-mark rule="shipyardGrowth.capacityStep" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -173,11 +173,11 @@
             </v-simple-table>
           </div>
           <div class="panel-foot caption text--secondary">
-            A slipway costs the yard's capacity over 500 tons times 120 times the race's shipyard operations; a capacity step costs the yard's slipways times 120 times the operations times its multiple of 500 tons (1, 2, 4, 10 or 20). A commercial or repair yard pays a tenth. The operations factor is the lowest multiplier among the Shipyard Operations levels the race holds. The time is the price over the yard's modification rate, which rises with its capacity. The 500 and 2,000 ton steps are marked estimated: no save checked stores one, so their price follows the pattern of the others. A continual upgrade is priced per ton at the steps' rate and stepped each construction period, so its time is approximate and the last period may overshoot the target; the game stores no price for it to compare with.<provenance-mark rule="shipyardGrowth.operations" />
+            Use it to compare the upgrades and to size a continual target. The yard's own modification rate sets the time. A slipway costs the yard's capacity over 500 tons times 120 times the race's shipyard operations; a capacity step costs the yard's slipways times 120 times the operations times its multiple of 500 tons (1, 2, 4, 10 or 20). A commercial or repair yard pays a tenth. The operations factor is the lowest multiplier among the Shipyard Operations levels the race holds. The time is the price over the yard's modification rate, which rises with its capacity. The 500 and 2,000 ton steps are marked estimated: no save checked stores one, so their price follows the pattern of the others. A continual upgrade is priced per ton at the steps' rate and stepped each construction period, so its time is approximate and the last period may overshoot the target; the game stores no price for it to compare with.<provenance-mark rule="shipyardGrowth.operations" />
           </div>
         </v-card>
 
-        <v-card v-if="view === 'refits'" class="panel" data-summary="Every refit between the race's ship classes, one direction at a time: its time, its cost against each class and how many yards can take it or be retooled for it. Use it to find upgrades worth refitting and to avoid needless tooling changes." elevation="1">
+        <v-card v-if="view === 'refits'" class="panel" data-summary="Every refit between the race's ship classes, one direction at a time." elevation="1">
           <div class="panel-head">
             <span>Refit matrix<provenance-mark rule="refit.cost" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -232,11 +232,11 @@
             </div>
           </div>
           <div class="panel-foot caption text--secondary">
-            A cell is a refit of a ship of the row's class into the column's class; the opposite cell is a separate figure. Its time is at the quickest yard that can take the column's class now or once a slipway is free, one slipway working; a dash means a yard's eligibility or rate is not known, so the quickest is not known either, and "Retool first" means only a retooled yard could take it. S and T are the refit's cost as a share of the source (row) class's cost and of the target (column) class's cost. The wrench is the number of yards that take the target class now or when a slipway frees; the tools are the yards that would take it after a retool; a ≥ marks a count that has yards not known either way. A check mark: a yard tooled for the source builds or refits to the target without retooling. Components the target drops earn no credit. With the size window on, a class with no partner inside the window leaves the matrix.
+            Use it to find upgrades worth refitting and to avoid needless tooling changes. Each cell shows the refit's time and cost against each class, and how many yards can take it or be retooled for it. A cell is a refit of a ship of the row's class into the column's class; the opposite cell is a separate figure. Its time is at the quickest yard that can take the column's class now or once a slipway is free, one slipway working; a dash means a yard's eligibility or rate is not known, so the quickest is not known either, and "Retool first" means only a retooled yard could take it. S and T are the refit's cost as a share of the source (row) class's cost and of the target (column) class's cost. The wrench is the number of yards that take the target class now or when a slipway frees; the tools are the yards that would take it after a retool; a ≥ marks a count that has yards not known either way. A check mark: a yard tooled for the source builds or refits to the target without retooling. Components the target drops earn no credit. With the size window on, a class with no partner inside the window leaves the matrix.
           </div>
         </v-card>
 
-        <v-card v-if="view === 'refits'" class="panel" data-summary="One refit in full: what it costs by part, its minerals, the components that change and the ships that would take it. Use it to see why a refit is dear and whether the reverse refit is cheaper." elevation="1">
+        <v-card v-if="view === 'refits'" class="panel" data-summary="One refit in full: its cost by part, its minerals, the components that change and the ships that would take it." elevation="1">
           <div class="panel-head">
             <span>Selected refit<provenance-mark rule="refit.minerals" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -336,7 +336,7 @@
             </v-row>
           </div>
           <div class="panel-foot caption text--secondary">
-            The cost is the added components' cost times 1.2 plus the size change (the difference in size over the source class's size). Percentages name their denominator: the source class is what the ship is worth as it stands, the target class what a new one costs. A removed component refunds nothing, so the minerals count the added parts only, each count at one decimal.<provenance-mark rule="refit.cost" />
+            Use it to see why a refit is dear and whether the reverse refit is cheaper. The cost is the added components' cost times 1.2 plus the size change (the difference in size over the source class's size). Percentages name their denominator: the source class is what the ship is worth as it stands, the target class what a new one costs. A removed component refunds nothing, so the minerals count the added parts only, each count at one decimal.<provenance-mark rule="refit.cost" />
           </div>
         </v-card>
 
@@ -396,13 +396,13 @@
             </v-data-table>
           </template>
           <div class="panel-foot caption text--secondary">
-            A yard is judged on its type, its capacity (50 tons to the size unit), its slipways less the tasks working at it and the class's flags. A yard takes the class it is tooled for whatever its other flags, and another class without a retool when that class is within 20% of the tooled class's size and the refit between them costs at most a fifth of its cost; any other class that is not obsolete, not a shipping line's and within the capacity needs a retool, which a yard with no tooled class takes at once and free. A retool costs the lesser of the refit from the yard's own tooled class to the target and the target's cost, times 0.5 plus 0.25 per slipway, times the race's shipyard operations, and is shared among the slipways; a refit that costs nothing retools at once. A refit also needs its source class within the capacity and within 20% of the size of the class the yard is tooled for when the work starts, and a commercial yard takes commercial classes only. A repair yard repairs only, with no tooling. A yard type the rules do not cover shows as not covered and a figure the save lacks as not known. Not checked: whether ships of the source class are at the yard's colony, and whether a damaged ship is there to repair.<provenance-mark rule="refit.yardEligibility" />
+            Use it to pick a yard for a class and to see why a yard cannot take it or needs a retool. A yard is judged on its type, its capacity (50 tons to the size unit), its slipways less the tasks working at it and the class's flags. A yard takes the class it is tooled for whatever its other flags, and another class without a retool when that class is within 20% of the tooled class's size and the refit between them costs at most a fifth of its cost; any other class that is not obsolete, not a shipping line's and within the capacity needs a retool, which a yard with no tooled class takes at once and free. A retool costs the lesser of the refit from the yard's own tooled class to the target and the target's cost, times 0.5 plus 0.25 per slipway, times the race's shipyard operations, and is shared among the slipways; a refit that costs nothing retools at once. A refit also needs its source class within the capacity and within 20% of the size of the class the yard is tooled for when the work starts, and a commercial yard takes commercial classes only. A repair yard repairs only, with no tooling. A yard type the rules do not cover shows as not covered and a figure the save lacks as not known. Not checked: whether ships of the source class are at the yard's colony, and whether a damaged ship is there to repair.<provenance-mark rule="refit.yardEligibility" />
           </div>
         </v-card>
 
         <platform-paths v-if="view === 'classes'" :classes="classes" :extras="platformSources.extras" :components="components" :yards="yards" :colonies="platformColonies" :context="eligibilityContext" :version="formulaVersion" :researched="platformSources.researched" />
 
-        <v-card v-if="(view === 'refits' || view === 'classes') && runningRows.length" class="panel" data-summary="Refits and retools the yards are working on now, each with the cost the save stores beside the cost the rules give. Use it to check the rules against the game and to see when the work ends." elevation="1">
+        <v-card v-if="(view === 'refits' || view === 'classes') && runningRows.length" class="panel" data-summary="Refits and retools the yards are working on now, with the stored cost beside the cost the rules give." elevation="1">
           <div class="panel-head">
             <span>Running refits and retools<provenance-mark rule="production.shipFinish" label /></span>
           </div>
@@ -444,7 +444,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            The time left is the one the Production Recap shows: the stored cost not yet done over the colony's shipyard rate for the task. A retool's cost is the rules' figure from the yard's tooled class to the class it is retooled to.<provenance-mark rule="refit.retool" />
+            Use it to check the rules against the game and to see when the work ends. The time left is the one the Production Recap shows: the stored cost not yet done over the colony's shipyard rate for the task. A retool's cost is the rules' figure from the yard's tooled class to the class it is retooled to.<provenance-mark rule="refit.retool" />
           </div>
         </v-card>
       </template>
@@ -644,7 +644,7 @@ export default {
     },
 
     yardsSummary() {
-      return this.view === 'refits' ? 'The race\'s shipyards against the selected refit: which can take the target class, how long the refit takes at each, and what retooling each to the target costs from its own tooled class. Use it to pick a yard and to see whether it needs retooling.' : 'The race\'s shipyards against one class and one kind of work: which can build it, refit to it or repair it now, which are busy, and which need a retool, with the reasons. Use it to find a yard for a class and to see why a yard cannot take it.'
+      return this.view === 'refits' ? 'The race\'s shipyards against the selected refit, with the time and the retooling cost at each.' : 'The race\'s shipyards against one class and one kind of work, with the reasons each can or cannot take it.'
     },
 
     yardsHint() {

@@ -3,7 +3,7 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="How every page writes large numbers, and whether the computer-run empires are listed beside the players' ones. Use it to pick the thousands separator and to open the data of the NPR empires." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="How every page writes large numbers, and whether the computer-run empires are listed beside the players' ones." elevation="1">
             <div class="panel-head"><span>Number format and Computer-run empires</span></div>
             <div class="panel-body">
               <div class="setting">
@@ -21,12 +21,12 @@
                 <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Both apply at once and are kept in the settings file; About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">Use it to pick the thousands separator and to open the data of the NPR empires. Both apply at once and are kept in the settings file; About shows where it is.</div>
           </v-card>
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts each page has remembered. Use it to clear them and bring every page back to its defaults." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts that each page has remembered." elevation="1">
             <div class="panel-head">
               <span>Remembered views</span>
               <v-chip small>{{ count(totalCount) }} {{ totalCount === 1 ? 'value' : 'values' }}</v-chip>
@@ -47,14 +47,14 @@
                 <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the number format and Computer-run empires, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
+            <div class="panel-foot caption text--secondary">Use it to clear them and bring every page back to its defaults. Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the number format and Computer-run empires, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
           </v-card>
         </v-col>
       </v-row>
 
       <v-row>
         <v-col cols="12" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as the theme, how strongly the nine sections are coloured, the colour preset, the typeface and the text size. Use it to set the app up, to have the theme follow the operating system, to tone the section colours down or switch them off, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="How every page looks and reads: theme, section colours, colour preset, typeface and text size." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting" data-theme-policy>
@@ -129,7 +129,7 @@
 
       <v-row>
         <v-col cols="12" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Moves the theme, the section accents, the colour preset, the number format, the remembered views and the Galaxy Map's pins and clusters to a file and back. Use it to carry one empire's set-up to another, with a preview of every change and an Undo." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Preferences exported to a file and imported back." elevation="1">
             <div class="panel-head">
               <span>Export and import preferences</span>
               <v-chip v-if="backup" small>Undo kept</v-chip>
@@ -235,7 +235,7 @@
                 <v-btn outlined data-transfer-action="undo" @click="undo">Undo</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">A file holds only the categories chosen, as the app stores them, and nothing of the save. Values about one empire travel without its game and empire ids and are written to the empire picked here; values the file does not hold stay as they are. The whole file is checked before anything is written: an unknown key, or a value the page would not accept, rejects it and names the field. One undo is kept, in a file of its own beside the settings, and the next import replaces it. Empire History, Warnings mutes and exclusions, what was new at the last visit, local scenarios and save paths are never exported or imported.</div>
+            <div class="panel-foot caption text--secondary">Use it to carry one empire's set-up to another, with a preview of every change and an Undo. A file holds only the categories chosen, as the app stores them, and nothing of the save. Values about one empire travel without its game and empire ids and are written to the empire picked here; values the file does not hold stay as they are. The whole file is checked before anything is written: an unknown key, or a value the page would not accept, rejects it and names the field. One undo is kept, in a file of its own beside the settings, and the next import replaces it. Empire History, Warnings mutes and exclusions, what was new at the last visit, local scenarios and save paths are never exported or imported.</div>
           </v-card>
         </v-col>
       </v-row>

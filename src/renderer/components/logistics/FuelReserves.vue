@@ -1,6 +1,6 @@
 <template>
   <div class="fuel-reserves" data-fuel-reserves>
-    <div class="px-4 pt-3 fuel-reserves__title">Local reserve records: a ship, or a ship class</div>
+    <div class="px-4 pt-3 fuel-reserves__title">Local reserve records for a ship or a ship class</div>
     <div v-if="!ready" class="px-4 py-2" data-fuel-state>
       <load-state :failed="state.failed" :error="state.error" :loading="state.loading" @retry="retryReserves" />
       <v-alert v-if="!state.loading && !state.failed && repositoryError" type="info" outlined dense data-fuel-error>The scenario records are not available in this window, so reserves are not kept: {{ repositoryError }}</v-alert>

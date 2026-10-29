@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel archive" data-summary="The observed record of this race's game log on this branch of the campaign: how many events it keeps, the game dates it observed, the stretches nobody observed, and what a later save contradicted. The list below can show it in place of the open save's log." elevation="1">
+  <v-card class="panel archive" data-summary="The observed record of the race's game log on this branch." elevation="1">
     <div class="panel-head">
       <div class="subtitle-2">Event archive</div>
       <div class="list-source">
@@ -61,7 +61,7 @@
     </div>
 
     <div class="panel-foot caption text--secondary">
-      Each branch keeps its own archive, seeded from its parent up to the fork and never merged afterwards. A save holds only a moving window of the log, so what falls outside the observed spans is unknown, and an empty stretch inside a span is an observed stretch without events. When the list shows the archive, the pinned and new marks follow the same rules, and a pin is still compared with the open save.
+      The archive holds the events observed, the game dates observed and the stretches nobody observed, and the list can show it in place of the open save's log. Each branch keeps its own archive, seeded from its parent up to the fork and never merged afterwards. A save holds only a moving window of the log, so what falls outside the observed spans is unknown, and an empty stretch inside a span is an observed stretch without events. When the list shows the archive, the pinned and new marks follow the same rules, and a pin is still compared with the open save.
     </div>
   </v-card>
 </template>

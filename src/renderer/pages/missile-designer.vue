@@ -11,7 +11,7 @@
         <v-alert v-if="scenarioNotice" type="info" outlined dense class="mt-1" data-tech="scenario-notice">{{ scenarioNotice }}</v-alert>
         <v-alert v-if="linkNotice" type="warning" outlined dense dismissible class="mt-1" data-link="notice" @input="dismissLink">{{ linkNotice }}</v-alert>
 
-        <v-card class="panel" data-summary="The saved missile pinned as the baseline and the scenario every column is judged under: the target's speed and missile jammer, the launcher's tactical modifier, the point-defence figure and the target's signature. A baseline keeps the figures the save stored; a design made here starts from a copy of it or from nothing." elevation="1">
+        <v-card class="panel" data-summary="The saved missile pinned as the baseline, and the scenario every column is judged under." elevation="1">
           <div class="panel-head">
             <span>Baseline and scenario</span>
           </div>
@@ -61,11 +61,11 @@
             </div>
           </div>
           <div class="panel-foot caption text--secondary">
-            The target speed, jammer and modifier are those of the Designed Tech page's missile hit chance panel and move together. The point-defence figure feeds the planner figure only, warhead × hit chance × (1 − PD / speed), a planner figure and not a game statistic: it is a point-defence attenuation in km/s with no verified model of interception, and it must be 0 or more and not above the missile speed. The target signature sets the reach of a missile's own active sensor against it and is left blank when not wanted.
+            The scenario is the target's speed and missile jammer, the launcher's tactical modifier, the point-defence figure and the target's signature. A baseline keeps the figures the save stored, and a design made here starts from a copy of it or from nothing. The target speed, jammer and modifier are those of the Designed Tech page's missile hit chance panel and move together. The point-defence figure feeds the planner figure only, warhead × hit chance × (1 − PD / speed), a planner figure and not a game statistic: it is a point-defence attenuation in km/s with no verified model of interception, and it must be 0 or more and not above the missile speed. The target signature sets the reach of a missile's own active sensor against it and is left blank when not wanted.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The tech levels designs are made with: each line starts at the level the race holds and can be set to another level it has researched or to a next level it has not, which marks every result built on it as hypothetical. Ship thrust limits are not among them." elevation="1">
+        <v-card class="panel" data-summary="The tech levels that designs are made with." elevation="1">
           <div class="panel-head">
             <span>Tech levels<v-chip v-if="techChoiceCount" x-small outlined class="ml-2">{{ techChoiceCount }} changed</v-chip></span>
           </div>
@@ -83,11 +83,11 @@
             </v-row>
           </div>
           <div class="panel-foot caption text--secondary">
-            A missile engine is designed at the thrust modifier of the missile itself. Above the race's greatest thrust modifier its fuel use is boosted by the missile rule; a ship's least thrust modifier and largest engine size are never read here. Typed tech figures on an alternative replace these lines for that alternative.
+            Each line starts at the level the race holds and can be set to another level it has researched or to a next level it has not, which marks every result built on it as hypothetical. Ship thrust limits are not among them. A missile engine is designed at the thrust modifier of the missile itself. Above the race's greatest thrust modifier its fuel use is boosted by the missile rule; a ship's least thrust modifier and largest engine size are never read here. Typed tech figures on an alternative replace these lines for that alternative.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The baseline and up to three alternatives side by side: saved missiles, designs made from the tech the race holds, from a hypothetical next level or from typed figures. Every column carries the same inputs, figures and gated options, each figure with its provenance mark, sizes in MSP, HS and tons, and for a saved missile what the save stored beside what the rules rebuild." data-designer="comparison" elevation="1">
+        <v-card class="panel" data-summary="The baseline and its alternatives side by side." data-designer="comparison" elevation="1">
           <div class="panel-head">
             <span>Comparison<v-chip v-if="comparison.columns.length" x-small outlined class="ml-2">{{ comparison.columns.length }} {{ comparison.columns.length === 1 ? 'column' : 'columns' }}</v-chip></span>
             <span class="d-flex align-center flex-wrap">
@@ -98,11 +98,11 @@
           <div v-if="!comparison.columns.length" class="panel-body text--secondary" data-designer="empty">Pin a saved missile as the baseline, or add an alternative, to compare.</div>
           <missile-compare-table v-else :comparison="comparison" :links="columnLinks" @remove="removeAlternative" />
           <div class="panel-foot caption text--secondary">
-            Size is the full MSP sum of every part, raised to the floor of 1 MSP and cut to the size limit; 20 MSP are 1 HS and 50 tons are 1 HS. Fuel is 2,500 litres to the MSP, cut to a whole litre; speed and endurance are cut to 0.1. A saved missile's recomputed figures are rebuilt from the levels the race holds that reproduce what it stored, so agreement shows that some held level gives the figure; a figure the save lacks is unknown, never 0, and unknown or unsupported is never agreement. The planner figure is the planner's own heuristic and no game statistic. It is per warhead: the strength and the hit chance are those of one warhead and neither is multiplied by the number of warheads. A saved missile's hit chance and planner figure use its recomputed speed and warhead.
+            Alternatives are saved missiles, designs made from the tech the race holds, from a hypothetical next level or from typed figures. Every column carries the same inputs, figures and gated options, each figure with its provenance mark, and sizes in MSP, HS and tons. For a saved missile, the column shows what the save stored beside what the rules rebuild. Size is the full MSP sum of every part, raised to the floor of 1 MSP and cut to the size limit; 20 MSP are 1 HS and 50 tons are 1 HS. Fuel is 2,500 litres to the MSP, cut to a whole litre; speed and endurance are cut to 0.1. A saved missile's recomputed figures are rebuilt from the levels the race holds that reproduce what it stored, so agreement shows that some held level gives the figure; a figure the save lacks is unknown, never 0, and unknown or unsupported is never agreement. The planner figure is the planner's own heuristic and no game statistic. It is per warhead: the strength and the hit chance are those of one warhead and neither is multiplied by the number of warheads. A saved missile's hit chance and planner figure use its recomputed speed and warhead.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The designs made here, one editor each: the counts and sizes of the parts as typed, the options switched on and the tech they are designed with. Text that is not a figure stays on its field with its error and no number replaces it." data-designer="alternatives" elevation="1">
+        <v-card class="panel" data-summary="The designs made here, one editor each." data-designer="alternatives" elevation="1">
           <div class="panel-head">
             <span>Alternatives<v-chip x-small outlined class="ml-2">{{ alternatives.length }} of {{ maxAlternatives }}</v-chip></span>
           </div>
@@ -113,11 +113,11 @@
             </div>
           </div>
           <div class="panel-foot caption text--secondary">
-            An option that needs a tech line with no level is not applied: it is marked with its reason beside the option and on the column, and no figure of that column is shown, because any figure would be that of a missile without the option. A second stage, a ship decoy, a ground pod and an enhanced radiation warhead are carried from a seeded design and not built.
+            Each editor holds the counts and sizes of the parts as typed, the options switched on and the tech the design uses. Text that is not a figure stays on its field with its error, and no number replaces it. An option that needs a tech line with no level is not applied: it is marked with its reason beside the option and on the column, and no figure of that column is shown, because any figure would be that of a missile without the option. A second stage, a ship decoy, a ground pod and an enhanced radiation warhead are carried from a seeded design and not built.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="A bounded search of the engine, fuel, warhead and option sizes of a missile for one goal: the greatest warhead at a hit chance, the fastest, the longest range, the cheapest per warhead or the match of the baseline. Limits on size, cost, range and speed hold for every candidate, the best are listed beside the efficient front, a run that stops early says so, and the best can be set beside the baseline as alternatives." data-designer="optimiser" elevation="1">
+        <v-card class="panel" data-summary="A bounded search of the engine, fuel, warhead and option sizes of a missile for one goal." data-designer="optimiser" elevation="1">
           <div class="panel-head">
             <span>Missile optimiser<v-chip v-if="optimiserIncomplete" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip><v-chip v-if="optimiserHypothetical" x-small color="warning" outlined class="ml-2" data-tech="optimiser-hypothetical">Hypothetical tech</v-chip></span>
             <span class="d-flex align-center flex-wrap">
@@ -151,11 +151,11 @@
             </template>
           </div>
           <div class="panel-foot caption text--secondary">
-            Every candidate of the domain is held to the size, cost, range and speed limits; the missile is designed with the tech levels above and an option set to both ways is tried with and without. The hit chance is the combat model's, against the target speed, jammer and tactical modifier of the scenario, capped at its greatest; the point-defence figure feeds the planner figure only, a planner figure and not a game statistic. A missile on a second stage or with a decoy warhead has no hit chance, so a goal that needs one finds none. Cheapest per warhead leaves out a missile with no warhead, as its cost per warhead is undefined. The efficient front holds every candidate within the limits that no other beats on all the compared figures, whatever number of results is kept. A run stops at 200,000 candidates or 30 seconds and then says it is incomplete, never as an answer for the whole domain.
+            The goals are the greatest warhead at a hit chance, the fastest, the longest range, the cheapest per warhead and the match of the baseline. The best are listed beside the efficient front and can be set beside the baseline as alternatives. A run that stops early says so. Every candidate of the domain is held to the size, cost, range and speed limits; the missile is designed with the tech levels above and an option set to both ways is tried with and without. The hit chance is the combat model's, against the target speed, jammer and tactical modifier of the scenario, capped at its greatest; the point-defence figure feeds the planner figure only, a planner figure and not a game statistic. A missile on a second stage or with a decoy warhead has no hit chance, so a goal that needs one finds none. Cheapest per warhead leaves out a missile with no warhead, as its cost per warhead is undefined. The efficient front holds every candidate within the limits that no other beats on all the compared figures, whatever number of results is kept. A run stops at 200,000 candidates or 30 seconds and then says it is incomplete, never as an answer for the whole domain.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The launching ship's missile fire control and search sensor set beside the missile's own sensor and its range. Each sensor is a saved one of the race or typed figures, and the coverage of the target comes from the same detection rule as the sensors' own page; a figure that is missing is unknown and never 0." data-designer="launcher-coverage" elevation="1">
+        <v-card class="panel" data-summary="The launching ship's missile fire control and search sensor, set beside the missile's own sensor and its range." data-designer="launcher-coverage" elevation="1">
           <div class="panel-head">
             <span>Launcher coverage</span>
           </div>
@@ -163,11 +163,11 @@
             <launcher-coverage :sensors="launcherSensorRows" :selection="launcherSelection" :items="launcherItems" :missiles="launcherMissileRows" :jammer="launcherJammer" :jammer-problem="launcherJammerProblem" @sensor="setLauncherSensor" @jammer="setLauncherJammer" />
           </div>
           <div class="panel-foot caption text--secondary">
-            A sensor reaches a target at its maximum range, cut by the square of the target's signature over the sensor's resolution when the target is under it, and by 0.75 for each point the target's sensor jammer is above the sensor's ECCM. The target signature is that of the scenario above. The sensor jammer is its own figure, a blank one meaning none, and is not the missile jammer of the hit chance, which does not cut a sensor's range. A saved sensor that is not in this save has no figures: its coverage is unknown and the typed figures are not used in its place. The missile's own sensor and the launching ship's are never added: a fire control that reaches the whole range of a missile can guide it with no sensor of its own, and a missile whose own sensor reaches less than the shot is guided from the ship.
+            Each sensor is a saved one of the race or typed figures, and the coverage of the target comes from the same detection rule as the Sensor Planner. A figure that is missing is unknown and never 0. A sensor reaches a target at its maximum range, cut by the square of the target's signature over the sensor's resolution when the target is under it, and by 0.75 for each point the target's sensor jammer is above the sensor's ECCM. The target signature is that of the scenario above. The sensor jammer is its own figure, a blank one meaning none, and is not the missile jammer of the hit chance, which does not cut a sensor's range. A saved sensor that is not in this save has no figures: its coverage is unknown and the typed figures are not used in its place. The missile's own sensor and the launching ship's are never added: a fire control that reaches the whole range of a missile can guide it with no sensor of its own, and a missile whose own sensor reaches less than the shot is guided from the ship.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The smallest search sensor and missile fire control that see the target of the scenario at the missile's range, sized from the race's tech at each legal resolution. The range and the jammer start from the baseline and the launcher card and can be changed here without changing them there; the tech levels in effect are those chosen above." data-designer="sensor-sizing" elevation="1">
+        <v-card class="panel" data-summary="The smallest search sensor and missile fire control that see the target of the scenario at the missile's range." data-designer="sensor-sizing" elevation="1">
           <div class="panel-head">
             <span>Sensor sizing for the target<page-link :to="linkTo.sensors({ mode: 'active' })" name="Active mode" class="ml-1" /></span>
           </div>
@@ -193,11 +193,11 @@
             </div>
           </div>
           <div class="panel-foot caption text--secondary">
-            The target is the signature typed in the scenario above, and the wanted range starts at the range of the pinned baseline missile; a blank range or signature leaves the sizing unknown, never 0. Each row sizes the search sensor and the missile fire control at one resolution, from the sensor tech levels the Tech menu above holds. The jammer is the target's sensor jammer, not the missile jammer of the hit chance. The Sensor Planner shows the same sizing with the target by size or class, the saved pair and the hardening and ECCM levels.
+            Sizes come from the race's tech at each legal resolution. The range and the jammer start from the baseline and the launcher card and can be changed here without changing them there, and the tech levels in effect are those chosen above. The target is the signature typed in the scenario above, and the wanted range starts at the range of the pinned baseline missile; a blank range or signature leaves the sizing unknown, never 0. Each row sizes the search sensor and the missile fire control at one resolution, from the sensor tech levels the Tech menu above holds. The jammer is the target's sensor jammer, not the missile jammer of the hit chance. The Sensor Planner shows the same sizing with the target by size or class, the saved pair and the hardening and ECCM levels.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Comparisons kept in the scenario records of the race on this branch: the baseline, the alternatives as typed, the scenario and the tech levels chosen, never a figure of the save. A comparison made at a later game time is listed and not applied until moved to this save." data-designer="records" elevation="1">
+        <v-card class="panel" data-summary="Comparisons kept in the scenario records of the race on this branch." data-designer="records" elevation="1">
           <div class="panel-head">
             <span>Saved comparisons<v-chip v-if="recordsRead.entries.length" x-small outlined class="ml-2">{{ recordsRead.entries.length }}</v-chip></span>
           </div>
@@ -233,7 +233,7 @@
             </v-list>
           </div>
           <div class="panel-foot caption text--secondary">
-            A comparison keeps its inputs as text and the tech levels chosen on this page, by tech ID and name (never a figure), and works every figure out again from the save when it is opened. A level that is no longer a level the race has, or whose tech changed, reads as unresolved and named, and the line designs with the game's pick. It is kept on this branch of the campaign; a saved missile it names that changed or is gone is flagged and never re-pointed. Nothing is written into the Aurora save.
+            A comparison holds the baseline, the alternatives as typed, the scenario and the tech levels chosen, never a figure of the save. One made at a later game time is listed and not applied until moved to this save. A comparison keeps its inputs as text and the tech levels chosen on this page, by tech ID and name (never a figure), and works every figure out again from the save when it is opened. A level that is no longer a level the race has, or whose tech changed, reads as unresolved and named, and the line designs with the game's pick. It is kept on this branch of the campaign; a saved missile it names that changed or is gone is flagged and never re-pointed. Nothing is written into the Aurora save.
           </div>
         </v-card>
       </template>

@@ -101,7 +101,7 @@
         <v-alert v-if="mode === 'passive' && !classes.length" type="info" outlined dense class="mt-3" data-sensors="no-classes">The race has no ship classes.</v-alert>
         <v-alert v-if="handoffProblemText" type="warning" outlined dense dismissible class="mt-3" data-planner-link="unreadable" @input="dismissHandoffProblems">{{ handoffProblemText }}</v-alert>
         <v-alert v-if="focusNotice" type="warning" outlined dense dismissible class="mt-3" data-planner-link="design" @input="dismissFocusNotice">{{ focusNotice }}</v-alert>
-        <v-card v-if="handoffResolution" class="panel" data-summary="The missile handed over by the Missile Designer: its name, size and range, the target signature and resolution it was evaluated under, the jammer it carried, which a missile target does not take, where the figures come from and the tech it is built on, so the sizing reads against that missile and each figure traces back to it." elevation="1" data-planner-link="handoff">
+        <v-card v-if="handoffResolution" class="panel" data-summary="The missile handed over by the Missile Designer, with the scenario and tech it was evaluated under." elevation="1" data-planner-link="handoff">
           <div class="panel-head">
             <span>Missile from the Missile Designer<v-chip x-small outlined class="ml-2" data-planner-link="source">{{ handoffSourceText }}</v-chip><v-chip v-if="handoffResolution.applies" x-small outlined class="ml-2" :color="handoffHeld ? undefined : 'warning'" data-planner-link="state">{{ handoffHeld ? 'In the sizing' : 'Edited since' }}</v-chip></span>
           </div>
@@ -135,7 +135,7 @@
         </v-card>
 
         <template v-if="mode === 'passive'">
-          <v-card class="panel" data-summary="The thermal and EM signatures of each class and its cross-section with the cloak working and damaged, then how far the typed enemy sensors reach each. A figure is marked confirmed, estimated, assumed or unavailable, and a stored figure the rules do not reproduce is flagged, so the classes can be compared on what a sensor sees." elevation="1">
+          <v-card class="panel" data-summary="The thermal and EM signatures and the cloaked cross-section of each class, with the reach of typed enemy sensors against each." elevation="1">
             <div class="panel-head">
               <span>Signatures</span>
               <span class="d-flex align-center flex-wrap">
@@ -192,7 +192,7 @@
             </div>
           </v-card>
 
-          <v-card class="panel" data-summary="The thermal signature of the chosen class and the reach of the typed enemy thermal sensor against it from standing still to full speed, to see what speed costs in being seen." elevation="1">
+          <v-card class="panel" data-summary="The thermal signature of the chosen class and the reach of the typed enemy thermal sensor against it, from standing still to full speed." elevation="1">
             <div class="panel-head">
               <span>Speed and detection<v-chip v-if="selectedClass" x-small outlined class="ml-2">{{ selectedClass.name }}</v-chip></span>
               <v-btn-toggle v-model="speedView" mandatory dense>
@@ -230,7 +230,7 @@
             <div class="panel-foot caption text--secondary">The share is the part of top speed the fleet moves at. Idle, with no move orders, is the floor of a twentieth of the class size, and a share too low to rise above the floor shows the floor. A class with no engine shows the floor at rest and 0 when it moves. The reach is that of a passive thermal sensor of the typed sensitivity against each signature; with no sensitivity typed the reach is unknown, and the table says so. The chart and the table list the same points.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="How far passive thermal and EM sensors detect targets of typed signatures: every thermal and EM sensor the race has researched and the typed enemy sensor, on logarithmic axes, to see which sensor sees what a target gives off." elevation="1">
+          <v-card class="panel" data-summary="How far passive thermal and EM sensors detect targets of typed signatures." elevation="1">
             <div class="panel-head">
               <span>Passive range</span>
               <v-btn-toggle v-model="passiveView" mandatory dense>
@@ -273,7 +273,7 @@
             <div class="panel-foot caption text--secondary">A passive sensor detects a target out to 250,000 km times the square root of its sensitivity times the target's signature, so four times the sensitivity doubles the range. A sensor size typed in the toolbar adds a proposed thermal and an EM sensor of that size at the levels in use, ahead of the rest, and a hypothetical level marks its ranges. The sensors listed are every thermal and EM sensor design the race has researched, each by its design's sensitivity, the strongest first; the chart draws the strongest eight of each kind and the typed enemy sensor, and the table holds the rest. The number fitted to a ship does not add, and a target's cloak and jammer do not change a passive range. The target signatures are typed and assumed, one number for each point, in the thermal or EM figure of the game; the enemy sensitivity is the one typed in the toolbar and is assumed too. The axes are logarithmic.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="The engines of the chosen class designed again at each thermal reduction level the race has researched: the multiplier, the engine cost factor and tech, the engine BP and the thermal signature at the speed shares, to weigh stealth against cost." elevation="1">
+          <v-card class="panel" data-summary="The engines of the chosen class designed again at each researched thermal reduction level, with their cost and thermal signature." elevation="1">
             <div class="panel-head">
               <span>Thermal reduction<v-chip v-if="selectedClass" x-small outlined class="ml-2">{{ selectedClass.name }}</v-chip></span>
             </div>
@@ -311,7 +311,7 @@
         <template v-else-if="mode === 'active'">
           <stat-tiles :tiles="activeTiles" class="mt-3" data-sensors="active-tiles" />
 
-          <v-card class="panel" data-summary="The smallest search sensor and missile fire control that reach the wanted range against the target at each legal resolution: the size and reach of each, the pair's cost, minerals and crew, to see which resolution suits the target." elevation="1">
+          <v-card class="panel" data-summary="The smallest search sensor and missile fire control that reach the wanted range against the target, at each legal resolution." elevation="1">
             <div class="panel-head">
               <span>Sizing<v-chip x-small outlined class="ml-2">{{ target.label }}</v-chip></span>
             </div>
@@ -324,7 +324,7 @@
             </div>
           </v-card>
 
-          <v-card class="panel" data-summary="How far the proposed pair and each saved sensor reach against targets of different sizes, on logarithmic axes or as a table, to see which sensor sees what size." elevation="1">
+          <v-card class="panel" data-summary="How far the proposed pair and each saved sensor reach against targets of different sizes." elevation="1">
             <div class="panel-head">
               <span>Range curve</span>
               <v-btn-toggle v-model="curveView" mandatory dense>
@@ -362,7 +362,7 @@
             <div class="panel-foot caption text--secondary">The curve is the effective range of each sensor against a target of each size, at the sensor's own resolution and ECCM and against the jammer typed in the toolbar. A target size is typed and assumed; the cross-section is the size over 50 t per HS, never under 0.3 HS. A sensor with no stored range or resolution has no point, never 0. The proposed pair comes first, then the saved sensors; the chart draws the first eight and the table lists all. The chart and the table hold the same points.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="A saved search sensor and a saved missile fire control against the target: the reach of each and of the pair, the member that falls short, and the best pair to design instead." elevation="1">
+          <v-card class="panel" data-summary="A saved search sensor and a saved missile fire control against the target, with the best pair to design instead." elevation="1">
             <div class="panel-head">
               <span>Saved pair</span>
             </div>
@@ -408,7 +408,7 @@
             <div class="panel-foot caption text--secondary">Each member is measured at its stored range, resolution and ECCM against the target and the jammer; a missile target takes no jammer. The pair reaches as far as the shorter member. A search sensor that falls short limits the pair whatever the fire control reaches, and the reverse; when both fall short, the member that reaches less is named. The pair to design instead is the best one at the saved resolution of the search sensor when one reaches the range, else the best overall.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="What the proposed pair costs at each hardening and ECCM level the race has: BP, Uridium and Corbomite, and whether the pair still reaches the wanted range against the jammer." elevation="1">
+          <v-card class="panel" data-summary="What the proposed pair costs at each hardening and ECCM level, and whether it still reaches the wanted range against the jammer." elevation="1">
             <div class="panel-head">
               <span>Hardening and ECCM</span>
             </div>
@@ -442,7 +442,7 @@
             <div class="panel-foot caption text--secondary">The sizes stay those of the proposed pair at the chosen resolution; the levels change the cost and the ECCM the pair meets the jammer with. Hardening sets the Uridium of the sensor and ECCM the Corbomite on top of it. The row in the tint is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair; a missile target takes no jammer, so the ECCM changes no reach against it.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="The active sensors and missile fire controls the race has researched, with the stored figures and how far each reaches the target, linked to their designs and techs." elevation="1">
+          <v-card class="panel" data-summary="The active sensors and missile fire controls the race has researched, with their stored figures and reach." elevation="1">
             <div class="panel-head">
               <span>Existing designs</span>
               <v-chip small outlined>{{ existingItems.length }} designs</v-chip>
@@ -466,7 +466,7 @@
             <div class="panel-foot caption text--secondary">The figures are as the save stores them. The reach is the stored range cut by the resolution against the target and, for a ship, shortened by the jammer over the ECCM, so a design the stored figures do not give a reach for shows Unknown. A missile target takes no jammer. A missile fire control reaches as far as its own stored range. The links open the design in Designed Tech and its research in the Tech Tree.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="How far the proposed pair reaches each class of the race, with the cloak working and damaged, to see which classes the pair sees at the wanted range." elevation="1">
+          <v-card class="panel" data-summary="How far the proposed pair reaches each class of the race, with the cloak working and damaged." elevation="1">
             <div class="panel-head">
               <span>Classes against the proposed pair</span>
               <v-chip small outlined>{{ visibleClasses.length }} of {{ classes.length }} classes</v-chip>
@@ -501,7 +501,7 @@
         <template v-else>
           <stat-tiles :tiles="beamTileList" class="mt-3" data-sensors="beam-tiles" />
 
-          <v-card class="panel" data-summary="The range and the tracking speed wanted, each on its own: the multiplier that reaches it, what that multiplier gives, and whether the cap or the tech stands in the way." elevation="1">
+          <v-card class="panel" data-summary="The wanted beam range and tracking speed, each sized on its own." elevation="1">
             <div class="panel-head">
               <span>Requirement<v-chip x-small outlined class="ml-2" data-sensors="beam-restriction">{{ beam.restriction.label }}</v-chip></span>
             </div>
@@ -530,7 +530,7 @@
             <div class="panel-foot caption text--secondary">The range of a beam fire control is its range multiplier times the distance rating, never above 1,400,000 km, and its tracking speed is its tracking multiplier times the speed rating. The two are sized separately, each at the smallest legal multiplier that reaches what is wanted; a range above the cap is reported as beyond it, not as met. A single weapon control is offered only where the race has researched or hypothetically chose the single weapon tech, and the restriction in the heading says which kind is sized: an unrestricted control is never taken for a single weapon one.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="The beam fire controls at each pair of range and tracking multipliers: range, tracking speed, size, cost, minerals and crew, with the sized pair marked and a multiplier that the range cap wastes flagged." elevation="1">
+          <v-card class="panel" data-summary="The beam fire controls at each pair of range and tracking multipliers." elevation="1">
             <div class="panel-head">
               <span>Multipliers</span>
               <v-chip small outlined>{{ beamMultiplierRows.length }} designs</v-chip>
@@ -568,7 +568,7 @@
             <div class="panel-foot caption text--secondary">Each row designs the fire control at the two multipliers from the distance and speed ratings, the weapon number of the restriction and the hardening and ECCM levels in use. A row whose range multiplier takes the range past the cap of 1,400,000 km is flagged: the range stays at the cap and the rest of the multiplier only adds size and cost. A figure the tech lines do not give shows Unknown, naming the line.</div>
           </v-card>
 
-          <v-card class="panel" data-summary="The beam fire controls the race has researched, with the stored range and tracking speed beside what is wanted and the axis that falls short." elevation="1">
+          <v-card class="panel" data-summary="The beam fire controls the race has researched, with their stored range and tracking speed against what is wanted." elevation="1">
             <div class="panel-head">
               <span>Existing beam fire controls</span>
               <v-chip small outlined>{{ existingBeamItems.length }} designs</v-chip>

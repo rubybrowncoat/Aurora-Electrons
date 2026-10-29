@@ -10,7 +10,7 @@
 
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Unassigned officers who would do a post better than its current holder: governors, specialist ships and research projects. Use it to improve the assignments." elevation="1">
+        <v-card class="panel" data-summary="Unassigned officers who would do a post better than its current holder." elevation="1">
           <div class="panel-head">
             <span>Better assignments<provenance-mark rule="commanders.bonusSuggestion" /></span>
             <v-btn-toggle v-model="suggestionView" mandatory dense>
@@ -129,7 +129,7 @@
           </template>
         </v-card>
 
-        <v-card class="panel" data-summary="Every commander of the race with rank, post, bonuses and health. Use it to find who is available, who is best suited and who is ageing." elevation="1">
+        <v-card class="panel" data-summary="Every commander of the race with rank, post, bonuses and health." elevation="1">
           <div class="panel-head">
             <span>Roster<provenance-mark rule="commanders.count" /></span>
             <v-btn-toggle v-model="typeId" mandatory dense>
@@ -209,7 +209,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Commanders who are prisoners, retired or dead, with their careers. Use it to look back at who served the race and who is held captive." elevation="1">
+        <v-card class="panel" data-summary="Commanders who are prisoners, retired or dead, with their careers." elevation="1">
           <div class="panel-head">
             <span>Former commanders<provenance-mark rule="commanders.groupCount" /></span>
             <v-btn-toggle :value="formerGroup" mandatory dense @change="(value) => (formerView = value)">
@@ -277,7 +277,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The naval admin commands with their fleets and ships, or the ground formations, each with the commander serving in its post. Use it to see who commands what, where a link in the structure is broken, and to export the structure as CSV or Markdown." elevation="1" data-structure>
+        <v-card class="panel" data-summary="The naval admin commands with their fleets and ships, or the ground formations, with the commander in each post." elevation="1" data-structure>
           <div class="panel-head">
             <span>Command structure</span>
             <span class="d-flex align-center flex-wrap controls">

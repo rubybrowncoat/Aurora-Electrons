@@ -2,7 +2,7 @@ import { linkTo } from '../deep-links'
 import { isKnownNumber } from '../math'
 import { QUARTER, amount, bandOf, bandWords, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
-export const group = { key: 'research', title: 'Research', summary: 'Idle labs, dead or forgotten projects and scientists working outside their field, so the race\'s research makes full use of what it has.' }
+export const group = { key: 'research', title: 'Research', summary: 'Idle labs, dead or forgotten projects and scientists working outside their field.' }
 
 const LAB_INSTALLATIONS = 'the amount or the type of a research installation of the colony'
 const PAUSED = 'whether the project is paused'
