@@ -7,7 +7,7 @@
   - A constructed race of 12 formations (at a colony, aboard a ship, stored nowhere, at a colony of another race, at a colony the save lacks; one, both or no rating) whose rows, role filters, marks, totals and sentences are worked out by hand.
   - The view preferences and the deep link of the table.
   - The named saves, opened read-only: the rows, the remote formations, the systems of the marks and the totals are compared with SQL written separately here, and with the counts the saves are known to hold.
-  - The pages, run on pseudo-instances: the map's mark, role filter, lazy read and panel fact, and the table's rows, link, sort keys and load state.
+  - The pages, run on pseudo-instances: the map's mark, role filter, lazy read and panel fact, and the table's rows, link, row click (the handler its template binds, which opens the row's detail and goes nowhere), sort keys and load state.
   - Planted faults in a copy of the utility and of the pages, each of which must make a named check fail.
 
   Prints `N of N checks passed`; any failed check sets exit code 1. A save that is not there fails its checks: none is skipped.
@@ -15,6 +15,7 @@
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
+const { compileTemplate, parse } = require('vue/compiler-sfc')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
@@ -520,14 +521,63 @@ pageAdd('page-survey-table', 'the table lists the rows the roles, the remote swi
   assert.deepEqual(surveyView(ctx, { formations: { supported: false, missing: ['FCT_GroundUnitFormation'] } }).formationList, [])
 })
 
-pageAdd('page-survey-open', 'a row opens its system on the map, and one with no known system opens nothing', (ctx) => {
-  const pushed = []
-  const vm = surveyView(ctx, { $router: { push: (location) => pushed.push(location) } })
-  const rows = new Map(vm.formationAll.map((row) => [row.id, row]))
+// The handler the Ground formations table binds to a click on a row, as the page's template gives it, run with `vm` as the template's scope: a method's name or a function written in place is the handler, and any other statement runs with the event as Vue 2 runs it. The table is the one whose items, as its compiled binding evaluates them on the page, are the formations the page lists, however the binding is written.
+const rowClickOf = (ctx, vm) => {
+  const parsed = parse({ source: ctx.pages.surveyText })
+  const { ast } = compileTemplate({ source: (parsed.descriptor || parsed).template.content, filename: 'survey-progress.vue' })
+  const elements = []
+  const visit = (node) => {
+    if (node && node.type === 1) {
+      elements.push(node)
+      ;(node.children || []).forEach(visit)
+      ;(node.ifConditions || []).forEach((condition) => condition.block !== node && visit(condition.block))
+      Object.values(node.scopedSlots || {}).forEach(visit)
+    }
+  }
 
-  vm.openFormation(rows.get(3))
-  vm.openFormation(rows.get(10))
-  assert.deepEqual(pushed, [ctx.links.map(9)])
+  visit(ast)
+
+  const listed = vm.formationList.map((row) => row.id).join()
+  const itemsOf = (node) => [...(node.attrs || []), ...(node.props || [])].find((binding) => binding.name === 'items')
+  const listsFormations = (node) => {
+    try {
+      // eslint-disable-next-line no-new-func
+      const items = new Function('scope', `with (scope) { return (${itemsOf(node).value}) }`)(vm)
+
+      return Array.isArray(items) && items.length > 0 && items.map((row) => row.id).join() === listed
+    } catch {
+      return false
+    }
+  }
+  const tables = elements.filter((node) => node.tag === 'v-data-table' && itemsOf(node) && listsFormations(node))
+
+  assert.equal(tables.length, 1, 'one data table lists the formations the page lists')
+
+  const bound = (tables[0].events || {})['click:row']
+
+  assert.ok(bound && !Array.isArray(bound), 'the formations table takes one handler for a click on a row')
+
+  const value = bound.value.trim()
+  const direct = /^([\w$]+|\([^)]*?\))\s*=>|^function(?:\s+[\w$]+)?\s*\(/.test(value) || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(value)
+
+  // eslint-disable-next-line no-new-func
+  return new Function('scope', `with (scope) { return ${direct ? `(${value})` : `function ($event) { ${value} }`} }`)(vm)
+}
+
+pageAdd('page-survey-row', 'a click on a formation\'s row opens its detail and a second click closes it, as the expander does, for a formation with a system and one without, and the page goes nowhere', (ctx) => {
+  const moved = []
+  const vm = surveyView(ctx, { $router: { push: (location) => moved.push(location), replace: (location) => moved.push(location) } })
+  const rows = new Map(vm.formationAll.map((row) => [row.id, row]))
+  const click = rowClickOf(ctx, vm)
+  const expanded = []
+  const press = (row, isExpanded) => click(row, { item: row, isExpanded, expand: (value) => expanded.push([row.id, value]) })
+
+  assert.ok(rows.get(3).system && !rows.get(10).system, 'formation 3 has a system and formation 10 none')
+  press(rows.get(3), false)
+  press(rows.get(3), true)
+  press(rows.get(10), false)
+  assert.deepEqual(expanded, [[3, true], [3, false], [10, true]])
+  assert.deepEqual(moved, [])
 })
 
 pageAdd('page-survey-reveal', 'a link to a system\'s formations scrolls to the panel once, when the page draws it, even if the formations arrive before another input', (ctx) => {
@@ -619,20 +669,27 @@ const MUTANTS = [
   ['the page forgets to wait for the naval admins', "  navalAdmins: 'naval admin commands',\n", '', SURVEY_FILE, ['page-survey-ready']],
   ['a link is cleared before the page draws the panel', 'if (this.formationsPending && this.formationAll.length && this.ready) {', 'if (this.formationsPending && this.formationAll.length) {\n        this.formationsPending = false', SURVEY_FILE, ['page-survey-reveal']],
   ['the reveal is not retried when the page becomes ready', '    ready() {\n      this.revealFormations()\n    },\n', '', SURVEY_FILE, ['page-survey-reveal']],
-  ['a row opens the map on no system', 'this.$router.push(linkTo.map(item.system.id))', 'this.$router.push(linkTo.map(item.id))', SURVEY_FILE, ['page-survey-open']],
+  ['a click on a formation\'s row opens its system on the map', 'no-data-text="No formation matches the roles and the scope chosen" @click:row="toggleRow"', 'no-data-text="No formation matches the roles and the scope chosen" @click:row="(item) => item.system && $router.push(linkTo.map(item.system.id))"', SURVEY_FILE, ['page-survey-row']],
+  ['a click on a row opens its detail and never closes it', '    toggleRow(_item, { expand, isExpanded }) {\n      expand(!isExpanded)', '    toggleRow(_item, { expand }) {\n      expand(true)', SURVEY_FILE, ['page-survey-row']],
+]
+
+// Rewrites that change nothing the checks observe: each must leave every check passing.
+const BENIGN = [
+  ['the formations table binds its items in longhand', ':items="formationList" item-key="id" show-expand', 'v-bind:items="formationList" item-key="id" show-expand', SURVEY_FILE],
 ]
 
 const main = async () => {
   const sources = { remote: fs.readFileSync(REMOTE_FILE, 'utf8'), map: fs.readFileSync(MAP_FILE, 'utf8'), survey: fs.readFileSync(SURVEY_FILE, 'utf8') }
   const appearance = (await loadUtilities(['appearance'], { stubs: UTILITY_STUBS })).appearance.resolveAppearance('light')
 
-  // The two pages, each with the texts it is given: a fault planted in the utility reaches them through their import of it.
+  // The two pages, each with the texts it is given: a fault planted in the utility reaches them through their import of it. The survey page's own text is kept for the checks that read its template.
   const pagesOf = async (given) => {
     const text = { 'utilities/remote-formations': given.remote }
 
     return {
       map: await loadPage('pages/map', { sources: { ...text, 'pages/map': given.map }, stubs: MAP_STUBS, modules: MAP_MODULES }),
       survey: await loadPage('pages/survey-progress', { sources: { ...text, 'pages/survey-progress': given.survey }, stubs: SURVEY_STUBS, modules: { 'mixins/load-state': null } }),
+      surveyText: given.survey,
     }
   }
   const loaded = await loadUtilities(['remote-formations', 'ground-formations', 'deep-links'], { stubs: { dayjs: real('dayjs'), 'dayjs/plugin/utc.js': real('dayjs/plugin/utc.js'), romanum: 'export default { toNumeral: String }' } })
@@ -682,6 +739,15 @@ const main = async () => {
       const failed = (await run(own, context(mod, await pagesOf(given)))).filter((result) => !result.ok).map((result) => result.id)
 
       check(`planted: ${name}: caught by ${failed.join(', ') || 'nothing'}`, expected.some((id) => failed.includes(id)), `expected one of ${expected.join(', ')}`)
+    }
+
+    console.log('\nBenign rewrites')
+
+    for (const [name, from, to, file] of BENIGN) {
+      const given = { remote: sources.remote, map: sources.map, survey: sources.survey, [file === SURVEY_FILE ? 'survey' : file === MAP_FILE ? 'map' : 'remote']: patched(file, file === SURVEY_FILE ? sources.survey : file === MAP_FILE ? sources.map : sources.remote, from, to) }
+      const failed = (await run(own, context(loaded['remote-formations'], await pagesOf(given)))).filter((result) => !result.ok).map((result) => result.id)
+
+      check(`benign: ${name}: no check fails`, failed.length === 0, failed.join(', '))
     }
   }
 

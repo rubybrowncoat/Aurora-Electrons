@@ -6,7 +6,7 @@
   Each part (the suites, each save, the control and each mutant) runs in a process of its own through scripts/lib/suite-runner.js, with a deadline and a record that --resume continues; `--variants` runs exactly the parts named, in one process.
 
   The groups, each check a PASS or FAIL line:
-  - The pure builders on constructed rows worked out by hand: the naval tree (11 commands, 8 fleets and 8 ships of the race, and the rows that must not enter it; with the shipping lines listed, 9 fleets and 10 ships), the posts and their holders, the ground formations with their commanders, the CSV and Markdown of both, and the roster filters on a roster of people whose post, rank and age are stored, unknown or on the edge of a bound.
+  - The pure builders on constructed rows worked out by hand: the naval tree (11 commands, 8 fleets and 8 ships of the race, and the rows that must not enter it; with the shipping lines listed, 9 fleets and 10 ships), the posts and their holders, the ground formations with their commanders, the CSV and Markdown of both (the Markdown's title and file name by the empire, its list nested as a CommonMark reader and a reader that needs four spaces a level read it, and its Mermaid diagram of the organisation read back as Mermaid reads it), and the roster filters on a roster of people whose post, rank and age are stored, unknown or on the edge of a bound.
   - The SELECT statements and the loaders on an in-memory SQLite database that holds rows of another race and another game, and a save without the columns the posts need (never a save of the user).
   - The Commanders page itself, its compiled template rendered by Vue: the controls are found by driving them and seeing the roster change, the downloads by clicking the buttons and reading what they save. The shipping-line switch is driven the same way against the page's own read of the naval tree on an in-memory database, re-run as the app re-runs a read whose inputs changed, and across a reload of the saved view.
   - Every AuroraDB*.db that can be found, one check per game and race: the models (with the shipping lines left out and listed), the posts and the roster filters compared with SQL written separately here. A save without the tables or columns is reported UNSUPPORTED and a save with nothing to compare EMPTY: neither counts as agreement.
@@ -16,7 +16,7 @@
 
   Who is credited with a planted fault: a fault counts only when every check named for it fails by an assertion of its own on a value it read, never because something threw. A check's verdict (what it returns when it does not hold) is its own assertion, and so is the failure of a call of the code under test, which runs only through explicit adapters (the functions of the utilities, and the computed values, methods, watchers, reads, data and hooks of the page) that turn a throw or a rejection into a failure marked with a symbol nothing else holds and naming the call. Such a failure says that the subject threw (`threw` on the result), and a fault that a named check catches only that way crashed the code instead of changing a value: crediting it stops the run (HarnessError, exit status 2) unless the fault declares that a throw is how it is caught. Any other exception (a lookup the harness gets wrong, a check's own mistake) is a failed check in the unmodified code, and while a fault is judged it stops the run (HarnessError), crediting nothing. What the harness hands the page (the store and the methods of the persisted-view mixin) is the harness's own: a getter of the wrong kind or one that throws, a rejecting dispatch and a throwing callback are a HarnessError, never a failure of the page. The rule is the shared scripts/lib/fault-credit.js (`caughtAll`); `--detail` prints, for a mutant part, what each named check said.
 
-  The figures of the exports are read whole by scripts/lib/browser-observe.js `readFigure` (the CSV writes them with no grouping), and the rows of a CSV and the bullets of an outline are set against the entries of the hand-worked tree by the identity of each (`pairedBy`, and the order of the tree for the outline, whose place is its structure), the order checked on its own.
+  The figures of the exports are read whole by scripts/lib/browser-observe.js `readFigure` (the CSV writes them with no grouping), and the rows of a CSV and the bullets of an outline are set against the entries of the hand-worked tree by the identity of each (`pairedBy`, and the order of the tree for the outline, whose place is its structure), the order checked on its own. The bullet a reader nests a bullet under must be its parent's bullet in the model (`nestingOf`), and the nodes and arrows of the diagram are the model's units and their links (`flowchartOf`).
 */
 const fs = require('fs')
 const path = require('path')
@@ -247,40 +247,143 @@ const tableOf = (text) => {
   return { header, rows: rest.map((cells) => strictRow(Object.fromEntries(header.map((name, index) => [name, cells[index]])))), widths: rest.map((cells) => cells.length) }
 }
 
-// A Markdown line's text as a reader sees it: a backslash escape is its character and a code span is its text; null when markup is left in it (an unescaped emphasis, link, table, heading or entity character).
+// A Markdown line's text as a reader sees it, read from the left as a reader does: a backslash escape is its character (an escaped backtick opens no code span) and a code span is its text; null when markup is left in it (an unescaped emphasis, link, table, heading or entity character).
 const MARKUP = /[*_[\]<>|#&`]/
+const ESCAPE_OR_SPAN = /\\([\s\S])|`([^`]*)`/g
 
 const readMarkdown = (line) => {
   const body = line.replace(/^\s*- /, '')
-  const bare = body.replace(/\\[\s\S]/g, '').replace(/`[^`]*`/g, '')
 
-  if (MARKUP.test(bare)) {
+  if (MARKUP.test(body.replace(ESCAPE_OR_SPAN, ''))) {
     return null
   }
 
-  return body.replace(/`([^`]*)`/g, '$1').replace(/\\([\s\S])/g, '$1')
+  return body.replace(ESCAPE_OR_SPAN, (_match, escaped, span) => (escaped === undefined ? span : escaped))
 }
 
-// The bullets of the outline of an export, without the lists of the sections after it (the loops).
+// The bullets of the list of entries of an export: the first list of the document outside a fenced block (the diagram), up to the next heading (the loops).
 const outlineBullets = (markdown) => {
-  const all = markdown.split('\n')
-  const end = all.findIndex((line, index) => index > 0 && /^#{1,6} /.test(line))
+  const bullets = []
+  let fenced = false
 
-  return (end === -1 ? all : all.slice(0, end)).filter((line) => /^\s*- /.test(line))
+  for (const line of markdown.split('\n')) {
+    if (/^```/.test(line)) {
+      fenced = !fenced
+    } else if (!fenced && /^#{1,6} /.test(line) && bullets.length) {
+      break
+    } else if (!fenced && /^\s*- /.test(line)) {
+      bullets.push(line)
+    }
+  }
+
+  return bullets
 }
+
+// The parent of each bullet of a list as a reader nests it: the index of the bullet it hangs from, -1 for a bullet at the top of the list, or null when the reader would not read a line as an item of the list. `rule` is 'commonmark', as GitHub and Obsidian read a list (an item is under the open item whose text starts at or before its marker, and a marker four or more columns past that is code), or 'four', as the readers that need four spaces a level read it (the original Markdown, Python-Markdown): an item is under the item four spaces to its left.
+const nestingOf = (bullets, rule) => {
+  const open = []
+  const parents = []
+
+  for (const [index, line] of bullets.entries()) {
+    const indent = line.match(/^( *)- /)[1].length
+
+    if (rule === 'commonmark') {
+      while (open.length && indent < open[open.length - 1].text) {
+        open.pop()
+      }
+
+      if (open.length ? indent >= open[open.length - 1].text + 4 : indent > 3) {
+        return null
+      }
+
+      parents.push(open.length ? open[open.length - 1].index : -1)
+      open.push({ index, text: indent + 2 })
+    } else {
+      while (open.length && indent <= open[open.length - 1].indent) {
+        open.pop()
+      }
+
+      if (indent !== (open.length ? open[open.length - 1].indent + 4 : 0)) {
+        return null
+      }
+
+      parents.push(open.length ? open[open.length - 1].index : -1)
+      open.push({ index, indent })
+    }
+  }
+
+  return parents
+}
+
+// The bullet each entry of `order` (keys in tree order) hangs from in the model, by its place in `order`: -1 for a top-level entry. `childrenOf` gives an entry's children by key.
+const parentsIn = (order, childrenOf) => {
+  const parentOf = new Map(order.flatMap((key) => childrenOf(key).map((child) => [child, key])))
+
+  return order.map((key) => (parentOf.has(key) ? order.indexOf(parentOf.get(key)) : -1))
+}
+
+// Whether a list nests as the model does under both readers, or what each reader made of it.
+const nestsAs = (bullets, expected) => {
+  const read = { commonmark: nestingOf(bullets, 'commonmark'), four: nestingOf(bullets, 'four') }
+
+  return (same(read.commonmark, expected) && same(read.four, expected)) || `expected ${JSON.stringify(expected)}, a CommonMark reader read ${JSON.stringify(read.commonmark)} and a four-space reader ${JSON.stringify(read.four)}`
+}
+
+// The Mermaid flowchart of a document: { nodes: [{ id, lines }] in the order written, arrows: [[from, to]] } with each label as Mermaid shows it (an entity code is its character, `<br>` breaks the line); null when the document has no diagram, and { invalid } when a line of it is neither a node with a quoted label, nor an arrow, or a label holds a character Mermaid would read as markup.
+const flowchartOf = (markdown) => {
+  const lines = markdown.split('\n')
+  const start = lines.indexOf('```mermaid')
+
+  if (start === -1) {
+    return null
+  }
+
+  const end = lines.indexOf('```', start + 1)
+  const body = end === -1 ? [] : lines.slice(start + 1, end)
+
+  if (!/^flowchart (LR|RL|TB|TD|BT)$/.test(body[0] || '')) {
+    return { invalid: body[0] || 'no flowchart' }
+  }
+
+  const nodes = []
+  const arrows = []
+
+  for (const line of body.slice(1)) {
+    const node = /^\s*(\w+)\["([^"]*)"\]$/.exec(line)
+    const arrow = /^\s*(\w+) --> (\w+)$/.exec(line)
+
+    if (node && !/[<>&`]|#(?!\d+;)/.test(node[2].replace(/<br>/g, ''))) {
+      nodes.push({ id: node[1], lines: node[2].split('<br>').map((part) => part.replace(/#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))) })
+    } else if (arrow) {
+      arrows.push([arrow[1], arrow[2]])
+    } else {
+      return { invalid: line }
+    }
+  }
+
+  return { nodes, arrows }
+}
+
+// The title and the summary of a document: what comes before its first section.
+const headOf = (markdown) => markdown.split('\n## ')[0]
+// The title of a document as a reader shows it, or null when markup is left in it.
+const titleOf = (markdown) => readMarkdown(markdown.split('\n')[0].replace(/^# /, ''))
 
 // ---------- the constructed rows ----------
 
 const GAME = 1
 const RACE = 7
 const IDS = { GameID: GAME, RaceID: RACE }
+// The empire's name the exports are titled with, and the empire list of the store, which holds a race of another game under the same id and another race of the game before the selected one.
+const EMPIRE = 'Test Empire'
+const GAMES = [{ GameID: 2, Races: [{ RaceID: RACE, RaceTitle: 'Empire Of Another Game' }] }, { GameID: GAME, Races: [{ RaceID: 99, RaceTitle: 'Another Empire' }, { RaceID: RACE, RaceTitle: EMPIRE }] }]
 
 const cmd = (id, name, parent, over = {}) => ({ NavalAdminCommandID: id, AdminCommandName: name, ParentAdminCommandID: parent, GameID: GAME, RaceID: RACE, ...over })
 const flt = (id, name, parent, flag = 0, over = {}) => ({ FleetID: id, FleetName: name, ParentCommandID: parent, ShippingLine: flag, GameID: GAME, RaceID: RACE, ...over })
 const shp = (id, name, fleet, flag = 0, over = {}) => ({ ShipID: id, ShipName: name, FleetID: fleet, ShippingLineID: flag, GameID: GAME, RaceID: RACE, ...over })
 const holder = (CommanderID, Name, CommandType, CommandID, Serving = 1) => ({ CommanderID, Name, CommandType, CommandID, Serving })
 
-// Race 7 of game 1: commands 1 to 11 (1 is the top; 2 and 3 hang from it, 4 from 2; 5 has a parent that is not in the save, 6 one of another race, 7 and 8 are each the other's parent, 9 its own, 10 stores none, 11 has no name), fleets 20 to 28 (22 is a shipping line's), ships 40 to 49 (43 sails in that fleet, 44 is a shipping line's own), and the rows that are not the race's: a command of another race, one of another game, a repeated command row, a fleet and a ship of another race.
+// Race 7 of game 1: commands 1 to 11 (1 is the top; 2 and 3 hang from it, 4 from 2; 5 has a parent that is not in the save, 6 one of another race, 7 and 8 are each the other's parent, 9 its own, 10 stores none and has characters in its name that Markdown and Mermaid read as markup, 11 has no name), fleets 20 to 28 (22 is a shipping line's), ships 40 to 49 (43 sails in that fleet, 44 is a shipping line's own), and the rows that are not the race's: a command of another race, one of another game, a repeated command row, a fleet and a ship of another race.
 const navalRows = () => ({
   commands: [
     cmd(1, 'Root Admin', 0),
@@ -291,8 +394,8 @@ const navalRows = () => ({
     cmd(6, 'Foreign Child', 300),
     cmd(7, 'Loop Seven', 8),
     cmd(8, 'Loop Eight', 7),
-    cmd(9, 'Self Parent', 9),
-    cmd(10, 'No Parent Stored', null),
+    cmd(9, 'Self\nParent', 9),
+    cmd(10, 'No Parent <Stored> #10 & `x`', null),
     cmd(11, null, 1),
     cmd(300, 'Other Race Admin', 1, { RaceID: 8 }),
     cmd(301, 'Other Game Admin', 1, { GameID: 2 }),
@@ -409,7 +512,7 @@ const pureSuite = async (mods, into) => {
   const { csvCell, csvLine } = mods['csv-cell']
   const { buildNavalHierarchy } = mods['naval-hierarchy']
   const { buildGroundFormations } = mods['ground-formations']
-  const { hierarchyRows, hierarchyCsv, hierarchyMarkdown, hierarchyExport, hierarchyNotice, HIERARCHY_COLUMNS } = mods['hierarchy-export']
+  const { hierarchyRows, hierarchyCsv, hierarchyMarkdown, hierarchyExport, hierarchyNotice, HIERARCHY_COLUMNS, DIAGRAM_LIMIT } = mods['hierarchy-export']
   const { ageBound, rosterChoices, rosterFilter } = mods.commanders
 
   const built = await settle(() => buildNavalHierarchy(frozen(navalRows()), IDS))
@@ -509,11 +612,12 @@ const pureSuite = async (mods, into) => {
 
   await add('ground-csv', 'the ground formations are exported the same way: one row each in tree order, with their paths and the commanders of their posts', () => (groundPaired.problems.length === 0 && same(groundTable.rows.map((row) => wholeOf(row.ID)), GROUND_TREE.map((entry) => entry.id)) && groundPaired.pairs.every(([entry, row]) => wholeOf(row.Depth) === entry.depth) && groundTable.rows.every((row) => row.Tree === 'ground' && row.Kind === 'formation' && row.Post !== '') && groundRow(7)['Path IDs'].split('/').length === 2 && groundRow(1)['Holder ID'] === '5010' && same(idsIn(groundRow(2)['Holder ID']), [5020, 5021]) && groundRow(3)['Holder ID'] === '' && groundRow(4)['Holder ID'] === '' && new Set([1, 2, 3, 4].map((id) => groundRow(id).Vacancy)).size === 4 && groundRow(4)['Parent state'] === 'orphan' && groundRow(6)['Parent state'] === 'cycle' && groundRow(4).Note.split('; ').includes('orphan-parent') && groundRow(6).Note.split('; ').includes('parent-cycle')) || `problems ${JSON.stringify(groundPaired.problems).slice(0, 300)}`)
 
-  // The Markdown outline. Its bullets have no ids: the place of a bullet is its place in the tree, so bullet n is the entry n of the hand-worked order, and its depth and notes are those of the CSV row of that entry.
-  const text = hierarchyMarkdown(naval, 'naval')
+  // The Markdown document. Its bullets have no ids: the place of a bullet is its place in the tree, so bullet n is the entry n of the hand-worked order, and its notes are those of the CSV row of that entry. A bullet hangs from the bullet a reader nests it under, which must be the entry's parent in the model.
+  const text = hierarchyMarkdown(naval, 'naval', EMPIRE)
   const bullets = outlineBullets(text)
+  const navalParents = parentsIn(NAVAL_ORDER, (key) => model.byKey.get(key).children)
 
-  await add('md-outline', 'the outline has one nested bullet for each entry, in tree order, indented by its depth', () => bullets.length === 27 && bullets.every((line, index) => line.match(/^( *)- /)[1].length === 2 * wholeOf(rowOf(NAVAL_ORDER[index]).Depth)) && !text.includes('\r'))
+  await add('md-outline', 'the list has one bullet for each entry, in tree order, each nested under the bullet of its parent as a CommonMark reader (GitHub, Obsidian) and a reader that needs four spaces a level both read it', () => bullets.length === 27 && !text.includes('\r') && nestsAs(bullets, navalParents))
   await add('md-names', 'each bullet shows its entry\'s name as written, on one line', () => bullets.length === NAVAL_ORDER.length && bullets.every((line, index) => {
     const name = model.byKey.get(NAVAL_ORDER[index]).name ?? ''
     const shown = readMarkdown(line)
@@ -527,10 +631,62 @@ const pureSuite = async (mods, into) => {
     return at('command:1').includes('=cmd()') && at('command:3').includes('Shared A') && at('command:3').includes('Shared B') && at('ship:42').includes('Captain Three') && !at('command:2').includes('Captain') && [1002, 1003].every((id) => figuresIn(at('command:3')).includes(id))
   })
   await add('md-notes', 'the problems of an entry are named in its bullet', () => bullets.length === NAVAL_ORDER.length && bullets.every((line, index) => rowOf(NAVAL_ORDER[index]).Note.split('; ').filter(Boolean).every((note) => line.includes(note))))
-  await add('md-ground', 'the ground outline is the same: one bullet per formation, nested by depth', () => {
-    const groundLines = outlineBullets(hierarchyMarkdown(groundModel, 'ground'))
+  await add('md-ground', 'the ground list is the same: one bullet per formation, nested under its parent formation by both readers', () => {
+    const groundLines = outlineBullets(hierarchyMarkdown(groundModel, 'ground', EMPIRE))
 
-    return groundLines.length === GROUND_TREE.length && groundLines.every((line, index) => line.match(/^( *)- /)[1].length === 2 * wholeOf(groundRow(GROUND_TREE[index].id).Depth) && readMarkdown(line) !== null) && readMarkdown(groundLines[0]).includes('Ground One')
+    return groundLines.length === GROUND_TREE.length && groundLines.every((line) => readMarkdown(line) !== null) && readMarkdown(groundLines[0]).includes('Ground One') && nestsAs(groundLines, parentsIn(GROUND_TREE.map((entry) => entry.id), (id) => ground.byId.get(id).children))
+  })
+  await add('md-empire', 'the document is titled with the empire\'s name, shown as written, and its title, its summary and the Markdown file\'s name hold neither the game\'s id nor the race\'s; without a name to use, the title and the file name say the game and the race by id; the CSV keeps its name by id', () => {
+    const ids = { ...naval, GameID: 9431, RaceID: 9877 }
+    const named = hierarchyExport(ids, 'naval', 'markdown', 'Aurelian *Star* Empire #1')
+    const unnamed = hierarchyExport(ids, 'naval', 'markdown', '')
+    const symbols = hierarchyExport(ids, 'naval', 'markdown', '***')
+    const groundTitle = titleOf(hierarchyMarkdown({ ...groundModel, GameID: 9431, RaceID: 9877 }, 'ground', 'Aurelian Empire'))
+    const without = (text) => !numbersIn(text).includes(9431) && !numbersIn(text).includes(9877)
+    const both = (text) => numbersIn(text).includes(9431) && numbersIn(text).includes(9877)
+    const title = titleOf(named.text)
+
+    return (title !== null && title.includes('Aurelian *Star* Empire #1') && groundTitle !== null && groundTitle.includes('Aurelian Empire') && without(headOf(named.text)) && without(named.fileName) && /aurelian/i.test(named.fileName) && /empire/i.test(named.fileName) && named.fileName.endsWith('.md') && named.type === 'text/markdown' && both(headOf(unnamed.text)) && same(numbersIn(unnamed.fileName), [9431, 9877]) && same(numbersIn(symbols.fileName), [9431, 9877]) && same(numbersIn(hierarchyExport(ids, 'naval', 'csv', 'Aurelian Empire').fileName), [9431, 9877])) || `title ${JSON.stringify(title)}, head ${JSON.stringify(headOf(named.text).slice(0, 200))}, files ${named.fileName} ${unnamed.fileName} ${symbols.fileName}`
+  })
+
+  // The diagram of the organisation, read back as Mermaid reads it.
+  const commandOrder = NAVAL_ORDER.filter((key) => key.startsWith('command:'))
+  const arrowsOf = (chart, order) => chart.arrows.map(([from, to]) => `${order[chart.nodes.findIndex((node) => node.id === from)]}>${order[chart.nodes.findIndex((node) => node.id === to)]}`).sort()
+  const shownAs = (chart, order, nameOf) => chart.nodes.length === order.length && new Set(chart.nodes.map((node) => node.id)).size === order.length && chart.nodes.every((node, index) => node.lines.length === 2 && (nameOf(order[index]) ? node.lines[0] === nameOf(order[index]).replace(/\s*[\r\n]+\s*/g, ' ') : figuresIn(node.lines[0]).includes(Number(order[index].split(':')[1]))))
+  const unreadable = (chart) => (chart ? `the diagram is not read at ${JSON.stringify(chart.invalid)}` : 'there is no diagram')
+
+  await add('md-diagram', 'the diagram draws each admin command once, in tree order, with its name as written (a line break read as a space) and the commanders serving in it, and an arrow from each command to each command under it; a quote, #, angle bracket, & or backtick in a name stays text', () => {
+    const chart = flowchartOf(text)
+
+    if (!chart || chart.invalid !== undefined) {
+      return unreadable(chart)
+    }
+
+    const expected = commandOrder.flatMap((key) => model.byKey.get(key).children.filter((child) => child.startsWith('command:')).map((child) => `${key}>${child}`)).sort()
+    const holdersOf = (key) => chart.nodes[commandOrder.indexOf(key)].lines[1]
+
+    return (shownAs(chart, commandOrder, (key) => model.byKey.get(key).name) && same(arrowsOf(chart, commandOrder), expected) && expected.length === 5 && holdersOf('command:1').includes('=cmd()') && holdersOf('command:3').includes('Shared A') && holdersOf('command:3').includes('Shared B') && !holdersOf('command:2').includes('=cmd()')) || `nodes ${JSON.stringify(chart.nodes).slice(0, 300)}, arrows ${JSON.stringify(arrowsOf(chart, commandOrder))} against ${JSON.stringify(expected)}`
+  })
+  await add('md-diagram-ground', 'the ground diagram draws the formations that head other formations, each once with its commander, and an arrow from each to each such formation under it', () => {
+    const deeper = buildGroundFormations(frozen({ formations: [formation(1), formation(2, { ParentFormationID: 1 }), formation(3, { ParentFormationID: 2 }), formation(4, { ParentFormationID: 1 }), formation(5)] }), IDS)
+    const charts = [flowchartOf(hierarchyMarkdown(groundModel, 'ground', EMPIRE)), flowchartOf(hierarchyMarkdown({ supported: true, ...deeper }, 'ground', EMPIRE))]
+    const broken = charts.find((chart) => !chart || chart.invalid !== undefined)
+
+    if (broken !== undefined) {
+      return unreadable(broken)
+    }
+
+    const nameOf = (key) => `Formation ${key.split(':')[1]}`
+
+    return (shownAs(charts[0], ['formation:1', 'formation:6'], nameOf) && charts[0].arrows.length === 0 && charts[0].nodes[0].lines[1].includes('Ground One') && shownAs(charts[1], ['formation:1', 'formation:2'], nameOf) && same(arrowsOf(charts[1], ['formation:1', 'formation:2']), ['formation:1>formation:2'])) || JSON.stringify(charts).slice(0, 400)
+  })
+  await add('md-diagram-limit', 'an organisation of as many units as the diagram limit (a whole number that keeps the arrows within the 500 Mermaid draws) is drawn whole; one more is not drawn, and the section of the diagram gives the number of units', () => {
+    const flat = (count) => supporting(buildNavalHierarchy(frozen({ commands: Array.from({ length: count }, (_item, index) => cmd(index + 1, `Unit ${index + 1}`, index === 0 ? 0 : 1)) }), IDS))
+    const atLimit = flowchartOf(hierarchyMarkdown(flat(DIAGRAM_LIMIT), 'naval', EMPIRE))
+    const past = hierarchyMarkdown(flat(DIAGRAM_LIMIT + 1), 'naval', EMPIRE)
+    const between = past.split('\n## ').slice(1, -1).join('\n')
+
+    return (Number.isInteger(DIAGRAM_LIMIT) && DIAGRAM_LIMIT >= 1 && DIAGRAM_LIMIT <= 500 && atLimit !== null && atLimit.invalid === undefined && atLimit.nodes.length === DIAGRAM_LIMIT && atLimit.arrows.length === DIAGRAM_LIMIT - 1 && flowchartOf(past) === null && figuresIn(between).includes(DIAGRAM_LIMIT + 1) && outlineBullets(past).length === DIAGRAM_LIMIT + 1) || `limit ${DIAGRAM_LIMIT}, at the limit ${atLimit ? atLimit.nodes && atLimit.nodes.length : 'no diagram'}, past it ${JSON.stringify(between.slice(0, 300))}`
   })
 
   // The shipping lines' fleets and ships, listed when the model is built with them.
@@ -555,7 +711,7 @@ const pureSuite = async (mods, into) => {
     const listed = outlineBullets(hierarchyMarkdown(shipping, 'naval'))
     const cleared = outlineBullets(hierarchyMarkdown({ ...shipping, byKey: new Map(Array.from(shipping.byKey, ([key, item]) => [key, { ...item, shippingLine: false }])) }, 'naval'))
 
-    return listed.length === SHIPPING_ORDER.length && listed.every((line, index) => line.match(/^( *)- /)[1].length === 2 * wholeOf(lineAt(SHIPPING_ORDER[index]).Depth) && readMarkdown(line) !== null) && same(SHIPPING_ORDER.filter((_key, index) => listed[index] !== cleared[index]), LINE_KEYS)
+    return (listed.length === SHIPPING_ORDER.length && listed.every((line) => readMarkdown(line) !== null) && same(SHIPPING_ORDER.filter((_key, index) => listed[index] !== cleared[index]), LINE_KEYS) && nestsAs(listed, parentsIn(SHIPPING_ORDER, (key) => shippingModel.byKey.get(key).children))) || `${listed.length} bullets for ${SHIPPING_ORDER.length} entries`
   })
 
   await add('export-file', 'an export has a file name that says the tree, the game and the race and a type that matches its format', () => {
@@ -829,7 +985,7 @@ const EMPTY_READS = { commanders: [], bonusTypes: [], traits: [], colonies: [], 
 
 const STORE = {
   getters: { config: { get: (_name, fallback) => fallback }, database: null, GameID: GAME, RaceID: RACE, StartYear: 2000, 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() },
-  state: { freshness: { inputs: {} } },
+  state: { freshness: { inputs: {} }, empires: { games: GAMES } },
   dispatch: async () => {},
   commit: () => {},
 }
@@ -900,7 +1056,7 @@ const pageSuite = async (variant, mods, into) => {
   const { Component, fields } = await loadComponent(variant, mods)
   const { buildNavalHierarchy } = mods['naval-hierarchy']
   const { buildGroundFormations } = mods['ground-formations']
-  const { hierarchyRows, hierarchyCsv, hierarchyMarkdown } = mods['hierarchy-export']
+  const { hierarchyRows, hierarchyCsv, hierarchyExport } = mods['hierarchy-export']
   const problems = []
   const mounted = []
   const loadedKeys = Object.fromEntries(CORE_KEYS.concat(OPTIONAL_KEYS).map((key) => [key, null]))
@@ -1149,13 +1305,14 @@ const pageSuite = async (variant, mods, into) => {
 
     return sameRows(structureItems(vm), rowsOf(ground, 'ground')) && moved.persisted.length === 1 && moved.other.length === 0 && fields[moved.persisted[0]].default === 'naval' && fields[moved.persisted[0]].valid('ground') === true && fields[moved.persisted[0]].valid('naval') === true && fields[moved.persisted[0]].valid('air') === false
   })
-  await add('page-download', 'the two download buttons save the naval structure as a CSV and as a Markdown file, exactly the exports', async () => {
+  await add('page-download', 'the two download buttons save the naval structure as a CSV and as a Markdown file, exactly the exports, the Markdown titled and named with the selected race\'s empire from the empire list', async () => {
     const vm = withPeople({ navalTree: naval, groundTree: ground })
     const saved = await clickAll(vm)
     const csv = saved.find((item) => item.type === 'text/csv')
     const markdown = saved.find((item) => item.type === 'text/markdown')
+    const expected = hierarchyExport(naval, 'naval', 'markdown', EMPIRE)
 
-    return saved.length === 2 && csv && markdown && csv.text === hierarchyCsv(naval, 'naval') && markdown.text === hierarchyMarkdown(naval, 'naval') && /\.csv$/.test(csv.file) && /\.md$/.test(markdown.file) && csv.file !== markdown.file
+    return saved.length === 2 && csv && markdown && csv.text === hierarchyCsv(naval, 'naval') && markdown.text === expected.text && markdown.file === expected.fileName && /\.csv$/.test(csv.file) && /\.md$/.test(markdown.file) && csv.file !== markdown.file
   })
   await add('page-download-ground', 'with the ground formations chosen, the buttons save the ground structure', async () => {
     const vm = withPeople({ navalTree: naval, groundTree: ground })
@@ -1171,7 +1328,7 @@ const pageSuite = async (variant, mods, into) => {
 
     reset(vm)
 
-    return saved.length === 2 && needed(saved.find((item) => item.type === 'text/csv'), 'CSV download').text === hierarchyCsv(ground, 'ground') && needed(saved.find((item) => item.type === 'text/markdown'), 'Markdown download').text === hierarchyMarkdown(ground, 'ground') && /ground/i.test(saved[0].file) && /ground/i.test(saved[1].file)
+    return saved.length === 2 && needed(saved.find((item) => item.type === 'text/csv'), 'CSV download').text === hierarchyCsv(ground, 'ground') && needed(saved.find((item) => item.type === 'text/markdown'), 'Markdown download').text === hierarchyExport(ground, 'ground', 'markdown', EMPIRE).text && /ground/i.test(saved[0].file) && /ground/i.test(saved[1].file)
   })
   await add('page-structure-unsupported', 'a save without what the structure reads shows no table and no download, and the page says which tables or columns are missing', async () => {
     const missing = { supported: false, missing: ['FCT_Ship.ShippingLineID', 'FCT_Fleet'], GameID: GAME, RaceID: RACE }
@@ -1474,8 +1631,24 @@ const MUTANTS = [
   ['a post with several holders lists the first', U('hierarchy-export'), 'Holder: holders.map((holder) => holder.name ?? \'\').join(\'; \')', 'Holder: holders.length ? holders[0].name ?? \'\' : \'\'', ['csv-holders']],
   ['the notes are left empty', U('hierarchy-export'), '.filter((problem) => NOTE_KINDS.has(problem.kind))', '.filter(() => false)', ['csv-notes', 'csv-unresolved']],
   ['a name is written into Markdown as it is', U('hierarchy-export'), '.replace(/[\\\\`*_[\\]<>|#&]/g, (character) => `\\\\${character}`)', '', ['md-markup', 'md-names']],
-  ['a line break in a name breaks the outline', U('hierarchy-export'), '.replace(/\\s*[\\r\\n]+\\s*/g, \' \')', '.replace(/\\s*[\\r\\n]+\\s*/g, \'\\n\')', ['md-names']],
-  ['the outline is not nested', U('hierarchy-export'), '${\'  \'.repeat(row.Depth)}- ${label}', '- ${label}', ['md-outline', 'md-ground']],
+  ['a line break in a name breaks the outline', U('hierarchy-export'), 'markdownText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \' \')', 'markdownText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \'\\n\')', ['md-names']],
+  ['the outline is not nested', U('hierarchy-export'), '${LEVEL.repeat(row.Depth)}- ${label}', '- ${label}', ['md-outline', 'md-ground', 'md-shipping-line']],
+  ['the list is indented two spaces a level', U('hierarchy-export'), 'const LEVEL = \'    \'', 'const LEVEL = \'  \'', ['md-outline', 'md-ground', 'md-shipping-line']],
+  ['each entry is nested a level deeper than its parent\'s child', U('hierarchy-export'), '${LEVEL.repeat(row.Depth)}- ${label}', '${LEVEL.repeat(row.Depth + 1)}- ${label}', ['md-outline', 'md-ground', 'md-shipping-line']],
+  ['the title names the game and the race whatever the empire', U('hierarchy-export'), 'name ? `# ${markdownText(name)}: ${TREE_NOUNS[tree]}` : `# ${TREE_NAMES[tree]}`', '`# ${TREE_NAMES[tree]}`', ['md-empire']],
+  ['the summary names the game and the race beside the empire', U('hierarchy-export'), '`${name ? \'\' : `Game ${model.GameID}, race ${model.RaceID}: `}${hierarchySummary', '`Game ${model.GameID}, race ${model.RaceID}: ${hierarchySummary', ['md-empire']],
+  ['the empire\'s name is written into the title as it is', U('hierarchy-export'), '`# ${markdownText(name)}: ${TREE_NOUNS[tree]}`', '`# ${name}: ${TREE_NOUNS[tree]}`', ['md-empire']],
+  ['the Markdown file is named for the game and the race whatever the empire', U('hierarchy-export'), 'fileName: csv || !slug ?', 'fileName: true ?', ['md-empire']],
+  ['the diagram draws no arrow', U('hierarchy-export'), 'const arrows = units.flatMap(', 'const arrows = [].flatMap(', ['md-diagram', 'md-diagram-ground', 'md-diagram-limit']],
+  ['an arrow leads from a unit to the unit above it', U('hierarchy-export'), '`  ${ids.get(entry.key)} --> ${ids.get(key)}`', '`  ${ids.get(key)} --> ${ids.get(entry.key)}`', ['md-diagram', 'md-diagram-ground']],
+  ['a name is written into the diagram as it is', U('hierarchy-export'), '.replace(/["#<>&`]/g, (character) => `#${character.charCodeAt(0)};`)', '', ['md-diagram']],
+  ['a line break in a name breaks the diagram', U('hierarchy-export'), 'mermaidText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \' \')', 'mermaidText = (value) => String(value ?? \'\').replace(/\\s*[\\r\\n]+\\s*/g, \'\\n\')', ['md-diagram']],
+  ['the diagram names no holder', U('hierarchy-export'), '<br>${mermaidText(serving)}`', '<br>`', ['md-diagram', 'md-diagram-ground']],
+  ['the diagram is drawn past its limit', U('hierarchy-export'), 'if (units.length > DIAGRAM_LIMIT) {', 'if (false) {', ['md-diagram-limit']],
+  ['the ground diagram draws every formation', U('hierarchy-export'), ': entry.children.length > 0))', ': true))', ['md-diagram-ground']],
+  ['the page exports the Markdown without the empire\'s name', PAGE, 'format, this.empireName)', 'format)', ['page-download']],
+  ['the empire is the first race of the game', PAGE, 'game && game.Races.find((entry) => entry.RaceID === this.RaceID)', 'game && game.Races[0]', ['page-download']],
+  ['the empire is looked up in the first game of the list', PAGE, 'this.games.find((entry) => entry.GameID === this.GameID)', 'this.games[0]', ['page-download']],
   ['the file name has the game twice', U('hierarchy-export'), '-g${model.GameID}-r${model.RaceID}', '-g${model.GameID}-r${model.GameID}', ['export-file']],
   ['the first child of an entry is skipped', U('hierarchy-export'), 'for (let index = entry.children.length - 1; index >= 0; index--) {', 'for (let index = entry.children.length - 1; index >= 1; index--) {', ['csv-rows', 'md-outline', 'ground-csv', 'page-structure-naval']],
   ['a ground formation lists no holder', U('hierarchy-export'), 'anchor: node.anchor, post: node.post, problems: node.problems', 'anchor: node.anchor, post: { state: \'none\', holders: [], unsettled: [] }, problems: node.problems', ['ground-csv', 'md-ground']],

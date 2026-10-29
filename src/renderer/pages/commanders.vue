@@ -304,7 +304,7 @@
             </v-data-table>
           </template>
           <div class="panel-foot caption text--secondary">
-            The naval structure leaves out the shipping lines' fleets and ships unless Shipping lines is on, which lists them marked in their own column and in both exports. A fleet is not a post. A link to a parent that is missing, belongs to another race or loops is listed as its own top-level entry with a note, and a post whose holders cannot be told is not shown as vacant. The exports hold one row per entry, with its path from the top.
+            The naval structure leaves out the shipping lines' fleets and ships unless Shipping lines is on, which lists them marked in their own column and in both exports. A fleet is not a post. A link to a parent that is missing, belongs to another race or loops is listed as its own top-level entry with a note, and a post whose holders cannot be told is not shown as vacant. The CSV holds one row per entry, with its path from the top. The Markdown file is named for the empire and lists every entry nested under its parent, after a Mermaid diagram of the admin commands, or of the formations that head others, which GitHub and Obsidian draw; an organisation of more than {{ diagramLimit }} such units is listed without the diagram.
           </div>
         </v-card>
       </template>
@@ -313,7 +313,7 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { mapGetters, mapState } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
@@ -325,7 +325,7 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { AGE_NOTES, COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadGroundFormationPosts } from '../utilities/ground-formations'
-import { hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
+import { DIAGRAM_LIMIT, hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { loadNavalHierarchy } from '../utilities/naval-hierarchy'
@@ -413,6 +413,7 @@ export default {
       formerPageSizes: FORMER_PAGE_SIZES,
       structurePageSizes: STRUCTURE_PAGE_SIZES,
       structureViews: STRUCTURE_VIEWS,
+      diagramLimit: DIAGRAM_LIMIT,
       ageNotes: AGE_NOTES,
       focusCommanderId: null,
       focusColonyId: null,
@@ -420,6 +421,15 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear']),
+    ...mapState('empires', ['games']),
+
+    // The selected race's title, from the empire list the rail and Settings read it from: the name the Markdown export is titled and named with.
+    empireName() {
+      const game = this.games.find((entry) => entry.GameID === this.GameID)
+      const race = game && game.Races.find((entry) => entry.RaceID === this.RaceID)
+
+      return race ? race.RaceTitle : ''
+    },
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -1075,7 +1085,7 @@ export default {
     },
     // The text, file name and type of the chosen structure in a format ('csv' or 'markdown'), or null while there is nothing to export.
     structureExport(format) {
-      return this.structureExportable ? hierarchyExport(this.structureModel, this.structureView, format) : null
+      return this.structureExportable ? hierarchyExport(this.structureModel, this.structureView, format, this.empireName) : null
     },
     downloadStructure(format) {
       const file = this.structureExport(format)

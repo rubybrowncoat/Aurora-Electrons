@@ -1452,7 +1452,7 @@ const MUTANTS = [
 const BENIGN = [
   ['an explicit prop and event instead of v-model on the roles', 'v-model="deployRoles"', ':value="deployRoles" @change="deployRoles = $event"', SURVEY_FILE, [], true],
   ['a panel heading reworded', '<span>Specialist deployments</span>', '<span>Specialist placements</span>', SURVEY_FILE, [], true],
-  ['v-on longhand for a click', '@click:row="toggleDeployment"', 'v-on:click:row="toggleDeployment"', SURVEY_FILE],
+  ['v-on longhand for a click', 'no-data-text="No formation matches the roles and states chosen" @click:row="toggleRow"', 'no-data-text="No formation matches the roles and states chosen" v-on:click:row="toggleRow"', SURVEY_FILE],
   ['a qualifier moved from the front to the back in a sentence', 'No troop bay holds it (the largest takes ${count(lift.largest)} t)', 'Held by no troop bay (the largest takes ${count(lift.largest)} t)', SPEC_FILE],
   ['a synonym in generated prose', "'Location not resolved'", "'Place not resolved'", SPEC_FILE],
   ['a parenthesised condition', 'if (roles.geo !== true && roles.xeno !== true) {', 'if ((roles.geo !== true) && (roles.xeno !== true)) {', SPEC_FILE],

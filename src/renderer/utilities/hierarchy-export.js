@@ -1,4 +1,6 @@
-// The exports of the shared hierarchies on the Commanders page: the naval administration (utilities/naval-hierarchy.js) and the ground formations (utilities/ground-formations.js), each as a CSV with one row per entry and as a Markdown outline. Both walk the model from its top-level entries, so an entry appears once, under its parent, and an entry whose parent is missing, foreign or in a loop is a top-level entry that says so. Nothing is invented: a name or holder the save does not give is an empty cell, a post whose holders cannot be told is `not settled` or `not read`, never `vacant`, and the notes list only what the model reports.
+// The exports of the shared hierarchies on the Commanders page: the naval administration (utilities/naval-hierarchy.js) and the ground formations (utilities/ground-formations.js), each as a CSV with one row per entry and as a Markdown document. Both walk the model from its top-level entries, so an entry appears once, under its parent, and an entry whose parent is missing, foreign or in a loop is a top-level entry that says so. Nothing is invented: a name or holder the save does not give is an empty cell, a post whose holders cannot be told is `not settled` or `not read`, never `vacant`, and the notes list only what the model reports.
+//
+// The Markdown document is titled with the empire's name and holds the organisation twice: as a Mermaid flowchart of its units (every admin command; the formations that head other formations), which GitHub and Obsidian draw with nothing installed, and as a list of every entry nested under its parent. The list is indented four spaces a level, which nests the same in every Markdown reader, the CommonMark ones and those that need four spaces alike.
 
 import { csvCell } from './csv-cell'
 import { POSTS } from './commanders'
@@ -8,6 +10,15 @@ export const HIERARCHY_TREES = ['naval', 'ground']
 const TREE_NAMES = { naval: 'Naval command structure', ground: 'Ground command structure' }
 const TREE_FILES = { naval: 'naval-structure', ground: 'ground-structure' }
 const TREE_NOUNS = { naval: 'naval command structure', ground: 'ground command structure' }
+const LIST_TITLES = { naval: 'Commands, fleets and ships', ground: 'Formations' }
+const UNIT_NOUNS = { naval: ['admin command', 'admin commands'], ground: ['formation that heads others', 'formations that head others'] }
+const UNIT_LEGENDS = { naval: 'Each admin command with the commander serving in it; an arrow leads to the commands under it.', ground: 'Each formation that heads other formations with its commander; an arrow leads to the formations under it.' }
+
+// The most units the diagram draws. Past it the chart is too dense to read, and Mermaid's default configuration (`maxEdges`) refuses a flowchart of more than 500 arrows.
+export const DIAGRAM_LIMIT = 150
+
+// The indentation of one level of the list.
+const LEVEL = '    '
 
 // The columns of the CSV, in order.
 export const HIERARCHY_COLUMNS = ['Tree', 'Game ID', 'Race ID', 'Kind', 'ID', 'Name', 'Shipping line', 'Depth', 'Path', 'Path IDs', 'Parent kind', 'Parent ID', 'Parent state', 'Post', 'Holder ID', 'Holder', 'Vacancy', 'Anchor', 'Note']
@@ -107,11 +118,42 @@ export const hierarchySummary = (model, tree) => {
   return `${counted(summary.commands, 'command', 'commands')}, ${counted(summary.fleets, 'fleet', 'fleets')}, ${counted(summary.ships, 'ship', 'ships')}${postText}; ${lineText}; ${counted(summary.orphans + summary.foreignParents + summary.unknownParents, 'unresolved parent link', 'unresolved parent links')}, ${counted(summary.cycles, 'loop', 'loops')}`
 }
 
-// The Markdown outline of a supported model: the title, the summary, one bullet per entry nested under its parent (with the post, the holders and the notes), then the loops and the serving commanders whose post is not an entry.
-export const hierarchyMarkdown = (model, tree) => {
-  const lines = [`# ${TREE_NAMES[tree]}`, '', `Game ${model.GameID}, race ${model.RaceID}: ${hierarchySummary(model, tree)}.`, '']
+// A text made safe to stand in a quoted Mermaid label: a line break is a space, and a character that would end the label, start an entity or markup, or close the Markdown fence (a quote, `#`, angle brackets, `&`, a backtick) is written as Mermaid's entity code for it.
+export const mermaidText = (value) => String(value ?? '').replace(/\s*[\r\n]+\s*/g, ' ').replace(/["#<>&`]/g, (character) => `#${character.charCodeAt(0)};`)
 
-  hierarchyRows(model, tree).forEach((row) => {
+// The organisation as the lines of a Mermaid flowchart, from the `rows` of `hierarchyRows`: the units of the tree in tree order, each with its name and the commanders serving in its post (or what is known of the post), and an arrow from each unit to each unit under it. A unit is an admin command of the naval tree, or a formation that heads other formations. Past DIAGRAM_LIMIT units a sentence says so in place of the chart, and a tree with no unit has no diagram.
+const diagramLines = (model, tree, rows) => {
+  const { entries } = entriesOf(model, tree)
+  const units = rows.map((row) => entries.get(`${row.Kind}:${row.ID}`)).filter((entry) => (tree === 'naval' ? entry.kind === 'command' : entry.children.length > 0))
+
+  if (!units.length) {
+    return []
+  }
+
+  if (units.length > DIAGRAM_LIMIT) {
+    return ['', '## Organisation', '', `The organisation has ${counted(units.length, ...UNIT_NOUNS[tree])}, more than the ${DIAGRAM_LIMIT} one diagram draws legibly, so none is drawn; the list below holds every entry.`]
+  }
+
+  const ids = new Map(units.map((entry, index) => [entry.key, `n${index + 1}`]))
+  const label = (entry) => {
+    const { holders, state } = entry.post
+    const serving = holders.length ? holders.map((holder) => holder.name || String(holder.id)).join(', ') : VACANCIES[state]
+
+    return `${mermaidText(entry.name || `${entry.kind} ${entry.id}`)}<br>${mermaidText(serving)}`
+  }
+  const nodes = units.map((entry) => `  ${ids.get(entry.key)}["${label(entry)}"]`)
+  const arrows = units.flatMap((entry) => entry.children.filter((key) => ids.has(key)).map((key) => `  ${ids.get(entry.key)} --> ${ids.get(key)}`))
+
+  return ['', '## Organisation', '', UNIT_LEGENDS[tree], '', '```mermaid', 'flowchart LR', ...nodes, ...arrows, '```']
+}
+
+// The Markdown document of a supported model for the empire named `empire` (the race's title; without one the game and the race are named by id): the title, the summary, the diagram of the organisation, one bullet per entry nested under its parent (with the post, the holders and the notes), then the loops and the serving commanders whose post is not an entry.
+export const hierarchyMarkdown = (model, tree, empire = '') => {
+  const name = String(empire ?? '').trim()
+  const rows = hierarchyRows(model, tree)
+  const lines = [name ? `# ${markdownText(name)}: ${TREE_NOUNS[tree]}` : `# ${TREE_NAMES[tree]}`, '', `${name ? '' : `Game ${model.GameID}, race ${model.RaceID}: `}${hierarchySummary(model, tree)}.`, ...diagramLines(model, tree, rows), '', `## ${LIST_TITLES[tree]}`, '']
+
+  rows.forEach((row) => {
     const label = row.Name === null || row.Name === '' ? `${row.Kind} ${row.ID}` : markdownText(row.Name)
     const holder = row['Holder ID'] === '' ? '' : `, held by ${row.Holder === '' ? row['Holder ID'] : `${markdownText(row.Holder)} (${row['Holder ID']})`}`
     const post = row.Post === '' ? '' : ` — ${row.Post}: ${row.Vacancy}${holder}`
@@ -119,7 +161,7 @@ export const hierarchyMarkdown = (model, tree) => {
     const notes = row.Note === '' ? '' : ` — ${row.Note.split('; ').map((note) => `\`${note}\``).join(' ')}`
     const line = row['Shipping line'] === '' ? '' : ', shipping line'
 
-    lines.push(`${'  '.repeat(row.Depth)}- ${label} (${row.Kind} ${row.ID}${line}${top})${post}${notes}`)
+    lines.push(`${LEVEL.repeat(row.Depth)}- ${label} (${row.Kind} ${row.ID}${line}${top})${post}${notes}`)
   })
 
   if (model.cycles.length) {
@@ -136,11 +178,12 @@ export const hierarchyMarkdown = (model, tree) => {
   return `${lines.join('\n')}\n`
 }
 
-// The text, the file name and the type of an export of a supported model: `format` is 'csv' or 'markdown'.
-export const hierarchyExport = (model, tree, format) => {
+// The text, the file name and the type of an export of a supported model: `format` is 'csv' or 'markdown'. The Markdown is named for the empire (`empire`, the race's title, made a file name as the preferences file makes it: lower case, each run of other characters a hyphen); the CSV, whose rows carry the ids, and a Markdown with no name to use are named for the game and the race by id.
+export const hierarchyExport = (model, tree, format, empire = '') => {
   const csv = format === 'csv'
+  const slug = String(empire ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 
-  return { text: csv ? hierarchyCsv(model, tree) : hierarchyMarkdown(model, tree), fileName: `${TREE_FILES[tree]}-g${model.GameID}-r${model.RaceID}.${csv ? 'csv' : 'md'}`, type: csv ? 'text/csv' : 'text/markdown' }
+  return { text: csv ? hierarchyCsv(model, tree) : hierarchyMarkdown(model, tree, empire), fileName: csv || !slug ? `${TREE_FILES[tree]}-g${model.GameID}-r${model.RaceID}.${csv ? 'csv' : 'md'}` : `${slug}-${TREE_FILES[tree]}.md`, type: csv ? 'text/csv' : 'text/markdown' }
 }
 
 // What the page says in place of the export, or null when the model can be exported: the model is not supported (the save lacks tables or columns), or the serving commanders could not be read (the posts then are not listed).

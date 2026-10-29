@@ -160,7 +160,7 @@
               <v-chip v-for="choice in stateChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals.states[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals.states[choice.value]) }})</v-chip>
             </v-chip-group>
           </div>
-          <v-data-table :headers="deployHeaders" :items="deployList" item-key="id" show-expand single-expand :expanded.sync="deployExpanded" :sort-by.sync="deployTable.sortBy" :sort-desc.sync="deployTable.sortDesc" :items-per-page.sync="deployTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and states chosen" @click:row="toggleDeployment">
+          <v-data-table :headers="deployHeaders" :items="deployList" item-key="id" show-expand single-expand :expanded.sync="deployExpanded" :sort-by.sync="deployTable.sortBy" :sort-desc.sync="deployTable.sortDesc" :items-per-page.sync="deployTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and states chosen" @click:row="toggleRow">
             <template #[`item.name`]="{ item }">
               <div class="py-2" :data-deploy-formation="item.id">
                 <div class="font-weight-medium" data-deploy-name>{{ item.name }}</div>
@@ -260,7 +260,7 @@
               </div>
               <div v-else-if="observable" class="caption text--secondary mb-2" data-observe="unavailable">Observing the formations is unavailable: the save lacks {{ observationGaps.join(', ') }}.</div>
             </div>
-            <v-data-table :headers="formationHeaders" :items="formationList" item-key="id" show-expand single-expand :expanded.sync="formationExpanded" :sort-by.sync="formationsTable.sortBy" :sort-desc.sync="formationsTable.sortDesc" :items-per-page.sync="formationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and the scope chosen" @click:row="openFormation">
+            <v-data-table :headers="formationHeaders" :items="formationList" item-key="id" show-expand single-expand :expanded.sync="formationExpanded" :sort-by.sync="formationsTable.sortBy" :sort-desc.sync="formationsTable.sortDesc" :items-per-page.sync="formationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and the scope chosen" @click:row="toggleRow">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.name }}</div>
@@ -980,13 +980,6 @@ export default {
       }
     },
 
-    // A formation's row opens its system on the map; one with no known system has none to open.
-    openFormation(item) {
-      if (item.system) {
-        this.$router.push(linkTo.map(item.system.id))
-      }
-    },
-
     // A formation's comparison with the template chosen as the intent (`formationCompared`).
     compareOf(item) {
       return this.formationCompared.get(item.id).comparison
@@ -1059,7 +1052,8 @@ export default {
       return candidatesOf(item, this.deployment.index, this.deployment.rows)
     },
 
-    toggleDeployment(_item, { expand, isExpanded }) {
+    // A click on a formation's row opens its detail, or closes it, as the expander does; the system's link in the row opens the map.
+    toggleRow(_item, { expand, isExpanded }) {
       expand(!isExpanded)
     },
 
