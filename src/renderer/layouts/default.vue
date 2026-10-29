@@ -65,7 +65,7 @@
 
       <template v-if="showTabs" #extension>
         <v-tabs class="section-tabs" :style="pageStyle" :value="tabIndex" show-arrows height="44">
-          <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
+          <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}<v-chip v-if="tab.wip" x-small label color="warning" class="ml-2" data-wip-chip>WIP</v-chip></v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
@@ -87,6 +87,7 @@
         <capability-state v-else-if="capabilityReport && capabilityReport.status === 'unsupported'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
         <template v-else>
           <capability-state v-if="capabilityReport && capabilityReport.status === 'degraded'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
+          <wip-notice v-if="page.wip" :title="page.title" />
           <router-view :key="$route.path" />
         </template>
         <section-nav :style="pageStyle" />
@@ -119,6 +120,7 @@ import { sectionStyle } from '../components/navigation/section-style'
 import CapabilityState from '../components/page/CapabilityState.vue'
 import SectionNav from '../components/page/SectionNav.vue'
 import UnsupportedSave from '../components/page/UnsupportedSave.vue'
+import WipNotice from '../components/page/WipNotice.vue'
 import { SYSTEM_QUERY, activeAppearance, appearanceStyle, applyPolicy, followSystem, loadAppearance, nativeThemeSource, quickSwitch, requestNativeTheme } from '../utilities/appearance'
 import { REPORT_ROUTES } from '../utilities/capabilities'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
@@ -143,6 +145,7 @@ export default {
     SectionFlyout,
     SectionNav,
     UnsupportedSave,
+    WipNotice,
   },
   data () {
     return {

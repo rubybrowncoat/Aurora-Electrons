@@ -3,7 +3,7 @@
 // The game lists a project as researchable when its field matches, it is not ruin-only, it belongs to nobody or to the race (or the race made it eligible), its prerequisites are researched, and it is not researched, running or queued. A prerequisite id that has no tech row can never be researched, so a tech that needs one is out of reach for good. `evaluateResearch` computes that once for every tech, with the path to it, so the page only reads.
 
 import { toBoolean } from './aurora'
-import { isKnownNumber, roundToDecimal, UNKNOWN_TEXT } from './math'
+import { countText, isKnownNumber, UNKNOWN_TEXT } from './math'
 import { combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
 export const DONE = 'done'
@@ -589,8 +589,8 @@ export const nextLandingResult = (schedule, game) => {
   return { project: best, result: combine({ rule: 'research.nextLanding', parts: { landing: best.yearsResult }, compute: (values) => values.landing, inputs: { present: ['the game clock'], missing: undated } }), unknown: undated.length, causes }
 }
 
-// "9 d", "7.5 mo", "3.4 y": a span of years as a player reads it.
-export const durationLabel = (years) => {
+// "9 d", "7.5 mo", "3.4 y": a span of years as a player reads it, the figure of a long one grouped with `separator`.
+export const durationLabel = (years, separator = '\'') => {
   if (!isKnownNumber(years)) {
     return UNKNOWN_TEXT
   }
@@ -602,8 +602,8 @@ export const durationLabel = (years) => {
   } else if (days < 100) {
     return `${Math.round(days)} d`
   } else if (years < 2) {
-    return `${roundToDecimal(years * 12, 1)} mo`
+    return `${countText(years * 12, 1, separator)} mo`
   }
 
-  return `${roundToDecimal(years, 1)} y`
+  return `${countText(years, 1, separator)} y`
 }

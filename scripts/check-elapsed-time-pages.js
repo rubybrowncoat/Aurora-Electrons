@@ -368,7 +368,7 @@ const handlingOf = (truth, key) => {
 
 const DAY = 86400
 
-// The grouping of the figures the pages write with formatters that group no digits: the spans and durations (`span` and `duration` of src/renderer/mixins/count-format.js), Hauling's fixed figures, distances and tonnes, and the strengths and hours of a stop (src/renderer/components/page/HandlingBreakdown.vue). A count (`count` of the same mixin) is written in the grouping of the setting, which each screen reads.
+// The grouping of the figures the pages write with formatters that group no digits: Hauling's fixed figures, distances and tonnes, and the strengths and hours of a stop (src/renderer/components/page/HandlingBreakdown.vue), and the spans and durations (`span` and `duration` of src/renderer/mixins/count-format.js), which group a figure of a thousand or more but write none here, the longest being a few years. A count (`count` of the same mixin) is written in the grouping of the setting, which each screen reads.
 const PLAIN = 'None'
 
 // A figure read whole (scripts/lib/browser-observe.js `readFigure`) in `grouping`, the name of the setting it is written in: text that is no figure stops the read, and the check that read it tells it as a wrong value.

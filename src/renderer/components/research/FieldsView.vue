@@ -461,7 +461,9 @@ export default {
       return projectIdle(project) ? { text: 'Not progressing', result: null } : { text: UNKNOWN_TEXT, result: entry.yearsResult }
     },
 
-    duration: durationLabel,
+    duration(years) {
+      return durationLabel(years, this.separator)
+    },
   },
 }
 </script>

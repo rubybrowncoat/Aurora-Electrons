@@ -264,7 +264,7 @@ export default {
       const unrated = output.unknown ? `, ${this.count(output.unknown)} of them with no rate known` : ''
       const idleText = idle ? `, ${this.count(idle)} idle` : ''
       const overText = labs.over ? `, ${this.count(labs.over)} assigned beyond those built` : ''
-      const landing = next.project && isAvailable(next.result) ? `${this.landing(next.project.years)}, in ${durationLabel(next.project.years)}` : ''
+      const landing = next.project && isAvailable(next.result) ? `${this.landing(next.project.years)}, in ${durationLabel(next.project.years, this.separator)}` : ''
       const nothing = next.unknown ? `${this.count(next.unknown)} ${plural(next.unknown, 'project has', 'projects have')} no landing time${next.causes.length ? `, missing ${next.causes.join(', ')}` : ''}` : schedule.length ? 'Every project is paused or has no scientist or rate' : 'No research project is under way'
 
       return [

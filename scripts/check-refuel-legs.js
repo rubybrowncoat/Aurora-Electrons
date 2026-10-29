@@ -580,7 +580,7 @@ const motionOf = async (ctx) => {
   const methods = new Function(...keys, `return { ${ROW_METHODS.map((name) => methodText(page, name)).join('\n')}\n${viewText} }`)(...keys.map((key) => dependency[key]))
   const format = fs.readFileSync(path.join(root, 'src/renderer/mixins/count-format.js'), 'utf8')
   // eslint-disable-next-line no-new-func
-  const counts = new Function('countText', 'isKnownNumber', 'roundToDecimal', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.isKnownNumber, loaded.math.roundToDecimal)
+  const counts = new Function('countText', 'isKnownNumber', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.isKnownNumber)
   const rocks = [rockOf(10, 0.02, 90, 48), rockOf(20, 0.04, 270, 96)]
   // The orbits three times as far and as slow, for the case in which only the closing fill has hours that are not known.
   const wide = rocks.map((rock) => rockOf(rock.id, rock.distance * 3, rock.bearing, rock.year * 3))
@@ -839,7 +839,7 @@ const viewOfPage = async (ctx) => {
   const methods = new Function(...keys, `return { ${['ledgerViewOf', 'servicePartOf'].map((name) => methodText(page, name)).join('\n')} }`)(...keys.map((key) => dependency[key]))
   const format = fs.readFileSync(path.join(root, 'src/renderer/mixins/count-format.js'), 'utf8')
   // eslint-disable-next-line no-new-func
-  const counts = new Function('countText', 'isKnownNumber', 'roundToDecimal', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.isKnownNumber, loaded.math.roundToDecimal)
+  const counts = new Function('countText', 'isKnownNumber', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.isKnownNumber)
   const vm = { ...methods, ...counts, separator: '\'' }
 
   return (ledger) => vm.ledgerViewOf(ledger)

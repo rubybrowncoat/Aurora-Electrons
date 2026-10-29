@@ -183,7 +183,7 @@ export default {
       const rate = this.research.totalRate
 
       if (rate > 0) {
-        facts.push({ label: 'With every lab on it', value: isKnownNumber(entry.pathRp) ? durationLabel(entry.pathRp / rate) : UNKNOWN_TEXT, result: pathRpResult(entry), note: `at ${this.count(rate)} RP a year, if one scientist could run them all` })
+        facts.push({ label: 'With every lab on it', value: isKnownNumber(entry.pathRp) ? durationLabel(entry.pathRp / rate, this.separator) : UNKNOWN_TEXT, result: pathRpResult(entry), note: `at ${this.count(rate)} RP a year, if one scientist could run them all` })
       }
 
       facts.push({ label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology' : 'technologies' })

@@ -1,6 +1,6 @@
 import { mapGetters } from 'vuex'
 
-import { countText, isKnownNumber, roundToDecimal, thousandsSeparator } from '../utilities/math'
+import { countText, isKnownNumber, thousandsSeparator } from '../utilities/math'
 
 // Numbers as the "Thousands Separator" setting writes them, for components that don't read the setting themselves, and spans of days in the unit that reads best.
 export default {
@@ -35,17 +35,21 @@ export default {
 
       return this.duration(seconds / 86400)
     },
-    // `3 h`, `12.5 d`, `4.1 mo` (30.4-day months), `2.3 y`.
+    // `3 h`, `12.5 d`, `4.1 mo` (30.4-day months), `2.3 y`; the figure of a long span is grouped as a count is (`910'038'079.5 y`). A dash for a value that is not known.
     duration(days) {
+      if (!isKnownNumber(days)) {
+        return '—'
+      }
+
       if (days < 1) {
         return `${Math.max(1, Math.round(days * 24))} h`
       } else if (days < 60) {
-        return `${roundToDecimal(days, 1)} d`
+        return `${this.count(days, 1)} d`
       } else if (days < 730) {
-        return `${roundToDecimal(days / 30.4, 1)} mo`
+        return `${this.count(days / 30.4, 1)} mo`
       }
 
-      return `${roundToDecimal(days / 365, 1)} y`
+      return `${this.count(days / 365, 1)} y`
     },
   },
 }

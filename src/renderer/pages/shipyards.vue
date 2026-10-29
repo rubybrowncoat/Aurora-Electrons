@@ -4,13 +4,16 @@
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <stat-tiles :tiles="tiles" />
+        <v-row dense align="center" class="mb-1">
+          <v-col cols="auto" class="d-flex align-center mr-4">
+            <span class="caption text--secondary mr-2">View</span>
+            <v-btn-toggle v-model="view" mandatory dense>
+              <v-btn v-for="option in viewOptions" :key="option.value" :value="option.value" small>{{ option.label }}</v-btn>
+            </v-btn-toggle>
+          </v-col>
+        </v-row>
 
-        <div class="d-flex align-center flex-wrap controls mb-3">
-          <v-btn-toggle v-model="view" mandatory dense>
-            <v-btn v-for="option in viewOptions" :key="option.value" :value="option.value" small>{{ option.label }}</v-btn>
-          </v-btn-toggle>
-        </div>
+        <stat-tiles :tiles="tiles" />
 
         <v-card v-if="view === 'yards'" class="panel" data-summary="Every shipyard of the race once, with the tasks it is working, the upgrade or retool in progress and the price to add a slipway. Use it to find idle yards and to see what keeps each one busy." elevation="1">
           <div class="panel-head">

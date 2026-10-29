@@ -7,7 +7,7 @@
       <div class="section-flyout__name">{{ page.title }}</div>
       <div>
         <v-chip v-if="page.planned" x-small label>Planned</v-chip>
-        <v-chip v-else-if="page.wip" x-small label outlined>WIP</v-chip>
+        <v-chip v-else-if="page.wip" x-small label color="warning" data-wip-chip>WIP</v-chip>
       </div>
       <div class="section-flyout__blurb">{{ page.blurb }}</div>
       <div v-if="page.peekable" class="section-flyout__peek">

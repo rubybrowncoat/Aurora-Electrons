@@ -281,10 +281,10 @@
               </v-tooltip>
               <span v-else class="text--secondary">None</span>
               <provenance-mark v-if="item.row.minerals.deposits" :result="provenanceOf(item.row).minerals" />
-              <v-chip v-if="item.row.minerals.rich" x-small label :color="tone('rich')" dark class="ml-1 px-1">Rich</v-chip>
+              <v-chip v-if="item.row.minerals.rich" x-small label :color="tone('rich')" dark class="ml-1">Rich</v-chip>
               <v-tooltip v-if="item.row.minerals.cmc.length" top max-width="340">
                 <template #activator="{ on }">
-                  <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
+                  <v-chip x-small label outlined class="ml-1" v-on="on">CMC</v-chip>
                 </template>
                 <span>Qualifies for a civilian mining complex with {{ item.row.minerals.cmc.join(', ') }}. {{ cmcNote(item.row) }}</span>
               </v-tooltip>
