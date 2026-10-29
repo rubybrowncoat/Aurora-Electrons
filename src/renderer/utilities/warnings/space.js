@@ -331,8 +331,8 @@ export const checks = checksOf([
     rule: 'A wreck lies in a surveyed system.',
     evidence: {
       verification: 'confirmed',
-      structure: ['FCT_Wrecks.SystemID, Size, ClassID, RaceID, OrbitBodyID', 'FCT_RaceSysSurvey.Name'],
-      note: 'A presence check on stored rows: a wreck in a system the race has surveyed. A missing size or owner shows a dash.',
+      structure: ['FCT_Wrecks.SystemID, Size, ClassID, RaceID, OrbitBodyID', 'FCT_ShipClass.ClassName of the race\'s own wrecks', 'FCT_AlienClass.ClassName of the race\'s intelligence on other races\' wrecks', 'FCT_RaceSysSurvey.Name'],
+      note: 'A presence check on stored rows: a wreck in a system the race has surveyed. The race\'s own wreck shows its class; another race\'s shows the class name the race\'s intelligence holds, or Unknown. A missing size or owner shows a dash.',
     },
     columns: [
       { key: 'wreck', text: 'Wreck' },
@@ -342,12 +342,12 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
 
-      const wrecks = await rowsOf(ctx, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.Size, FCT_ShipClass.ClassName, (FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${GameID}`)
+      const wrecks = await rowsOf(ctx, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.Size, case when FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID then FCT_ShipClass.ClassName end as OwnClassName, FCT_AlienClass.ClassName as AlienClassName, (FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.GameID = FCT_Wrecks.GameID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${GameID}`)
 
       return wrecks.map((wreck) => ({
         id: `wreck:${wreck.WreckID}`,
         cells: {
-          wreck: wreck.ClassName || 'Unknown class',
+          wreck: wreck.Owned ? wreck.OwnClassName || 'Unknown class' : wreck.AlienClassName || 'Unknown',
           size: figure(ctx, wreck.Size, 'the size of the wreck', (known) => ctx.count(known, 1)),
           design: isKnownNumber(wreck.Owned) ? (wreck.Owned ? 'Owned' : '') : unknownCell(ctx, ['the empire the wreck belonged to']),
         },
