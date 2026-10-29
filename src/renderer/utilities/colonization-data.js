@@ -112,13 +112,13 @@ from FCT_Race
 inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID
 where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`).then(([row]) => row || NO_RACE_RULES)
 
-// Whether a game founds civilian mining complexes, from its `FCT_Game` row. The switch (`AllowCMC`) came with Aurora 2.7; a 2.6 game has no such column and founds them regardless, so a row without it counts as switched on.
-export const cmcAllowedOf = (game) => (game.AllowCMC === undefined ? true : game.AllowCMC === 1)
+// Whether a game founds civilian mining complexes, from its `FCT_Game` row. The switch is `FCT_Game.AllowCMC`; a row without it does not count as switched on.
+export const cmcAllowedOf = (game) => game.AllowCMC === 1
 
-// What the game asks of the race before it founds a civilian mining complex: complexes switched on for the game, a shipyard, more than one colony with people or infrastructure, and per system the millions of people in the race's largest colony there (for colonization.js `cmcSite`). The whole game row is read because a 2.6 save lacks the switch (`cmcAllowedOf`).
+// What the game asks of the race before it founds a civilian mining complex: complexes switched on for the game (`FCT_Game.AllowCMC`), a shipyard, more than one colony with people or infrastructure, and per system the millions of people in the race's largest colony there (for colonization.js `cmcSite`).
 export const loadCmcRules = async (database, { GameID, RaceID }) => {
   const [[race], colonies] = await Promise.all([
-    rows(database, `select FCT_Game.*, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
+    rows(database, `select FCT_Game.AllowCMC, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
 from FCT_Game
 where FCT_Game.GameID = ${GameID}`),
     rows(database, `select SystemID, max(Population) as Largest from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID} group by SystemID`),
@@ -181,14 +181,8 @@ const byMineralId = (row) => Object.fromEntries(MINERALS.map((mineral) => [miner
 // How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets over the year's net loss, from the game's mineral ledger), read once for the Planner. The same reads as the page's, over the last 365 days.
 const LEDGER_DAYS = 365
 
-// The game's mineral ledger (Aurora 2.6 and later) over the last year, summed by mineral and entry type; [] for a save that doesn't have the table.
+// The game's mineral ledger over the last year, summed by mineral and entry type; [] for a save whose ledger holds no row in that time.
 const loadLedger = async (database, { GameID, RaceID }) => {
-  const [table] = await rows(database, "select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
-
-  if (!table.Present) {
-    return []
-  }
-
   return rows(database, `select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, ${completeSum('FCT_RaceMineralData.Amount')} as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick
 from FCT_RaceMineralData
 inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID

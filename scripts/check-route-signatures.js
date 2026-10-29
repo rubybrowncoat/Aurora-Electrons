@@ -11,7 +11,7 @@
   - a desired route with no capable active fleet is `uncovered`, which is not the `unknown` of a cycle that is observed and cannot be told, and a desired route is only ever the player's own record, kept apart from the observed groups;
   - the History page's backup registers the desired routes: a restore previewed through the adapter its own `backupAnnotations` returns keeps a kept route, which a repository with no adapter of the kind rejects;
   - every group and every fleet of it names the stored orders it was inferred from;
-  - the loader reads the queues of a database made here, in a save of 2.6 or later, and says why it cannot read one that predates the conditional orders;
+  - the loader reads the queues of a database made here, and says why it cannot read a save without the conditional orders table;
   - the page, in a browser over a constructed copy of a save, draws the groups, their fleets, their stored orders, their capacity (the fleets' own figures of the table above it, summed once), their flags and the queues that do not repeat, each read back by the `data-*` hook it carries and against the page's own tables of words.
 
   Every planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names by a wrong value of its own, never because a call threw (scripts/lib/fault-credit.js); each benign rewrite (a v-on longhand, an explicit prop and event in place of v-model, a qualifier moved from the front of a label to the back, an element of another kind, parts of a line in another order, a parenthesised condition and the like) must leave every check green. Prints `N of N checks passed`; a failed check, a fault that no named check catches and a rewrite that changes a verdict each set exit code 1. The suite runs through scripts/lib/suite-runner.js: the head of the pure parts, the head of the panel of the routes and the head of the desired routes (`page`, `page-desires`), and each fault and rewrite in a worker, the page ones on a page server and a browser started once for them (Playwright's Chromium).
@@ -786,7 +786,7 @@ add('audit', 'the audit puts the groups, the queues that do not repeat and the o
   const audit = m.audit.auditOf({ queues: QUEUES(), raceId: RACE, ships: { 1: hold, 2: hold, 3: hold, 8: hold, 9: hold }, rows, colonyNames: { 'colony:101': 'Alpha', 'colony:102': 'Beta' } })
   const byFleet = Object.fromEntries(audit.groups.flatMap((group) => group.fleets.map((record) => [record.FleetID, group])))
 
-  assert.equal(audit.supported, true, 'a save of 2.6 or later is supported')
+  assert.equal(audit.supported, true, 'a save with the conditional orders is supported')
   assert.deepEqual(audit.groups.map((group) => group.fleets.map((record) => record.FleetID)).sort((a, b) => a[0] - b[0]), [[1, 2], [3], [8], [9]], 'the groups: the two identical cycles once, the reversed flow, the hub, the conditional route alone')
   assert.equal(byFleet[1], byFleet[2], 'the two fleets are in one group')
   assert.deepEqual(byFleet[1].capacity, yearOf(160, 0, 0, 5), 'their capacity is summed once')
@@ -884,7 +884,7 @@ const fill = (db, { game = 1, race = RACE } = {}) => {
   Object.entries(ACTIONS).forEach(([id, action]) => db.run('insert into DIM_MoveAction values (?, ?, ?, ?, ?, ?)', [Number(id), action.name, action.item, action.quantity ? 1 : 0, action.minimum ? 1 : 0, action.transit ? 1 : 0]))
 }
 
-add('loader', 'the loader reads the queues of the race in the game from a save of 2.6 or later, the flags of the actions, the conditional and standing orders and the templates, and says why it reads none from an older save', async ({ m }) => {
+add('loader', 'the loader reads the queues of the race in the game from a save, the flags of the actions, the conditional and standing orders and the templates, and says why it reads none from a save without the conditional orders table', async ({ m }) => {
   const db = queueDatabase()
 
   fill(db)

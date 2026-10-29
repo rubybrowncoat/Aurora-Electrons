@@ -7,7 +7,7 @@ import { columnsOf } from './mine-bootstrap-data'
 import { ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LEDGER_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the fuel service rules are not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the fuel service rules are not checked against the save.'
 const SECONDS_PER_HOUR = 3600
 
 registerRule({
@@ -159,9 +159,9 @@ const recipientsOf = (ships, fuel, wants) => ships.map((entry) => ({ id: entry.i
 // The hours the largest receipt takes at `rate` L/h per ship.
 const hoursOf = (litres, rate) => (isNumber(rate) && rate > 0 ? litres / rate : null)
 
-// A colony's service to the recipients. `site` is the colony row of `loadFuelSites` (null when no colony of the race stands at the stop); `recipients` in the order the game serves them (`recipientsOf`, by ID); `options`: `hubEra`, `rate` (the race's refuelling rate per ship), `reserve` (the player's reserve at the colony, 0 when the records are read and hold none, null when they are not read), `saved` (the litres above the reserve the save holds), `now` (the litres available now, after what the run and the fleets ahead drew; null when not known), `entry` (the litres available when the plan began), `ahead` ({ taken, unknown } of `netLedgers`) and `version`.
+// A colony's service to the recipients. `site` is the colony row of `loadFuelSites` (null when no colony of the race stands at the stop); `recipients` in the order the game serves them (`recipientsOf`, by ID); `options`: `rate` (the race's refuelling rate per ship), `reserve` (the player's reserve at the colony, 0 when the records are read and hold none, null when they are not read), `saved` (the litres above the reserve the save holds), `now` (the litres available now, after what the run and the fleets ahead drew; null when not known), `entry` (the litres available when the plan began), `ahead` ({ taken, unknown } of `netLedgers`) and `version`.
 // The result: `permission` ('allowed', 'blocked' or 'unknown': unknown wherever an input of the service is not known, the recipients' litres, the reserve records, a stock a fleet ahead left not known), `gate`, `reason` and `gates`, the figures (`stock`, `reserve`, `entry`, `available`, `received`, `residual`), `perShip` (Map of ShipID to litres received), `hours` (null when not known), `limiter` ('stock', 'rate' or 'none') and `limiting` (the ship that receives most), `exhausted` (a ship was left short by the stock) and `drawn` (Map of the source's key to the litres taken).
-export const colonyService = (site, recipients, { hubEra = 0, rate = null, reserve = null, saved = null, now = null, entry = null, ahead = EMPTY_AHEAD, version = null } = {}) => {
+export const colonyService = (site, recipients, { rate = null, reserve = null, saved = null, now = null, entry = null, ahead = EMPTY_AHEAD, version = null } = {}) => {
   const key = site ? colonyKey(site.PopulationID) : null
   const stock = site && isNumber(site.FuelStockpile) ? site.FuelStockpile : null
   const takenBy = key ? (ahead.taken.get(key) || []) : []
@@ -169,7 +169,6 @@ export const colonyService = (site, recipients, { hubEra = 0, rate = null, reser
   const reserveRead = isNumber(reserve)
   const keys = site ? [colonyKey(site.PopulationID)] : []
   const gates = [
-    hubEra ? unknown('version', 'hub-era') : pass('version'),
     site ? pass('record') : fail('record', 'no-colony'),
     !site ? pass('point') : !isNumber(site.RefuellingPoints) ? unknown('point', 'points-unknown') : site.RefuellingPoints > 0 ? pass('point') : fail('point', 'no-refuelling-point'),
     !site ? pass('stock') : stock === null ? unknown('stock', 'stock-unknown') : stock > 0 ? pass('stock') : fail('stock', 'stock-empty'),
@@ -252,7 +251,7 @@ export const stationaryOf = (value) => {
   return text === '1' || text === 'TRUE' ? true : text === '0' || text === 'FALSE' ? false : null
 }
 
-// A stationary tanker fleet's service to the recipients. `fleet` is a fleet of `loadFuelSites` ({ FleetID, FleetName, LastMoveTime, FirstOrderStationary, ships }); `recipients` in the game's order (`recipientsOf`, then by refuelling priority, class priority and the size of the tank); `options`: `gameTime`, `reserves` ({ ship(row) }) and `reserveRead`, `version`, `hubEra` as the donor result takes it from the ship row, `entrySurplus(key, saved)` and `nowSurplus(key, saved)` (the litres each tanker has entering the plan and now) and `ahead`.
+// A stationary tanker fleet's service to the recipients. `fleet` is a fleet of `loadFuelSites` ({ FleetID, FleetName, LastMoveTime, FirstOrderStationary, ships }); `recipients` in the game's order (`recipientsOf`, then by refuelling priority, class priority and the size of the tank); `options`: `gameTime`, `reserves` ({ ship(row) }) and `reserveRead`, `version`, `entrySurplus(key, saved)` and `nowSurplus(key, saved)` (the litres each tanker has entering the plan and now) and `ahead`.
 // The result is the colony service's, with `tankers` (each { name, rate, permission, reason, saved, entry, drawn, residual }), `bound` 'at-least' on the hours and `drawn` the litres taken from each tanker's key. The service is not known (permission 'unknown') wherever an input of it is not: a tanker that cannot be decided, a recipient's size, litres wanted or priority, the tank that orders the tankers, and the records or the levels a fleet ahead left not known.
 export const tankerService = (fleet, recipients, { gameTime = null, reserves = null, reserveRead = true, version = null, entrySurplus = (_key, saved) => saved, nowSurplus = (_key, saved) => saved, ahead = EMPTY_AHEAD } = {}) => {
   const tankers = tankersOf(fleet, { reserves, reserveRead, version, entrySurplus, nowSurplus })
@@ -272,7 +271,6 @@ export const tankerService = (fleet, recipients, { gameTime = null, reserves = n
   const everyServes = (recipient) => eligible.map((tanker) => servesRecipient(tanker, recipient))
   const served = wanting.filter((recipient) => everyServes(recipient).includes(true))
   const sizeDoubt = wanting.some((recipient) => !isNumber(recipient.size) && eligible.some((tanker) => servesRecipient(tanker, recipient) === null))
-  const hubEra = tankers.some((tanker) => tanker.ship.HubEra)
   const takenBy = mergeTaken([...eligible, ...undecided].flatMap((tanker) => ahead.taken.get(tanker.key) || []))
   // A tanker not decided may serve, give to or take from any recipient, so it softens every failure of the pool gates: some litres of it could cure them.
   const maybe = (gate) => (undecided.length > 0 && gate.status === 'fail' ? unknown(gate.gate, 'donors-partial') : gate)
@@ -280,7 +278,6 @@ export const tankerService = (fleet, recipients, { gameTime = null, reserves = n
   // The first input of the service that is not known, which leaves everything the service gives not known: the litres a ship wants, the size of a recipient a low-rate tanker may or may not serve, the tank that puts the giving tankers in order and the priority that puts the recipients in order.
   const input = recipients.some((recipient) => !isNumber(recipient.want)) ? 'required-unknown' : sizeDoubt ? 'recipient-unknown' : givers.length > 1 && givers.some((tanker) => !tanker.orderKnown) ? 'order-unknown' : wanting.length > 1 && wanting.some((recipient) => !isNumber(recipient.ship.RefuelPriority) || !isNumber(recipient.ship.ClassRefuelPriority)) ? 'priority-unknown' : null
   const gates = [
-    hubEra ? unknown('version', 'hub-era') : pass('version'),
     movedUnknown ? unknown('moved', 'moved-unknown') : fleet.LastMoveTime === gameTime ? fail('moved', 'moved-this-pulse') : pass('moved'),
     orders === null || orders === undefined ? unknown('stationary', 'orders-unknown') : Number(orders) === 1 ? pass('stationary') : fail('stationary', 'first-order-not-stationary'),
     eligible.length ? (undecided.length ? unknown('donors', 'donors-partial') : pass('donors')) : undecided.length ? unknown('donors', 'donors-unknown') : fail('donors', 'no-eligible-tanker'),
@@ -399,7 +396,7 @@ export const serviceAt = (stop, context, wants) => {
     const now = key ? levels.now(key, saved) : null
     const entry = key ? levels.entry(key, saved) : null
 
-    take(colonyService(colony, recipientsOf(tanks, fuel, remaining).sort((a, b) => a.id - b.id), { hubEra: sites.hubEra, rate: sites.rates.MaxRefuellingRate, reserve, saved, now, entry, ahead, version }))
+    take(colonyService(colony, recipientsOf(tanks, fuel, remaining).sort((a, b) => a.id - b.id), { rate: sites.rates.MaxRefuellingRate, reserve, saved, now, entry, ahead, version }))
   }
 
   fleets.forEach((fleet) => {
@@ -757,9 +754,9 @@ export const ledgerNote = (ledger, { litres = String, hours = String, ordinal = 
   return served.map((stop) => `Refuels at ${stop.stop.name}: ${litres(stop.receivedTotal)}${isNumber(stop.hours) ? ` over ${stop.bound === 'at-least' ? `${SERVICE_BOUNDS['at-least'].before} ` : ''}${hours(stop.hours)}` : ''}`).join('; ')
 }
 
-// The colonies of the race with what a service there needs, the stationary tanker fleets and the race's refuelling rates, for `serviceAt`: { gameTime, hubEra, rates: { MaxRefuellingRate, UnderwayReplenishmentRate }, colonies: [{ PopulationID, PopName, SystemID, SystemBodyID, Population, FuelStockpile, FuelProdStatus, RefuellingPoints, Refineries }], fleets: [{ FleetID, FleetName, SystemID, OrbitBodyID, Xcor, Ycor, LastMoveTime, FirstOrderStationary, ships }] }. Every colony of the race is listed, with `RefuellingPoints` the sum of the refuelling mass of its installations, so a colony without a point reads as one. A fleet is listed when one of its ships is a tanker, a ship with a refuelling rate, a transfer system or a harvester (the rows of `loadFuelDonors`, grouped); `FirstOrderStationary` is 1 for a fleet with no orders or a first order that is a stationary action, 0 for one that is not, null when the action's flag is not in the save. A column the save lacks reads as null. Throws when a read fails.
+// The colonies of the race with what a service there needs, the stationary tanker fleets and the race's refuelling rates, for `serviceAt`: { gameTime, rates: { MaxRefuellingRate, UnderwayReplenishmentRate }, colonies: [{ PopulationID, PopName, SystemID, SystemBodyID, Population, FuelStockpile, FuelProdStatus, RefuellingPoints, Refineries }], fleets: [{ FleetID, FleetName, SystemID, OrbitBodyID, Xcor, Ycor, LastMoveTime, FirstOrderStationary, ships }] }. Every colony of the race is listed, with `RefuellingPoints` the sum of the refuelling mass of its installations, so a colony without a point reads as one. A fleet is listed when one of its ships is a tanker, a ship with a refuelling rate, a transfer system or a harvester (the rows of `loadFuelDonors`, grouped); `FirstOrderStationary` is 1 for a fleet with no orders or a first order that is a stationary action, 0 for one that is not, null when the action's flag is not in the save. A column the save lacks reads as null. Throws when a read fails.
 export const loadFuelSites = async (database, { GameID, RaceID }) => {
-  const [populationColumns, fleetColumns, raceColumns, classColumns] = await Promise.all([columnsOf(database, 'FCT_Population'), columnsOf(database, 'FCT_Fleet'), columnsOf(database, 'FCT_Race'), columnsOf(database, 'FCT_ShipClass')])
+  const [populationColumns, fleetColumns, raceColumns] = await Promise.all([columnsOf(database, 'FCT_Population'), columnsOf(database, 'FCT_Fleet'), columnsOf(database, 'FCT_Race')])
   const has = (columns, name) => columns.size === 0 || columns.has(name)
   const population = (name) => (has(populationColumns, name) ? `FCT_Population.${name}` : 'null')
   const fleetColumn = (name) => (has(fleetColumns, name) ? `FCT_Fleet.${name}` : 'null')
@@ -780,7 +777,6 @@ export const loadFuelSites = async (database, { GameID, RaceID }) => {
 
   return Object.freeze({
     gameTime: games.length ? games[0].GameTime : null,
-    hubEra: classColumns.has('RefuellingHub') ? 1 : 0,
     rates: Object.freeze({ MaxRefuellingRate: races.length ? races[0].MaxRefuellingRate : null, UnderwayReplenishmentRate: races.length ? races[0].UnderwayReplenishmentRate : null }),
     colonies: Object.freeze(colonies),
     fleets: Object.freeze(fleets.map(({ OrderCount, FirstAction, ...fleet }) => ({ ...fleet, FirstOrderStationary: OrderCount === 0 ? 1 : stationaryOf(FirstAction) === null ? null : stationaryOf(FirstAction) ? 1 : 0, ships: byFleet.get(fleet.FleetID) }))),

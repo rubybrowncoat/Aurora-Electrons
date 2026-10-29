@@ -10,7 +10,6 @@
 */
 
 const TRANSFER_FUEL = 61
-const HUB_COLUMN = 'RefuellingHub'
 
 // The sum of counts, null when any is unknown.
 const summed = (counts) => (counts.includes(null) ? null : counts.reduce((sum, count) => sum + count, 0))
@@ -18,13 +17,11 @@ const summed = (counts) => (counts.includes(null) ? null : counts.reduce((sum, c
 const verdictOf = (gates) => (gates.includes('fail') ? 'blocked' : gates.includes('unknown') ? 'unknown' : 'allowed')
 
 const fuelServiceTruth = async (all, { GameID, RaceID }) => {
-  const [ships, components, damage, columns] = await Promise.all([
+  const [ships, components, damage] = await Promise.all([
     all(`select s.ShipID, s.Fuel, s.ShipClassID, c.MinimumFuel, c.FuelTanker, c.RefuellingRate, c.FuelCapacity from FCT_Ship s inner join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${GameID} and s.RaceID = ${RaceID} and s.ShippingLineID = 0`),
     all(`select cc.ClassID, cc.ComponentID, cc.NumComponent from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where d.ComponentTypeID = ${TRANSFER_FUEL}`),
     all(`select ShipID, ComponentID, Number from FCT_DamagedComponent where GameID = ${GameID}`),
-    all('pragma table_info(FCT_ShipClass)'),
   ])
-  const hub = columns.map((column) => column.name).includes(HUB_COLUMN)
   const mounted = new Map()
   const damaged = new Map()
 
@@ -42,7 +39,6 @@ const fuelServiceTruth = async (all, { GameID, RaceID }) => {
     }))
     const known = ship.Fuel !== null && ship.MinimumFuel !== null
     const permission = verdictOf([
-      hub ? 'unknown' : 'pass',
       ship.FuelTanker === null ? 'unknown' : ship.FuelTanker === 0 ? 'fail' : 'pass',
       systems === null ? 'unknown' : systems <= 0 ? 'fail' : left === null ? 'unknown' : left <= 0 ? 'fail' : 'pass',
       ship.RefuellingRate === null ? 'unknown' : ship.RefuellingRate > 0 ? 'pass' : 'fail',

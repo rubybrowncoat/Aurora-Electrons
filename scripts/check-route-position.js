@@ -1848,7 +1848,7 @@ check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off
 })
 
 // The refuelling sites and fuel reserves of a save with no colony or tanker fleet that serves and no fuel kept back, read: a run is decided by the tanks alone.
-const NO_SITES = { gameTime: 1, hubEra: 0, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies: [], fleets: [] }
+const NO_SITES = { gameTime: 1, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies: [], fleets: [] }
 const NO_RESERVES = { ready: true, reader: { colony: () => null, ship: () => null } }
 
 check('pages-transport', 'Transport states a run\'s time and distance with the same positions, the Lagrange points of its route included, for a class and for a fleet, and adds nothing to a route of fixed places', async (w) => {

@@ -4,7 +4,7 @@ import { roundToDecimal } from './math'
 import { ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const CREW_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the rule is not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
 
 // The share of its class crew a ship has aboard, as the game scales a ship's modules and its cargo handling: Current Crew / Class Crew, 1 once the class crew is aboard (an over-crewed ship is no faster) and 1 for a class without crew (the game never scales it, so there is no division by zero). A ship with no crew aboard has 0, and a missing crew or class crew gives null, never 1. `ship`: { CurrentCrew, ClassCrew }.
 export const crewFraction = (ship) => {
@@ -24,7 +24,7 @@ export const crewFractionSql = (ship = 'FCT_Ship', shipClass = 'FCT_ShipClass') 
 
 const BASE_STRUCTURE = ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew']
 const MODULE_STRUCTURE = [...BASE_STRUCTURE, 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent']
-const STANDING = 'Estimated: read from the game\'s rules for 2.6 and 2.7; no saved game shows a short-crewed ship doing this, so it is checked against nothing stored.'
+const STANDING = 'Estimated: read from the game\'s rules for 2.7; no saved game shows a short-crewed ship doing this, so it is checked against nothing stored.'
 
 // The activities a crew deficit slows. `types`: the module types (DIM_ComponentType) whose undamaged modules the share scales, `time` that the game lengthens the time instead of cutting a rate (the speed is the same share), `twice` that the share counts twice, `zero` what a ship with no crew aboard does where the game's rule divides by the crew.
 const ACTIVITIES = [

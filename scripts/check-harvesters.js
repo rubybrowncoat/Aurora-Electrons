@@ -1,9 +1,9 @@
 /*
   Checks the Sorium harvester rule against a save: for every harvester ship of one race it recomputes the annual potential and the fuel one harvesting step can add from the save's own rows, compares the stored inputs it can (the racial rate, the class module and tank totals, the deposit accessibility, the tank level) and compares the Fuel & Maintenance page's own figures (utilities/logistics.js harvesterReport, harvesterBasis, harvesterObtainable and harvesterAdminBonus, fed by the page's own query) with the rule.
 
-  node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <older.db>] [--list]
+  node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <earlier.db>] [--list]
 
-  Two kinds of result stay apart. Rule verification: the rule below is the game's 2.7.1 per-step harvesting rule, read from its source (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an older save of the same campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
+  Two kinds of result stay apart. Rule verification: the rule below is the game's 2.7.1 per-step harvesting rule, read from its source (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an earlier save of the same 2.7 campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
 
   A stored value the rule does not reproduce, a page figure that differs from the rule, and a worked case that fails are mismatches and set exit code 1. The page follows the rule on the undamaged module and tank counts, the body found by coordinates, any room in the tanks, the root command for a fleet without one, and an unknown output where the body is unsurveyed, so no page difference is explained away: the explained classes that remain are only the stored-input ones (a deposit raised outside the game, fuel above the capacity of damaged tanks).
 
@@ -60,7 +60,7 @@ const parseArguments = (argv) => {
   }
 
   if (!options.save || !Number.isInteger(options.race) || !(options.years > 0)) {
-    fail('Usage: node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <older.db>] [--list]')
+    fail('Usage: node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <earlier.db>] [--list]')
   }
 
   return options
@@ -487,7 +487,7 @@ const printWorkedCases = (cases) => {
   return failed
 }
 
-// The construction cycles between two saves of one campaign: a cycle runs at the first increment more than MinConstructionPeriod after the last one, and sets LastGrowthTime. Replaying the newer save's ledger from the older save's LastGrowthTime must end at the newer save's. The save writes the ledger before its last increment, so the save's own GameTime is added as the final increment when it is past the ledger's tail (the 2.6 sample pair needs it: its last cycle ran at the save's GameTime).
+// The construction cycles between two saves of one campaign: a cycle runs at the first increment more than MinConstructionPeriod after the last one, and sets LastGrowthTime. Replaying the newer save's ledger from the earlier save's LastGrowthTime must end at the newer save's. The save writes the ledger before its last increment, so the save's own GameTime is added as the final increment when it is past the ledger's tail (a pair whose last cycle ran at the save's GameTime needs it).
 const replayCycles = async (older, newer, gameId) => {
   const [olderGame] = await query(older, 'select GameTime, LastGrowthTime, MinConstructionPeriod from FCT_Game where GameID = :game', { ':game': gameId })
   const [newerGame] = await query(newer, 'select GameTime, LastGrowthTime, MinConstructionPeriod from FCT_Game where GameID = :game', { ':game': gameId })
@@ -518,16 +518,16 @@ const observe = async (database, olderDatabase, world, app, options) => {
   const older = await loadWorld(olderDatabase, options.race, app).catch((error) => ({ error }))
 
   if (older.error) {
-    return { available: false, reason: `the older save has no readable race ${options.race}: ${older.error.message}`, lines: [] }
+    return { available: false, reason: `the earlier save has no readable race ${options.race}: ${older.error.message}`, lines: [] }
   }
 
   if (older.race.GameID !== gameId) {
-    return { available: false, reason: `the older save's game ${older.race.GameID} is not the save's ${gameId}`, lines: [] }
+    return { available: false, reason: `the earlier save's game ${older.race.GameID} is not the save's ${gameId}`, lines: [] }
   }
 
   const replay = await replayCycles(olderDatabase, database, gameId)
   const years = replay.cycles.reduce((sum, dt) => sum + dt, 0) / SECONDS_PER_YEAR
-  const lines = [`older save: game time ${replay.olderGame.GameTime}, newer ${replay.newerGame.GameTime}; the older ledger is ${replay.prefix ? '' : 'NOT '}a prefix of the newer; ${replay.cycles.length} construction cycles replayed (${format(years)} yr), the replay ${replay.reproduced ? 'reproduces' : 'does NOT reproduce'} the newer LastGrowthTime ${replay.newerGame.LastGrowthTime} (replayed ${replay.lastReplayed})`]
+  const lines = [`earlier save: game time ${replay.olderGame.GameTime}, newer ${replay.newerGame.GameTime}; the earlier ledger is ${replay.prefix ? '' : 'NOT '}a prefix of the newer; ${replay.cycles.length} construction cycles replayed (${format(years)} yr), the replay ${replay.reproduced ? 'reproduces' : 'does NOT reproduce'} the newer LastGrowthTime ${replay.newerGame.LastGrowthTime} (replayed ${replay.lastReplayed})`]
 
   if (!replay.prefix || !replay.reproduced) {
     return { available: false, reason: 'the two saves are not one ledger or the cycles do not replay, so no cycle length is known', lines }
@@ -713,7 +713,7 @@ const main = async () => {
   let observed = null
 
   if (options.since) {
-    const older = await open(path.resolve(options.since)).catch((error) => fail(`Cannot open the older save: ${error.message}`))
+    const older = await open(path.resolve(options.since)).catch((error) => fail(`Cannot open the earlier save: ${error.message}`))
 
     observed = await observe(database, older, world, app, options)
     older.close()
@@ -721,7 +721,7 @@ const main = async () => {
     observed.lines.forEach((line) => console.log(`  ${line}`))
     console.log(`  clean increment observation: ${observed.available ? 'available' : `unavailable - ${observed.reason}`}`)
   } else {
-    console.log('\nobserved reconciliation: not run (no --since <older save of the same campaign>)')
+    console.log('\nobserved reconciliation: not run (no --since <earlier save of the same 2.7 campaign>)')
   }
 
   const registered = app.registry.listRules().filter((rule) => !APP_RULES.includes(rule.id) && rule.id.startsWith('logistics.harvester'))

@@ -538,7 +538,7 @@ export default {
     },
 
     versionNote() {
-      return this.formulaVersion ? 'The save has the 2.7 schema and no version label, so the 2.7 rules apply: the stored inputs agree with them on sample saves, but no fuel gain between two saves has been observed.' : 'The save has no version label and not the 2.7 schema, so the rules are not verified for its game version and every figure is an estimate.'
+      return this.formulaVersion ? 'The save carries the AllowCMC and AncientRelics columns of FCT_Game and no version label, so the 2.7 rules apply: the stored inputs agree with them on sample saves, but no fuel gain between two saves has been observed.' : 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rules are not verified against the save and every figure is an estimate.'
     },
 
     burnRows() {

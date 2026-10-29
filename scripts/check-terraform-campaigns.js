@@ -104,10 +104,8 @@ const pairOf = async (before, after, game, populationId, clockOfTime = 'LastGrow
 }
 
 // Pairs whose order stood and whose target was not reached inside the interval: the observed change is the predicted one to four places. [label, earlier save, later save, game, colony]
-const RIN = ['AuroraDB_260_Reisen.db', 'saves/AuroraDB_26Simple.db', 139]
 const AURELIAN = 'saves/AuroraDB_270_unknown.db'
 const EXACT = [
-  ['Rin Venus carbon dioxide', ...RIN, 48989],
   ['Falryx 2713949950 to 2740177930 Verun III carbon dioxide', falryx(2713949950), falryx(2740177930), 141, 49103],
   ['Falryx 2713949950 to 2740177930 Orso oxygen', falryx(2713949950), falryx(2740177930), 141, 49128],
   ['Falryx 2713949950 to 2740177930 Grassi aestusium', falryx(2713949950), falryx(2740177930), 141, 49284],
@@ -170,16 +168,15 @@ const appOutputs = async (modules, fixtures, plans) => {
   }
 }
 
-// Every pair of saves of one campaign whose colonies kept their order across the pair and moved the ordered gas, for every race of the game: [campaign, earlier save, later save, game]. The three short Falryx pairs, Rin's pair and Egg's one interval.
+// Every pair of saves of one campaign whose colonies kept their order across the pair and moved the ordered gas, for every race of the game: [campaign, earlier save, later save, game]. The three short Falryx pairs and Egg's one interval.
 const LEDGER_INTERVALS = [
   ['Falryx A', falryx(2713949950), falryx(2740177930), 141],
   ['Falryx B', falryx(2794985390), falryx(2810693885), 141],
   ['Falryx C', falryx(2904201340), falryx(2930673230), 141],
-  ['Rin', RIN[0], RIN[1], 139],
   ['Egg', 'saves/AuroraDBSaveBackup.db', 'saves/AuroraDB.db', 138],
 ]
 
-const LEDGER_COUNTS = { exact: 13, 'climate: water vapour condenses': 6, 'rate: capacity changed, observed between the two predictions': 10, 'rate: capacity changed, observed outside the two predictions': 3, 'gap: no cause visible at the two saves': 3 }
+const LEDGER_COUNTS = { exact: 12, 'climate: water vapour condenses': 6, 'rate: capacity changed, observed between the two predictions': 10, 'rate: capacity changed, observed outside the two predictions': 3, 'gap: no cause visible at the two saves': 3 }
 
 // The ledger of the replay: one row per colony whose order (direction and gas) stood across the pair and whose gas changed, with the capacity the rule gives at the earlier and at the later save, the change it predicts at the earlier capacity, the change observed and a class.
 const ledgerOf = async () => {
@@ -341,12 +338,10 @@ const BREAKDOWN_CHECKS = {
     },
   },
   'rate Falryx': { needs: [falryx(2904201340)], run: (modules) => rateOnSave(modules, falryx(2904201340), 141, 791) },
-  'rate Rin Venus': { needs: [RIN[0]], run: (modules) => rateOnSave(modules, RIN[0], 139, 779) },
   'rate passive moon': { needs: [passive(2)], run: (modules) => rateOnSave(modules, passive(2), 139, 2) },
   'pairs Falryx A': { needs: [falryx(2713949950), falryx(2740177930)], run: (modules) => pairsFrom(modules, falryx(2713949950)) },
   'pairs Falryx B': { needs: [falryx(2794985390), falryx(2810693885)], run: (modules) => pairsFrom(modules, falryx(2794985390)) },
   'pairs Falryx C': { needs: [falryx(2904201340), falryx(2930673230)], run: (modules) => pairsFrom(modules, falryx(2904201340)) },
-  'pairs Rin': { needs: [RIN[0], RIN[1]], run: (modules) => pairsFrom(modules, RIN[0]) },
   truncation: {
     needs: [falryx(2904201340)],
     run: async (modules) => {
@@ -595,29 +590,20 @@ const BREAKDOWN_CHECKS = {
       }
     },
   },
-  captainless: {
-    needs: [RIN[0]],
-    run: async (modules) => {
-      const sources = await sourcesOf(modules, RIN[0], 139, 779)
-      const venus = sources.colonies[48989]
-
-      assert.ok(venus.ships.length > 0 && venus.ships.every((ship) => ship.captain === 1 && ship.captained === false))
-    },
-  },
 }
 
 // Faults planted in the shared helper. `fails` names the BREAKDOWN_CHECKS each must break; a fault whose named checks all lack their saves is skipped.
 const BREAKDOWN_FAULTS = [
   { label: 'installation sum not rounded down', from: 'raceRate * Math.trunc(source.installations) * modifier.value', to: 'raceRate * source.installations * modifier.value', fails: ['arith', 'truncation', 'rate Falryx'] },
   { label: 'Math.PI for the body area', from: 'export const SURFACE_PI = 3.1416', to: 'export const SURFACE_PI = Math.PI', fails: ['arith', 'rate Falryx'] },
-  { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith', 'rate Rin Venus', 'pairs Rin'] },
+  { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith'] },
   { label: 'naval admin chain ignored', from: 'group.admin * group.effective', to: 'group.effective', fails: ['arith'] },
   { label: 'crew share ignored', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules', fails: ['arith', 'unknown'] },
   { label: 'unknown crew read as 1', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules * (known(ship.crew) ?? 1)', fails: ['unknown'] },
   { label: 'unknown captain bonus read as 1', from: 'staffed === null || known(ship.captain) === null ? null : staffed * ship.captain', to: 'staffed === null ? null : staffed * (known(ship.captain) ?? 1)', fails: ['unknown'] },
   { label: 'unknown fleet assignment read as no ships', from: "source.shipsKnown === false ? ['the fleets assigned to the colony (FCT_Fleet.AssignedPopulationID)'] : []", to: '[]', fails: ['unknown'] },
   { label: 'the sector bonus counted in full', from: '1 + (modifier.sector - 1) / 4', to: 'modifier.sector', fails: ['arith', 'rate Falryx'] },
-  { label: 'a missing captain read as 0', from: ': null) : 1)', to: ': null) : 0)', fails: ['rate Rin Venus', 'captainless'] },
+  { label: 'a missing captain read as 0', from: ': null) : 1)', to: ': null) : 0)', fails: ['rate Falryx'] },
   { label: 'an unconfirmed commander bonus read as 1', from: 'captain: row.BonusUnknown ? null : bonusOf(', to: 'captain: bonusOf(', fails: ['blocked'] },
   { label: 'damaged modules counted', from: 'Math.max(0, row.Designed - (row.DamageRows > 0 ? row.Damaged : 0))', to: 'row.Designed', fails: ['damaged'] },
   { label: 'a present bonus row without a value read as 1 (captain)', from: 'captain: row.BonusUnknown ? null : bonusOf(row.CaptainBonus, row.CaptainRows, row.CaptainKnown)', to: 'captain: row.BonusUnknown ? null : row.CaptainBonus ?? 1', fails: ['bonus value missing: captain'] },
@@ -715,16 +701,16 @@ const main = async () => {
     })
   }
 
-  if (present(...RIN.slice(0, 2))) {
-    await check('rate Venus residual', async () => {
-      const pair = await pairOf(RIN[0], RIN[1], 139, 48989)
+  if (present(falryx(2904201340), falryx(2930673230))) {
+    await check('rate Verun III residual', async () => {
+      const pair = await pairOf(falryx(2904201340), falryx(2930673230), 141, 49103)
 
       assert.ok(Math.abs(pair.observed - pair.predicted) < 1e-9, `residual ${pair.observed - pair.predicted}`)
     })
     await check('rate the game time as the clock is off by percent', async () => {
-      const pair = await pairOf(RIN[0], RIN[1], 139, 48989, 'GameTime')
+      const pair = await pairOf(falryx(2904201340), falryx(2930673230), 141, 49103, 'GameTime')
 
-      assert.ok(pair.predicted / pair.observed > 0.96 && pair.predicted / pair.observed < 0.98, `ratio ${pair.predicted / pair.observed}`)
+      assert.ok(pair.predicted / pair.observed > 0.98 && pair.predicted / pair.observed < 0.99, `ratio ${pair.predicted / pair.observed}`)
     })
   }
 
@@ -762,7 +748,6 @@ const main = async () => {
 
   for (const [label, file, game, race, within, outside] of [
     ['Egg', 'saves/AuroraDB.db', 138, 785, 127, 0],
-    ['Rin', RIN[1], 139, 779, 65, 0],
     ['Falryx', falryx(2930673230), 141, 791, 206, 3],
   ]) {
     if (!present(file)) {
@@ -782,7 +767,6 @@ const main = async () => {
   for (const [label, file, game, bodies, hidden] of [
     ['Egg later', 'saves/AuroraDB.db', 138, 229, 7],
     ['Egg earlier', 'saves/AuroraDBSaveBackup.db', 138, 125, 17],
-    ['Rin later', RIN[1], 139, 226, 0],
     ['Falryx last', falryx(2930673230), 141, 372, 43],
     ['passive snapshot 13', passive(13), 139, 48, 10],
   ]) {
@@ -902,7 +886,7 @@ const main = async () => {
       }
 
       assert.deepEqual(counts, LEDGER_COUNTS)
-      assert.equal(ledger.length, 35)
+      assert.equal(ledger.length, 34)
       assert.equal(ledger.filter((row) => row.class === 'exact').length, EXACT.length)
     })
   } else {

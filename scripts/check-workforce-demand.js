@@ -129,7 +129,7 @@ const MODIFIERS = { PopName: 'Test colony', ConstructionProduction: 36500, Overa
 const INSTALLATIONS = { 1: { Workers: 0.05 }, 2: { Workers: 0.2 }, 3: { Workers: 0 }, 4: { Workers: 0.1 } }
 
 // A colony of 100 million people of which 20 million are employed by installations, the way the page reads one.
-const colonyRow = (extra = {}) => ({ PopulationID: 7, PopName: 'Test colony', Population: 100, ReqInf: 0, SpeciesID: 1, PopulationGrowthModifier: 1, PopulationGrowthBonus: 1, PopulationDensityModifier: 1, SystemBodyID: 70, BodyClass: 1, Radius: 6400, HydroExt: 0.5, TidalLock: 0, RadiationLevel: 0, LowGravity: 0, LegacyLowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, InstallationWorkers: 20, YardWorkers: 0, BodyPopulation: 100, InfrastructureCost: 0, ...extra })
+const colonyRow = (extra = {}) => ({ PopulationID: 7, PopName: 'Test colony', Population: 100, ReqInf: 0, SpeciesID: 1, PopulationGrowthModifier: 1, PopulationGrowthBonus: 1, PopulationDensityModifier: 1, SystemBodyID: 70, BodyClass: 1, Radius: 6400, HydroExt: 0.5, TidalLock: 0, RadiationLevel: 0, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, InstallationWorkers: 20, YardWorkers: 0, BodyPopulation: 100, InfrastructureCost: 0, ...extra })
 
 // One industrial project of the colony as the page reads it, with 1,000,000 t of each mineral in stock unless the case says otherwise.
 const projectRow = (extra = {}) => ({ ID: 1, Name: `Project ${extra.ID || 1}`, ProductionType: 0, ProductionID: 1, PopulationID: 7, Percentage: 100, Amount: 4, PartialCompletion: 0, ProdPerUnit: 1000, Queue: 0, Paused: 0, FuelRequired: 0, StockFuel: 0, ConversionFrom: null, ConversionSource: null, ...Object.fromEntries(MINERAL_NAMES.flatMap((name) => [[name, 0], [`Stock${name}`, 1e6]])), ...extra })

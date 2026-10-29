@@ -909,7 +909,7 @@ const routeOf = (km) => {
 }
 const REACH = { route: routeOf(KM), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
 // The refuelling sites and fuel reserves of a save with no colony or tanker fleet that serves and no fuel kept back, read: the fleets' runs are decided by their tanks alone.
-const NO_SITES = { gameTime: 1, hubEra: 0, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies: [], fleets: [] }
+const NO_SITES = { gameTime: 1, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies: [], fleets: [] }
 const NO_RESERVES = { ready: true, reader: { colony: () => null, ship: () => null } }
 const transportVmOf = (page, state, data = {}) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(state), handlingSupport: FULL_OFFICERS, formulaVersion: VERSION, origin: PLACE, destination: TARGET, reachOf: () => REACH, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship({ FleetSpeed: 300, UseMaximumSpeed: 0 }), slowShip({ FleetSpeed: 300, UseMaximumSpeed: 0 }), craft({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
 

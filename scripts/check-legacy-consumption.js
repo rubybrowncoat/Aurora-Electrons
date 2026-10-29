@@ -239,7 +239,7 @@ const sqlRows = (statements, sql) => new Promise((resolve, reject) => {
   })
 })
 
-// A copy of a save in the temp folder whose mineral ledger is emptied: a save from before the ledger (Aurora 2.6) as far as the page can tell.
+// A copy of a save in the temp folder whose mineral ledger is emptied: a save with no ledger entries as far as the page can tell.
 const ledgerlessCopy = async (file, directory) => {
   const target = path.join(directory, 'ledgerless.db')
 

@@ -1877,7 +1877,7 @@ const defineCases = (modules) => {
   })
 
   const donors = modules['fuel-donors']
-  const donorShip = (extra = {}) => ({ ShipID: 1, Fuel: 1000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 30000, EnginePower: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0, HubEra: 0, ...extra })
+  const donorShip = (extra = {}) => ({ ShipID: 1, Fuel: 1000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 30000, EnginePower: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0, ...extra })
 
   invariant('logistics', 'the fuel service rules are registered with their units, and the donor result names allowed, blocked or unknown with the first gate that decides it', () => {
     ;['stored', 'gameMinimum', 'playerReserve', 'eligibleSurplus', 'donor'].forEach((key) => assert.ok(provenance.getRule(`fuelService.${key}`), key))

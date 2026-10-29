@@ -13,7 +13,7 @@ export const LOW_RATE_LPH = 20000
 export const LOW_RATE_RECIPIENT_HS = 20
 
 const FUEL_SERVICE_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the fuel service rules are not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the fuel service rules are not checked against the save.'
 
 registerRule({
   id: 'fuelService.stored',
@@ -58,15 +58,14 @@ registerRule({
   units: '',
   verification: 'estimated',
   structure: ['FCT_ShipClass.FuelTanker, MinimumFuel, RefuellingRate', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent'],
-  note: 'Whether the ship may serve fuel to a recipient: allowed, blocked or unknown, with the first gate that decides it. A gate that fails blocks the ship whatever an earlier gate could not decide; with no failing gate, a gate the save cannot decide leaves the permission unknown. Hub-era saves (before 2.6) carry other refuelling rules that are not modelled, so their ships are unknown.',
+  note: 'Whether the ship may serve fuel to a recipient: allowed, blocked or unknown, with the first gate that decides it. A gate that fails blocks the ship whatever an earlier gate could not decide; with no failing gate, a gate the save cannot decide leaves the permission unknown.',
   assumptions: ['the class rate is the nominal rate of one undamaged system, not scaled by the systems left'],
 })
 
-export const GATES = Object.freeze(['version', 'designation', 'system', 'rate', 'litres', 'recipient'])
+export const GATES = Object.freeze(['designation', 'system', 'rate', 'litres', 'recipient'])
 
 // What each reason says, by its code. A gate that fails or cannot be decided gives one of these.
 export const REASONS = Object.freeze({
-  'hub-era': 'The save predates the 2.6 refuelling rules, which are not modelled',
   'not-designated': 'Not designated as a tanker',
   'designation-unknown': 'Whether the class is a tanker is not in the save',
   'no-system': 'The class has no Transfer - Fuel system',
@@ -92,13 +91,12 @@ const unknown = (gate, reason) => ({ gate, status: 'unknown', reason })
 // Whether a class rate is one that serves small recipients only: positive and under the threshold.
 export const isLowRate = (rate) => isNumber(rate) && rate > 0 && rate < LOW_RATE_LPH
 
-// The gates in the order the game tests them. `ship`: { FuelTanker, TransferSystems (the class's Transfer - Fuel systems, null when unknown), UndamagedTransfer (the ones this ship has left, null when a damaged row has no count), RefuellingRate, Fuel, MinimumFuel, HubEra }. `recipient`: undefined when no recipient is asked about, else { size } in hull spaces (null when not known).
+// The gates in the order the game tests them. `ship`: { FuelTanker, TransferSystems (the class's Transfer - Fuel systems, null when unknown), UndamagedTransfer (the ones this ship has left, null when a damaged row has no count), RefuellingRate, Fuel, MinimumFuel }. `recipient`: undefined when no recipient is asked about, else { size } in hull spaces (null when not known).
 const gatesOf = (ship, recipient) => {
   const designated = ship.FuelTanker === null || ship.FuelTanker === undefined ? null : Number(ship.FuelTanker) !== 0
   const abovesMinimum = isNumber(ship.Fuel) && isNumber(ship.MinimumFuel) ? Math.floor(ship.Fuel) - ship.MinimumFuel > 0 : null
 
   return [
-    ship.HubEra ? unknown('version', 'hub-era') : pass('version'),
     designated === null ? unknown('designation', 'designation-unknown') : designated ? pass('designation') : fail('designation', 'not-designated'),
     !isNumber(ship.TransferSystems) ? unknown('system', 'system-unknown') : ship.TransferSystems <= 0 ? fail('system', 'no-system') : !isNumber(ship.UndamagedTransfer) ? unknown('system', 'damage-unknown') : ship.UndamagedTransfer <= 0 ? fail('system', 'system-damaged') : pass('system'),
     !isNumber(ship.RefuellingRate) ? unknown('rate', 'rate-unknown') : ship.RefuellingRate <= 0 ? fail('rate', 'no-rate') : pass('rate'),
@@ -203,20 +201,17 @@ const DAMAGE_ROWS = 'from FCT_DamagedComponent where FCT_DamagedComponent.ShipID
 // The Transfer - Fuel systems of the class, and those this ship has left: null where a mounted count, or a damaged row's number, is not stored.
 const TRANSFER_SYSTEMS_SQL = `case when exists (select 1 ${TRANSFER_ROWS} and FCT_ClassComponent.NumComponent is null) then null else coalesce((select sum(FCT_ClassComponent.NumComponent) ${TRANSFER_ROWS}), 0) end`
 const UNDAMAGED_TRANSFER_SQL = `case when exists (select 1 ${TRANSFER_ROWS} and (FCT_ClassComponent.NumComponent is null or exists (select 1 ${DAMAGE_ROWS} and FCT_DamagedComponent.Number is null))) then null else coalesce((select sum(max(FCT_ClassComponent.NumComponent - coalesce((select FCT_DamagedComponent.Number ${DAMAGE_ROWS}), 0), 0)) ${TRANSFER_ROWS}), 0) end`
-// The class column that tells a save of the hub era, before 2.6 (it is absent from every 2.6 and 2.7 save). It is named through this constant so the page scan sees a column built by name, not one the read needs.
-const HUB_CLASS_COLUMN = 'RefuellingHub'
-// The columns of FCT_ShipClass the read takes by name: one an older save lacks reads as null (not known), never as 0.
+// The columns of FCT_ShipClass the read takes by name: a column the save lacks reads as null (not known), never as 0.
 const CLASS_COLUMNS = ['FuelCapacity', 'FuelTanker', 'MinimumFuel', 'RefuellingRate', 'EnginePower', 'Harvesters', 'Size']
 
-// The race's ships that can serve, have fuel to offer or harvest: every ship of a class that is designated a tanker, has a refuelling rate, mounts a Transfer - Fuel system or harvests, whatever its tanks (a harvester with no tanks still has its fuel aboard and its reason), with the class's rate, minimum and designation, the systems it has and the ones it has left after damage, and the stored fuel. Whether a ship counts in the tanker total is `countsAsTanker`, not this read. One row per ship, the race's own ships only (never a shipping line's). A column an old save lacks reads as null.
+// The race's ships that can serve, have fuel to offer or harvest: every ship of a class that is designated a tanker, has a refuelling rate, mounts a Transfer - Fuel system or harvests, whatever its tanks (a harvester with no tanks still has its fuel aboard and its reason), with the class's rate, minimum and designation, the systems it has and the ones it has left after damage, and the stored fuel. Whether a ship counts in the tanker total is `countsAsTanker`, not this read. One row per ship, the race's own ships only (never a shipping line's). A column the save lacks reads as null.
 export const loadFuelDonors = async (database, { GameID, RaceID }) => {
   const [shipColumns, classColumns] = await Promise.all([columnsOf(database, 'FCT_Ship'), columnsOf(database, 'FCT_ShipClass')])
   const hasClass = (name) => classColumns.size === 0 || classColumns.has(name)
   const ofClass = (name) => (hasClass(name) ? `FCT_ShipClass.${name}` : 'null')
   const fuel = shipColumns.size === 0 || shipColumns.has('Fuel') ? 'FCT_Ship.Fuel' : 'null'
   const columns = CLASS_COLUMNS.map((name) => `${ofClass(name)} as ${name}`).join(', ')
-  const hub = classColumns.has(HUB_CLASS_COLUMN) ? 1 : 0
-  const sql = `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Ship.ShipClassID, FCT_ShipClass.ClassName, ${fuel} as Fuel, ${columns}, ${TRANSFER_SYSTEMS_SQL} as TransferSystems, ${UNDAMAGED_TRANSFER_SQL} as UndamagedTransfer, case when ${ofClass('Harvesters')} > 0 or exists (select 1 ${componentRows(HARVESTER)}) then 1 else 0 end as Harvester, ${hub} as HubEra from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 and (${ofClass('FuelTanker')} = 1 or ${ofClass('RefuellingRate')} > 0 or ${ofClass('Harvesters')} > 0 or exists (select 1 ${TRANSFER_ROWS}) or exists (select 1 ${componentRows(HARVESTER)})) order by FCT_Fleet.FleetName, FCT_Ship.ShipName`
+  const sql = `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Ship.ShipClassID, FCT_ShipClass.ClassName, ${fuel} as Fuel, ${columns}, ${TRANSFER_SYSTEMS_SQL} as TransferSystems, ${UNDAMAGED_TRANSFER_SQL} as UndamagedTransfer, case when ${ofClass('Harvesters')} > 0 or exists (select 1 ${componentRows(HARVESTER)}) then 1 else 0 end as Harvester from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 and (${ofClass('FuelTanker')} = 1 or ${ofClass('RefuellingRate')} > 0 or ${ofClass('Harvesters')} > 0 or exists (select 1 ${TRANSFER_ROWS}) or exists (select 1 ${componentRows(HARVESTER)})) order by FCT_Fleet.FleetName, FCT_Ship.ShipName`
   const [rows] = await database.query(sql)
 
   return Object.freeze(rows)

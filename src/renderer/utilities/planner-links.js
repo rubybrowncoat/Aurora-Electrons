@@ -125,7 +125,7 @@ export const componentPlacementText = ({ standing, mode, found }) => {
 
 const RACE_TECH_HELD = 'select count(*) from FCT_RaceTech where FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID'
 
-// Reads what the save says of a missile ID for the race: a standing, `unknown` when the read fails (an older save may lack a table).
+// Reads what the save says of a missile ID for the race: a standing, `unknown` when the read fails (a save may lack a table).
 export const loadMissileStanding = async (database, { GameID, RaceID }, id) => {
   try {
     const [rows] = await database.query(`select FCT_MissileType.Name as Name, FCT_MissileType.Size as Size, FCT_MissileType.MaxRange as MaxRange, FCT_TechSystem.RaceID as OwnerID, (${RACE_TECH_HELD} = :race and FCT_RaceTech.TechID = FCT_MissileType.MissileID) as Held from FCT_MissileType left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :game and FCT_MissileType.MissileID = :id`, { replacements: { game: GameID, race: RaceID, id } })

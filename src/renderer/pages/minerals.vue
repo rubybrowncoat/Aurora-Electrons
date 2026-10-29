@@ -1717,7 +1717,7 @@ export default {
           return null
         }
 
-        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, (select max(DIM_PlanetaryInstallation.MiningProductionValue) from DIM_PlanetaryInstallation where DIM_PlanetaryInstallation.CivilianInstallation = 1) as ComplexMining, FCT_Game.* from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
+        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, (select max(DIM_PlanetaryInstallation.MiningProductionValue) from DIM_PlanetaryInstallation where DIM_PlanetaryInstallation.CivilianInstallation = 1) as ComplexMining, FCT_Game.AllowCMC from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
 
         return race ? { MineProduction: race.MineProduction, MaximumOrbitalMiningDiameter: race.MaximumOrbitalMiningDiameter, ComplexMining: race.ComplexMining, AllowCMC: cmcAllowedOf(race) } : null
       }),

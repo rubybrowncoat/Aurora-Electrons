@@ -1,9 +1,9 @@
 /*
-  Checks that the Hauling page loads on a save without the aether gates' table (FCT_AetherGates, which a save from before 2.6 does not have): the capability report of /hauling is degraded by the gates alone, the page's orders read succeeds, and only the place of an order to a gate reads as unknown (src/renderer/pages/hauling.vue `orders`, src/renderer/mixins/capability-gates.js, src/renderer/utilities/capabilities.js `SOFT`).
+  Checks that the Hauling page reads the place of an order to an aether gate (src/renderer/pages/hauling.vue `orders`, `DESTINATIONS`, its join of FCT_AetherGates): every order of the repeating fleets is read at its destination's stored place, and an order to a gate at the gate's, both as the place of the order and as the place the fleet is after it. A save without FCT_AetherGates is unsupported for /hauling (check-capabilities.js).
 
   Run: bun scripts/check-hauling-gates.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791 with 81 repeating fleets). The check copies it twice into a folder of its own: one copy keeps the table and gets one added order of a repeating fleet to the first aether gate (the save holds no order to a gate), the other is that copy with the table dropped, which is the shape of an old save. The page's script runs on each copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copies: the orders the repeating fleets have, and the gate's stored place.
+  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791 with 81 repeating fleets). The check copies it into a folder of its own and adds one order of a repeating fleet to the first aether gate (the save holds no order to a gate). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy: the orders the repeating fleets have, and the gate's stored place.
 
   Every planted fault must fail the checks it names by a wrong value or by the read error the page reports (`loadErrors.orders`), never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -36,7 +36,7 @@ const PLACE = ['SystemID', 'X', 'Y', 'ExitSystemID', 'ExitX', 'ExitY']
 
 const adapter = (db) => ({ query: async (sql) => [db.query(sql).all()] })
 
-// ---------- the two copies of the save ----------
+// ---------- the copy of the save ----------
 
 let FOLDER = null
 let COPIES = null
@@ -49,7 +49,6 @@ const copies = () => {
   FOLDER = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-hauling-gates-'))
 
   const intactFile = path.join(FOLDER, 'intact.db')
-  const oldFile = path.join(FOLDER, 'old.db')
 
   fs.copyFileSync(path.join(root, SAVE), intactFile)
 
@@ -63,14 +62,7 @@ const copies = () => {
 
   edit.run(`insert into FCT_MoveOrders (MoveOrderID, GameID, RaceID, FleetID, MoveActionID, MoveOrder, StartSystemID, DestinationType, DestinationID, NewWarpPointID) values (${ADDED_ORDER}, ${GAME}, ${RACE}, ${fleet.FleetID}, 1, ${fleet.Last + 1}, ${gate.SystemID}, 14, ${gate.AetherGateID}, 0)`)
   edit.close()
-  fs.copyFileSync(intactFile, oldFile)
-
-  const old = new Database(oldFile)
-
-  old.run('drop table FCT_AetherGates')
-  old.close()
-
-  COPIES = { intact: new Database(intactFile, { readonly: true }), old: new Database(oldFile, { readonly: true }), gate, fleet }
+  COPIES = { intact: new Database(intactFile, { readonly: true }), gate, fleet }
 
   return COPIES
 }
@@ -78,7 +70,6 @@ const copies = () => {
 const closeCopies = () => {
   if (COPIES) {
     COPIES.intact.close()
-    COPIES.old.close()
     COPIES = null
   }
 
@@ -114,8 +105,6 @@ const readOf = async ({ caps, page }, db) => {
 }
 
 const keyOf = (row) => `${row.FleetID}:${row.MoveOrder}`
-
-const fieldsOf = (entries) => entries.map((entry) => `${entry.key}(${entry.fields.join(' ')})`).join('; ')
 
 // The tables an order's destination is stored in, by the order's DestinationType, with the key the order names it by. Every one has SystemID, Xcor and Ycor; a survey location is numbered within the system the order starts in.
 const STORES = [
@@ -179,15 +168,14 @@ const assertAgainstSave = (rows, oracle, label) => {
 
 const intactChecks = {
   id: 'intact',
-  name: 'a save with the aether gates reads every order at its destination\'s stored place, an order to a gate at the gate\'s, and reports the group as present',
+  name: 'every order is read at its destination\'s stored place, an order to a gate at the gate\'s, and Hauling stays in service',
   run: async ({ read, db }) => {
     const { intact, gate } = db
     const { report, rows, loadError } = read.intact
 
     assert.equal(loadError, null, `the read error the page reports for the intact copy: ${loadError}`)
-    assert.equal(report.groups.aetherGates, true, 'the report counts the gates as present')
-    assert.equal(report.degraded.some((entry) => entry.key === 'aetherGates'), false, 'the report names no missing gate field')
-    assertAgainstSave(rows, oracleOf(intact), 'the intact copy')
+    assert.notEqual(report.status, 'unsupported', 'the report keeps Hauling in service')
+    assertAgainstSave(rows, oracleOf(intact), 'the copy')
 
     const added = rows.filter((row) => row.DestinationType === 14)
 
@@ -197,45 +185,7 @@ const intactChecks = {
   },
 }
 
-const reportChecks = {
-  id: 'report',
-  name: 'a save without the aether gates is degraded for Hauling by the gates alone, naming the table, and no other part of the report changes',
-  run: async ({ read }) => {
-    const { intact, old } = read
-
-    assert.equal(old.report.groups.aetherGates, false, 'the report counts the gates as absent')
-    assert.equal(old.report.missing.length, 0, `nothing is missing that Hauling cannot do without, not: ${fieldsOf(old.report.missing)}`)
-    assert.equal(old.report.status, 'degraded', 'the report is degraded, not unsupported')
-
-    const added = old.report.degraded.filter((entry) => !intact.report.degraded.some((before) => before.key === entry.key))
-
-    assert.equal(added.length, 1, `one part is added to what the report leaves out, not: ${fieldsOf(added)}`)
-    assert.equal(added[0].key, 'aetherGates', 'the part is the gates')
-    assert.ok(added[0].fields.length > 0 && added[0].fields.every((field) => /^FCT_AetherGates\b/.test(field)), `the fields it names are the table's, not: ${added[0].fields.join(', ')}`)
-  },
-}
-
-const oldChecks = {
-  id: 'old',
-  name: 'Hauling loads on a save without the aether gates: the orders read succeeds, every order is there at its stored place, and only the place of an order to a gate reads as unknown',
-  run: async ({ read, db }) => {
-    const { intact, old } = read
-    const { gate } = db
-
-    assert.equal(old.loadError, null, `the read error the page reports for the old copy: ${old.loadError}`)
-    assertAgainstSave(old.rows, oracleOf(db.old), 'the old copy')
-
-    const before = new Map(intact.rows.map((row) => [keyOf(row), row]))
-    const gated = old.rows.filter((row) => row.DestinationType === 14)
-
-    assert.equal(gated.length, 1, 'the one order to a gate is still read')
-    assert.equal(gated[0].DestinationID, gate.AetherGateID, 'the order to the gate still names its gate')
-    assert.deepEqual(PLACE.map((name) => gated[0][name]), PLACE.map(() => null), 'the place of the order to a gate reads as unknown, not as a figure')
-    old.rows.filter((row) => row.DestinationType !== 14).forEach((row) => assert.deepEqual(row, before.get(keyOf(row)), `the order ${keyOf(row)} reads as it does with the table`))
-  },
-}
-
-const CHECKS = [intactChecks, reportChecks, oldChecks]
+const CHECKS = [intactChecks]
 
 // ---------- the faults and the rewrites ----------
 
@@ -249,23 +199,15 @@ const swap = (from, to) => (text) => {
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  { name: 'the orders read joins the aether gates whether or not the save has them', file: 'hauling', change: swap('const { aetherGates } = await gates', 'const aetherGates = true'), fails: ['old'] },
-  { name: 'the capability gates tell every page the aether gates are there', file: 'gates', change: swap('aetherGates: report ? report.groups.aetherGates !== false : true', 'aetherGates: true'), fails: ['old'] },
-  { name: 'the orders read leaves the aether gates out whether or not the save has them', file: 'hauling', change: (text) => swap("const gateJoin = aetherGates ? 'left join", "const gateJoin = false ? 'left join")(swap("...(aetherGates ? ['VIR_AetherGate'] : [])", '...[]')(text)), fails: ['intact'] },
-  { name: 'the place of an order does not take the aether gate\'s', file: 'hauling', change: swap("...(aetherGates ? ['VIR_AetherGate'] : [])", '...[]'), fails: ['intact'] },
-  { name: 'the report of Hauling does not hold the gates as a part it can lose', file: 'capabilities', change: swap(", aetherGates('the place of an order to an aether gate, which rests on the gates of the save')", ''), fails: ['report', 'old'] },
-  { name: 'an order whose place the save does not give reads as the origin', file: 'hauling', change: swap(".join(', ')})`", ".join(', ')}, 0)`"), fails: ['old'] },
-  { name: 'the places of every order are left out when the save has no gates', file: 'hauling', change: swap('...crossings, ...DESTINATIONS, ...(aetherGates', '...crossings, ...(aetherGates ? DESTINATIONS : []), ...(aetherGates'), fails: ['old'] },
-  { name: 'the part the report holds names one column of the table, not the table', file: 'capabilities', change: swap("fields: Object.freeze(['FCT_AetherGates.*'])", "fields: Object.freeze(['FCT_AetherGates.AetherGateID'])"), fails: ['report', 'old'] },
-  { name: 'the place of an order to a body is not read', file: 'hauling', change: swap("const DESTINATIONS = ['FCT_SystemBody', ", 'const DESTINATIONS = ['), fails: ['intact', 'old'] },
+  { name: 'the place of an order does not take the aether gate\'s', file: 'hauling', change: swap(", 'VIR_Destination', 'VIR_AetherGate']", ", 'VIR_Destination']"), fails: ['intact'] },
+  { name: 'the place of an order to a body is not read', file: 'hauling', change: swap("const DESTINATIONS = ['FCT_SystemBody', ", 'const DESTINATIONS = ['), fails: ['intact'] },
+  { name: 'the gate of an order is joined on the order\'s item, not its destination', file: 'hauling', change: swap('VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID', 'VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationItemID'), fails: ['intact'] },
 ]
 
-// Rewrites that say the same thing: the condition of the join parenthesised, the terms of the join turned about, and the gate test spelled out in each of the two places that make it.
+// Rewrites that say the same thing: the terms of the join turned about and the join condition parenthesised.
 const BENIGN = [
-  { name: 'the join condition parenthesised', file: 'hauling', change: swap('const gateJoin = aetherGates ?', 'const gateJoin = (aetherGates) ?') },
   { name: 'the terms of the join turned about', file: 'hauling', change: swap('and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID', 'and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID and (VIR_AetherGate.GameID = FCT_MoveOrders.GameID)') },
-  { name: 'the gate test of the place spelled out', file: 'hauling', change: swap("...(aetherGates ? ['VIR_AetherGate'] : [])", "...(aetherGates === true ? ['VIR_AetherGate'] : [])") },
-  { name: 'the gate test of the capability gates spelled out', file: 'gates', change: swap('aetherGates: report ? report.groups.aetherGates !== false : true', 'aetherGates: !report || report.groups.aetherGates !== false') },
+  { name: 'the join condition parenthesised', file: 'hauling', change: swap('on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID', 'on (FCT_MoveOrders.DestinationType = 14) and VIR_AetherGate.GameID') },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -285,11 +227,11 @@ const results = async (variant, ids) => {
   const page = await loadPage('pages/hauling', { sources: { ...sources, 'pages/hauling': given.hauling }, modules: { 'mixins/load-state': LOAD_STATE } })
   const db = copies()
 
-  if (!hasGateTable(db.intact) || hasGateTable(db.old)) {
-    throw new HarnessError('the copies are not one with and one without the aether gates table')
+  if (!hasGateTable(db.intact)) {
+    throw new HarnessError('the copy has no aether gates table')
   }
 
-  const read = { intact: await readOf({ caps, page }, db.intact), old: await readOf({ caps, page }, db.old) }
+  const read = { intact: await readOf({ caps, page }, db.intact) }
 
   return await runChecks(CHECKS.filter(({ id }) => !ids || ids.includes(id)), { read, db })
 }
@@ -332,11 +274,11 @@ const checkRewrite = async (rewrite) => {
   report(`variant passes: ${rewrite.name}`, wrong.length === 0, wrong.join('; '))
 }
 
-// The deadline of a variant, in seconds: it loads the page and the registry, runs the real preflight over two copies and reads the orders of each (the copies are made once in a worker).
+// The deadline of a variant, in seconds: it loads the page and the registry, runs the real preflight over the copy and reads its orders (the copy is made once in a worker).
 const DEADLINE = 180
 
 const variantsOf = (mutating) => [
-  { key: 'head', name: 'the head: the orders read of Hauling over a save with and without the aether gates', head: true, heading: 'The Hauling orders read (pages/hauling.vue, mixins/capability-gates.js, utilities/capabilities.js)', deadline: DEADLINE, run: checkHead },
+  { key: 'head', name: 'the head: the orders read of Hauling over a save with an order to an aether gate', head: true, heading: 'The Hauling orders read (pages/hauling.vue, mixins/capability-gates.js, utilities/capabilities.js)', deadline: DEADLINE, run: checkHead },
   ...(mutating ? FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults', deadline: DEADLINE, run: () => checkFault(fault) })) : []),
   ...(mutating ? BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites that say the same thing', deadline: DEADLINE, run: () => checkRewrite(rewrite) })) : []),
 ]

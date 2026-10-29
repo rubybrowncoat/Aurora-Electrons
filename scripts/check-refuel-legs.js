@@ -45,13 +45,13 @@ const BASE_SHIP = { ShipID: 1, ShipName: 'Hauler', FleetID: 5, FleetName: 'Convo
 const hauler = (id, fuel, changes = {}) => ({ ...BASE_SHIP, ShipID: id, ShipName: `Ship ${id}`, Fuel: fuel, ...changes })
 
 // A ship of a stationary tanker fleet as `loadFuelDonors` gives it: a class of 450,000 L/h with one undamaged system.
-const TANKER = { ShipID: 501, ShipName: 'Tanker', FleetID: 900, FleetName: 'Tanks', SystemID: 1, ShipClassID: 1, ClassName: 'Tanker class', Fuel: 5000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 450000, EnginePower: 100, Harvesters: 0, Size: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0, HubEra: 0 }
+const TANKER = { ShipID: 501, ShipName: 'Tanker', FleetID: 900, FleetName: 'Tanks', SystemID: 1, ShipClassID: 1, ClassName: 'Tanker class', Fuel: 5000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 450000, EnginePower: 100, Harvesters: 0, Size: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0 }
 const tanker = (id, changes = {}) => ({ ...TANKER, ShipID: id, ShipName: `Tanker ${id}`, ...changes })
 const depotFleet = (ships, changes = {}) => ({ FleetID: 900, FleetName: 'Tanks', SystemID: 1, OrbitBodyID: 0, Xcor: 0, Ycor: 0, LastMoveTime: 0, FirstOrderStationary: 1, ships, ...changes })
 const DEPOT = { name: 'Depot', PopulationID: null, SystemID: 1, Xcor: 0, Ycor: 0 }
 
 const colonyRow = (id, changes = {}) => ({ PopulationID: id, PopName: `Colony ${id}`, SystemID: 1, SystemBodyID: id * 10, Population: 5, FuelStockpile: 1000, FuelProdStatus: 0, RefuellingPoints: 1, Refineries: 0, ...changes })
-const sitesOf = (colonies = [], fleets = [], changes = {}) => ({ gameTime: GAME_TIME, hubEra: 0, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies, fleets, ...changes })
+const sitesOf = (colonies = [], fleets = [], changes = {}) => ({ gameTime: GAME_TIME, rates: { MaxRefuellingRate: 80000, UnderwayReplenishmentRate: 0 }, colonies, fleets, ...changes })
 const at = (id, name) => ({ name, PopulationID: id, SystemID: 1, Xcor: 0, Ycor: 0 })
 const READ = { ship: () => null, colony: () => null }
 
@@ -346,7 +346,7 @@ const requiredChecks = {
 
 const gateChecks = {
   id: 'gates',
-  name: 'the gates of a service: a fleet that moved in the last pulse, a first order that is not stationary, every tanker blocked and a save of the hub era do not serve, and a colony with no population but a point and a stock does',
+  name: 'the gates of a service: a fleet that moved in the last pulse, a first order that is not stationary and every tanker blocked do not serve, and a colony with no population but a point and a stock does',
   run: (ctx) => {
     const ships = [hauler(1, 40)]
     const serviceOf = (sites) => firstService(ledgerOf(ctx, { ships, stops: [DEPOT, at(null, 'Far')], sites }))
@@ -355,16 +355,11 @@ const gateChecks = {
     assert.deepEqual(reasonOf(serviceOf(sitesOf([], [depotFleet([tanker(501)], { LastMoveTime: GAME_TIME })]))), { permission: 'blocked', reason: 'moved-this-pulse' }, 'a fleet that moved in the last pulse')
     assert.deepEqual(reasonOf(serviceOf(sitesOf([], [depotFleet([tanker(501)], { FirstOrderStationary: 0 })]))), { permission: 'blocked', reason: 'first-order-not-stationary' }, 'a first order that is not stationary')
     assert.deepEqual(reasonOf(serviceOf(sitesOf([], [depotFleet([tanker(501, { TransferSystems: 0, UndamagedTransfer: 0 })])]))), { permission: 'blocked', reason: 'no-eligible-tanker' }, 'every tanker blocked')
-    assert.deepEqual(reasonOf(serviceOf(sitesOf([], [depotFleet([tanker(501, { HubEra: 1 })])]))), { permission: 'unknown', reason: 'hub-era' }, 'a tanker of a hub-era save is not decided')
     assert.deepEqual(reasonOf(serviceOf(sitesOf([], [depotFleet([tanker(501)])]))), { permission: 'allowed', reason: null }, 'a stationary fleet that has not moved serves')
 
     const empty = firstService(ledgerOf(ctx, { ships, stops: [at(1, 'Empty'), at(null, 'Far')], sites: sitesOf([colonyRow(1, { Population: 0, FuelStockpile: 1000 })]) }))
 
     assert.deepEqual({ permission: empty.permission, received: empty.received }, { permission: 'allowed', received: 60 }, 'a colony of population 0 with a point and a stock serves')
-
-    const hub = firstService(ledgerOf(ctx, { ships, stops: [at(1, 'Hub'), at(null, 'Far')], sites: sitesOf([colonyRow(1)], [], { hubEra: 1 }) }))
-
-    assert.deepEqual(reasonOf(hub), { permission: 'unknown', reason: 'hub-era' }, 'a save of the hub era is not decided')
   },
 }
 
@@ -767,9 +762,6 @@ const NOW_NOT_KNOWN_FOR = (key) => (id, saved) => (id === key ? null : saved)
 const NOW_OF = (key, litres) => (id, saved) => (id === key ? litres : saved)
 
 const GATE_ROWS = [
-  { row: 'version, a save before the hub era is dropped: known pass', ships: [K()], expect: ['allowed', null, null], fill: [60] },
-  { row: 'version, hub era: not modelled', ships: [{ ...K(), HubEra: 1 }], expect: ['unknown', 'version', 'hub-era'], fill: [0] },
-  { row: 'version, hub era beside an undecided tanker', ships: [{ ...K(), HubEra: 1 }, U()], expect: ['unknown', 'version', 'hub-era'] },
   { row: 'moved, known fail', ships: [K()], fleet: { LastMoveTime: GAME_TIME }, expect: ['blocked', 'moved', 'moved-this-pulse'], fill: [0] },
   { row: 'moved, known fail beside an undecided tanker: the fail is known whatever its fuel is', ships: [K(), U()], fleet: { LastMoveTime: GAME_TIME }, expect: ['blocked', 'moved', 'moved-this-pulse'] },
   { row: 'moved, known fail with no tanker decided', ships: [U()], fleet: { LastMoveTime: GAME_TIME }, expect: ['blocked', 'moved', 'moved-this-pulse'] },

@@ -286,7 +286,7 @@ const runRace = async (app, database, save, label, increments) => {
   }
 
   if (!ledgerTable) {
-    console.log(`UNSUPPORTED  ${label}: the save has no mineral ledger table (a save before 2.6)`)
+    console.log(`UNSUPPORTED  ${label}: the save has no mineral ledger table (FCT_RaceMineralData)`)
     return
   }
 

@@ -26,6 +26,7 @@ const { patched } = require('./lib/mutant-source')
 const { safeRoot } = require('./lib/safe-root')
 
 const ROOT = path.resolve(__dirname, '..')
+// A save of the 2.7 line (its FCT_Game carries both 2.7 columns) whose file name is that of an earlier version.
 const SAVE = 'saves/AuroraDB_26OafsalotError.db'
 // Another save, for `useSave`; the module a variant replaces, by its path and its route.
 const OTHER_SAVE = 'saves/AuroraDB_271_skoormit_saved.db'

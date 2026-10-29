@@ -6,7 +6,7 @@ import { finishDays, flagOf, shipRate, shipyardFinish, shipyardUpgradeRate } fro
 import { combine, envelope, getRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 
 const REFIT_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the rule is not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
 
 // A refit adds 20% for the yard work, and the size change adds its own share of the added cost.
 export const REFIT_OVERHEAD = 0.2

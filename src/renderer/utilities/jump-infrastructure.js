@@ -3,7 +3,7 @@
 import { jumpPointNumbers } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.6.x', '2.7.x']
+const VERSIONS = ['2.7.x']
 
 // DIM_MoveAction 'Stabilise Jump Point'; a destination of type 1 is the jump point of the order.
 export const STABILISE_JUMP_POINT = 64

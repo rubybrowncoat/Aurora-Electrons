@@ -159,7 +159,7 @@ const RACE = 5
 // The colonies worked by hand. Colony cost 0: agriculture takes 5% of the people; services take (population / 1000 M)^0.25, which is half of 62.5 M people. 62.5 M people have 28.125 M workers.
 const world = (m) => {
   const { cf, col, provenance } = m
-  const colony = (over = {}) => ({ PopulationID: 1, PopName: 'Alpha', Population: 62.5, InstallationWorkers: 20, YardWorkers: 0, ReqInf: 0, PopulationDensityModifier: 1, LowGravity: 0, LegacyLowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, ...over })
+  const colony = (over = {}) => ({ PopulationID: 1, PopName: 'Alpha', Population: 62.5, InstallationWorkers: 20, YardWorkers: 0, ReqInf: 0, PopulationDensityModifier: 1, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, ...over })
   // A colony of colony cost `cost`: ReqInf = cost x population x 100 / density.
   const costed = (cost, over = {}) => { const base = colony(over); return { ...base, ReqInf: (cost * base.Population * 100) / base.PopulationDensityModifier } }
   const results = (c) => { const cost = col.colonyCostResult(c); return { cost, workers: col.workerSplitResult(c, cost) } }
@@ -176,7 +176,7 @@ const world = (m) => {
     const rate = col.infrastructureRateResult(c)
     const cap = col.infrastructureCapResult(col.infrastructureOf(c, arriving), rate)
 
-    return { PopulationID: c.PopulationID, name: c.PopName, place: 'Sol', Population: c.Population, Infrastructure: c.Infrastructure, LGInfrastructure: c.LGInfrastructure, LegacyLowGravity: c.LegacyLowGravity, infrastructureCap: provenance.valueOrNull(cap), committedResult: null, r: { workersNow: workers, cost, rate, cap }, ...over }
+    return { PopulationID: c.PopulationID, name: c.PopName, place: 'Sol', Population: c.Population, Infrastructure: c.Infrastructure, LGInfrastructure: c.LGInfrastructure, infrastructureCap: provenance.valueOrNull(cap), committedResult: null, r: { workersNow: workers, cost, rate, cap }, ...over }
   }
 
   return { colony, costed, results, split, source, sources, queue, assess, plain, value, row, A: colony() }

@@ -137,20 +137,14 @@ export const loadSiteRoutes = async (database, { GameID, RaceID }) => {
   return Object.freeze(rows)
 }
 
-// The ledger's moves between colonies over the last `windowDays`, one row per colony, mineral and entry type: { PopulationID, MaterialID, MineralDataType, Amount }, with Amount null when any term of the sum is not recorded. A save without the ledger has none.
+// The ledger's moves between colonies over the last `windowDays`, one row per colony, mineral and entry type: { PopulationID, MaterialID, MineralDataType, Amount }, with Amount null when any term of the sum is not recorded. A ledger with no entry in the window gives none.
 export const loadTransfers = async (database, { GameID, RaceID, windowDays }) => {
-  const [[table]] = await database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
-
-  if (!table.Present) {
-    return Object.freeze([])
-  }
-
   const [rows] = await database.query(`select FCT_RaceMineralData.PopulationID, FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, case when count(FCT_RaceMineralData.Amount) = count(*) then sum(FCT_RaceMineralData.Amount) end as Amount from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID where FCT_RaceMineralData.GameID = ${GameID} and FCT_RaceMineralData.RaceID = ${RaceID} and FCT_RaceMineralData.MineralDataType in (${TRANSFER_LIST.join(', ')}) and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * 86400} group by FCT_RaceMineralData.PopulationID, FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType`)
 
   return Object.freeze(rows)
 }
 
-// The moves of `loadTransfers` as the figures read them: `{ table: { [PopulationID]: { [MaterialID]: { [type]: Amount } } }, perYear }`. `perYear` is the factor from the window's tonnes to t/yr (365 over the days the ledger covers), null when the save has no ledger or it covers no days: every observed figure is then unknown, not 0.
+// The moves of `loadTransfers` as the figures read them: `{ table: { [PopulationID]: { [MaterialID]: { [type]: Amount } } }, perYear }`. `perYear` is the factor from the window's tonnes to t/yr (365 over the days the ledger covers), null when the ledger covers no days: every observed figure is then unknown, not 0.
 export const transferFlows = (rows, perYear) => {
   const table = {}
 
@@ -164,7 +158,7 @@ export const transferFlows = (rows, perYear) => {
   return { table, perYear: known(perYear) && perYear > 0 ? perYear : null }
 }
 
-// The tonnes a year of the entry `types` at one colony and mineral, as a result of `rule`: a colony and mineral with no entry of a type moved none of it (0); an entry with no amount, or no ledger, is unknown.
+// The tonnes a year of the entry `types` at one colony and mineral, as a result of `rule`: a colony and mineral with no entry of a type moved none of it (0); an entry with no amount, or a ledger that covers no days, is unknown.
 const observed = (rule, flows, populationId, materialId, types) => {
   if (!flows || flows.perYear === null) {
     return unavailable({ rule, missing: ['the mineral ledger over the window'] })

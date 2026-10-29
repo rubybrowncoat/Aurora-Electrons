@@ -159,7 +159,7 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null
   const short = sensors.filter(isShort)
 
   if (!ruleSupports(rule, version)) {
-    assumptions.push('The save is not 2.7-shaped and has no version label, so the rule is not checked for its game version.')
+    assumptions.push('The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.')
   }
 
   if (kind === 'grav') {

@@ -65,7 +65,7 @@ registerRule({
   units: 'M people',
   verification: 'confirmed',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.InfrastructureValue, LGInfrastructureValue', 'FCT_Population.ReqInf, Population', 'FCT_MoveOrders, FCT_ShipCargo (infrastructure on its way)'],
-  note: 'Millions of people the colony\'s infrastructure (built and on its way) supports: the infrastructure over the requirement per million; unlimited when the colony needs none. A pre-2.6 save counts only low-gravity infrastructure on a low-gravity body, a rule no save has been found to check. Arithmetic on stored values.',
+  note: 'Millions of people the colony\'s infrastructure (built and on its way) supports: the infrastructure over the requirement per million; unlimited when the colony needs none. Arithmetic on stored values.',
 })
 
 registerRule({
@@ -83,7 +83,7 @@ registerRule({
   units: 'colony cost',
   verification: 'confirmed',
   structure: ['FCT_Population.ReqInf, Population', 'FCT_Species.PopulationDensityModifier, Gravity, GravDev', 'FCT_SystemBody.Gravity'],
-  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body from 2.6. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock 2.7.1 save (largest difference 0.0027), so the halving holds there. The rule for a pre-2.6 save (separate low-gravity infrastructure) has no save to check.',
+  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock 2.7.1 save (largest difference 0.0027), so the halving holds there.',
 })
 
 registerRule({
@@ -159,12 +159,12 @@ export const crowdingResult = (colony, capacity) => derive({ rule: 'colonies.cro
 // A colony that needs infrastructure needs a population to divide it by.
 const withPopulation = (colony) => (colony.ReqInf > 0 && !(colony.Population > 0) ? { ...colony, Population: null } : colony)
 
-// Infrastructure per million people. The game's live requirement (`ReqInf`) already doubles it on low-gravity bodies (Aurora 2.6), so it's used rather than the stale `LastColonyCost`. 0 is a colony that needs none; a requirement the save lacks is unavailable.
+// Infrastructure per million people. The game's live requirement (`ReqInf`) already doubles it on low-gravity bodies, so it's used rather than the stale `LastColonyCost`. 0 is a colony that needs none; a requirement the save lacks is unavailable.
 export const infrastructureRateResult = (colony) => derive({ rule: 'colonies.infrastructureRate', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population'] : [])], compute: () => (colony.ReqInf > 0 ? colony.ReqInf / colony.Population : 0) })
 
-// The infrastructure a colony counts: built plus on its way. Pre-2.6 saves: a low-gravity body counts only low-gravity infrastructure. NaN when a stored quantity is missing.
+// The infrastructure a colony counts: built plus on its way. NaN when a stored quantity is missing.
 export const infrastructureOf = (colony, arriving) => {
-  const terms = [...(colony.LegacyLowGravity ? [colony.LGInfrastructure] : [colony.Infrastructure, colony.LGInfrastructure]), arriving ? arriving.Infrastructure : 0]
+  const terms = [colony.Infrastructure, colony.LGInfrastructure, arriving ? arriving.Infrastructure : 0]
 
   return terms.every(finite) ? terms.reduce((sum, value) => sum + value, 0) : NaN
 }
@@ -190,8 +190,8 @@ export const infrastructureCostResult = (colony, needed) => {
   return derive({ rule: 'colonies.infrastructureNeeded', source: colony, required: ['InfrastructureCost'], parts: { needed }, compute: ({ needed: amount }) => amount * colony.InfrastructureCost, units: 'BP' })
 }
 
-// The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density). From Aurora 2.6 a low-gravity body needs twice the infrastructure at the same colony cost (docs `planetary-installations`), and ReqInf holds that factor; a pre-2.6 save has separate LG infrastructure instead.
-export const colonyCostResult = (colony) => derive({ rule: 'colonies.colonyCost', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population', 'PopulationDensityModifier', 'LowGravity', 'LegacyLowGravity'] : [])], compute: () => (colony.ReqInf > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100 * (colony.LowGravity && !colony.LegacyLowGravity ? 2 : 1)) : 0) })
+// The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density). A low-gravity body needs twice the infrastructure at the same colony cost (docs `planetary-installations`), and ReqInf holds that factor.
+export const colonyCostResult = (colony) => derive({ rule: 'colonies.colonyCost', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population', 'PopulationDensityModifier', 'LowGravity'] : [])], compute: () => (colony.ReqInf > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100 * (colony.LowGravity ? 2 : 1)) : 0) })
 
 // Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%; agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work. Required: installations and shipyards, today's unless `required` gives the figure of a later day. Reproduces the save's stored Efficiency on the sample.
 export const workerSplit = (colony, population, cost, required = colony.InstallationWorkers + colony.YardWorkers) => {

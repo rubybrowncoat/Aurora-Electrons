@@ -1,9 +1,9 @@
 /*
   Checks the shared component contract (src/renderer/utilities/design-data.js) against saves, read-only.
 
-  node scripts/check-components.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--pair <a.db> <b.db> <GameID> <RaceID>]
+  node scripts/check-components.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--pair <save.db> <GameID> <RaceID>]
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and the pair of 2.6 saves in the repository root that share game 138 and race 779 but are different campaigns (AuroraDB_260_1.db, AuroraDB_260_3.db); a save that is not there is reported as not run.
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a copy of that stock save read with one anchor system altered, which shares its game and race but is another campaign, and another copy read without FCT_Game.AncientRelics; a save that is not there is reported as not run.
 
   It proves, on real rows and on synthetic manual components: the fixed-part and own-component loaders return the rows an independent query gives (the race's research through FCT_RaceTech TechID = SDComponentID, stock rows of game 0 included, fixed parts not researched left out) with every stored figure carried over, and loadStockTanks still returns what the old tank query returned; imported and manual additive components give equal basic totals and keep different provenance; a figure the save lacks stays unknown and cannot satisfy a constraint; components of other races, saves or revisions are not combined silently; and a size converts between HS and MSP only for the family the component declares. Any failed check sets exit code 1.
 */
@@ -43,7 +43,7 @@ const parseArguments = (argv) => {
   const defaults = {
     stock: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
     modded: { file: 'AuroraDB.db', game: 140, race: 784 },
-    pair: { files: ['AuroraDB_260_1.db', 'AuroraDB_260_3.db'], game: 138, race: 779 },
+    pair: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
   }
   const options = { ...defaults }
 
@@ -53,7 +53,7 @@ const parseArguments = (argv) => {
     if (name === '--stock' || name === '--modded') {
       options[name.slice(2)] = { file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) }
     } else if (name === '--pair') {
-      options.pair = { files: [argv[++index], argv[++index]], game: Number(argv[++index]), race: Number(argv[++index]) }
+      options.pair = { file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) }
     } else {
       fail(`Unknown option ${name}`)
     }
@@ -176,7 +176,7 @@ const run = async () => {
 
     const expectedStatus = ruleSupports('component.imported', source.formulaVersion) === true ? STATUS.CONFIRMED : STATUS.ESTIMATED
 
-    check('an imported figure is confirmed for a 2.7-shaped save and estimated otherwise', own.every((c) => data.quantityOf(c, 'cost').status === expectedStatus && data.quantityOf(c, 'sizeHS').status === expectedStatus), expectedStatus)
+    check('an imported figure is confirmed where the formula version is stated and estimated otherwise', own.every((c) => data.quantityOf(c, 'cost').status === expectedStatus && data.quantityOf(c, 'sizeHS').status === expectedStatus), expectedStatus)
 
     const narrowed = await data.loadFixedParts(database, context, { types: [2], source })
 
@@ -485,13 +485,15 @@ const run = async () => {
     check('a source whose shared systems differ in one row is another save', data.relateFingerprints(mine.source.fingerprint, altered.fingerprint) === 'different' && data.compareSources(mine.source, forged.source) === 'other-save' && data.componentTotals([{ component: mine, count: 1 }, { component: forged, count: 1 }]).conflicts[0].reason === 'other-save')
   }
 
-  const checkPair = async ({ files, game, race }) => {
-    const [first, second] = await Promise.all(files.map((file) => openSave(file)))
+  const checkPair = async ({ file, game, race }) => {
+    const first = await openSave(file)
+    const second = await openSave(file, (sql, rows) => (sql.includes('from FCT_System') && sql.includes('limit 16') ? rows.map((row, index) => (index === 3 ? { ...row, Stars: row.Stars + 1 } : row)) : rows))
+    const lacking = await openSave(file, (sql, rows) => (sql.includes("pragma_table_xinfo('FCT_Game')") ? rows.filter((row) => row.name !== 'AncientRelics') : rows))
 
-    console.log('\n== a real pair: same GameID and RaceID, different campaigns ==')
+    console.log('\n== the same GameID and RaceID in a copy whose anchor systems differ: another campaign ==')
 
-    if (!first || !second) {
-      console.log(`SKIP  ${files.join(' and ')} is not there`)
+    if (!first) {
+      console.log(`SKIP  ${file} is not there`)
       return
     }
 
@@ -500,10 +502,14 @@ const run = async () => {
     const b = (await data.loadFixedParts(second, context, { types: [3] }))[0]
     const crossed = data.componentTotals([{ component: a, count: 1 }, { component: b, count: 1 }])
 
-    check(`${first.file} and ${second.file}, both game ${game} race ${race}, give component ${a.id} twice that is not combined`, a.id === b.id && a.source.gameId === b.source.gameId && a.source.raceId === b.source.raceId && ['other-save', 'unknown-save'].includes(data.compareSources(a.source, b.source)) && crossed.results.sizeHS.status === STATUS.UNAVAILABLE && crossed.results.sizeHS.value === null && crossed.conflicts.length === 1, `${data.relateFingerprints(a.source.fingerprint, b.source.fingerprint)} by fingerprint: ${crossed.results.sizeHS.inputs.missing[0]}`)
-    check('a save that is not 2.7-shaped reads as estimated, not confirmed', a.source.formulaVersion === null && data.quantityOf(a, 'cost').status === STATUS.ESTIMATED && data.quantityOf(a, 'cost').assumptions.some((text) => text.includes('not verified')))
+    check(`${first.file} and a copy of it with one anchor system altered, both game ${game} race ${race}, give component ${a.id} twice that is not combined`, a.id === b.id && a.source.gameId === b.source.gameId && a.source.raceId === b.source.raceId && data.compareSources(a.source, b.source) === 'other-save' && crossed.results.sizeHS.status === STATUS.UNAVAILABLE && crossed.results.sizeHS.value === null && crossed.conflicts.length === 1, `${data.relateFingerprints(a.source.fingerprint, b.source.fingerprint)} by fingerprint: ${crossed.results.sizeHS.inputs.missing[0]}`)
+
+    const c = (await data.loadFixedParts(lacking, context, { types: [3] }))[0]
+
+    check('a save without FCT_Game.AncientRelics reads as estimated, not confirmed, while the save with it is confirmed', c.source.formulaVersion === null && a.source.formulaVersion !== null && data.quantityOf(c, 'cost').status === STATUS.ESTIMATED && data.quantityOf(a, 'cost').status === STATUS.CONFIRMED && data.quantityOf(c, 'cost').assumptions.some((text) => text.includes('not verified')))
     first.close()
     second.close()
+    lacking.close()
   }
 
   const modded = await checkSave('modded save', options.modded)

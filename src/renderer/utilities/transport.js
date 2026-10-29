@@ -173,7 +173,7 @@ registerRule({
 export const UNVERIFIED_VERSION = 'the 2.7.x landing and shuttle rules, though the save\'s game version is not verified'
 
 // The formula version in words for a note.
-export const describeFormulaVersion = (version) => (version ? `The save has the 2.7 schema and no version label, so the ${version} rules apply.` : 'The save has no version label and not the 2.7 schema, so the landing rule is not verified for its game version.')
+export const describeFormulaVersion = (version) => (version ? `The save carries the AllowCMC and AncientRelics columns of FCT_Game and no version label, so the ${version} rules apply.` : 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the landing rule is not verified against the save.')
 
 // The largest craft, in hull spaces, that lands at a colony and loads with a strength of 1: the rule's own limit when it holds for the version, null when the version is not known or the rule is not verified for it (3.0 is said publicly to land 1000 t; that is not modelled).
 export const landingThreshold = (version) => (ruleSupports('transport.landingThreshold', version) ? SMALL_CRAFT_SIZE : null)

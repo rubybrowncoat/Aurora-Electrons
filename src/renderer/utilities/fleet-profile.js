@@ -61,10 +61,10 @@ registerRule({
   assumptions: ['one speed all the way and both ways', 'full holds', 'no refuelling or overhaul stops'],
 })
 
-// The columns of FCT_Ship the profile reads that an older save may lack: such a column reads as null (not known), never as 0.
+// The columns of FCT_Ship the profile reads that the save may lack: a column the save lacks reads as null (not known), never as 0.
 const OPTIONAL_SHIP_COLUMNS = ['Fuel', 'RefuelPriority', 'OverhaulFactor', 'MaintenanceState', 'MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies', 'SensorDelay']
 
-// The columns of FCT_ShipClass the ship's runtime state reads that an older save may lack: the planned deployment, the stored maintenance supplies and failure rate, and the flags that decide how a ship's clocks run. Each reads as null (not known) when the save lacks it.
+// The columns of FCT_ShipClass the ship's runtime state reads that the save may lack: the planned deployment, the stored maintenance supplies and failure rate, and the flags that decide how a ship's clocks run. Each reads as null (not known) when the save lacks it.
 const OPTIONAL_CLASS_COLUMNS = ['PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip', 'ArmourThickness', 'FuelTanker', 'MinimumFuel']
 
 // The class column that tells a commercial hangar from a military one. It is named through this constant so the page scan sees a column built by name (a bare marker, not a required column): a save without it still loads every ship, the carrier's hangar kind reading null.

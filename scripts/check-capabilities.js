@@ -7,7 +7,6 @@
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
   - the two real saves (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): every report supported, the formula version 2.7.x, every lookup row as expected, no diagnostic;
-  - older fixtures (2.6-shaped, the pre-2.6 ones): the reports and gates that differ are named, and what stays supported;
   - copies of a 2.7 save in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
   - the Commanders page's own roster queries (taken from its source) run on copies without a rank or age column, on the parts the preflight chose, and fail on the parts of a complete save;
@@ -38,13 +37,6 @@ const PLANNED_ROUTES = new Set(['/settings', '/about'])
 const REAL = [
   { label: 'modded 2.7 save', file: 'AuroraDB.db' },
   { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db' },
-]
-
-const OLDER = [
-  { label: 'G260 base', file: 'AuroraDB_260_base.db' },
-  { label: 'G270 base', file: 'AuroraDB_270_base.db' },
-  { label: 'Old64 (Pepega)', file: 'AuroraDB_Pepega.db' },
-  { label: 'OldDde (Offline Elminster)', file: 'AuroraDB_OfflineElminster.db' },
 ]
 
 // The fourteen columns Aurora 2.7 added over 2.6, as 'Table.Column', written here from the diff of the two saves on disk: the oracle utilities/capabilities.js `LINE_SIGNATURE` is compared with, and the columns the planted copies drop.
@@ -302,23 +294,6 @@ const realSaveChecks = async (capabilities, save) => {
   check(`${save.label}: the commanders soft groups are both whole`, result.reports['/commanders'].groups.rank === true && result.reports['/commanders'].groups.age === true)
 }
 
-const olderChecks = async (capabilities, save) => {
-  const file = path.resolve(repo, save.file)
-
-  if (!fs.existsSync(file)) {
-    console.log(`SKIP  ${save.label}: ${save.file} is not there (not run)`)
-
-    return null
-  }
-
-  const { result } = await preflightOf(capabilities, file)
-
-  console.log(`INFO  ${save.label}: ${result.tables} tables, ${result.columns} columns; ${summary(result)}; formula ${result.formula.status}; failed lookups: ${failedGates(result).join(', ') || 'none'}`)
-  notSupported(result).forEach((report) => console.log(`INFO  ${save.label}: ${report.route} ${report.status}: ${[...report.missing, ...report.degraded].map((entry) => `${entry.label} (${entry.fields.slice(0, 4).join(', ')}${entry.fields.length > 4 ? `, ${entry.fields.length - 4} more` : ''})`).join('; ')}`))
-
-  return result
-}
-
 const alteredChecks = async (capabilities, source) => {
   const copies = []
   const unrelated = (result, ...routes) => Object.values(result.reports).filter((report) => !routes.includes(report.route)).every((report) => report.status === 'supported')
@@ -520,34 +495,21 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_SystemBody.Bearing dropped makes no other report unsupported', Object.values(orbit.reports).filter((report) => !ROUTE_PAGES.includes(report.route)).every((report) => report.status !== 'unsupported' || report.missing.some((entry) => entry.fields.includes('FCT_SystemBody.Bearing'))), notSupported(orbit).map((report) => report.route + ' ' + report.status).join(', '))
 
     const GATE_PAGES = ['/hauling', '/routes']
-    const gateReaders = Object.keys(capabilities.INPUTS).filter((route) => !GATE_PAGES.includes(route) && capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates))
+    const gateReaders = Object.keys(capabilities.INPUTS).filter((route) => capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates))
 
-    check('altered: FCT_AetherGates dropped degrades /hauling by the gates alone, naming the table, and leaves it in service', gateless.reports['/hauling'].status === 'degraded' && gateless.reports['/hauling'].missing.length === 0 && gateless.reports['/hauling'].groups.aetherGates === false && gateless.reports['/hauling'].degraded.some((entry) => entry.group && entry.key === 'aetherGates' && entry.fields.includes('FCT_AetherGates (table)')) && baseline.reports['/hauling'].groups.aetherGates === true, JSON.stringify(gateless.reports['/hauling']))
-    check('altered: FCT_AetherGates dropped degrades /routes by the gates alone, naming the table, and leaves it in service', gateless.reports['/routes'].status === 'degraded' && gateless.reports['/routes'].missing.length === 0 && gateless.reports['/routes'].groups.aetherGates === false && gateless.reports['/routes'].degraded.filter((entry) => !baseline.reports['/routes'].degraded.some((before) => before.key === entry.key)).map((entry) => `${entry.key}:${entry.group}:${entry.fields.includes('FCT_AetherGates (table)')}`).join() === 'aetherGates:true:true' && baseline.reports['/routes'].groups.aetherGates === true && baseline.reports['/routes'].status !== 'unsupported', JSON.stringify(gateless.reports['/routes']))
-    check('altered: the same copy leaves unsupported only the reports whose own required inputs read the table and do not hold it as a part they can lose (/hauling and /routes do)', GATE_PAGES.every((route) => capabilities.INPUTS[route].some((input) => !input.optional && input.reads.FCT_AetherGates)) && Object.values(gateless.reports).filter((report) => report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)'))).map((report) => report.route).sort().join() === gateReaders.sort().join() && Object.values(gateless.reports).filter((report) => !gateReaders.includes(report.route) && report.status === 'unsupported').every((report) => baseline.reports[report.route].status === 'unsupported'), notSupported(gateless).map((report) => `${report.route} ${report.status}`).join(', '))
+    check('altered: FCT_AetherGates dropped makes /hauling and /routes unsupported, naming the table, as the places they choose among and the orders they list rest on it', GATE_PAGES.every((route) => gateless.reports[route].status === 'unsupported' && gateless.reports[route].missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')) && baseline.reports[route].status !== 'unsupported'), JSON.stringify(GATE_PAGES.map((route) => gateless.reports[route].status)))
+    check('altered: the same copy leaves unsupported only the reports whose own required inputs read the table, and no report holds the gates as a part it can lose', GATE_PAGES.every((route) => gateReaders.includes(route)) && Object.values(gateless.reports).filter((report) => report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)'))).map((report) => report.route).sort().join() === gateReaders.sort().join() && Object.values(gateless.reports).filter((report) => !gateReaders.includes(report.route) && report.status === 'unsupported').every((report) => baseline.reports[report.route].status === 'unsupported') && Object.values(capabilities.SOFT).every((groups) => groups.every((group) => group.key !== 'aetherGates')), notSupported(gateless).map((report) => report.route).join(', '))
 
-    const gateGroup = ", aetherGates('the place of an order to an aether gate, which rests on the gates of the save')"
-    const noGroup = mutatedCopy('utilities/capabilities.js', gateGroup, '')
-
-    try {
-      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(noGroup, 'utilities') })).capabilities
-      const report = (await preflightOf(mutant, noGates)).result.reports['/hauling']
-
-      check('altered: a copy of the code in which /hauling does not hold the gates as a part it can lose makes it unsupported on a save without the table, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')), report.status)
-    } finally {
-      fs.rmSync(noGroup, { recursive: true, force: true })
-    }
-
-    const routesGroup = "  '/routes': Object.freeze([aetherGates('the aether gates among the places to choose, which rest on the gates of the save')]),\n"
-    const noRoutesGroup = mutatedCopy('utilities/capabilities.js', routesGroup, '')
+    const softGates = 'export const SOFT = Object.freeze({\n'
+    const withGroup = mutatedCopy('utilities/capabilities.js', softGates, `${softGates}  '/routes': Object.freeze([Object.freeze({ key: 'aetherGates', label: 'Aether gates', affects: 'the aether gates among the places to choose', fields: Object.freeze(['FCT_AetherGates.*']) })]),\n`)
 
     try {
-      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(noRoutesGroup, 'utilities') })).capabilities
-      const report = (await preflightOf(mutant, noGates)).result.reports['/routes']
+      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(withGroup, 'utilities') })).capabilities
+      const reports = (await preflightOf(mutant, noGates)).result.reports
 
-      check('altered: a copy of the code in which /routes does not hold the gates as a part it can lose makes it unsupported on a save without the table, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')), report.status)
+      check('altered: a copy of the code in which /routes holds the gates as a part it can lose leaves it degraded on a save without the table, as the check above must notice', reports['/routes'].status === 'degraded' && reports['/routes'].missing.length === 0, reports['/routes'].status)
     } finally {
-      fs.rmSync(noRoutesGroup, { recursive: true, force: true })
+      fs.rmSync(withGroup, { recursive: true, force: true })
     }
 
     for (const route of ROUTE_PAGES) {
@@ -1135,29 +1097,14 @@ const main = async () => {
     await realSaveChecks(capabilities, save)
   }
 
-  const older = {}
+  const real260 = path.resolve(repo, 'AuroraDB_260_base.db')
 
-  for (const save of OLDER) {
-    older[save.label] = await olderChecks(capabilities, save)
-  }
+  if (fs.existsSync(real260)) {
+    const { result } = await preflightOf(capabilities, real260)
 
-  const old64 = older['Old64 (Pepega)']
-  const g260 = older['G260 base']
-
-  if (old64) {
-    check('older: the pre-2.6 shape makes /commanders unsupported and its component type 29 differ', old64.reports['/commanders'].status === 'unsupported' && failedGates(old64).includes('component type 29') && old64.formula.status === 'unavailable')
-  }
-
-  if (g260) {
-    check('older: a 2.6-shaped save has no formula version, its lookups as expected, and /commanders still readable', g260.formula.status === 'unavailable' && failedGates(g260).length === 0 && g260.reports['/commanders'].status !== 'unsupported')
-  }
-
-  if (g260) {
-    const file = path.resolve(repo, OLDER.find((save) => save.label === 'G260 base').file)
-
-    check('older: a real 2.6 save is refused as a save from before 2.7, naming each of the fourteen columns the file lacks', g260.line.status === 'refused' && g260.line.reason === 'pre-2.7' && sameFields(g260.line.missing, await absentIn(file, LINE_COLUMNS)) && g260.line.missing.length === 14, JSON.stringify(g260.line))
+    check('line: a real 2.6 save is refused as a save from before 2.7, naming each of the fourteen columns the file lacks', result.line.status === 'refused' && result.line.reason === 'pre-2.7' && sameFields(result.line.missing, await absentIn(real260, LINE_COLUMNS)) && result.line.missing.length === 14, JSON.stringify(result.line))
   } else {
-    console.log('SKIP  older: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
+    console.log('SKIP  line: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
   }
 
   const source = path.resolve(repo, 'AuroraDB_270_base.db')

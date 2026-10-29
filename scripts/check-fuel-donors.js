@@ -57,7 +57,7 @@ const swap = (from, to) => (text) => {
 // ---------- the donor result, over constructed ships ----------
 
 // A ship as `loadFuelDonors` gives it: a tanker of the 30,000 LPH class with one undamaged system and fuel above its minimum.
-const SHIP = { ShipID: 1, ShipName: 'Tanker', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'Sol', ShipClassID: 1, ClassName: 'Class', Fuel: 1000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 30000, EnginePower: 100, Harvesters: 0, Size: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0, HubEra: 0 }
+const SHIP = { ShipID: 1, ShipName: 'Tanker', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'Sol', ShipClassID: 1, ClassName: 'Class', Fuel: 1000000, FuelCapacity: 5000000, FuelTanker: 1, MinimumFuel: 100000, RefuellingRate: 30000, EnginePower: 100, Harvesters: 0, Size: 100, TransferSystems: 1, UndamagedTransfer: 1, Harvester: 0 }
 const ship = (changes = {}) => ({ ...SHIP, ...changes })
 
 // What the donor of a ship is: [name, the ship's changes, the recipient (left out when none is asked about), { permission, gate, reason }]. Written from the rules of the game: the gates are tested in this order and the first that fails decides; with none failing, the first that cannot be decided leaves the permission unknown.
@@ -85,8 +85,6 @@ const GATE_CASES = [
   ['the rate is tested before the litres', { RefuellingRate: 0, Fuel: 0 }, undefined, { permission: 'blocked', gate: 'rate', reason: 'no-rate' }],
   ['a gate that fails wins over an earlier gate that cannot be decided', { UndamagedTransfer: null, RefuellingRate: 0 }, undefined, { permission: 'blocked', gate: 'rate', reason: 'no-rate' }],
   ['with no gate failing, the first gate that cannot be decided is named', { UndamagedTransfer: null, Fuel: null }, undefined, { permission: 'unknown', gate: 'system', reason: 'damage-unknown' }],
-  ['a save of the hub era is not decided whatever the ship', { HubEra: 1 }, undefined, { permission: 'unknown', gate: 'version', reason: 'hub-era' }],
-  ['a ship that fails a gate of a hub-era save is still blocked by it', { HubEra: 1, FuelTanker: 0 }, undefined, { permission: 'blocked', gate: 'designation', reason: 'not-designated' }],
   ['a recipient is not asked about when none is given, even for a low rate', { RefuellingRate: 15000 }, undefined, { permission: 'allowed', gate: null, reason: null }],
   ['a rate under 20,000 LPH serves a recipient inside the limit', { RefuellingRate: 15000 }, { size: RECIPIENT_HS.inside }, { permission: 'allowed', gate: null, reason: null }],
   ['a rate under 20,000 LPH serves a recipient of exactly 20 HS', { RefuellingRate: 15000 }, { size: RECIPIENT_HS.limit }, { permission: 'allowed', gate: null, reason: null }],
@@ -99,8 +97,8 @@ const GATE_CASES = [
   ['a recipient that is too large blocks, with no earlier gate undecided hiding it', { RefuellingRate: 15000, UndamagedTransfer: null }, { size: RECIPIENT_HS.far }, { permission: 'blocked', gate: 'recipient', reason: 'recipient-too-large' }],
 ]
 
-// The order the gates are listed in a result, as the game tests them (the version gate stands first and passes in a save of the era).
-const GATE_ORDER = ['version', 'designation', 'system', 'rate', 'litres', 'recipient']
+// The order the gates are listed in a result, as the game tests them.
+const GATE_ORDER = ['designation', 'system', 'rate', 'litres', 'recipient']
 
 const gateChecks = {
   id: 'gates',
@@ -337,10 +335,10 @@ const SQL_EXPECTED = {
   117: { TransferSystems: 0, UndamagedTransfer: 0, Harvester: 1 },
 }
 
-// A constructed save with the tables the loader reads; `hub` adds the class column of the hub era, `without` drops a class column an old save lacks, `fuelless` leaves the fuel aboard of every ship unstated, `undesignated` makes no class a tanker.
-const constructedSave = async ({ hub = false, without = null, fuelless = false, undesignated = false } = {}) => {
+// A constructed save with the tables the loader reads; `without` drops a class column a damaged save lacks, `fuelless` leaves the fuel aboard of every ship unstated, `undesignated` makes no class a tanker.
+const constructedSave = async ({ without = null, fuelless = false, undesignated = false } = {}) => {
   const raw = await open(':memory:')
-  const classColumns = ['ShipClassID integer', 'ClassName text', 'GameID integer', 'RaceID integer', 'FuelTanker integer', 'RefuellingRate integer', 'MinimumFuel real', 'FuelCapacity real', 'EnginePower real', 'Harvesters integer', 'Size real'].filter((column) => !without || column.split(' ')[0] !== without).concat(hub ? ['RefuellingHub integer'] : [])
+  const classColumns = ['ShipClassID integer', 'ClassName text', 'GameID integer', 'RaceID integer', 'FuelTanker integer', 'RefuellingRate integer', 'MinimumFuel real', 'FuelCapacity real', 'EnginePower real', 'Harvesters integer', 'Size real'].filter((column) => !without || column.split(' ')[0] !== without)
 
   await run(raw, `create table FCT_ShipClass (${classColumns.join(', ')})`)
   await run(raw, 'create table FCT_Ship (ShipID integer, ShipName text, FleetID integer, ShipClassID integer, GameID integer, RaceID integer, ShippingLineID integer, Fuel real)')
@@ -357,7 +355,7 @@ const constructedSave = async ({ hub = false, without = null, fuelless = false, 
     const values = { ShipClassID: id, ClassName: `'${name}'`, GameID: 1, RaceID: 1, FuelTanker: undesignated ? 0 : tanker, RefuellingRate: rate, MinimumFuel: minimum, FuelCapacity: capacity, EnginePower: engines, Harvesters: harvesters, Size: 10 }
     const names = Object.keys(values).filter((column) => column !== without)
 
-    await run(raw, `insert into FCT_ShipClass (${names.join(', ')}${hub ? ', RefuellingHub' : ''}) values (${names.map((column) => values[column]).join(', ')}${hub ? ', 0' : ''})`)
+    await run(raw, `insert into FCT_ShipClass (${names.join(', ')}) values (${names.map((column) => values[column]).join(', ')})`)
 
     for (const [component, count] of components) {
       await run(raw, `insert into FCT_ClassComponent values (${id}, ${component}, ${count === null ? 'null' : count}, 1)`)
@@ -440,7 +438,6 @@ const sqlChecks = {
     assert.equal(mod.countsAsTanker(rows.find((row) => row.ShipID === 117)), false, 'and it is not counted as a tanker')
     assert.equal(donorOf(115).stored, 100, 'a tanker class with no tanks is read with the fuel it holds')
     assert.equal(mod.countsAsTanker(rows.find((row) => row.ShipID === 115)), false, 'and is not counted as a tanker')
-    assert.equal(rows.every((row) => row.HubEra === 0), true, 'a save of the current era is not of the hub era')
 
     const reconciled = await reconciledFrom(mod)
 
@@ -451,17 +448,10 @@ const sqlChecks = {
   },
 }
 
-const hubChecks = {
-  id: 'hub',
-  name: 'a save with the class column of the hub era is not decided, and a save without a class column reads the column as not known and never as 0',
+const columnChecks = {
+  id: 'columns',
+  name: 'a save without a class column reads the column as not known and never as 0',
   run: async ({ mod }) => {
-    const hub = await loadedFrom(mod, { hub: true })
-
-    assert.equal(hub.every((row) => row.HubEra === 1), true, 'every ship of a hub-era save says so')
-    assert.equal(mod.fuelDonor(hub.find((row) => row.ShipID === 101)).permission, 'unknown', 'a ship of a hub-era save is not decided')
-    assert.equal(mod.fuelDonor(hub.find((row) => row.ShipID === 101)).reason, 'hub-era', 'and says why')
-    assertReconciled(await reconciledFrom(mod, { hub: true }), 'the hub-era save')
-
     const old = await loadedFrom(mod, { without: 'MinimumFuel' })
     const unread = old.find((row) => row.ShipID === 101)
 
@@ -472,7 +462,7 @@ const hubChecks = {
   },
 }
 
-const PURE_CHECKS = [gateChecks, recipientChecks, figureChecks, reasonChecks, reportChecks, sqlChecks, hubChecks]
+const PURE_CHECKS = [gateChecks, recipientChecks, figureChecks, reasonChecks, reportChecks, sqlChecks, columnChecks]
 
 /* eslint-disable no-template-curly-in-string */
 const PURE_FAULTS = [
@@ -488,8 +478,8 @@ const PURE_FAULTS = [
   { name: 'a tanker with no tanks is counted in the tanker total', change: swap('Boolean(ship.FuelTanker) && ship.FuelCapacity > 0', 'Boolean(ship.FuelTanker)'), fails: ['report'] },
   { name: 'the stored total counts only the tankers that have a surplus', change: swap('const stored = columnTotal(\'logistics.fuelStock\', counted, ', 'const stored = columnTotal(\'logistics.fuelStock\', counted.filter((row) => row.donor.eligibleSurplus > 0), '), fails: ['report'] },
   { name: 'the damage read ignores the damage rows', change: swap('coalesce((select FCT_DamagedComponent.Number ${DAMAGE_ROWS}), 0)', '0'), fails: ['sql'] },
-  { name: 'the transfer system is read as another component type', change: swap('const TRANSFER_FUEL = 61', 'const TRANSFER_FUEL = 60'), fails: ['sql', 'hub'] },
-  { name: 'a save of the hub era is read as the current era', change: swap('const hub = classColumns.has(HUB_CLASS_COLUMN) ? 1 : 0', 'const hub = 0'), fails: ['hub'] },
+  { name: 'the transfer system is read as another component type', change: swap('const TRANSFER_FUEL = 61', 'const TRANSFER_FUEL = 60'), fails: ['sql'] },
+  { name: 'a class column the save lacks is read as 0', change: swap('(hasClass(name) ? `FCT_ShipClass.${name}` : \'null\')', '(hasClass(name) ? `FCT_ShipClass.${name}` : \'0\')'), fails: ['columns'] },
   { name: 'the surplus of a blocked ship is drawn as 0 litres', change: swap('donor.permission === \'blocked\' && donor.gate !== \'litres\' ? \'Blocked\' : ', ''), fails: ['reasons'] },
   { name: 'a blocked ship has no reason', change: swap('reason: donor.reason ? REASONS[donor.reason] : null,', 'reason: null,'), fails: ['reasons'] },
   { name: 'a low rate names no recipient limit', change: swap('recipientLimit: isLowRate(ship.RefuellingRate) ? LOW_RATE_RECIPIENT_HS : null,', 'recipientLimit: null,'), fails: ['recipient'] },

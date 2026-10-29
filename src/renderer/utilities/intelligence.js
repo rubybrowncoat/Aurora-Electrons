@@ -4,7 +4,7 @@
 import { STATUS, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull, weakestStatus } from './provenance'
 
 const INTELLIGENCE_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the thresholds are not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the thresholds are not checked against the save.'
 const START_YEAR = 'the game\'s start year'
 
 export const SECONDS_PER_YEAR = 31536000

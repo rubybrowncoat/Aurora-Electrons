@@ -17,23 +17,23 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'assumed',
   structure: ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics'],
-  note: 'A save carries no version label. FCT_Game.AllowCMC and FCT_Game.AncientRelics came with 2.7 and are absent from every 2.6-shaped and older save examined, so a save with both is taken as 2.7.x, the formula version the rules are stated for. That is a fact about the schema, not a verified version.',
+  note: 'A save carries no version label. FCT_Game.AllowCMC and FCT_Game.AncientRelics are the two columns Aurora 2.7 added to FCT_Game, so a save with both is taken as 2.7.x, the formula version the rules are stated for, and a save without one of them has no formula version. That is a fact about the schema, not a verified version.',
 })
 
 registerRule({
   id: BONUS,
-  versions: ['2.6.x', '2.7.x'],
+  versions: ['2.7.x'],
   verification: 'confirmed',
   structure: ['DIM_CommanderBonusType.BonusID', 'DIM_CommanderBonusType.Description', 'DIM_CommanderBonusType.Percentage'],
-  note: 'The commander bonus IDs the planners read were compared with DIM_CommanderBonusType in 2.6, 2.7 and 2.7.1 saves: each stands for the same bonus, a multiplier or a rating, in all of them. A save whose row differs is not mapped.',
+  note: 'The commander bonus IDs the planners read were compared with DIM_CommanderBonusType in 2.7 and 2.7.1 saves: each stands for the same bonus, a multiplier or a rating, in both. A save whose row differs is not mapped.',
 })
 
 registerRule({
   id: COMPONENT,
-  versions: ['2.6.x', '2.7.x'],
+  versions: ['2.7.x'],
   verification: 'confirmed',
   structure: ['DIM_ComponentType.ComponentTypeID', 'DIM_ComponentType.TypeDescription'],
-  note: 'Component type 29 is Jump Point Stabilisation in the 2.6, 2.7 and 2.7.1 saves examined, and Jump Gate Construction in the pre-2.6 ones, so a save whose type differs is not mapped.',
+  note: 'Component type 29 is Jump Point Stabilisation in the 2.7 and 2.7.1 saves examined, so a save whose type differs is not mapped.',
 })
 
 // The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships, the jump point infrastructure and the gate builders of the Lagrange page (its map and saved points do not read them, and the infrastructure table marks the figures it cannot give as unknown), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the ships' fuel service of the Logistics page (the tanker panel and the harvesters' fuel service column name what they could not read, with a Retry; the stock figures do not rest on it), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
@@ -62,9 +62,6 @@ export const isOptional = (route, key) => key === 'recoveryObservationRead' || B
 // The ranks of the naval admin commanders decide whether a command's bonus applies down its chain, so a report that reads them keeps its stock figures and leaves only the rates that need the chain unknown (`loadNavalAdmins` takes `ranks`).
 const navalRank = (affects) => Object.freeze({ key: 'navalRank', label: 'Naval admin ranks', affects, fields: Object.freeze(['FCT_Commander.RankID', 'FCT_Ranks.*']) })
 
-// The aether gates' table came with 2.6; a report that reads it keeps every other place and leaves only the aether gates unknown: the place of an order to a gate (Hauling) or the gate among the places a route can visit (Routes). The page leaves the table out of its query.
-const aetherGates = (affects) => Object.freeze({ key: 'aetherGates', label: 'Aether gates', affects, fields: Object.freeze(['FCT_AetherGates.*']) })
-
 // The column groups a report can lose without the rest of it. `fields` are 'Table.Column', or 'Table.*' for a whole table that only the group reads. A group's columns still count as missing for the report's inputs, but degrade the report instead of making it unsupported, and the page leaves them out of its queries (`groupsOf`).
 export const SOFT = Object.freeze({
   '/commanders': Object.freeze([
@@ -76,8 +73,7 @@ export const SOFT = Object.freeze({
   '/habitability': Object.freeze([navalRank('the mining outlook of the mass-driver colonies, which rests on the ranks of the naval admin commanders')]),
   '/logistics': Object.freeze([navalRank('the fuel output of the Sorium harvesters, which rests on the ranks of the naval admin commanders')]),
   '/survey-progress': Object.freeze([navalRank('the survey rates of the fleets, which rest on the ranks of the naval admin commanders')]),
-  '/hauling': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders'), aetherGates('the place of an order to an aether gate, which rests on the gates of the save')]),
-  '/routes': Object.freeze([aetherGates('the aether gates among the places to choose, which rest on the gates of the save')]),
+  '/hauling': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
   '/information': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
 })
 

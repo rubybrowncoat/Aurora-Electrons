@@ -1,4 +1,4 @@
-// The read of the stored queues the route signatures (utilities/route-signatures.js) are worked out from: the race's fleets that repeat a route or hold a queue of two orders or more, their orders and conditional orders, the move actions' own flags, and the race's order templates. A save before 2.6 has no conditional orders table and is not supported: the read says so and returns nothing.
+// The read of the stored queues the route signatures (utilities/route-signatures.js) are worked out from: the race's fleets that repeat a route or hold a queue of two orders or more, their orders and conditional orders, the move actions' own flags, and the race's order templates. A save without the conditional orders table (FCT_FleetConditionalOrder) is not supported: the read says so and returns nothing.
 
 import { columnsOf } from './mine-bootstrap-data'
 
@@ -38,7 +38,7 @@ export const loadRouteQueues = async (database, { GameID, RaceID }) => {
   const [fleet, order, conditional, standing] = await Promise.all(['FCT_Fleet', 'FCT_MoveOrders', 'FCT_FleetConditionalOrder', 'FCT_FleetStandingOrder'].map((table) => columnsOf(database, table)))
 
   if (!conditional.has('FleetID')) {
-    return { ...NOTHING, reason: 'The save has no conditional orders table, so it was written before version 2.6; route signatures are not supported for it.' }
+    return { ...NOTHING, reason: 'The save has no conditional orders table (FCT_FleetConditionalOrder), so route signatures are not supported for it.' }
   } else if (!['FleetID', 'FleetName', 'CycleMoves', 'RaceID', 'GameID'].every((name) => fleet.has(name)) || !REQUIRED_ORDER_COLUMNS.every((name) => order.has(name))) {
     return { ...NOTHING, reason: 'The save lacks a column the stored orders are read from.' }
   }

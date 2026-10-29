@@ -37,7 +37,7 @@ const catalogueSql = (eligible) => `select ${CATALOGUE_COLUMNS} from FCT_TechSys
 
 const RESEARCHED_IDS_SQL = 'select FCT_RaceTech.TechID from FCT_RaceTech where FCT_RaceTech.GameID = :GameID and FCT_RaceTech.RaceID = :RaceID'
 
-// Saves from before 2.6 have no eligible-projects table.
+// The eligible projects of the race, read from FCT_EligibleProjects.
 const ELIGIBLE_SQL = 'select FCT_EligibleProjects.TechSystemID from FCT_EligibleProjects where FCT_EligibleProjects.GameID = :GameID and FCT_EligibleProjects.RaceID = :RaceID'
 
 const PROJECTS_SQL = 'select FCT_ResearchProject.TechID, FCT_ResearchProject.ResearchPointsRequired from FCT_ResearchProject where FCT_ResearchProject.GameID = :GameID and FCT_ResearchProject.RaceID = :RaceID'
@@ -126,7 +126,7 @@ export const withCandidates = (raceTech, { raceId, catalogue, researched, eligib
 // The race's tech with the candidates of every line: the researched levels and the game's pick of race-tech.js, and the research graph of the open save.
 export const loadTechChoices = async (database, { GameID, RaceID }) => {
   const replacements = { GameID, RaceID }
-  const eligible = await database.query(ELIGIBLE_SQL, { replacements }).then(([rows]) => rows.map((row) => Number(row.TechSystemID)).filter(Number.isInteger), () => [])
+  const eligible = await database.query(ELIGIBLE_SQL, { replacements }).then(([rows]) => rows.map((row) => Number(row.TechSystemID)).filter(Number.isInteger))
   const [raceTech, [catalogue], [researched], [projects], [queued], [paused]] = await Promise.all([
     loadRaceTech(database, { GameID, RaceID }),
     database.query(catalogueSql(eligible)),

@@ -7,7 +7,7 @@ import { isAvailable, ofRule, registerRule, ruleSupports, unavailable, weakestSt
 
 const MAP_VERSIONS = ['2.7.x']
 
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the rule is not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
 
 // The assumptions a rule that depends on the game version makes when the save's version is not known (`loadFormulaVersion`).
 export const versionAssumptions = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE])

@@ -7,7 +7,7 @@
 
   The panel's script runs as a pseudo instance over scripts/lib/page-loader.js, its template and the page are read as text and the page's script runs the supply computed.
 
-  The saves (saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only) give the real colonies, mines, packets and ledger: the stock and the packets in flight are compared with raw sums of the tables, extraction with the rates of the mining rows, each site's route with the stored destination, and the ledger's sums with a raw grouped read. On a temporary copy of the 271 save every destination is cleared (no site has a route: each adds its extraction to its own stock and supplies none) and the ledger is dropped (no moves are observed). A save that is not there is skipped.
+  The saves (saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only) give the real colonies, mines, packets and ledger: the stock and the packets in flight are compared with raw sums of the tables, extraction with the rates of the mining rows, each site's route with the stored destination, and the ledger's sums with a raw grouped read. On a temporary copy of the 271 save every destination is cleared (no site has a route: each adds its extraction to its own stock and supplies none). With a ledger that covers no days every observed figure is unknown and the totals are unchanged. A save that is not there is skipped.
 
   Each mutation of the utility, the panel, the page or the outlook must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -627,16 +627,10 @@ const pure = (ctx) => {
     return { log, query: async (sql) => { log.push(sql); return [answers.find(([pattern]) => pattern.test(sql))[1]] } }
   }
 
-  add('loaders: a save without the ledger has no moves and asks no more than the table', async () => {
-    const database = standIn([[/sqlite_master/, [{ Present: 0 }]], [/FCT_RaceMineralData/, [{ PopulationID: 1 }]]])
-    const rows = await ms.loadTransfers(database, { GameID: 3, RaceID: RACE, windowDays: 30 })
-
-    return same([rows, database.log.length], [[], 1])
-  })
   add('loaders: the ledger read takes the race\'s moves of the four entry types inside the window, summed by colony, mineral and type', async () => {
-    const database = standIn([[/sqlite_master/, [{ Present: 1 }]], [/FCT_RaceMineralData/, [move(1, 12, 5)]]])
+    const database = standIn([[/FCT_RaceMineralData/, [move(1, 12, 5)]]])
     const rows = await ms.loadTransfers(database, { GameID: 3, RaceID: RACE, windowDays: 30 })
-    const sql = database.log[1]
+    const sql = database.log[0]
 
     return rows.length === 1 && sql.includes('MineralDataType in (7, 8, 12, 13)') && sql.includes('GameTime - 2592000') && sql.includes('GameID = 3') && sql.includes(`RaceID = ${RACE}`) && /group by FCT_RaceMineralData\.PopulationID, FCT_RaceMineralData\.MineralID, FCT_RaceMineralData\.MineralDataType/.test(sql) && sql.includes('count(FCT_RaceMineralData.Amount) = count(*)') ? true : sql
   })
@@ -1124,14 +1118,13 @@ const saveStatements = async (ctx, save) => {
 
       return bad.length ? short(bad.map(({ name }) => name)) : true
     })
-    addSave('save-noledger: on a copy without the ledger table no moves are read, every observed figure is unknown and the totals are unchanged', async () => {
-      const rows = await withCopy('drop table if exists FCT_RaceMineralData', (edited) => ms.loadTransfers(edited, { ...ids, windowDays: 365 }))
-      const none = totals(ms.transferFlows(rows, null))
+    addSave('save-noyears: with a ledger that covers no days every observed figure is unknown and the totals are unchanged', async () => {
+      const none = totals(ms.transferFlows([], null))
       const site = names.flatMap(({ id }) => none[id].sites)[0]
       const unknown = site && !provenance.isAvailable(site.sent) && !provenance.isAvailable(site.loaded)
       const bad = names.filter(({ id }) => ['extraction', 'stock', 'inFlight'].some((keyName) => value(none[id].empire[keyName]) !== value(supplies[id].empire[keyName])))
 
-      return rows.length === 0 && unknown && !bad.length ? true : short([rows.length, unknown, bad.map(({ name }) => name)])
+      return unknown && !bad.length ? true : short([unknown, bad.map(({ name }) => name)])
     })
   }
 
@@ -1184,7 +1177,6 @@ const MUTATIONS = [
   { name: 'a move with no amount read as 0', file: U, find: 'mineral[row.MineralDataType] = Number.isFinite(row.Amount) ? row.Amount : null', replace: 'mineral[row.MineralDataType] = Number.isFinite(row.Amount) ? row.Amount : 0', fails: ['observed'] },
   { name: 'the moves of the saves read over every type', file: U, find: 'MineralDataType in (${TRANSFER_LIST.join(\', \')})', replace: 'MineralDataType in (7, 8, 12)', fails: ['loaders', 'save-ledger'] },
   { name: 'the ledger read over the whole history', file: U, find: 'and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * 86400}', replace: '', fails: ['loaders', 'save-ledger'] },
-  { name: 'a save without the ledger asked for its moves', file: U, find: 'if (!table.Present) {', replace: 'if (false) {', fails: ['loaders', 'save-noledger'] },
   { name: 'the destination\'s drivers read again as a gate', file: U, find: 'VIR_Destination.SystemID as DestinationSystemID from', replace: 'VIR_Destination.SystemID as DestinationSystemID, 0 as DestinationDrivers from', fails: ['loaders'] },
   { name: 'the colonies read without their stock', file: U, find: 'FCT_Population.MassDriverDest, ${stocks},', replace: 'FCT_Population.MassDriverDest,', fails: ['loaders', 'save-stock'] },
   { name: 'the colonies read with the reserves, which a save may lack', file: U, find: 'FCT_Population.MassDriverDest, ${stocks},', replace: 'FCT_Population.MassDriverDest, ${stocks}, FCT_Population.ReserveDuranium,', fails: ['loaders'] },

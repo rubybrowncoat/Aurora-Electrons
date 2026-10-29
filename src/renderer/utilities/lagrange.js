@@ -4,7 +4,7 @@ import { crewFraction } from './crew'
 import { combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LAGRANGE_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the rule is not checked for its game version.'
+const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 export const BASE_DAYS = 60 * 30
 const SECONDS_PER_DAY = 86400

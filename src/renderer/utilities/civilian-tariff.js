@@ -26,7 +26,7 @@ registerRule({
   units: 'wealth per unit per billion km',
   verification: 'estimated',
   structure: ['the published payout rates by category'],
-  note: 'What a shipping line is paid per unit carried and per billion km travelled, as published for 2.7: 0.00015 for a colonist and for a cargo point, 0.006 for a passenger and 0.375 for a trade good, 50% above the 2.6 rates (Aurora v2.7.0 patch notes, post on updates to shipping lines). A public statement, not checked against the save: it stores each payout (FCT_ShippingWealthData.Amount) but not the quantity carried, so no rate can be recomputed from it. No rate is published for fuel. No per-system tariff or earlier-version rate is used, and a game version other than 2.7 gets no rate.',
+  note: 'What a shipping line is paid per unit carried and per billion km travelled, as published for 2.7: 0.00015 for a colonist and for a cargo point, 0.006 for a passenger and 0.375 for a trade good (Aurora v2.7.0 patch notes, post on updates to shipping lines). A public statement, not checked against the save: it stores each payout (FCT_ShippingWealthData.Amount) but not the quantity carried, so no rate can be recomputed from it. No rate is published for fuel. No per-system tariff or earlier-version rate is used, and a game version other than 2.7 gets no rate.',
 })
 
 registerRule({
