@@ -284,25 +284,40 @@ const synthetic = (m, tree) => {
     ['the words of a missing field and of a failed read name no table or column, and keep the name they were given', async () => {
       const code = /\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/
       const fields = [['a column', 'FCT_Ship.CurrentCrew', 'the current crew of ship'], ['a whole table', 'FCT_Fleet.*', 'the fleet data'], ['a missing table', 'FCT_Fleet (table)', 'the fleet data'], ['a table alone', 'FCT_GroundUnitFormation', 'the ground unit formation data']]
-      const ambiguousError = (() => {
+      // The messages of SQLite for a read and a write that fail, from a database in memory.
+      const realErrors = (() => {
         const database = new (require('bun:sqlite').Database)(':memory:')
+        const attempt = (sql) => {
+          try {
+            database.exec(sql)
+          } catch (error) {
+            return error.message
+          }
+
+          return `the statement did not fail: ${sql}`
+        }
 
         try {
-          database.exec('create table A (RaceID integer); create table B (RaceID integer); insert into A values (1); insert into B values (1);')
-          database.query('select RaceID from A join B').all()
+          database.exec('create table A (RaceID integer); create table B (RaceID integer); insert into A values (1); insert into B values (1); create table S (SystemID integer primary key, Xcor integer not null check (Xcor < 100), Ycor integer, unique (Xcor, Ycor)); insert into S values (1, 5, 5); pragma foreign_keys = on; create table P (PlanetID integer, Name text); create table C (ChildID integer, PlanetID integer references P (PlanetID)); create table G (Id integer, Xcor integer generated always as (1) virtual); create view V as select 1 as Xcor; create table T (Xcor integer) strict;')
 
-          return 'the read did not fail'
-        } catch (error) {
-          return error.message
+          return { ambiguous: attempt('select RaceID from A join B'), notNull: attempt('update S set Xcor = null'), check: attempt('update S set Xcor = 500'), unique: attempt('insert into S values (1, 6, 6)'), composite: attempt('insert into S values (2, 5, 5)'), mismatch: attempt('insert into C values (1, 1)'), function: attempt('select Missing(1)'), exists: attempt('create table S (Id integer)'), generated: attempt('update G set Xcor = 2'), view: attempt('update V set Xcor = 2'), strict: attempt('insert into T values (1e100)') }
         } finally {
           database.close()
         }
       })()
-      const failures = [['a missing column', 'SQLITE_ERROR: no such column: FCT_Ship.CurrentCrew', 'the save lacks the current crew of ship'], ['a bare column', 'no such column: CurrentCrew', 'the save lacks the current crew'], ['a missing table', 'SQLITE_ERROR: no such table: FCT_Fleet', 'the save lacks the fleet data'], ['a table in a longer text', 'near FCT_Fleet.FleetName: syntax error', 'near the fleet name of fleet: syntax error'], ['a text with no name in it', 'database is locked', 'database is locked'], ['a prefixed text with no name in it', 'SQLITE_BUSY: database is locked', 'database is locked'], ['an ambiguous column', 'SQLITE_ERROR: ambiguous column name: RaceID', 'the read names the race id ambiguously'], ['a real ambiguous column', ambiguousError, 'the read names the race id ambiguously'], ['an insert of a missing column', 'table FCT_Ship has no column named CurrentCrew', 'table the ship data lacks the current crew']]
+      // Texts of other errors that carry a name of a table: a file the save is kept in. They are shown as they are.
+      const KEPT = ["EACCES: permission denied, open 'P:/Saves/FCT_Fleet.db'", 'ENOENT: no such file or directory, open \'C:/Saves/DIM_Race.Backup.json\'', 'The backup of VIR_Ship.db could not be kept']
+      // Messages of a form the list does not know, from an error that has the code of SQLite: the names in them are put in words all the same.
+      const CODED = [['a table in a message of another form', 'cannot do FCT_Fleet.FleetName this way', 'cannot do the fleet name of fleet this way'], ['a quoted name in a message of another form', 'cannot do "Xcor" this way', 'cannot do the xcor this way']]
+      const KEPT_CODED = ["EACCES: permission denied, open 'P:/Saves/FCT_Fleet.db' as \"Xcor\""]
+      const failures = [['a missing column', 'SQLITE_ERROR: no such column: FCT_Ship.CurrentCrew', 'the save lacks the current crew of ship'], ['a bare column', 'no such column: CurrentCrew', 'the save lacks the current crew'], ['a missing table', 'SQLITE_ERROR: no such table: FCT_Fleet', 'the save lacks the fleet data'], ['a malformed read', 'SQLITE_ERROR: near "FCT_Fleet": syntax error', 'the read is malformed'], ['a text with no name in it', 'database is locked', 'database is locked'], ['a prefixed text with no name in it', 'SQLITE_BUSY: database is locked', 'database is locked'], ['an ambiguous column', 'SQLITE_ERROR: ambiguous column name: RaceID', 'the read names the race id ambiguously'], ['a real ambiguous column', realErrors.ambiguous, 'the read names the race id ambiguously'], ['a real constraint that a value is required', realErrors.notNull, 'the save requires the xcor of s'], ['a real constraint of a value', realErrors.check, 'a value breaks a rule of the save'], ['a real constraint of a repeated key', realErrors.unique, 'the save already holds a row with the system id of s'], ['a real constraint of two columns', realErrors.composite, 'the save already holds a row with the xcor of s, the ycor of s'], ['a real foreign key that does not match', realErrors.mismatch, 'the link of the c to the p does not match'], ['a real function the save lacks', realErrors.function, 'the read uses a function the save lacks'], ['a real table that exists', realErrors.exists, 'the save already holds the s'], ['a real generated column', realErrors.generated, 'the save does not allow writing the xcor'], ['a real view', realErrors.view, 'the save does not allow writing the v'], ['a real value of the wrong type', realErrors.strict, 'the save does not take that value for the xcor of t'], ['a real constraint of a column of a table of the save', 'NOT NULL constraint failed: FCT_RaceSysSurvey.Xcor', 'the save requires the xcor of race sys survey'], ['an insert of a missing column', 'table FCT_Ship has no column named CurrentCrew', 'the save lacks the current crew of ship']]
 
       return firstProblem([
         ...fields.map(([label, field, words]) => [label, provenance.fieldWords(field) === words ? '' : `reads "${provenance.fieldWords(field)}", not "${words}"`]),
         ...failures.map(([label, text, words]) => [label, provenance.failureWords(new Error(text)) === words ? '' : `reads "${provenance.failureWords(new Error(text))}", not "${words}"`]),
+        ...CODED.map(([label, text, words]) => [label, provenance.failureWords(Object.assign(new Error(text), { code: 'SQLITE_ERROR' })) === words ? '' : `reads "${provenance.failureWords(Object.assign(new Error(text), { code: 'SQLITE_ERROR' }))}", not "${words}"`]),
+        ...KEPT_CODED.map((text) => ['a file error with a code that is not the database\'s', provenance.failureWords(Object.assign(new Error(text), { code: 'EACCES' })) === text ? '' : `reads "${provenance.failureWords(Object.assign(new Error(text), { code: 'EACCES' }))}", not "${text}"`]),
+        ...KEPT.map((text) => ['a text that is no database message', provenance.failureWords(new Error(text)) === text ? '' : `reads "${provenance.failureWords(new Error(text))}", not "${text}"`]),
         ['a list', provenance.fieldList(['FCT_Ship.CurrentCrew', 'FCT_Fleet']) === 'the current crew of ship, the fleet data' ? '' : 'is not the words joined'],
         ...[...fields.map(([, field]) => provenance.fieldWords(field)), ...failures.map(([, text]) => provenance.failureWords(new Error(text)))].map((text) => ['no name', code.test(text) ? `says "${code.exec(text)[0]}"` : '']),
       ])
@@ -474,9 +489,16 @@ const MUTATIONS = [
   ['a missing growth modifier named by its bare column', path.join('utilities', 'colonies.js'), "PopulationGrowthModifier: 'the species\\' population growth modifier'", "PopulationGrowthModifier: 'PopulationGrowthModifier'", ['no unavailable result names a table or column']],
   ['the words of a missing field keep the column name', path.join('utilities', 'provenance.js'), "  return inputWords(table, column === '*' ? '' : column)\n}", '  return field\n}', ['the words of a missing field and of a failed read']],
   // eslint-disable-next-line no-template-curly-in-string
-  ['the words of a failed read keep the column an ambiguous read names', path.join('utilities', 'provenance.js'), '.replace(/ambiguous column name: (\\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`)', '', ['the words of a missing field and of a failed read']],
-  ['the words of a failed read keep the code of the database error', path.join('utilities', 'provenance.js'), ".replace(/^SQLITE_\\w+: /, '')", '', ['the words of a missing field and of a failed read']],
-  ['the words of a failed read keep the table named in the error', path.join('utilities', 'provenance.js'), '.replace(/\\b(?:FCT|DIM|VIR)_\\w+(?:\\.\\w+)?/g, named)', '', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the column an ambiguous read names', path.join('utilities', 'provenance.js'), '[/ambiguous column name: (\\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`],', '', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the code of the database error', path.join('utilities', 'provenance.js'), '.replace(/^SQLITE_[A-Z_]+: /, \'\')', '', ['the words of a missing field and of a failed read']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the words of a failed read keep the table named in a constraint', path.join('utilities', 'provenance.js'), '[/NOT NULL constraint failed: ([^\\s,]+(?:, [^\\s,]+)*)/g, (_found, names) => `the save requires ${namedList(names)}`],', '[/NOT NULL constraint failed: ([^\\s,]+(?:, [^\\s,]+)*)/g, (_found, names) => `the save requires ${names}`],', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the names of a message of another form', path.join('utilities', 'provenance.js'), 'return database ? worded.replace(', 'return false ? worded.replace(', ['the words of a missing field and of a failed read']],
+  ['the words of any error put the names of another form in words whatever its code', path.join('utilities', 'provenance.js'), 'return database ? worded.replace(', 'return true ? worded.replace(', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the second column of a constraint', path.join('utilities', 'provenance.js'), '[/UNIQUE constraint failed: ([^\\s,]+(?:, [^\\s,]+)*)/g', '[/UNIQUE constraint failed: (\\S+(?:, \\S+)*)/g', ['the words of a missing field and of a failed read']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the words of a failed read keep the tables of a link that does not match', path.join('utilities', 'provenance.js'), '  [/foreign key mismatch - "([^"]*)" referencing "([^"]*)"/g, (_found, child, parent) => `the link of ${named(child)} to ${named(parent)} does not match`],\n', '', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the rule of a check', path.join('utilities', 'provenance.js'), '[/CHECK constraint failed: .*/g, () => \'a value breaks a rule of the save\'],', '', ['the words of a missing field and of a failed read']],
   ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://aurora4x.com/.', ['no registered rule cites a glossary link']],
   ['the help card speaks to the reader', HELP_PANEL, 'Definitions kept in the app', 'Your definitions kept in the app', ['the help speaks in the impersonal voice']],
   ['a page overview speaks to the reader', GLOSSARY, 'overview: \'Production Recap lists every job', 'overview: \'Your Production Recap lists every job', ['the help speaks in the impersonal voice']],

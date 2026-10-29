@@ -184,12 +184,38 @@ export const fieldWords = (field) => {
 // Capability fields in words, as one list for a notice.
 export const fieldList = (fields) => fields.map(fieldWords).join(', ')
 
-// What a failed read says on screen: the first line of the error, with the table or column a database error names put in words and its SQLite code dropped (`no such column: FCT_Ship.CurrentCrew` reads as the save lacking the current crew of ship).
-export const failureWords = (error) => {
-  const text = String(error && error.message !== undefined ? error.message : error).split('\n')[0]
-  const named = (name) => (name.includes('.') || /^(?:FCT|DIM|VIR)_/.test(name) ? fieldWords(name) : `the ${spaced(name)}`)
+const named = (name) => (name.includes('.') || /^(?:FCT|DIM|VIR)_/.test(name) ? fieldWords(name) : `the ${spaced(name)}`)
 
-  return text.replace(/^SQLITE_\w+: /, '').replace(/no such (?:column|table): (\S+)/g, (_found, name) => `the save lacks ${named(name)}`).replace(/ambiguous column name: (\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`).replace(/has no column named (\S+)/g, (_found, name) => `lacks ${named(name)}`).replace(/\b(?:FCT|DIM|VIR)_\w+(?:\.\w+)?/g, named)
+const namedList = (names) => names.split(', ').map(named).join(', ')
+
+// The messages SQLite gives, with what each names: a read or a write that the save cannot take.
+const DATABASE_FORMS = [
+  [/no such (?:column|table): (\S+)/g, (_found, name) => `the save lacks ${named(name)}`],
+  [/ambiguous column name: (\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`],
+  [/table (\S+) has no column named (\S+)/g, (_found, table, column) => `the save lacks ${inputWords(table, column)}`],
+  [/NOT NULL constraint failed: ([^\s,]+(?:, [^\s,]+)*)/g, (_found, names) => `the save requires ${namedList(names)}`],
+  [/UNIQUE constraint failed: ([^\s,]+(?:, [^\s,]+)*)/g, (_found, names) => `the save already holds a row with ${namedList(names)}`],
+  [/foreign key mismatch - "([^"]*)" referencing "([^"]*)"/g, (_found, child, parent) => `the link of ${named(child)} to ${named(parent)} does not match`],
+  [/no such function: (\S+)/g, () => 'the read uses a function the save lacks'],
+  [/table (\S+) already exists/g, (_found, name) => `the save already holds ${named(name)}`],
+  [/cannot (?:UPDATE|INSERT into) generated column "([^"]*)"/g, (_found, name) => `the save does not allow writing ${named(name)}`],
+  [/cannot modify (\S+) because it is a view/g, (_found, name) => `the save does not allow writing ${named(name)}`],
+  [/cannot store \w+ value in \w+ column (\S+)/g, (_found, name) => `the save does not take that value for ${named(name)}`],
+  [/CHECK constraint failed: .*/g, () => 'a value breaks a rule of the save'],
+  [/near "[^"]*": syntax error/g, () => 'the read is malformed'],
+]
+
+// Whether an error comes from the database: SQLite's own code on it or on the error it wraps, a Sequelize error, or the text of one kept before (`SQLITE_ERROR: …`).
+const fromDatabase = (error, text) => /^SQLITE_[A-Z_]+: /.test(text) || Boolean(error && typeof error === 'object' && (/^SQLITE/.test(error.code || '') || /^Sequelize/.test(error.name || '') || /^SQLITE/.test((error.parent && error.parent.code) || '')))
+
+// What a failed read or write says on screen: the first line of the error. A database message has its SQLite code dropped and the table or column it names put in words (`no such column: FCT_Ship.CurrentCrew` reads as the save lacking the current crew of ship); a message of a form not listed above has its table names and quoted names put in words too, but only when the error comes from the database. Any other text, a file path with a table's name in it among them, stays as it is.
+export const failureWords = (error) => {
+  const raw = String(error && error.message !== undefined ? error.message : error).split('\n')[0]
+  const database = fromDatabase(error, raw)
+  const text = raw.replace(/^SQLITE_[A-Z_]+: /, '')
+  const worded = DATABASE_FORMS.reduce((rest, [form, words]) => rest.replace(form, words), text)
+
+  return database ? worded.replace(/\b(?:FCT|DIM|VIR)_\w+(?:\.\w+)?/g, named).replace(/"([A-Za-z]\w*)"/g, (_found, name) => named(name)) : worded
 }
 
 // The assumption of a figure whose rule cannot be matched to the save: a save normally states the game rules it was played under, but a damaged one can lack the columns that tell.

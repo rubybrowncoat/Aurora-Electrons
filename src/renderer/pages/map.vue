@@ -329,7 +329,7 @@ import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
 import { jumpPointPlaces } from '../utilities/places'
-import { fieldList, isAvailable, valueOrNull } from '../utilities/provenance'
+import { failureWords, fieldList, isAvailable, valueOrNull } from '../utilities/provenance'
 import { OBSERVATION_PURPOSE, OBSERVATION_RULE } from '../utilities/recovery-ledger'
 import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
 import { ALL_TAGS } from '../utilities/world-tags'
@@ -3305,7 +3305,8 @@ export default {
         this.activateSnackbar({ color: 'success', text: `Saved the positions of ${ids.length} ${ids.length === 1 ? 'system' : 'systems'}` })
         this.$asyncComputed.systems.update()
       } catch (error) {
-        this.activateSnackbar({ color: 'error', text: `Couldn't save the positions: ${error.message}` })
+        console.error("Couldn't save the positions", error)
+        this.activateSnackbar({ color: 'error', text: `Couldn't save the positions: ${failureWords(error)}` })
       } finally {
         this.saving = false
       }

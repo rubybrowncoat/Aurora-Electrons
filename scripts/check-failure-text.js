@@ -84,6 +84,7 @@ const FILES = {
   'mixins/world-tags': 'mixins/world-tags.js',
   'pages/notebook': 'pages/notebook.vue',
   'pages/survey-progress': 'pages/survey-progress.vue',
+  'pages/map': 'pages/map.vue',
   'components/fleets/FleetStations': 'components/fleets/FleetStations.vue',
   'components/page/UnsupportedSave': 'components/page/UnsupportedSave.vue',
   'components/log/ArchivePanel': 'components/log/ArchivePanel.vue',
@@ -91,7 +92,22 @@ const FILES = {
 
 const textsOf = () => Object.fromEntries(Object.entries(FILES).map(([name, file]) => [name, fs.readFileSync(path.join(RENDERER, file), 'utf8')]))
 
-const load = (name, sources) => loadModule(name, { stubs: STUBS, sources, modules: { '../../package.json': 'export const version = "0.0.0"' } })
+// The map page's packages and its theme, as stand-ins that draw nothing.
+const MAP_STUBS = {
+  vue: 'export default { observable: (value) => value }',
+  cytoscape: 'const cytoscape = () => ({}); cytoscape.use = () => {}; export default cytoscape',
+  'cytoscape-cxtmenu': 'export default {}',
+  'cytoscape-fcose': 'export default {}',
+  'cytoscape-cola': 'export default {}',
+  'lodash/groupBy': 'export default () => ({})',
+}
+const MAP_MODULES = {
+  'utilities/appearance': 'export const activeAppearance = () => ({})\nexport const MAP_MENU = { fillAlpha: 0.88, activeSlot: 2, activeAlpha: 0.9 }',
+  'utilities/appearance-font': 'export const fontRoles = () => ({})\nexport const whenFontsReady = () => Promise.resolve()',
+  'components/charts/theme': 'export const chartTheme = () => ({}); export const mapFont = () => ({}); export const markerPoints = () => null; export const seriesIdentity = () => null; export const withAlpha = (color) => color',
+}
+
+const load = (name, sources) => loadModule(name, { stubs: { ...STUBS, ...MAP_STUBS }, sources, modules: { '../../package.json': 'export const version = "0.0.0"', ...MAP_MODULES } })
 
 // The statements of one run: [key, label, test], each test a function giving true or a text of what is wrong.
 const statementsOf = async (sources) => {
@@ -311,6 +327,49 @@ const statementsOf = async (sources) => {
     return vm.failures.length === stored.length ? (problems.length ? problems.join('; ') : true) : `lists ${vm.failures.length} of ${stored.length} failures`
   })
 
+  // The write of Save Positions on saves that cannot take it: the columns are not there, or a rule of the table refuses the value.
+  add('map-save', 'the map: positions that cannot be saved say so in words', async () => {
+    const options = (await get('pages/map')).default
+    const logged = console.error
+    const problems = []
+    const saves = [
+      ['a missing column', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer);'],
+      ['a rule of the table', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer check (Xcor < 100), Ycor integer); insert into FCT_RaceSysSurvey values (1, 1, 7, 5, 5);'],
+      ['a missing table', 'create table Other (Id integer);'],
+      ['two columns that must differ', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer, Ycor integer, unique (Xcor, Ycor)); insert into FCT_RaceSysSurvey values (1, 1, 2, 500, 500); insert into FCT_RaceSysSurvey values (1, 1, 7, 5, 5);'],
+      ['a column the save computes', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer generated always as (1) virtual, Ycor integer); insert into FCT_RaceSysSurvey (GameID, RaceID, SystemID, Ycor) values (1, 1, 7, 5);'],
+      ['a survey that is a view', 'create table Base (GameID integer, RaceID integer, SystemID integer, Xcor integer, Ycor integer); create view FCT_RaceSysSurvey as select * from Base;'],
+      ['a link that does not match', 'create table FCT_System (SystemID integer, Name text); create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer references FCT_System (SystemID), Ycor integer); insert into FCT_RaceSysSurvey values (1, 1, 7, null, 5); pragma foreign_keys = on;'],
+    ]
+
+    console.error = () => {}
+
+    try {
+      for (const [kind, schema] of saves) {
+        const raw = new Database(':memory:')
+
+        raw.exec(schema)
+
+        const database = { transaction: (work) => work(null), query: async (sql) => [raw.query(sql).all()] }
+        const shown = []
+        const vm = instantiate(options, { $store: { getters: {}, state: {} }, database, GameID: 1, RaceID: 1, data: { movedIds: [7], graphPositions: () => ({ 7: { x: 500, y: 500 } }), activateSnackbar: (snack) => shown.push(snack), saveDialog: true, systems: [] } })
+
+        await vm.savePositions()
+        raw.close()
+
+        const said = shown.length === 1 && shown[0].color === 'error' ? inWords(shown[0].text.replace("Couldn't save the positions: ", '')) : `shows ${JSON.stringify(shown)}`
+
+        if (said !== true) {
+          problems.push(`${kind}: ${said}`)
+        }
+      }
+    } finally {
+      console.error = logged
+    }
+
+    return problems.length ? problems.join('; ') : true
+  })
+
   add('refused', 'a save that is refused says what it lacks in words', async () => {
     const { REFUSALS } = await get('utilities/capabilities')
     const options = (await get('components/page/UnsupportedSave')).default
@@ -363,6 +422,8 @@ const MUTATIONS = [
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the observation note keeps the message of the database', file: 'pages/survey-progress', find: '(${failureWords(this.observationRead.failed)})', replace: '(${this.observationRead.failed.message})', fails: ['observation-note'] },
   { name: 'the Game Log diagnostic keeps the message of the database', file: 'utilities/log-diagnostics', find: 'failed: failed ? failureWords(failed) : null,', replace: 'failed: failed ? failed.message : null,', fails: ['log-diagnostic'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the map reports a failed save of positions as the database worded it', file: 'pages/map', find: 'text: `Couldn\'t save the positions: ${failureWords(error)}`', replace: 'text: `Couldn\'t save the positions: ${error.message}`', fails: ['map-save'] },
   { name: 'the archive lists a stored failure as the database worded it', file: 'components/log/ArchivePanel', find: 'reason: failureWords(failure.reason) }', replace: 'reason: failure.reason }', fails: ['archive-failures'] },
   { name: 'the refusal of a file with no game table names the table', file: 'utilities/capabilities', find: "notice: 'The file has no game table, so it is not an Aurora save.'", replace: "notice: 'The file has no FCT_Game table, so it is not an Aurora save.'", fails: ['refused'] },
   { name: 'the refusal lists the absent columns as stored', file: 'components/page/UnsupportedSave', find: 'return this.line.missing.map(fieldWords)', replace: 'return this.line.missing', fails: ['refused'] },
