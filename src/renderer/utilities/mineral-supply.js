@@ -102,20 +102,20 @@ const hasDriver = (drivers, gaps) => (known(drivers) && !(gaps > 0) ? Math.floor
 // The minerals aboard ships: `cargo` is the page's read by material id, null for a material whose hold amount is not recorded; a material with no key has none aboard (0), and no read at all is unknown.
 const cargoResult = (cargo, materialId) => {
   if (!cargo) {
-    return unavailable({ rule: 'mineralSupply.cargo', missing: ['FCT_ShipCargo.Amount'] })
+    return unavailable({ rule: 'mineralSupply.cargo', missing: ['the amount held in the ship cargo holds'] })
   }
 
   if (!Object.prototype.hasOwnProperty.call(cargo, materialId)) {
     return ofRule({ rule: 'mineralSupply.cargo', value: 0, inputs: { present: ['FCT_ShipCargo'] } })
   }
 
-  return known(cargo[materialId]) ? ofRule({ rule: 'mineralSupply.cargo', value: cargo[materialId], inputs: { present: ['FCT_ShipCargo.Amount'] } }) : unavailable({ rule: 'mineralSupply.cargo', missing: ['FCT_ShipCargo.Amount'] })
+  return known(cargo[materialId]) ? ofRule({ rule: 'mineralSupply.cargo', value: cargo[materialId], inputs: { present: ['FCT_ShipCargo.Amount'] } }) : unavailable({ rule: 'mineralSupply.cargo', missing: ['the amount held in the ship cargo holds'] })
 }
 
 // The results of one mineral at one colony row: its stock and what is in flight to it.
 const resultsAt = (colony, packets, materialId) => stockAndInbound(colony, packets, MINERALS.find((item) => item.id === materialId))
 
-const driverText = (where) => `FCT_PopulationInstallations.Amount or DIM_PlanetaryInstallation.MassDriverValue at ${where}`
+const driverText = (where) => `the number of mass drivers or their driver value at ${where}`
 const POLICY_COLUMN = 'FCT_Population.PurchaseCivilianMinerals'
 
 // Whether a colony's stored destination is one a packet reaches: true when it names a colony that exists and is not the colony itself, false when it names none, a colony that is gone or the colony itself (a packet to itself lands in its own stock), null when the field is not stored. Owner, system and drivers at the destination are never asked: the destination picker offers fewer colonies than a stored destination may be.
@@ -168,7 +168,7 @@ const observed = (rule, flows, populationId, materialId, types) => {
   const amounts = types.map((type) => (type in entry ? entry[type] : 0))
 
   if (amounts.includes(null)) {
-    return unavailable({ rule, missing: ['FCT_RaceMineralData.Amount'] })
+    return unavailable({ rule, missing: ['the amount the race\'s minerals data records'] })
   }
 
   return ofRule({ rule, value: amounts.reduce((total, amount) => total + amount, 0) * flows.perYear, inputs: { present: ['FCT_RaceMineralData'] } })
@@ -190,7 +190,7 @@ export const routeResult = ({ colony, civilian, RaceID }) => {
     const source = hasDriver(colony.Drivers, colony.DriverGaps)
 
     if (reach === null) {
-      missing = ['FCT_Population.MassDriverDest']
+      missing = ['the colony\'s mass driver destination']
     } else if (reach === false || source === false) {
       stock = 'none'
     } else if (source === null) {
@@ -199,7 +199,7 @@ export const routeResult = ({ colony, civilian, RaceID }) => {
       stock = 'ships'
     }
   } else {
-    missing = ['the site\'s row of FCT_Population']
+    missing = ['the site\'s colony']
   }
 
   if (stock === 'unknown') {
@@ -271,10 +271,10 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
       supply = ofRule({ rule: 'mineralSupply.supply', value: 0, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount'] } })
       capacity = ofRule({ rule: 'minerals.massDriverRate', value: 0, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount'] } })
     } else {
-      const driverPart = ships ? sent : routed.stock === 'none' ? ofRule({ rule: 'mineralSupply.supply', value: 0, inputs: { present: ['FCT_Population.MassDriverDest'] } }) : unavailable({ rule: 'mineralSupply.supply', missing: ['FCT_PopulationInstallations.Amount or DIM_PlanetaryInstallation.MassDriverValue'] })
+      const driverPart = ships ? sent : routed.stock === 'none' ? ofRule({ rule: 'mineralSupply.supply', value: 0, inputs: { present: ['FCT_Population.MassDriverDest'] } }) : unavailable({ rule: 'mineralSupply.supply', missing: ['the number of mass drivers or their driver value'] })
 
       supply = combine({ rule: 'mineralSupply.supply', parts: { packets: packetOutput, drivers: driverPart }, compute: ({ packets: output, drivers: sentByDrivers }) => output + sentByDrivers })
-      capacity = ships ? massDriverRateResult(colony.Drivers, colony.DriverGaps) : routed.stock === 'none' ? ofRule({ rule: 'minerals.massDriverRate', value: 0, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] })
+      capacity = ships ? massDriverRateResult(colony.Drivers, colony.DriverGaps) : routed.stock === 'none' ? ofRule({ rule: 'minerals.massDriverRate', value: 0, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] })
     }
 
     if (policyMissing && reach !== false) {
@@ -300,7 +300,7 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
       capacity,
       sent,
       loaded,
-      stock: results ? results.stock : unavailable({ rule: 'minerals.colonyStock', missing: ['the site\'s row of FCT_Population'] }),
+      stock: results ? results.stock : unavailable({ rule: 'minerals.colonyStock', missing: ['the site\'s colony'] }),
     }
   })
 

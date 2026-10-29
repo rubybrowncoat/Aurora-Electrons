@@ -5,7 +5,7 @@ import { maintenanceClusters, shipFigures } from './maintenance-pools'
 import { roundToDecimal } from './math'
 import { fleetCommandChain } from './minerals'
 import { MINING_BONUS, MINING_WITHHELD } from './mining-data'
-import { combine, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
+import { UNVERIFIED_SAVE, combine, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 import { totalOf } from './production'
 
 // The racial "Maintenance Production Rate" is BP per facility per year; 1 MSP is 0.25 BP.
@@ -316,10 +316,8 @@ const UNKNOWN_REASONS = ['Modules unknown', 'Tanks unknown', 'Not surveyed']
 // Whether an idle reason stands for a missing input (the output is then unknown, not 0).
 export const harvesterReasonIsUnknown = (reason) => UNKNOWN_REASONS.includes(reason)
 
-// A rule's status for a save: the rule's own verification where it holds for the save's formula version (`loadFormulaVersion`, null when the save is not 2.7-shaped), otherwise an estimate.
+// A rule's status for a save: the rule's own verification where it holds for the save's formula version (`loadFormulaVersion`, null when the save lacks the formula columns), otherwise an estimate.
 const statusFor = (rule, version) => (ruleSupports(rule, version) === true ? getRule(rule).verification : 'estimated')
-
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
 
 const assumptionsFor = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE])
 
@@ -467,7 +465,7 @@ export const compact = (value) => {
 
 // The rule registry for the Logistics page's figures, with the evidence in docs/plans/aurcalcs/build-2.md § Logistics.
 const LOGISTICS_VERSIONS = ['2.7.x']
-const LEDGER = 'matches the game\'s own mineral ledger on every sample colony (docs/plans/aurcalcs/build-2.md § Logistics)'
+const LEDGER = 'matches the game\'s own mineral ledger on every sample colony'
 
 registerRule({
   id: 'logistics.refineryOutput',
@@ -503,7 +501,7 @@ registerRule({
   units: 'MSP/yr',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles of the input minerals'],
-  note: 'The production figure (logistics.mspProduction) held to what the present stock of the input minerals allows, naming the mineral that limits it. Mines on the colony\'s body are not read as unlimited supply: what mining, packets and hauls add, and when, is the supplied output of mspSupply.supplied (msp-supply.js), kept apart from this figure.',
+  note: 'The production figure (the maintenance supply production rule) held to what the present stock of the input minerals allows, naming the mineral that limits it. Mines on the colony\'s body are not read as unlimited supply: what mining, packets and hauls add, and when, is the supplied output of the incoming minerals, kept apart from this figure.',
   assumptions: ['Only the colony\'s present stockpile supplies the input minerals'],
 })
 
@@ -570,7 +568,7 @@ registerRule({
   units: 'L/yr per ship',
   verification: 'confirmed',
   structure: ['FCT_ClassComponent and FCT_DamagedComponent (the undamaged harvester modules)', 'FCT_Race.FuelProduction', 'FCT_Ship.CurrentCrew, FCT_ShipClass.Crew', 'FCT_CommanderBonuses (Mining) and the naval admin chain', 'FCT_MineralDeposit.Accessibility of the body at the fleet\'s coordinates'],
-  note: 'Undamaged modules times the racial Fuel Production rate (not the component\'s own value) times the commander\'s and naval admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard when it is short; a fleet with no command takes the race\'s root naval admin command. This is the game\'s 2.7.1 rule: its stored inputs (racial rate, class modules, accessibility, tank levels) were reconciled on two saves, but no clean fuel increment between saves has been observed, so the rate itself rests on the rule and those inputs.',
+  note: 'Undamaged modules times the racial Fuel Production rate (not the component\'s own value) times the commander\'s and naval admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard when it is short; a fleet with no command takes the race\'s root naval admin command. This is the game\'s rule: its stored inputs (racial rate, class modules, accessibility, tank levels) were reconciled on two saves, but no clean fuel increment between saves has been observed, so the rate itself rests on the rule and those inputs.',
 })
 
 registerRule({
@@ -579,6 +577,6 @@ registerRule({
   units: 'L',
   verification: 'confirmed',
   structure: ['logistics.harvesterOutput', 'FCT_Ship.Fuel and the undamaged FuelStorage components (FCT_ClassComponent, FCT_DamagedComponent)', 'FCT_MineralDeposit.Amount'],
-  note: 'The unconstrained rate times the horizon, held first to the tonnes of Sorium the deposit has (2,000 L each) and then to the free room in the undamaged tanks; a ship with any room is filled and one with none gives nothing. The game\'s 2.7.1 order. The tank cap was observed on a save pair (35 of 36 ships ended at capacity); the rate was not, and the deposit\'s decline per cycle is not modelled.',
+  note: 'The unconstrained rate times the horizon, held first to the tonnes of Sorium the deposit has (2,000 L each) and then to the free room in the undamaged tanks; a ship with any room is filled and one with none gives nothing. The game\'s order. The tank cap was observed on a save pair (35 of 36 ships ended at capacity); the rate was not, and the deposit\'s decline per cycle is not modelled.',
   assumptions: ['The deposit\'s accessibility holds over the horizon: it falls once less than half of the original amount is left, and that is not applied', 'Ships over one deposit take it in turn, so a body\'s total is held to the deposit and each ship\'s own figure is taken against all of it', 'The ship stays where it is, with its modules, crew and commanders, over the horizon'],
 })

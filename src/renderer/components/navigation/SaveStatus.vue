@@ -194,7 +194,7 @@ export default {
 
       const reports = Object.values(this.capabilities.reports)
       const count = (status) => reports.filter((report) => report.status === status).length
-      const formula = this.refusal ? this.refusal.status : this.capabilities.formula.status === 'unavailable' ? `Formula version: not stated (${this.capabilities.formula.inputs.missing.join(', ')} absent)` : `Formula version: ${this.capabilities.formula.value}, assumed from the schema, not a verified version`
+      const formula = this.refusal ? this.refusal.status : this.capabilities.formula.status === 'unavailable' ? `Formula version: not stated (missing ${this.capabilities.formula.inputs.missing.join(', ')})` : 'Formula version: assumed from the schema, not a verified version'
       const gates = [...Object.values(this.capabilities.gates.bonuses), ...Object.values(this.capabilities.gates.components)]
       const unmatched = gates.filter((gate) => gate.status === 'unavailable').length
 

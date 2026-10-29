@@ -1,10 +1,9 @@
 // Intelligence: what one race knows about the others, decoded. Codes and thresholds come from the maintainer's reference for Aurora 2.7.1, references/mechanics/intelligence.md; the queries and their sample checks are in docs/plans/aurcalcs/sql-fleet.md § 7.
 // Every read goes through the viewing race's own intelligence tables. The `Actual*` columns (and alien ship or population IDs) point at the real objects, so they're never joined.
 
-import { STATUS, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull, weakestStatus } from './provenance'
+import { STATUS, UNVERIFIED_SAVE, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull, weakestStatus } from './provenance'
 
 const INTELLIGENCE_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the thresholds are not checked against the save.'
 const START_YEAR = 'the game\'s start year'
 
 export const SECONDS_PER_YEAR = 31536000
@@ -21,7 +20,7 @@ registerRule({
   versions: INTELLIGENCE_VERSIONS,
   verification: 'confirmed',
   structure: ['FCT_AlienRace.DiplomaticPoints'],
-  note: 'The bands of a race\'s diplomatic points as the game\'s intelligence reports word them: below -100 at war, below 0 negative, below 200 neutral, below 800 positive, below 4000 friendly, allied above. The band edges are the maintainer\'s reference for 2.7.1 and are not re-derived from saved data. A missing point total has no standing; a saved 0 is neutral.',
+  note: 'The bands of a race\'s diplomatic points as the game\'s intelligence reports word them: below -100 at war, below 0 negative, below 200 neutral, below 800 positive, below 4000 friendly, allied above. The band edges are the maintainer\'s reference and are not re-derived from saved data. A missing point total has no standing; a saved 0 is neutral.',
 })
 
 registerRule({
@@ -67,7 +66,7 @@ registerRule({
   units: 't',
   verification: 'estimated',
   structure: ['FCT_AlienClass.TCS', 'FCT_AlienShip.AlienClassID, Destroyed'],
-  note: 'The size of an observed class (FCT_AlienClass.TCS) times 50 tons, summed over the tracked ships in service. The 50 tons a size unit is the maintainer\'s reference, not a tonnage the save stores. A ship whose class has no saved size leaves the sum unavailable.',
+  note: 'The stored size of an observed class times 50 tons, summed over the tracked ships in service. The 50 tons a size unit is the maintainer\'s reference, not a tonnage the save stores. A ship whose class has no saved size leaves the sum unavailable.',
   assumptions: ['one size unit of a class is 50 tons'],
 })
 
@@ -86,7 +85,7 @@ registerRule({
   units: 'levels',
   verification: 'confirmed',
   structure: ['FCT_AlienPopulation.MaxIntelligence, AlienPopulationIntelligencePoints'],
-  note: 'The detail of a colony its peak intelligence has unlocked: above 100 points the population and installations, above 200 factories, mines, spaceport and cargo station, above 300 refineries, maintenance, refuelling and ordnance stations, above 500 research, ground training, naval HQ and sector command. The thresholds are the maintainer\'s reference for 2.7.1. A colony without a saved peak intelligence has no level, and a figure the colony is unlocked for but whose last value is missing is unavailable.',
+  note: 'The detail of a colony its peak intelligence has unlocked: above 100 points the population and installations, above 200 factories, mines, spaceport and cargo station, above 300 refineries, maintenance, refuelling and ordnance stations, above 500 research, ground training, naval HQ and sector command. The thresholds are the maintainer\'s reference. A colony without a saved peak intelligence has no level, and a figure the colony is unlocked for but whose last value is missing is unavailable.',
 })
 
 registerRule({
@@ -111,7 +110,7 @@ registerRule({
   versions: INTELLIGENCE_VERSIONS,
   verification: 'confirmed',
   structure: ['FCT_AlienRaceSensor.IntelligencePoints'],
-  note: 'A sensor\'s range and resolution are known once its intelligence points are above 100 (the maintainer\'s reference for 2.7.1). A sensor without saved points has no verdict.',
+  note: 'A sensor\'s range and resolution are known once its intelligence points are above 100 (the maintainer\'s reference). A sensor without saved points has no verdict.',
 })
 
 registerRule({
@@ -119,7 +118,7 @@ registerRule({
   versions: INTELLIGENCE_VERSIONS,
   verification: 'confirmed',
   structure: ['FCT_AlienGroundUnitClass.Hits, Penetrated, Destroyed'],
-  note: 'Each of a ground unit class\'s three counters reveals what it is about at 20 points (the maintainer\'s reference for 2.7.1). A counter without a saved value has no verdict.',
+  note: 'Each of a ground unit class\'s three counters reveals what it is about at 20 points (the maintainer\'s reference). A counter without a saved value has no verdict.',
 })
 
 registerRule({
@@ -135,7 +134,7 @@ registerRule({
   versions: INTELLIGENCE_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_AlienRace.CommModifier, CommStatus'],
-  note: 'The progress of an attempt at communication as the save stores it (FCT_AlienRace.CommModifier). How it rises and what completes it is not read from the reference nor checked against saved attempts.',
+  note: 'The progress of an attempt at communication as the save stores it. How it rises and what completes it is not read from the reference nor checked against saved attempts.',
 })
 
 registerRule({

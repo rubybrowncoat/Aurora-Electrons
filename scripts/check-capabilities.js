@@ -404,7 +404,7 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: a rating (27) turned into a multiplier fails its lookup', failedGates(flip).join() === 'bonus 27' && /rating/.test(flip.gates.bonuses[27].inputs.missing.join()), failedGates(flip).join())
     check('altered: a renamed component type (29) degrades /lagrange only', failedGates(retype).join() === 'component type 29' && retype.reports['/lagrange'].status === 'degraded' && unrelated(retype, '/lagrange'), notSupported(retype).map((report) => report.route).join(', '))
     check('altered: DIM_CommanderBonusType dropped fails every bonus lookup, and /commanders (which reads it) is unsupported', failedGates(noBonus).length === Object.keys(capabilities.BONUS_NAMES).length && noBonus.reports['/commanders'].status === 'unsupported')
-    check('altered: FCT_Game.AncientRelics dropped makes the formula version unavailable, without touching a report', formula.formula.status === 'unavailable' && formula.formula.inputs.missing.join() === 'FCT_Game.AncientRelics' && notSupported(formula).length === 0, JSON.stringify(formula.formula.inputs))
+    check('altered: FCT_Game.AncientRelics dropped makes the formula version unavailable, without touching a report', formula.formula.status === 'unavailable' && formula.formula.inputs.missing.join() === 'the game setting for ancient relics' && notSupported(formula).length === 0, JSON.stringify(formula.formula.inputs))
 
     const pre27Absent = await absentIn(pre27, LINE_COLUMNS)
     const sevenAbsent = await absentIn(sevenDropped, LINE_COLUMNS)

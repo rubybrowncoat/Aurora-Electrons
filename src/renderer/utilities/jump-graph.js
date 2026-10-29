@@ -18,7 +18,7 @@ registerRule({
   units: 'jumps',
   verification: 'confirmed',
   structure: ['FCT_JumpPoint.WPLink', 'FCT_RaceJumpPointSurvey.Explored', 'FCT_RaceJumpPointSurvey.Charted'],
-  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes (docs `fleet`). A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route.',
+  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes. A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route.',
 })
 
 registerRule({

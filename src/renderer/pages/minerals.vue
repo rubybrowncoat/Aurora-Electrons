@@ -709,7 +709,7 @@ export default {
     },
 
     unreadableResult() {
-      return unavailable({ rule: 'minerals.potential', missing: ['FCT_MineralDeposit.Amount or Accessibility'] })
+      return unavailable({ rule: 'minerals.potential', missing: ['the amount or accessibility of a deposit'] })
     },
 
     focus() {
@@ -1340,9 +1340,9 @@ export default {
       ]
     },
 
-    // The rates sentence of the policy panel's foot: the 2.7 constants where they hold for the save, or why the wealth figures show a dash.
+    // The rates sentence of the policy panel's foot: the game's constants where they hold for the save, or why the wealth figures show a dash.
     policyRatesNote() {
-      return ruleSupports('cmcPolicy.rates', this.formulaVersion) === true ? `Buying a complex's output costs ${this.count(CMC_PURCHASE_COST)} wealth a year and taxing it brings in ${this.count(CMC_TAX_INCOME)}, the 2.7 rates; the save stores neither.` : "No purchase or tax rate is verified for the save's game version, so the wealth figures and If switched show a dash."
+      return ruleSupports('cmcPolicy.rates', this.formulaVersion) === true ? `Buying a complex's output costs ${this.count(CMC_PURCHASE_COST)} wealth a year and taxing it brings in ${this.count(CMC_TAX_INCOME)}, the game's rates; the save stores neither.` : "No purchase or tax rate is verified for the save's game version, so the wealth figures and If switched show a dash."
     },
 
     mapLinks() {
@@ -1842,7 +1842,7 @@ export default {
       default: NO_CMC_POLICY,
     },
 
-    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape. The civilian mining rates hold for that version only.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a save that has the formula columns, null for a save without them. The civilian mining rates hold for that version only.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

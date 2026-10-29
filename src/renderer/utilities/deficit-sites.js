@@ -309,11 +309,11 @@ const newExtraction = ({ site, type, count, race }) => {
   const missing = [...(type ? [] : ['a mine type']), ...(count ? [] : ['a number of mines'])]
 
   if (type && !isNumber(type.Mining)) {
-    missing.push(`the mining value of ${type.Name} (DIM_PlanetaryInstallation.MiningProductionValue)`)
+    missing.push(`the mining value of ${type.Name}`)
   }
 
   if (type && !isNumber(type.Workers)) {
-    missing.push(`the workers of ${type.Name} (DIM_PlanetaryInstallation.Workers)`)
+    missing.push(`the workers of ${type.Name}`)
   }
 
   if (missing.length) {
@@ -453,7 +453,7 @@ export const rankSites = ({ candidates, mined = new Map(), destination = null, b
       notes.push('The deposit holds less than one load of the carrier.')
     }
 
-    return { key: `${site.SystemBodyID}-${site.MaterialID}`, SystemBodyID: site.SystemBodyID, name: nameOf(site), system: site.SystemName || '', state, site, amount: depositResult(site.Amount, 'FCT_MineralDeposit.Amount'), accessibility: depositResult(site.Accessibility, 'FCT_MineralDeposit.Accessibility'), distance: out.results.route, out, back, deployment, extraction, firstLoad, roundTrip, depletion, firstDelivery, delivered, exhausts, eta: valueOrNull(firstDelivery), notes, rank: null, order: 0 }
+    return { key: `${site.SystemBodyID}-${site.MaterialID}`, SystemBodyID: site.SystemBodyID, name: nameOf(site), system: site.SystemName || '', state, site, amount: depositResult(site.Amount, 'the amount of the deposit'), accessibility: depositResult(site.Accessibility, 'the accessibility of the deposit'), distance: out.results.route, out, back, deployment, extraction, firstLoad, roundTrip, depletion, firstDelivery, delivered, exhausts, eta: valueOrNull(firstDelivery), notes, rank: null, order: 0 }
   })
 
   const group = (row) => (row.exhausts === true ? 1 : row.eta === null ? 2 : 0)

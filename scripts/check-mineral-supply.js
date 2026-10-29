@@ -192,7 +192,7 @@ const pure = (ctx) => {
     const noDrivers = route(colony(1, 'Home', { Drivers: 1, DriverGaps: 1, ...toward(to) }), false)
     const noColony = route(undefined, false)
 
-    return isUnavailable(noDestination) && noDestination.inputs.missing.some((text) => text.includes('MassDriverDest')) && isUnavailable(noDrivers) && noDrivers.inputs.missing.some((text) => text.includes('MassDriverValue')) && isUnavailable(noColony) ? true : short([noDestination, noDrivers, noColony])
+    return isUnavailable(noDestination) && noDestination.inputs.missing.some((text) => text.includes('mass driver destination')) && isUnavailable(noDrivers) && noDrivers.inputs.missing.some((text) => text.includes('driver value')) && isUnavailable(noColony) ? true : short([noDestination, noDrivers, noColony])
   })
   add('route: the route is an estimate with its own rule', () => {
     const result = route(colony(1, 'Home'), false)
@@ -687,7 +687,7 @@ const panel = (ctx) => {
     const unknown = vm.siteRows.find((item) => item.populationId === 2)
     const lonely = vm.siteRows.find((item) => item.populationId === 3)
 
-    return unknown.connectionRank === null && unknown.gaps.some((text) => text.includes('MassDriverDest')) && lonely.reason === 'No destination' && unknown.view.label === 'Route not known' ? true : short([unknown.gaps, lonely.reason])
+    return unknown.connectionRank === null && unknown.gaps.some((text) => text.includes('mass driver destination')) && lonely.reason === 'No destination' && unknown.view.label === 'Route not known' ? true : short([unknown.gaps, lonely.reason])
   })
   add('panel: a figure that is not known is null with its result kept, never 0', () => {
     const vm = mount({ supply: result({ surface: [surface(3, 'Lone', { MineProduction: null })] }) })
@@ -1155,7 +1155,7 @@ const MUTATIONS = [
   { name: 'the extraction of an unconnected site delivered to a destination', file: U, find: 'supply = ofRule({ rule: \'mineralSupply.supply\', value: 0, inputs: { present: [\'FCT_Population.MassDriverDest\', \'FCT_PopulationInstallations.Amount\'] } })', replace: 'supply = extraction', fails: ['unconnected', 'save-unconnected'] },
   { name: 'an unconnected site\'s capacity taken from its drivers', file: U, find: 'capacity = ofRule({ rule: \'minerals.massDriverRate\', value: 0, inputs: { present: [\'FCT_Population.MassDriverDest\', \'FCT_PopulationInstallations.Amount\'] } })\n    } else {', replace: 'capacity = massDriverRateResult(colony.Drivers, colony.DriverGaps)\n    } else {', fails: ['unconnected'] },
   { name: 'the drivers\' capacity taken for what they ship', file: U, find: 'const driverPart = ships ? sent :', replace: 'const driverPart = ships ? massDriverRateResult(colony.Drivers, colony.DriverGaps) :', fails: ['throughput'] },
-  { name: 'a throughput that is not known given as 0', file: U, find: ': unavailable({ rule: \'mineralSupply.supply\', missing: [\'FCT_PopulationInstallations.Amount or DIM_PlanetaryInstallation.MassDriverValue\'] })', replace: ': ofRule({ rule: \'mineralSupply.supply\', value: 0, inputs: { present: [] } })', fails: ['throughput'] },
+  { name: 'a throughput that is not known given as 0', file: U, find: ': unavailable({ rule: \'mineralSupply.supply\', missing: [\'the number of mass drivers or their driver value\'] })', replace: ': ofRule({ rule: \'mineralSupply.supply\', value: 0, inputs: { present: [] } })', fails: ['throughput'] },
   { name: 'the freighter loads counted as the drivers\' sends', file: U, find: 'const sentOf = (flows, populationId, materialId) => observed(\'mineralSupply.shipped\', flows, populationId, materialId, [LEDGER_TYPES.sent])', replace: 'const sentOf = (flows, populationId, materialId) => observed(\'mineralSupply.shipped\', flows, populationId, materialId, [LEDGER_TYPES.sent, LEDGER_TYPES.loaded])', fails: ['throughput', 'observed'] },
   { name: 'the packets\' output left out of the supply', file: U, find: 'compute: ({ packets: output, drivers: sentByDrivers }) => output + sentByDrivers', replace: 'compute: ({ packets: output, drivers: sentByDrivers }) => sentByDrivers', fails: ['throughput', 'destinations'] },
   { name: 'the extraction taken as what stays in the site\'s stock', file: U, find: 'compute: ({ extraction: dug, packetOutput: shipped }) => dug - shipped', replace: 'compute: ({ extraction: dug, packetOutput: shipped }) => dug', fails: ['conservation', 'save-conservation'] },

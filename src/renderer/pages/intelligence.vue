@@ -763,7 +763,7 @@ export default {
     },
   },
   asyncComputed: {
-    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a save that has the formula columns, null for a save without them.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

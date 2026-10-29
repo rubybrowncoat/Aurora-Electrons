@@ -151,7 +151,7 @@ export const transitEstimator = (routes, lagrangePoints, basis) => {
     if (!hasOrigin) {
       return missingEstimate('no-origin', 'a colony with people and a position to fly from', speedResult, assumptions)
     } else if (!hasPosition(body)) {
-      return missingEstimate('no-position', 'the body\'s position (FCT_SystemBody.Xcor, Ycor)', speedResult, assumptions)
+      return missingEstimate('no-position', 'the body\'s position', speedResult, assumptions)
     }
 
     const found = own.toPlace(body)

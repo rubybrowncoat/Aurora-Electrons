@@ -57,7 +57,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['transport.fleetSpeed', 'transport.fleetCargo', 'the explored jump points'],
-  note: 'One travel cycle for the whole fleet: twice the route at the fleet\'s one speed plus loading and unloading at both ends, each stop taking the slowest ship\'s time (`transport.handlingTime`), and the wait for the jump shock the ships draw (`route.jumpWait`), counted at its upper case. Ships work in parallel at a stop, so a fast ship waits for the slowest at the stop and sails at the fleet\'s speed.',
+  note: 'One travel cycle for the whole fleet: twice the route at the fleet\'s one speed plus loading and unloading at both ends, each stop taking the slowest ship\'s time, and the wait for the jump shock the ships draw, counted at its upper case. Ships work in parallel at a stop, so a fast ship waits for the slowest at the stop and sails at the fleet\'s speed.',
   assumptions: ['one speed all the way and both ways', 'full holds', 'no refuelling or overhaul stops'],
 })
 

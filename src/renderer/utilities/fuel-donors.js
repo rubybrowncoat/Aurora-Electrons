@@ -3,7 +3,7 @@
 import { columnTotal } from './logistics'
 import { UNKNOWN_TEXT } from './math'
 import { columnsOf } from './mine-bootstrap-data'
-import { ofRule, registerRule, ruleSupports, unavailable } from './provenance'
+import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 // DIM_ComponentType: Transfer - Fuel, and Harvester.
 const TRANSFER_FUEL = 61
@@ -13,8 +13,6 @@ export const LOW_RATE_LPH = 20000
 export const LOW_RATE_RECIPIENT_HS = 20
 
 const FUEL_SERVICE_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the fuel service rules are not checked against the save.'
-
 registerRule({
   id: 'fuelService.stored',
   versions: FUEL_SERVICE_VERSIONS,

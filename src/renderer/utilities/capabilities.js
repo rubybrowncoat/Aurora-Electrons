@@ -17,7 +17,7 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'assumed',
   structure: ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics'],
-  note: 'A save carries no version label. FCT_Game.AllowCMC and FCT_Game.AncientRelics are the two columns Aurora 2.7 added to FCT_Game, so a save with both is taken as 2.7.x, the formula version the rules are stated for, and a save without one of them has no formula version. That is a fact about the schema, not a verified version.',
+  note: 'A save carries no version label. The two game settings that came with the current release line (whether civilian mining complexes are allowed and whether ancient relics are on) are stored together, so a save with both is taken as played under the rules the app states, and a save without one of them has no formula version. That is a fact about the schema, not a verified version.',
 })
 
 registerRule({
@@ -25,7 +25,7 @@ registerRule({
   versions: ['2.7.x'],
   verification: 'confirmed',
   structure: ['DIM_CommanderBonusType.BonusID', 'DIM_CommanderBonusType.Description', 'DIM_CommanderBonusType.Percentage'],
-  note: 'The commander bonus IDs the planners read were compared with DIM_CommanderBonusType in 2.7 and 2.7.1 saves: each stands for the same bonus, a multiplier or a rating, in both. A save whose row differs is not mapped.',
+  note: 'The commander bonus IDs the planners read were compared with the game\'s commander bonus types in two saves: each stands for the same bonus, a multiplier or a rating, in both. A save whose row differs is not mapped.',
 })
 
 registerRule({
@@ -33,7 +33,7 @@ registerRule({
   versions: ['2.7.x'],
   verification: 'confirmed',
   structure: ['DIM_ComponentType.ComponentTypeID', 'DIM_ComponentType.TypeDescription'],
-  note: 'Component type 29 is Jump Point Stabilisation in the 2.7 and 2.7.1 saves examined, so a save whose type differs is not mapped.',
+  note: 'Component type 29 is Jump Point Stabilisation in the saves examined, so a save whose type differs is not mapped.',
 })
 
 // The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships, the jump point infrastructure and the gate builders of the Lagrange page (its map and saved points do not read them, and the infrastructure table marks the figures it cannot give as unknown), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the ships' fuel service of the Logistics page (the tanker panel and the harvesters' fuel service column name what they could not read, with a Retry; the stock figures do not rest on it), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
@@ -150,6 +150,11 @@ const FUEL_SITE_READS = [
   'FCT_Race(GameID MaxRefuellingRate RaceID UnderwayReplenishmentRate)',
 ].join(' ')
 
+// What the mass driver and mineral stock loaders of the colonies read (utilities/mineral-supply.js, utilities/msp-supply.js, utilities/colony-minerals.js), whose queries build their columns by name.
+const spaced = (name) => name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
+
+const MASS_DRIVER_READS = 'DIM_PlanetaryInstallation(MassDriverValue) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* GameID MassDriverDest PopulationID RaceID) FCT_PopulationInstallations(Amount)'
+
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
@@ -168,7 +173,9 @@ const EXTRA_READS = Object.freeze({
     gases: 'DIM_Gases(GasID Name BoilingPoint GHGas AntiGHGas Dangerous DangerousLevel)',
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
   }),
-  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS }),
+  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
+  '/minerals': Object.freeze({ page: 'FCT_IndustrialProjects(* Amount GameID PopulationID RaceID) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* Reserve* GameID PopulationID RaceID) FCT_ShipyardTask(* CompletedBP GameID PopulationID RaceID TaskTypeID TotalBP)' }),
+  '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_SystemBody(Xcor)', page: MASS_DRIVER_READS }),
   '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS }),
   '/information': Object.freeze({ shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
   '/designed-tech': Object.freeze({
@@ -290,6 +297,9 @@ const GATE_TABLES = Object.freeze({
 
 const FORMULA_COLUMNS = Object.freeze(['AllowCMC', 'AncientRelics'])
 
+// What each formula column stores, in words for a missing input.
+const FORMULA_SETTINGS = Object.freeze({ AllowCMC: 'the game setting that allows civilian mining complexes', AncientRelics: 'the game setting for ancient relics' })
+
 // The columns Aurora 2.7 added over 2.6, as 'Table.Column', which tell a 2.7 save from an older one: a save carries no version label, and no 2.7 save is without all of them. Read from the saves on disk (AuroraDB_270_base.db against AuroraDB_260_base.db: every other table and column is the same).
 export const LINE_SIGNATURE = Object.freeze([
   'FCT_Game.AllowCMC',
@@ -359,9 +369,9 @@ const hasTable = (schema, table) => schema.has(table.toLowerCase())
 
 const hasColumn = (schema, table, column) => hasTable(schema, table) && schema.get(table.toLowerCase()).has(column.toLowerCase())
 
-// The formula version of the save as a result of 'capability.formulaVersion': assumed 2.7.x when the save has both 2.7 columns of FCT_Game, unavailable (naming the absent ones) otherwise. Separate from the structure checks: a save can have every column a report reads and still be of another game version.
+// The formula version of the save as a result of 'capability.formulaVersion': the stated one, assumed, when the save has both formula columns of FCT_Game, unavailable (naming the absent settings in words) otherwise. Separate from the structure checks: a save can have every column a report reads and still be of another game version.
 export const formulaResult = (schema) => {
-  const missing = qualified(FORMULA_COLUMNS.filter((column) => !hasColumn(schema, 'FCT_Game', column)), 'FCT_Game')
+  const missing = FORMULA_COLUMNS.filter((column) => !hasColumn(schema, 'FCT_Game', column)).map((column) => FORMULA_SETTINGS[column])
 
   return missing.length ? unavailable({ rule: FORMULA, missing, present: qualified(FORMULA_COLUMNS.filter((column) => hasColumn(schema, 'FCT_Game', column)), 'FCT_Game') }) : ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: qualified(FORMULA_COLUMNS, 'FCT_Game') } })
 }
@@ -468,12 +478,12 @@ const evaluateInputs = (route, schema) => {
 }
 
 const bonusGate = (id, expected, row, schema) => {
-  const missingColumns = qualified(GATE_TABLES.DIM_CommanderBonusType.filter((column) => !hasColumn(schema, 'DIM_CommanderBonusType', column)), 'DIM_CommanderBonusType')
+  const missingColumns = GATE_TABLES.DIM_CommanderBonusType.filter((column) => !hasColumn(schema, 'DIM_CommanderBonusType', column)).map((column) => `the ${spaced(column)} of the commander bonus types`)
 
   if (missingColumns.length) {
     return unavailable({ rule: BONUS, missing: missingColumns })
   } else if (!row) {
-    return unavailable({ rule: BONUS, missing: [`DIM_CommanderBonusType row ${id} (${expected.name})`] })
+    return unavailable({ rule: BONUS, missing: [`the commander bonus type ${id} (${expected.name})`] })
   }
 
   const kind = (value) => (Number(value) === 1 ? 'a multiplier' : 'a rating')
@@ -491,12 +501,12 @@ const bonusGate = (id, expected, row, schema) => {
 }
 
 const componentGate = (id, expected, row, schema) => {
-  const missingColumns = qualified(GATE_TABLES.DIM_ComponentType.filter((column) => !hasColumn(schema, 'DIM_ComponentType', column)), 'DIM_ComponentType')
+  const missingColumns = GATE_TABLES.DIM_ComponentType.filter((column) => !hasColumn(schema, 'DIM_ComponentType', column)).map((column) => `the ${spaced(column)} of the component types`)
 
   if (missingColumns.length) {
     return unavailable({ rule: COMPONENT, missing: missingColumns })
   } else if (!row) {
-    return unavailable({ rule: COMPONENT, missing: [`DIM_ComponentType row ${id} (${expected.name})`] })
+    return unavailable({ rule: COMPONENT, missing: [`the component type ${id} (${expected.name})`] })
   }
 
   return String(row.TypeDescription || '').trim().toLowerCase() === expected.name.toLowerCase() ? ofRule({ rule: COMPONENT, value: expected.name, inputs: { present: [`DIM_ComponentType row ${id}`] } }) : unavailable({ rule: COMPONENT, missing: [`component type ${id} is named "${row.TypeDescription}", not "${expected.name}"`] })

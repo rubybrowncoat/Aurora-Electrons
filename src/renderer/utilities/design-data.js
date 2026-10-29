@@ -134,7 +134,7 @@ registerRule({
   versions: ['2.7.x'],
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents', 'FCT_RaceTech.TechID = FCT_ShipDesignComponents.SDComponentID'],
-  note: 'A component row read as the save stores it, the race\'s own through its research; the meaning of each column is that of the 2.7 schema (docs `components`), so a save that is not 2.7-shaped reads as estimated.',
+  note: 'A component row read as the save stores it, the race\'s own through its research; the meaning of each column is that of the game\'s schema, so a save whose game rules are not known reads as estimated.',
 })
 
 registerRule({
@@ -210,7 +210,7 @@ const givenNumber = (value, name) => {
 // The rule a component's figures are enveloped under: the named design rule for a recomputed component, so its versions, note and standing assumptions travel with each figure, and the origin's own rule otherwise.
 const ruleOf = ({ source }) => (source.origin === COMPONENT_ORIGIN.RECOMPUTED ? source.rule : ORIGIN_RULES[source.origin])
 
-// Wraps one figure of a component as a result under its origin's rule: unavailable naming the input when it is unknown, otherwise at the strength the origin allows (assumed for a manual one, the named design rule's for a recomputed one, confirmed for an imported one from a 2.7-shaped save and estimated from any other).
+// Wraps one figure of a component as a result under its origin's rule: unavailable naming the input when it is unknown, otherwise at the strength the origin allows (assumed for a manual one, the named design rule's for a recomputed one, confirmed for an imported one from a save with the formula columns and estimated from any other).
 const stated = (component, label, value, units, assumptions = []) => {
   const { source } = component
   const rule = ruleOf(component)
@@ -230,7 +230,7 @@ const stated = (component, label, value, units, assumptions = []) => {
     status = ruleSupports(rule, source.formulaVersion) === true ? STATUS.CONFIRMED : STATUS.ESTIMATED
 
     if (status === STATUS.ESTIMATED) {
-      notes.push('The save is not shown to be a 2.7 save, so the meaning of the stored figures is not verified for its game version')
+      notes.push('The save does not state which game rules it was played under, so the meaning of the stored figures is not verified')
     }
   }
 
@@ -511,7 +511,7 @@ const loadRevision = async (database, GameID) => {
   return Object.freeze({ gameTime, increments, tipIncrementId, tipGameTime, ledgerDigest })
 }
 
-// What a component read from an opened save is tied to, so components of different saves, races or revisions are never combined without notice: `gameId`, `raceId`, the `formulaVersion` the save's schema stands for (`loadFormulaVersion`, null when it is not 2.7-shaped), `openId` (the opened copy of the save, which lasts as long as the database object), the `fingerprint` that tells campaigns apart without any app state (the lowest-numbered systems other than the home system, as the campaign-identity evidence describes), the `revision` of the save (game time, the number of increments in the game's ledger, its last one and a digest of the whole ledger, `ledgerDigest`) and `componentState`, a digest of every component row the race holds (all columns, with its research flags), which tells two opens at one point of the ledger apart when a component was edited without the game time moving. `campaignId` and `branchId` stay null until the campaign store supplies them. A part the save cannot give is null.
+// What a component read from an opened save is tied to, so components of different saves, races or revisions are never combined without notice: `gameId`, `raceId`, the `formulaVersion` the save's schema stands for (`loadFormulaVersion`, null when the save lacks the formula columns), `openId` (the opened copy of the save, which lasts as long as the database object), the `fingerprint` that tells campaigns apart without any app state (the lowest-numbered systems other than the home system, as the campaign-identity evidence describes), the `revision` of the save (game time, the number of increments in the game's ledger, its last one and a digest of the whole ledger, `ledgerDigest`) and `componentState`, a digest of every component row the race holds (all columns, with its research flags), which tells two opens at one point of the ledger apart when a component was edited without the game time moving. `campaignId` and `branchId` stay null until the campaign store supplies them. A part the save cannot give is null.
 export const loadComponentSource = async (database, { GameID, RaceID }, { campaignId = null, branchId = null } = {}) => {
   const [formulaVersion, fingerprint, revision, componentState] = await Promise.all([loadFormulaVersion(database), loadFingerprint(database, GameID), loadRevision(database, GameID), loadComponentState(database, GameID, RaceID)])
 
@@ -994,7 +994,7 @@ registerRule({
   units: 'tech level',
   verification: 'estimated',
   structure: ['FCT_RaceTech.TechID', 'FCT_TechSystem.TechTypeID, AdditionalInfo, DevelopCost', 'FCT_MissileType'],
-  note: 'A saved missile design records no tech level. The level it was made with is the one the race holds whose figure reproduces the stored one, the held level that cost the most to develop when several do; a design whose figure no held level gives has an unknown level. The level therefore agrees with the stored figure by construction, and a comparison made from it says that some held level gives the figure, not that the rule gives it independently (scripts/check-design-rules.js reports these as resolved from the stored figure).',
+  note: 'A saved missile design records no tech level. The level it was made with is the one the race holds whose figure reproduces the stored one, the held level that cost the most to develop when several do; a design whose figure no held level gives has an unknown level. The level therefore agrees with the stored figure by construction, and a comparison made from it says that some held level gives the figure, not that the rule gives it independently.',
   assumptions: ['The race has not lost or replaced a level it held when the design was made', 'The game picks the level of greatest development cost among those that give the stored figure'],
 })
 

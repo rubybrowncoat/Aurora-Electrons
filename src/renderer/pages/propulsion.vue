@@ -1734,9 +1734,9 @@ export default {
       return status === 'optimal' ? `The lightest package that holds the ${litres} this set needs, proved against every other combination of the tanks; ${this.count(excessLitres)} L of it is spare. The mark reads assumed because the game has no packing rule.` : `A package that holds the ${litres} this set needs, but not proved the lightest, so the mark reads estimated. The basis above names why.`
     },
 
-    // A result's rule, versions, assumptions and missing inputs on one line.
+    // A result's rule note, assumptions and missing inputs on one line.
     basisText(result) {
-      const parts = [`${result.rule.id}, game ${result.rule.versions.join(', ')}`]
+      const parts = [result.rule.note]
 
       if (result.assumptions.length) {
         parts.push(`assumes ${result.assumptions.join('; ')}`)
@@ -1749,16 +1749,16 @@ export default {
       return parts.join(' · ')
     },
 
-    // The saved class and every set listed, with the status beside each figure and the rules, versions, assumptions and missing inputs of the row, so a copy keeps what the table showed. An unavailable figure is left empty, never 0.
+    // The saved class and every set listed, with the status beside each figure and the rules, assumptions and missing inputs of the row, so a copy keeps what the table showed. An unavailable figure is left empty, never 0.
     downloadCsv() {
-      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Tank package', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs', 'Search']
+      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Tank package', 'Rules', 'Assumptions', 'Missing inputs', 'Search']
       const search = !this.result ? '' : `${this.result.run.incomplete ? `incomplete (${this.result.run.termination})` : 'complete'}: ${countText(this.result.counts)}`
       const lines = this.rows.map((row) => {
         const basis = BASIS_COLUMNS.map(([, key]) => row.provenance[key])
         const fields = basis.map(exportFields)
         const results = row.provenance.tanks ? [...basis, row.provenance.tanks] : basis
 
-        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, this.tankPackageCell(row), unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; '), row.pinned ? '' : search]
+        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, this.tankPackageCell(row), unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; '), row.pinned ? '' : search]
       })
 
       const csv = [header, ...lines].map((line) => line.map((value) => csvCell(value)).join(',')).join('\n')

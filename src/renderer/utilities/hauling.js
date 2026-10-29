@@ -50,7 +50,7 @@ registerRule({
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_MoveOrders', 'FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_SystemBody'],
-  note: 'The straight legs between the places a fleet\'s orders name, through the jump points and Lagrange points they cross, as the game measures a fleet\'s orders (docs `fleet`). A route with an order whose place the save no longer holds is not traced and has no distance.',
+  note: 'The straight legs between the places a fleet\'s orders name, through the jump points and Lagrange points they cross, as the game measures a fleet\'s orders. A route with an order whose place the save no longer holds is not traced and has no distance.',
 })
 
 registerRule({
@@ -59,7 +59,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
-  note: 'Moving time at the fleet\'s set speed plus loading and unloading as `transport.handlingTime` gives them plus the orders\' own delays plus, for each transit through a jump point, the wait for the jump shock the fleet\'s ships draw (`route.jumpWait`) where the fleet\'s crew is read, counted at its upper case. Loading counts the officers\' Logistics bonuses as `transport.logisticsBonuses` gives them, and a cycle comes out long when a bonus is not known; refuelling and overhauls are not counted.',
+  note: 'Moving time at the fleet\'s set speed plus loading and unloading as the stop handling time gives them plus the orders\' own delays plus, for each transit through a jump point, the wait for the jump shock the fleet\'s ships draw where the fleet\'s crew is read, counted at its upper case. Loading counts the officers\' Logistics bonuses, and a cycle comes out long when a bonus is not known; refuelling and overhauls are not counted.',
   assumptions: ['full loads, or the amounts set on the orders', 'the fleet\'s set speed all the way', 'no refuelling or overhaul stops'],
 })
 
@@ -69,7 +69,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.CargoCapacity'],
-  note: 'The minerals and installations a cycle carries, followed through the orders and the hold (a tonne of mineral takes two cargo points), times the cycles a year (`hauling.cycleTime`). The capacity arithmetic is exact; the cycles a year are estimated.',
+  note: 'The minerals and installations a cycle carries, followed through the orders and the hold (a tonne of mineral takes two cargo points), times the cycles a year. The capacity arithmetic is exact; the cycles a year are estimated.',
   assumptions: ['the colony has the stock a load asks for'],
 })
 
@@ -79,7 +79,7 @@ registerRule({
   units: 'colonists/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.ColonistCapacity'],
-  note: 'The colonists a cycle unloads, followed through the orders and the berths, times the cycles a year (`hauling.cycleTime`). The capacity arithmetic is exact; the cycles a year are estimated.',
+  note: 'The colonists a cycle unloads, followed through the orders and the berths, times the cycles a year. The capacity arithmetic is exact; the cycles a year are estimated.',
   assumptions: ['the colony has the colonists a load asks for'],
 })
 
@@ -109,7 +109,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.PopulationID'],
-  note: 'Each unload is credited with the cargo the fleet holds when it gets there, times the cycles a year (`hauling.cycleTime`).',
+  note: 'Each unload is credited with the cargo the fleet holds when it gets there, times the cycles a year.',
   assumptions: ['every cycle delivers the same load'],
 })
 

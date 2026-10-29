@@ -769,7 +769,7 @@ const EXPECTED_DIFFER = new Set([
 const EXPECTED_UNKNOWN = new Set([
   ...pinKeys('modded-g140', [500956, 501116], ['Level:shipDecoy', 'Level:emSensitivity', 'Level:laserFocus', 'Level:missileEcm']),
   ...pinKeys('stock-271-g138', [154110, 154194], ['MSPEngine', 'EngineComponent', 'Cost', 'Boronide', 'Gallicite', 'Speed', 'Endurance', 'MaxRange', 'TotalFlightTime']),
-  ...pinKeys('v260-solid-core-g137', [153571], ['Level:multipleWarheads']),
+  ...pinKeys('solid-core-g137', [153571], ['Level:multipleWarheads']),
   ...pinKeys('v270-kristover-g139', [153793], ['Level:multipleWarheads']),
   ...pinKeys('v270-kristover-g143', [154369], ['Level:multipleWarheads']),
 ])
@@ -824,8 +824,8 @@ const fixtureProblems = (library, data) => {
 const reconciliationChecks = (library, data) => {
   const modded = data.get('modded-g140')
   const stock = data.get('stock-271-g138')
-  const older = data.get('v260-solid-core-g137')
-  const older138 = data.get('v260-solid-core-g138')
+  const older = data.get('solid-core-g137')
+  const older138 = data.get('solid-core-g138')
   const kristover = data.get('v270-kristover-g143')
   const rebuilt = (fixture, id) => library.reconcileMissile(fixture, designOf(fixture, id))
   const totalMsp = (result) => library.CONTRIBUTIONS.reduce((total, name) => total + result.ledger[name].msp, 0)
@@ -1797,7 +1797,7 @@ const TECH_SLOTS = ['BGTech1', 'BGTech2', 'BGTech3', 'BGTech4', 'BGTech5', 'BGTe
 const sensorChecks = (library, data) => {
   const modded = data.get('modded-g140')
   const stock = data.get('stock-271-g138')
-  const unmodded = ['stock-271-g138', 'later-stock-g138', 'v260-solid-core-g138', 'v270-kristover-g143', 'boscodiogigia-1973-g140'].map((label) => data.get(label))
+  const unmodded = ['stock-271-g138', 'later-stock-g138', 'solid-core-g138', 'v270-kristover-g143', 'boscodiogigia-1973-g140'].map((label) => data.get(label))
   const later = data.get('later-stock-g138')
   const { valueOrNull, isAvailable } = library.provenance
   const types = library.SENSOR_COMPONENT_TYPES

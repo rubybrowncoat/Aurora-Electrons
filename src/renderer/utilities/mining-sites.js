@@ -23,7 +23,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_Population.Efficiency, Population', 'FCT_SystemBody.RadiationLevel', 'FCT_Race.MineProduction'],
-  note: 'Mines with workers need a workforce (the colony\'s efficiency above 0), automated mines and civilian complexes do not; no mine produces without a deposit, with radiation of 10000 or more or at a race mine production of 0. Read from the game\'s mining rules for 2.7, so the workforce and the radiation cut-off are unknown on a save that is not 2.7-shaped (the stored radiation level stays readable); the sample saves have no colony whose mines stand idle for these reasons.',
+  note: 'Mines with workers need a workforce (the colony\'s efficiency above 0), automated mines and civilian complexes do not; no mine produces without a deposit, with radiation of 10000 or more or at a race mine production of 0. Read from the game\'s mining rules, so the workforce and the radiation cut-off are unknown on a save whose game rules are not known (the stored radiation level stays readable); the sample saves have no colony whose mines stand idle for these reasons.',
   assumptions: ['A colony\'s stored efficiency of 0 means its manned mines have no workers; a colony without efficiency stored and with no population has none either.'],
 })
 
@@ -33,7 +33,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_Fleet.OrbitBodyID, AssignedPopulationID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew, MiningModules', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
-  note: 'Orbital mining modules add to the output of the race\'s colony on the body the fleet is at, when the fleet is assigned to that colony (an unassigned fleet is assigned to it), the body is no wider than the race\'s orbital mining limit and has a deposit; each undamaged module works at the share of the class crew aboard, so a ship with no crew aboard mines nothing. Read from the game\'s rules for 2.7; the modded sample save has no orbital miner and the stock sample\'s all work.',
+  note: 'Orbital mining modules add to the output of the race\'s colony on the body the fleet is at, when the fleet is assigned to that colony (an unassigned fleet is assigned to it), the body is no wider than the race\'s orbital mining limit and has a deposit; each undamaged module works at the share of the class crew aboard, so a ship with no crew aboard mines nothing. Read from the game\'s rules; the modded sample save has no orbital miner and the stock sample\'s all work.',
   assumptions: ['A fleet assigned to a colony that no longer exists is treated as unassigned.', 'Only fleets without move orders are judged; one with orders is moving or about to.'],
 })
 
@@ -56,7 +56,7 @@ export const ORBITAL_MINING_MODULE = 38
 // Radiation at which the colony's mine output modifier reaches 0.
 export const RADIATION_LIMIT = 10000
 
-export const VERSION_INPUT = 'the game version the mining rules are verified for (a 2.7-shaped save)'
+export const VERSION_INPUT = 'the game version the save was played under, which the mining rules are verified for'
 
 export const known = (value) => typeof value === 'number' && Number.isFinite(value)
 
@@ -72,7 +72,7 @@ const flag = (value) => (value === 1 || value === true ? 1 : value === 0 || valu
 // Whether a sum over installations is above 0: known when it is, or when no installation is unreadable.
 export const positive = (sum, gaps) => (known(sum) && sum > 0 ? 1 : known(sum) && !(gaps > 0) ? 0 : null)
 
-// A prerequisite: `verdict` 1 (met), 0 (missing) or null (not known). One that rests on a 2.7 rule is `supported` only on a 2.7-shaped save, and unknown on any other; `missing` is the text when it is lacking, `unknown` the text when not known and `inputs` the stored values that decide it.
+// A prerequisite: `verdict` 1 (met), 0 (missing) or null (not known). One that rests on a rule tied to the formula version is `supported` only on a save that has one, and unknown on any other; `missing` is the text when it is lacking, `unknown` the text when not known and `inputs` the stored values that decide it.
 const prerequisite = (key, owner, verdict, { missing, unknown, inputs, supported = true }) => {
   if (!supported) {
     return { key, owner, state: 'unknown', text: unknown, inputs: [VERSION_INPUT] }

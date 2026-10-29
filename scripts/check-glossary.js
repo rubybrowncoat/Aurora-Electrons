@@ -257,6 +257,13 @@ const synthetic = (m, tree) => {
       ])
     }],
 
+    ['no registered rule states a table or column name, a code span or a release number in its note or assumptions', async () => {
+      const code = /\b(?:FCT|DIM|VIR)_\w+|`[^`]*`|\b2\.[67](?:\.\d+|\.x)?\b|\b[a-z]+[A-Za-z]*\.[a-z][A-Za-z]+\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|\b[A-Z]{2,}_[A-Z_]+\b|[A-Za-z-]+\.js\b/
+      const rules = provenance.listRules()
+
+      return firstProblem(rules.flatMap((rule) => [rule.note, ...rule.assumptions].map((text) => [rule.id, code.test(text) ? `says "${code.exec(text)[0]}"` : ''])))
+    }],
+
     ['a hauling shortfall counts stock and mass-driver packets as held, as its definition says', async () => {
       const of = (stock, inbound, needs, reserve) => haulPlan.shortfallOf({ stock, inbound, needs, reserve })
       const gives = (label, got, queue, reserve) => [label, got.queue === queue && got.reserve === reserve ? '' : `gives ${got.queue} for the queue and ${got.reserve} for the reserve, not ${queue} and ${reserve}`]
@@ -413,9 +420,11 @@ const MUTATIONS = [
   ['a link loses its reviewed date', GLOSSARY, 'Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })', 'Object.freeze({ reached: REVIEWED, written: null, ...fields })', ['every link has a title']],
   ['a link loses its version label', GLOSSARY, 'gameVersion: \'Live discussion, not tied to one release\', ', '', ['every link has a title']],
   ['an old tutorial is marked current', GLOSSARY, 'written: \'2023-03\', gameVersion: \'C# edition, March 2023; no release number given\', status: VERSION_STATUS.OLDER }),\n  link({ id: \'tutorial-gameplay\'', 'written: \'2023-03\', gameVersion: \'C# edition, March 2023; no release number given\', status: VERSION_STATUS.CURRENT }),\n  link({ id: \'tutorial-gameplay\'', ['material written before any 2.7 release is marked older']],
-  ['the older words stop saying older', GLOSSARY, 'Older than 2.7: rules and menus may differ', 'Rules and menus may differ', ['the older status reads as older']],
+  ['the older words stop saying older', GLOSSARY, 'Written for an older release: rules and menus may differ', 'Rules and menus may differ', ['the older status reads as older']],
   ['a link claims to verify a formula', GLOSSARY, 'An index of written and video tutorials, playthroughs, forums and the wiki.', 'Verifies the formulas, with tutorials, playthroughs, forums and the wiki.', ['no link text claims to verify a figure']],
   ['a link names a rule', GLOSSARY, 'link({ id: \'community-forum\', ', 'link({ rule: \'finances.treasury\', id: \'community-forum\', ', ['no entry names a rule or a verification']],
+  ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
+  ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://7w1.github.io/posts/resources/.', ['no registered rule cites a glossary link']],
   ['the help card speaks to the reader', HELP_PANEL, 'Definitions of the terms and units on this page', 'Your definitions of the terms and units on this page', ['the help speaks in the impersonal voice']],
   ['the shortage rule starts counting packets on their way', path.join('utilities', 'colony-minerals.js'), 'state: stockState(values, exporting)', 'state: stockState({ ...values, stock: values.stock + values.inbound }, exporting)', ['a mineral shortage is']],

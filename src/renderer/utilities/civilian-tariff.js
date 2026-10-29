@@ -26,7 +26,7 @@ registerRule({
   units: 'wealth per unit per billion km',
   verification: 'estimated',
   structure: ['the published payout rates by category'],
-  note: 'What a shipping line is paid per unit carried and per billion km travelled, as published for 2.7: 0.00015 for a colonist and for a cargo point, 0.006 for a passenger and 0.375 for a trade good (Aurora v2.7.0 patch notes, post on updates to shipping lines). A public statement, not checked against the save: it stores each payout (FCT_ShippingWealthData.Amount) but not the quantity carried, so no rate can be recomputed from it. No rate is published for fuel. No per-system tariff or earlier-version rate is used, and a game version other than 2.7 gets no rate.',
+  note: 'What a shipping line is paid per unit carried and per billion km travelled, as published: 0.00015 for a colonist and for a cargo point, 0.006 for a passenger and 0.375 for a trade good (the Aurora patch notes, post on updates to shipping lines). A public statement, not checked against the save: it stores each payout but not the quantity carried, so no rate can be recomputed from it. No rate is published for fuel. No per-system tariff is used, and a save whose game rules are not known gets no rate.',
 })
 
 registerRule({
@@ -35,7 +35,7 @@ registerRule({
   units: 'wealth',
   verification: 'estimated',
   structure: ['civilianTariff.rates', 'the route distance'],
-  note: 'The quantity carried times the category\'s rate (`civilianTariff.rates`) times the distance in billion km, times 0.5 for a computer-run empire (the notes set that modifier for 2.7; a player\'s race has none). It is what the shipping line earns for the trip, not what the race spends: the wealth log holds no use that is stored as carrying it.',
+  note: 'The quantity carried times the category\'s published rate times the distance in billion km, times 0.5 for a computer-run empire (the notes set that modifier; a player\'s race has none). It is what the shipping line earns for the trip, not what the race spends: the wealth log holds no use that is stored as carrying it.',
   assumptions: ['every unit is carried the whole distance', 'the distance is the route travelled loaded'],
 })
 
@@ -85,7 +85,7 @@ export const rateOf = (version, id) => {
     return unavailable({ rule: 'civilianTariff.rates', missing: [`a published payout rate for ${category ? category.label.toLowerCase() : `the category "${id}"`}`] })
   }
 
-  return ofRule({ rule: 'civilianTariff.rates', value: category.rate, inputs: { present: ['the published 2.7 rate'] } })
+  return ofRule({ rule: 'civilianTariff.rates', value: category.rate, inputs: { present: ['the published rate'] } })
 }
 
 // What a shipping line is paid for carrying `quantity` units of a category over `billionKm` billion km, for a player's race (`npr` false) or a computer-run empire (`npr` true, paid at half). Unavailable when the rate is (see `rateOf`), for a quantity or distance that is not a number of 0 or more, and for an `npr` that is not true or false (the race's kind is not known).
@@ -99,14 +99,14 @@ export const payoutEstimate = ({ version, category, quantity, billionKm: distanc
   const missing = [...(finite(quantity) && quantity >= 0 ? [] : ['the quantity carried']), ...(finite(distance) && distance >= 0 ? [] : ['the route distance in billion km']), ...(typeof npr === 'boolean' ? [] : ['whether the race is a player\'s or computer-run'])]
 
   if (missing.length) {
-    return unavailable({ rule: 'civilianTariff.payout', missing, present: ['the published 2.7 rate'] })
+    return unavailable({ rule: 'civilianTariff.payout', missing, present: ['the published rate'] })
   }
 
-  return ofRule({ rule: 'civilianTariff.payout', value: quantity * rate.value * distance * (npr ? NPR_PAYOUT_MODIFIER : 1), inputs: { present: ['the published 2.7 rate', 'the quantity carried', 'the route distance', npr ? 'the published computer-run modifier of 0.5' : 'a player\'s race, paid the published rate'] } })
+  return ofRule({ rule: 'civilianTariff.payout', value: quantity * rate.value * distance * (npr ? NPR_PAYOUT_MODIFIER : 1), inputs: { present: ['the published rate', 'the quantity carried', 'the route distance', npr ? 'the published computer-run modifier of 0.5' : 'a player\'s race, paid the published rate'] } })
 }
 
 // The save's game version in words, for the chip and note beside a payout.
-export const describeTariffVersion = (version) => (ruleSupports('civilianTariff.rates', version) === true ? `Payout rates of game version ${version.replace(/\.x$/, '')}` : 'No payout rates for this save\'s game version')
+export const describeTariffVersion = (version) => (ruleSupports('civilianTariff.rates', version) === true ? 'Published payout rates' : 'No payout rates for this save\'s game version')
 
 // Which civilian uses are placed against a shipping-line payout: `complete` when every use has a role and at least one carries the payout; `unplaced` the uses without one. `uses` is the table, CIVILIAN_USES unless a caller holds a sourced one.
 export const treasuryMapping = (uses = CIVILIAN_USES) => {

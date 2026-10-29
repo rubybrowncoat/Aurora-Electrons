@@ -2,7 +2,7 @@
 
 import { crewFraction } from './crew'
 import { columnsOf, gaps } from './mine-bootstrap-data'
-import { envelope, getRule, registerRule, ruleSupports, unavailable } from './provenance'
+import { UNVERIFIED_SAVE, envelope, getRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const HOURS_PER_DAY = 24
 // DIM_ComponentType: Gravitational Survey Sensors, Geological Survey Sensors, Bridge and the other control components.
@@ -35,7 +35,7 @@ registerRule({
   units: 'points/day',
   verification: 'confirmed',
   structure: ['FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_Ship.CurrentCrew, CrewMorale', 'FCT_ShipClass.Crew', 'FCT_Commander', 'FCT_CommanderBonuses', 'FCT_Game.SurveySpeed', 'FCT_NavalAdminCommand'],
-  note: 'Points a day of the fleet\'s geological sensors: the undamaged sensors\' rating of each ship times the officer factor, the crew morale and the share of crew aboard, summed over the fleet\'s ships (embarked ones too), times the naval admin Survey share and the game\'s survey speed. Within 2% of the saved progress of 9 fleets in 2.7-shaped saves. A result that takes an embarked ship, a ship without a captain, damage, a short crew or a crew morale under 1 into account rests on the game\'s rule alone and is an estimate.',
+  note: 'Points a day of the fleet\'s geological sensors: the undamaged sensors\' rating of each ship times the officer factor, the crew morale and the share of crew aboard, summed over the fleet\'s ships (embarked ones too), times the naval admin Survey share and the game\'s survey speed. Within 2% of the saved progress of 9 fleets in saves. A result that takes an embarked ship, a ship without a captain, damage, a short crew or a crew morale under 1 into account rests on the game\'s rule alone and is an estimate.',
   assumptions: ['the naval admin command is effective when its commander\'s rank is high enough'],
 })
 
@@ -45,7 +45,7 @@ registerRule({
   units: 'points/day',
   verification: 'estimated',
   structure: ['FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_Ship.CurrentCrew, CrewMorale', 'FCT_ShipClass.Crew', 'FCT_Commander', 'FCT_CommanderBonuses', 'FCT_Game.SurveySpeed', 'FCT_NavalAdminCommand'],
-  note: 'Points a day of the fleet\'s gravitational sensors, by the same rule as the geological rate. The game keeps a fleet\'s gravitational rate until the save is reloaded and the save does not hold it, so a change of crew, officers or ships since is not seen. Within 5% of the saved progress of 33 of 35 fleets in 2.7-shaped saves; the largest error was 11.5%. Saves of the 2.6 shape differ by up to a factor of 2.',
+  note: 'Points a day of the fleet\'s gravitational sensors, by the same rule as the geological rate. The game keeps a fleet\'s gravitational rate until the save is reloaded and the save does not hold it, so a change of crew, officers or ships since is not seen. Within 5% of the saved progress of 33 of 35 fleets in saves; the largest error was 11.5%.',
   assumptions: ['the naval admin command is effective when its commander\'s rank is high enough'],
 })
 
@@ -64,7 +64,7 @@ registerRule({
   units: 'points/day',
   verification: 'estimated',
   structure: ['FCT_GroundUnitFormationElement.Units', 'DIM_GroundComponentType.Geosurvey', 'FCT_CommanderBonuses.BonusValue', 'FCT_GroundUnitFormation.ParentFormationID, PopulationID', 'FCT_GroundUnitClass.Size, HQCapacity', 'FCT_Game.SurveySpeed'],
-  note: 'Points a day of a colony\'s geosurvey units: the rating of each formation (its units\' equipment rating) times the square of its commander\'s effective Survey multiplier, added over the formations at the colony, times the game\'s survey speed. The game scales the rating by the multiplier when it reads it and again when it adds the day\'s points, so the multiplier counts twice. The multiplier is the commander\'s Survey bonus, cut to 1 + (bonus - 1) × share when the formation and the formations beneath it outgrow its largest headquarters (the share is 1 up to the capacity and 0 beyond it, a whole-number division), times, for each superior formation at the same colony that has a commander, 1 + (the superior\'s bonus - 1) × 0.25 × its share. The capacity cut matches the saved progress of 3 colonies to the second (a formation over its headquarters capacity works at its rating alone, whatever its commander\'s bonus; one colony in a 2.7 save, two in an earlier one). The save has no colony that separates the second application of the multiplier from the first (the one colony within capacity fits both), so the rule rests on the game\'s own and is an estimate.',
+  note: 'Points a day of a colony\'s geosurvey units: the rating of each formation (its units\' equipment rating) times the square of its commander\'s effective Survey multiplier, added over the formations at the colony, times the game\'s survey speed. The game scales the rating by the multiplier when it reads it and again when it adds the day\'s points, so the multiplier counts twice. The multiplier is the commander\'s Survey bonus, cut to 1 + (bonus - 1) × share when the formation and the formations beneath it outgrow its largest headquarters (the share is 1 up to the capacity and 0 beyond it, a whole-number division), times, for each superior formation at the same colony that has a commander, 1 + (the superior\'s bonus - 1) × 0.25 × its share. The capacity cut matches the saved progress of 3 colonies to the second (a formation over its headquarters capacity works at its rating alone, whatever its commander\'s bonus; one colony in a save). The save has no colony that separates the second application of the multiplier from the first (the one colony within capacity fits both), so the rule rests on the game\'s own and is an estimate.',
 })
 
 // The points one body takes for a geological or ground survey, as an SQL expression over `alias`, a table with Radius and BodyTypeID. The floor is per body.
@@ -130,7 +130,7 @@ const KINDS = {
 
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`
 
-// The points a day of a fleet's `kind` ('geo' or 'grav') sensors, as a provenance result of 'survey.geoRate' or 'survey.gravRate' (utilities/provenance.js). `ships`: the fleet's rows from `loadSurveyShips`, embarked ones included. `options`: `speed`, the game's survey speed in percent (FCT_Game.SurveySpeed), `admin`, the naval admin Survey bonus in range (1 for none) and `version`, the formula version of the save (`loadFormulaVersion`, null when it is not a 2.7-shaped save). A result is confirmed only when its rule is, the save is 2.7-shaped, and none of its inputs is one the rule has not been checked on; otherwise it is an estimate, with what makes it one in its assumptions. A missing input gives an unavailable result, never 0.
+// The points a day of a fleet's `kind` ('geo' or 'grav') sensors, as a provenance result of 'survey.geoRate' or 'survey.gravRate' (utilities/provenance.js). `ships`: the fleet's rows from `loadSurveyShips`, embarked ones included. `options`: `speed`, the game's survey speed in percent (FCT_Game.SurveySpeed), `admin`, the naval admin Survey bonus in range (1 for none) and `version`, the formula version of the save (`loadFormulaVersion`, null when the save lacks the formula columns). A result is confirmed only when its rule is, the save has a formula version, and none of its inputs is one the rule has not been checked on; otherwise it is an estimate, with what makes it one in its assumptions. A missing input gives an unavailable result, never 0.
 export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null, version = null }) => {
   const { value, designed, rule, unit } = KINDS[kind]
   const missing = []
@@ -159,7 +159,7 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null
   const short = sensors.filter(isShort)
 
   if (!ruleSupports(rule, version)) {
-    assumptions.push('The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.')
+    assumptions.push(UNVERIFIED_SAVE)
   }
 
   if (kind === 'grav') {

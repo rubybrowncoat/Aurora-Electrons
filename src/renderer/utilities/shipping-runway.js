@@ -59,7 +59,7 @@ registerRule({
   units: 'fraction',
   verification: 'estimated',
   structure: ['FCT_Race.NPR'],
-  note: 'The factor on the receipt of a shipping line: 1 for a player\'s race and 0.5 for a computer-run empire, whose lines are paid half after the tax is taken. The factor comes from the public 2.7 notes and the inspected rules, not from a saved figure.',
+  note: 'The factor on the receipt of a shipping line: 1 for a player\'s race and 0.5 for a computer-run empire, whose lines are paid half after the tax is taken. The factor comes from the public notes and the inspected rules, not from a saved figure.',
 })
 
 registerRule({
@@ -77,7 +77,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'A civilian use\'s logged amounts in the window scaled to a year by the time the window spans, as the Finances page scales every use (finances.categoryPerYear). A use with no row in the window logged nothing there, which is 0 for the use; an amount missing from a logged row leaves the whole ledger without a figure. These are the actual flows of the window.',
+  note: 'A civilian use\'s logged amounts in the window scaled to a year by the time the window spans, as the Finances page scales every use (the Finances yearly rate). A use with no row in the window logged nothing there, which is 0 for the use; an amount missing from a logged row leaves the whole ledger without a figure. These are the actual flows of the window.',
   assumptions: ['the rate over the window holds for a year'],
 })
 
@@ -87,7 +87,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'estimated',
   structure: ['FCT_WealthData Civilian Contracts and the taxes on shipping', 'FCT_Race.ShippingLineTax'],
-  note: 'A shipping line that delivers installations to a colony of the race charges the race its receipt, the gross fare less the tax, under Civilian Contracts, and credits the race the tax, so the race\'s net on a delivery is the tax less the receipt: a fare of 100 at a tax of 20% takes 80 and gives 20, net -60. Trade goods, colonists and passengers carry the tax and no charge. The logged Civilian Contracts therefore imply the gross fare of the window (the receipt over one less the tax rate, a computer-run empire\'s receipt being halved), and with it the tax paired with them. The rule is the mechanics of 2.7 saves; it is compared with the saved flows only in that the logged tax on installation deliveries must cover the tax paired with the contracts.',
+  note: 'A shipping line that delivers installations to a colony of the race charges the race its receipt, the gross fare less the tax, under Civilian Contracts, and credits the race the tax, so the race\'s net on a delivery is the tax less the receipt: a fare of 100 at a tax of 20% takes 80 and gives 20, net -60. Trade goods, colonists and passengers carry the tax and no charge. The logged Civilian Contracts therefore imply the gross fare of the window (the receipt over one less the tax rate, a computer-run empire\'s receipt being halved), and with it the tax paired with them. The rule is the game\'s mechanics; it is compared with the saved flows only in that the logged tax on installation deliveries must cover the tax paired with the contracts.',
   assumptions: ['Civilian Contracts holds only installation deliveries', 'the tax rate set now held through the window'],
 })
 
@@ -97,7 +97,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'estimated',
   structure: ['civilianTariff.payout', 'FCT_Race.ShippingLineTax'],
-  note: 'The yearly effect on the treasury of a planned contract: the gross fare (quantity times the published rate times the one-way loaded distance in billion km, as civilianTariff.payout, never halved) times the contracts a year; the race takes the tax on it, and for installation cargo it also pays the line\'s receipt, the fare less the tax (halved for a computer-run empire). Trade goods, colonists and passengers carry the tax only.',
+  note: 'The yearly effect on the treasury of a planned contract: the gross fare (quantity times the published rate times the one-way loaded distance in billion km, as the payout rule gives it, never halved) times the contracts a year; the race takes the tax on it, and for installation cargo it also pays the line\'s receipt, the fare less the tax (halved for a computer-run empire). Trade goods, colonists and passengers carry the tax only.',
   assumptions: ['every unit is carried the whole route one way, loaded', 'the contracts recur at the same rate every year'],
 })
 
@@ -117,7 +117,7 @@ registerRule({
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_Race.WealthPoints', ...WEALTH_STRUCTURE],
-  note: 'When the treasury is exhausted if the yearly net holds at the first figure up to the change and at the second after it: the treasury over the loss in each stretch, by the rule of the Finances runway (finances.treasuryRunway). A net that is not a loss never exhausts it, and an exhaustion past the horizon is reported as none within the horizon. With one net throughout it is that runway.',
+  note: 'When the treasury is exhausted if the yearly net holds at the first figure up to the change and at the second after it: the treasury over the loss in each stretch, by the rule of the Finances runway (the Finances runway rule). A net that is not a loss never exhausts it, and an exhaustion past the horizon is reported as none within the horizon. With one net throughout it is that runway.',
   assumptions: ['the nets hold from now on'],
 })
 
@@ -179,17 +179,17 @@ export const loadShippingTax = async (database, { GameID, RaceID }) => {
   const stored = RACE_COLUMNS.filter((name) => columns.some((column) => column.name === name))
 
   if (!stored.length) {
-    return { rate: null, missing: 'FCT_Race.ShippingLineTax', npr: null }
+    return { rate: null, missing: 'the race\'s shipping line tax', npr: null }
   }
 
   const [rows] = await database.query(`select ${stored.join(', ')} from FCT_Race where GameID = ${Number(GameID)} and RaceID = ${Number(RaceID)}`)
 
   if (!rows.length) {
-    return { rate: null, missing: 'the race\'s row of FCT_Race', npr: null }
+    return { rate: null, missing: 'the race', npr: null }
   }
 
   const { ShippingLineTax: rate, NPR: kind } = rows[0]
-  const tax = !stored.includes('ShippingLineTax') ? { rate: null, missing: 'FCT_Race.ShippingLineTax' } : rate === null || rate === undefined ? { rate: null, missing: 'a stored FCT_Race.ShippingLineTax' } : { rate: Number(rate), missing: '' }
+  const tax = !stored.includes('ShippingLineTax') ? { rate: null, missing: 'the race\'s shipping line tax' } : rate === null || rate === undefined ? { rate: null, missing: 'a stored shipping line tax of the race' } : { rate: Number(rate), missing: '' }
 
   return { ...tax, npr: stored.includes('NPR') ? raceKindOf(kind) : null }
 }

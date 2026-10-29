@@ -45,7 +45,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_Population.Reserve<mineral>'],
-  note: 'The reserve of a mineral the game stores for a colony: the stock the colony keeps back from its mass driver export, and the floor the Hauling plan leaves. A colony has no stored minimum of fuel or maintenance supplies, so none is shown for them, and WarningFuel and WarningMSP are warning levels, not reserves.',
+  note: 'The reserve of a mineral the game stores for a colony: the stock the colony keeps back from its mass driver export, and the floor the Hauling plan leaves. A colony has no stored minimum of fuel or maintenance supplies, so none is shown for them, and fuel warning level and maintenance supply warning level are warning levels, not reserves.',
 })
 
 registerRule({

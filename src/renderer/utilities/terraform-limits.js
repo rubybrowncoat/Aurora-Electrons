@@ -28,7 +28,7 @@ registerRule({
   units: 'colony cost',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species'],
-  note: 'The colony cost factors of habitability.colonyCost, priced on the atmosphere the Planner\'s terraforming plan leaves after each gas operation. The first stage is the body as saved; every later one is the plan\'s own estimate and was not observed on a played-out terraform. A factor is fixed when no gas operation changes it, so it is never promised away.',
+  note: 'The colony cost factors of the colony cost rule, priced on the atmosphere the Planner\'s terraforming plan leaves after each gas operation. The first stage is the body as saved; every later one is the plan\'s own estimate and was not observed on a played-out terraform. A factor is fixed when no gas operation changes it, so it is never promised away.',
   assumptions: STAGE_ASSUMPTIONS,
 })
 

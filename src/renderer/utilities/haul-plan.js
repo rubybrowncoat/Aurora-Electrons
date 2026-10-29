@@ -167,6 +167,6 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_ShipClass.CargoCapacity, MaxSpeed'],
-  note: 'Holds a class needs for the haul times its round trip (`transport.roundTrip`, cargo only), for one ship and for all the class\'s ships. The ships are taken as fully crewed and undamaged.',
+  note: 'Holds a class needs for the haul times its round trip (cargo only), for one ship and for all the class\'s ships. The ships are taken as fully crewed and undamaged.',
   assumptions: ['full holds', 'fully crewed, undamaged ships', 'top speed both ways'],
 })

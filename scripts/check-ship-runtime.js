@@ -636,7 +636,7 @@ check('class-selection', 'no class ids means every class of the race, an empty l
   assert.ok((await reader.read()).ships.length > 10)
 })
 
-check('version', 'the hangar clock and the shore-leave recovery are given for a 2.7-shaped save only, while the observed clocks and stocks and the other rates stay', async (w) => {
+check('version', 'the hangar clock and the shore-leave recovery are given for a save with the formula columns only, while the observed clocks and stocks and the other rates stay', async (w) => {
   const current = await read(w, await newDatabase())
   const old = await read(w, await oldVersionDatabase())
   const ships = byId(old)
@@ -649,13 +649,13 @@ check('version', 'the hangar clock and the shore-leave recovery are given for a 
 
   ;[1, 3, 13].forEach((id) => {
     assert.equal(ships[id].deployment.recovery.status, 'unavailable', `ship ${id}: no recovery`)
-    assert.ok(ships[id].deployment.recovery.inputs.missing.some((text) => /game version 2\.7/.test(text)), `ship ${id}: the version is named`)
+    assert.ok(ships[id].deployment.recovery.inputs.missing.some((text) => /game version/.test(text)), `ship ${id}: the version is named`)
     assert.equal(ships[id].deployment.eta.status, 'unavailable', `ship ${id}: no ETA`)
   })
 
   assert.equal(ships[3].maintenance.clockMode, 'unknown', 'the hangar clock of a carried ship')
   assert.equal(ships[3].maintenance.ageRate.status, 'unavailable')
-  assert.ok(ships[3].maintenance.clockReason.includes('game version 2.7'))
+  assert.ok(ships[3].maintenance.clockReason.includes('game version'))
   assert.equal(ships[3].maintenance.incrementChance.status, 'unavailable')
 
   // What the save states stays as read, and what does not depend on the version is still worked out.
@@ -675,7 +675,7 @@ check('version', 'the hangar clock and the shore-leave recovery are given for a 
   assert.equal(carried[6].support.case, 'hangared')
   assert.equal(carried[6].maintenance.clockMode, 'unknown', 'a commercial hangar of a save not shown to be 2.7')
   assert.equal(carried[6].maintenance.incrementChance.status, 'unavailable')
-  assert.ok(carried[6].maintenance.incrementChance.inputs.missing.some((text) => /game version 2\.7/.test(text)), 'the version is named')
+  assert.ok(carried[6].maintenance.incrementChance.inputs.missing.some((text) => /game version/.test(text)), 'the version is named')
   assert.equal(carried[1].maintenance.incrementChance.status, 'estimated', 'a ship outside a hangar does not depend on the hangar rules')
   assert.ok(byId(await read(w, await newDatabase(), { scenario }))[6].maintenance.incrementChance.value > 0, 'the 2.7 commercial hangar case is kept')
 })

@@ -294,7 +294,7 @@ export const chartPoints = (analysis) => ({
   average: analysis.first && analysis.last && analysis.first.t !== analysis.last.t ? [{ t: analysis.first.t, value: analysis.first.value }, { t: analysis.last.t, value: analysis.last.value }] : null,
 })
 
-export const CSV_COLUMNS = ['Record', 'Item', 'Game time (s)', 'Date', 'Value', 'Unit', 'Status', 'Rule', 'Versions', 'Assumptions', 'Missing inputs', 'Seconds since previous observation', 'Change since previous observation', 'Rate per game year', 'Step', 'Note']
+export const CSV_COLUMNS = ['Record', 'Item', 'Game time (s)', 'Date', 'Value', 'Unit', 'Status', 'Rule', 'Assumptions', 'Missing inputs', 'Seconds since previous observation', 'Change since previous observation', 'Rate per game year', 'Step', 'Note']
 
 const rowOf = (fields) => CSV_COLUMNS.map((column) => csvCell(fields[column]))
 
@@ -303,14 +303,14 @@ const unsettled = (value) => (value === null || value === undefined || value ===
 
 export const sourceText = (scope) => `campaign ${unsettled(scope.campaignId)}, branch ${unsettled(scope.branchId)}, game ${unsettled(scope.GameID)}, race ${scope.raceName || 'unnamed'} (RaceID ${unsettled(scope.RaceID)})${scope.kind === SCOPES.COLONY ? `, colony ${scope.name || 'unnamed'} (PopulationID ${unsettled(scope.colonyId)})` : ''}`
 
-// The lines of an export in one model: `context` rows (what the figures are of, one fact a row, the results with their rule, status, versions and assumptions) and `sample` rows (each distinct game time of the window at its exact game time). `date(seconds)` writes a game time; `retention` is the history's note on sampling and thinning.
+// The lines of an export in one model: `context` rows (what the figures are of, one fact a row, the results with their rule, status and assumptions) and `sample` rows (each distinct game time of the window at its exact game time). `date(seconds)` writes a game time; `retention` is the history's note on sampling and thinning.
 export const exportModel = (analysis, { date = defaultDate, retention = '' } = {}) => {
   const { stock, window: span } = analysis
   const fact = (item, note, extra = {}) => ({ Record: 'context', Item: item, Note: note, ...extra })
   const fieldsOf = (result) => {
     const fields = exportFields(result)
 
-    return { Value: fields.value, Status: fields.status, Rule: fields.rule, Versions: fields.versions, Assumptions: fields.assumptions, 'Missing inputs': fields.missing }
+    return { Value: fields.value, Status: fields.status, Rule: fields.rule, Assumptions: fields.assumptions, 'Missing inputs': fields.missing }
   }
 
   const figure = (item, result, { unit, time } = {}) => ({ Record: 'context', Item: item, Unit: unit === undefined ? result.units : unit, 'Game time (s)': time === undefined ? null : time, Date: time === undefined || time === null ? '' : date(time), ...fieldsOf(result) })

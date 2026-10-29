@@ -52,7 +52,7 @@ registerRule({
   units: 'HS',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size'],
-  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the 2.7.x rule and by the creator\'s public clarification of 500 t in 2.7.1. The limit is said to be 1000 t in 3.0, which is not modelled.',
+  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the rule and by the creator\'s public clarification of 500 t. A later release is said to raise the limit to 1000 t, which is not modelled.',
 })
 
 registerRule({
@@ -60,7 +60,7 @@ registerRule({
   versions: TRANSPORT_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size, Crew', 'FCT_Ship.CurrentCrew', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.CargoShuttleValue'],
-  note: 'A ship loads or unloads minerals, installations or colonists at a colony when its own strength (1 for a landing craft, else its undamaged bays) or the colony\'s spaceport or cargo shuttle station gives a positive strength, and its crew is aboard. The strength terms are checked for 2.7.x; that a ship with no crew aboard cannot load is inferred, not checked against saved data. Ground-unit loading and ship-to-ship transfers are separate rules and are not checked here.',
+  note: 'A ship loads or unloads minerals, installations or colonists at a colony when its own strength (1 for a landing craft, else its undamaged bays) or the colony\'s spaceport or cargo shuttle station gives a positive strength, and its crew is aboard. The strength terms are checked against saved data; that a ship with no crew aboard cannot load is inferred, not checked against saved data. Ground-unit loading and ship-to-ship transfers are separate rules and are not checked here.',
   assumptions: ['the colony\'s spaceports and cargo shuttle stations are the installations with a cargo shuttle value'],
 })
 
@@ -69,7 +69,7 @@ registerRule({
   versions: TRANSPORT_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_Race.CargoShuttleLoadModifier', 'DIM_PlanetaryInstallation.CargoShuttleValue'],
-  note: 'A ship\'s loading strength is its own term (1 for a craft of 10 hull spaces or less, else its undamaged bay strength) times the race\'s shuttle technology and times the officers\' Logistics factors (`transport.logisticsBonuses`), plus the technology once more at a colony with a spaceport or cargo shuttle station; that addition is not multiplied by any officer. Matches the game\'s rule for 2.7.x.',
+  note: 'A ship\'s loading strength is its own term (1 for a craft of 10 hull spaces or less, else its undamaged bay strength) times the race\'s shuttle technology and times the officers\' Logistics factors, plus the technology once more at a colony with a spaceport or cargo shuttle station; that addition is not multiplied by any officer. Matches the game\'s rule.',
   assumptions: ['a Logistics bonus the save cannot settle counts as 1, so the time errs long'],
 })
 
@@ -108,7 +108,7 @@ registerRule({
   units: 's',
   verification: 'estimated',
   structure: ['FCT_ShipClass.CargoCapacity, ColonistCapacity, Crew', 'FCT_Ship.CurrentCrew'],
-  note: 'A stop takes the slowest ship\'s time: cargo x 20 s (colonists x 10 s) divided by its loading strength (`transport.handlingStrength`) and its crew fraction, which applies once; a ship with no crew aboard cannot load and more crew than the class needs is no faster (docs `logistics`, `crew-and-commanders`). Reproduced consistently between Hauling and Transport on both sample saves, not compared with times the game stores.',
+  note: 'A stop takes the slowest ship\'s time: cargo x 20 s (colonists x 10 s) divided by its loading strength and its crew fraction, which applies once; a ship with no crew aboard cannot load and more crew than the class needs is no faster. Reproduced consistently between Hauling and Transport on both sample saves, not compared with times the game stores.',
   assumptions: ['every ship at the stop loads at once', 'a ship short of crew loads in proportion to the crew it has', 'a Logistics bonus the save cannot settle counts as 1'],
 })
 
@@ -118,7 +118,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_ShipClass.MaxSpeed', 'the explored jump points'],
-  note: 'Twice the route at top speed plus loading and unloading at both ends (`transport.handlingTime`). The route comes from the explored jump points; orders\' own delays and refuelling are not counted. A class timed alone has no crew read, so the jump shock waits (`route.jumpWait`) are left out of it; a fleet\'s trip counts them.',
+  note: 'Twice the route at top speed plus loading and unloading at both ends. The route comes from the explored jump points; orders\' own delays and refuelling are not counted. A class timed alone has no crew read, so the jump shock waits are left out of it; a fleet\'s trip counts them.',
   assumptions: ['top speed both ways', 'full holds', 'no refuelling or overhaul stops', 'jump shock waits are not counted for a class timed alone'],
 })
 
@@ -138,7 +138,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_ShipClass.CargoCapacity, ColonistCapacity'],
-  note: 'Ships x capacity x round trips a year (`transport.roundTrip`).',
+  note: 'Ships x capacity x round trips a year.',
   assumptions: ['full holds and berths on every trip'],
 })
 
@@ -167,13 +167,13 @@ registerRule({
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_RaceSysSurvey'],
-  note: 'The shortest route over the jump points the race has explored, jumps first; the search was checked against the game\'s own routes (docs `fleet`).',
+  note: 'The shortest route over the jump points the race has explored, jumps first; the search was checked against the game\'s own routes.',
 })
 
-export const UNVERIFIED_VERSION = 'the 2.7.x landing and shuttle rules, though the save\'s game version is not verified'
+export const UNVERIFIED_VERSION = 'the landing and shuttle rules, though the save does not state which game rules it was played under'
 
-// The formula version in words for a note.
-export const describeFormulaVersion = (version) => (version ? `The save carries the AllowCMC and AncientRelics columns of FCT_Game and no version label, so the ${version} rules apply.` : 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the landing rule is not verified against the save.')
+// The sentence a note states when the save does not state its game rules, or an empty text when it does.
+export const describeFormulaVersion = (version) => (version ? '' : 'The save does not state which game rules it was played under, so the landing rule is not verified against the save.')
 
 // The largest craft, in hull spaces, that lands at a colony and loads with a strength of 1: the rule's own limit when it holds for the version, null when the version is not known or the rule is not verified for it (3.0 is said publicly to land 1000 t; that is not modelled).
 export const landingThreshold = (version) => (ruleSupports('transport.landingThreshold', version) ? SMALL_CRAFT_SIZE : null)

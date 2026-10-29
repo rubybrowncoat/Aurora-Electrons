@@ -1290,7 +1290,7 @@ export default {
       }),
       default: NO_BOOTSTRAP_SOURCES,
     },
-    // The formula version the save's schema stands for, read with the mine bootstrap sources: null for a save that is not 2.7-shaped.
+    // The formula version the save's schema stands for, read with the mine bootstrap sources: null for a save without the formula columns.
     bootstrapVersion: {
       get: tracked('bootstrapVersion', async function () {
         if (!this.bootstrapColonyId || !this.database) {

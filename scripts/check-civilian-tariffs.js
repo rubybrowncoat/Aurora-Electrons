@@ -141,7 +141,7 @@ const synthetic = ({ tariff, provenance, finances }) => {
     })
   })
   add('an unsupported version has no figure even for a zero quantity', () => noValue(estimate({ version: '2.6.0', quantity: 0 })) && noValue(estimate({ version: null, quantity: 1, billionKm: 0 })))
-  add('the version text says rates are published for 2.7 and none for another version', () => /2\.7/.test(describeTariffVersion('2.7.x')) && /2\.7/.test(describeTariffVersion('2.7.1')) && !/2\.7/.test(describeTariffVersion(null)) && /No payout rates/.test(describeTariffVersion(null)) && /No payout rates/.test(describeTariffVersion('2.6.0')))
+  add('the version text says rates are published for a supported version and none for another', () => !/No payout rates/.test(describeTariffVersion('2.7.x')) && !/No payout rates/.test(describeTariffVersion('2.7.1')) && /No payout rates/.test(describeTariffVersion(null)) && /No payout rates/.test(describeTariffVersion('2.6.0')))
 
   add('fuel has no published rate: unavailable and naming fuel, never 0', () => {
     const rate = rateOf('2.7.x', 'fuel')
@@ -404,7 +404,7 @@ const MUTATIONS = [
   ['the civilian categories take the uses of the ledger in the ledger\'s order and keep the others', 'uses.map((use) => categories.find((category) => category.id === use.id)).filter(Boolean)', 'categories'],
   ['a small figure is rounded to a whole number', 'Number(value.toPrecision(4)).toFixed(12)', 'Math.round(value).toFixed(12)'],
   ['the separator is dropped from a large figure', 'countText(value, 0, separator)', 'countText(value, 0)'],
-  ['the version text claims rates for any version', 'ruleSupports(\'civilianTariff.rates\', version) === true ? `Payout rates', 'ruleSupports(\'civilianTariff.rates\', version) !== true ? `Payout rates'],
+  ['the version text claims rates for any version', "ruleSupports('civilianTariff.rates', version) === true ? 'Published payout rates'", "ruleSupports('civilianTariff.rates', version) !== true ? 'Published payout rates'"],
 ]
 
 const PAGE_MUTATIONS = [

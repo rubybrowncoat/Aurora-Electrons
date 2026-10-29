@@ -1,10 +1,9 @@
 // What stabilising a Lagrange point takes and which figures of the Lagrange page are counted or drawn: the multiplier a ship's captain and crew put on the time, the days a body needs with the quickest ship, the counts the tiles show, the time an order has left and the display scale of the map. Every figure travels as a result of a registered rule (utilities/provenance.js), so an input the save lacks gives an unavailable result that names it, never a time of 0 days.
 
 import { crewFraction } from './crew'
-import { combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
+import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LAGRANGE_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 export const BASE_DAYS = 60 * 30
 const SECONDS_PER_DAY = 86400
@@ -15,7 +14,7 @@ registerRule({
   units: '×',
   verification: 'estimated',
   structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_DamagedComponent', 'FCT_CommanderBonuses.BonusValue'],
-  note: 'A ship with an undamaged jump point stabilisation module takes 2 minus its captain\'s Production bonus times as long, and Class Crew / Current Crew times as long again while it is short of crew (docs `crew-and-commanders`, `crew.stabilisation`). The sources do not say whether the bonus divides the time or is taken off the 2, so the bonus term is not checked against a stabilisation the save records. A ship with no crew aboard has no defined time.',
+  note: 'A ship with an undamaged jump point stabilisation module takes 2 minus its captain\'s Production bonus times as long, and Class Crew / Current Crew times as long again while it is short of crew. The sources do not say whether the bonus divides the time or is taken off the 2, so the bonus term is not checked against a stabilisation the save records. A ship with no crew aboard has no defined time.',
 })
 
 registerRule({
@@ -24,7 +23,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Mass', 'lagrange.stabilisationMultiplier'],
-  note: '60 / the square root of the body\'s mass in Earth masses months of 30 days, times the quickest usable ship\'s multiplier (`lagrange.stabilisationMultiplier`). The trip to the body is left out.',
+  note: '60 / the square root of the body\'s mass in Earth masses months of 30 days, times the quickest usable ship\'s multiplier. The trip to the body is left out.',
   assumptions: ['the quickest usable ship does the work', 'the trip to the body takes no time'],
 })
 

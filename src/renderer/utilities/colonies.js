@@ -83,7 +83,7 @@ registerRule({
   units: 'colony cost',
   verification: 'confirmed',
   structure: ['FCT_Population.ReqInf, Population', 'FCT_Species.PopulationDensityModifier, Gravity, GravDev', 'FCT_SystemBody.Gravity'],
-  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock 2.7.1 save (largest difference 0.0027), so the halving holds there.',
+  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock sample save (largest difference 0.0027), so the halving holds there.',
 })
 
 registerRule({
@@ -92,7 +92,7 @@ registerRule({
   units: 'M workers',
   verification: 'confirmed',
   structure: ['FCT_Population.Population', 'FCT_PopulationInstallations, DIM_PlanetaryInstallation.Workers', 'FCT_Shipyard.Capacity, Slipways, SYType', 'the colony cost rule'],
-  note: 'Services take (population over 1,000 M) to the 0.25 power of the people, at most 70%; agriculture and environment 5% plus 5% per point of colony cost; the rest can work, against what installations and shipyards need. The efficiency it implies matched the stored one of all 66 colonies of the modded 2.7 save and the stock 2.7.1 save, 19 of them below 1, the largest difference 0.0027. A figure at the horizon rests on the projected population and is an estimate.',
+  note: 'Services take (population over 1,000 M) to the 0.25 power of the people, at most 70%; agriculture and environment 5% plus 5% per point of colony cost; the rest can work, against what installations and shipyards need. The efficiency it implies matched the stored one of all 66 colonies of the modded save and the stock sample save, 19 of them below 1, the largest difference 0.0027. A figure at the horizon rests on the projected population and is an estimate.',
 })
 
 registerRule({

@@ -4,7 +4,7 @@
 
   bun scripts/check-mining-redeployment.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  Fixtures: mines at a body whose deposit rows are all at 0 t (exhausted), at a surveyed body with no row (empty), with a deposit left, automated only, civilian only; orbital miners at an exhausted, empty, oversized or colony-less body, those reasons together on one site, a ship with one module (assessed), a diameter limit or diameter that is not stored (unknown, never "fits" and never oversized), a body the race has not surveyed, a save that is not 2.7-shaped, counts of ships and modules and of mines, the destination requirements and the inputs a relocation lacks (travel, production, stored). The mine counts and the fleet speed queries run against an in-memory SQLite, and the warning's rows, cells, links and signatures against a fake database of fixture rows.
+  Fixtures: mines at a body whose deposit rows are all at 0 t (exhausted), at a surveyed body with no row (empty), with a deposit left, automated only, civilian only; orbital miners at an exhausted, empty, oversized or colony-less body, those reasons together on one site, a ship with one module (assessed), a diameter limit or diameter that is not stored (unknown, never "fits" and never oversized), a body the race has not surveyed, a save without the formula columns, counts of ships and modules and of mines, the destination requirements and the inputs a relocation lacks (travel, production, stored). The mine counts and the fleet speed queries run against an in-memory SQLite, and the warning's rows, cells, links and signatures against a fake database of fixture rows.
 
   Saves: with no recommendation to be had in a real save (the sample saves hold no exhausted mine and no miner out of its limits), the queue is compared with queries written another way on each save as it stands, then with the rows the app's own loaders read from the save changed in memory (deposit rows at 0 t, a body wider than the limit, a missing limit, a ship with one module, a body with no colony, modules all damaged), the saves never written to. A save that is not there is reported as skipped and never counted as passed.
 
@@ -324,7 +324,7 @@ const fixtures = (m) => {
       assert.equal(item.constraints[3].text, 'radiation under 10000')
       assert.deepEqual(ground({ ...exhausted, MannedMines: 0, AutomatedMines: 4 }).constraints.map((need) => need.key), ['colony', 'deposit', 'radiation', 'export'])
     }],
-    ['version: on a save that is not 2.7-shaped the colony reason and the game rules of a destination are unknown', () => {
+    ['version: on a save without the formula columns the colony reason and the game rules of a destination are unknown', () => {
       const item = orbital({ ColonyID: null, ColonyName: null }, null)
 
       assert.equal(item.verdict, null)
@@ -333,7 +333,7 @@ const fixtures = (m) => {
       assert.deepEqual(item.constraints.filter((need) => need.state === 'unknown').map((need) => need.key), ['colony', 'assignment'])
       assert.deepEqual(only(assess(m, [colony({ ...exhausted })], [], '2.6.4').ground).constraints.filter((need) => need.state === 'unknown').map((need) => need.key), ['workforce', 'radiation', 'export'])
     }],
-    ['version: the stored facts still decide on a save that is not 2.7-shaped', () => {
+    ['version: the stored facts still decide on a save without the formula columns', () => {
       assert.deepEqual(reasons(orbital({ ...exhausted, Diameter: 5000, ColonyID: null, ColonyName: null }, null)), ['exhausted', 'oversized'])
       assert.deepEqual(reasons(only(assess(m, [colony({ ...exhausted })], [], null).ground)), ['exhausted'])
     }],
@@ -589,7 +589,7 @@ const warningStatements = (m) => {
       assert.equal(changed.find((row) => row.id === 'fleet:100').signature, 'fleet:deposit')
       assert.equal(m.index.checkByKey[KEY].captured[0]('fleet:deposit,fleet:diameter'), 'no mineral deposit on the body, body wider than the orbital mining limit')
     }],
-    ['warning: a save that is not 2.7-shaped lists no colony-less miner as a warning and says the game version is unknown', async () => {
+    ['warning: a save without the formula columns lists no colony-less miner as a warning and says the game version is unknown', async () => {
       const rows = await read({ ...fixtureWorld(), formula: false })
       const row = rows.find((item) => item.id === 'fleet:103')
 

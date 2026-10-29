@@ -548,9 +548,9 @@ const runs = (m) => {
   add('inputs: the unavailable scenarios name what is missing: the version rules', () => gap(scenarioOf(buildOf(m, world(m), { version: '2.6.0' }), 'delay').exhaustion))
   add('inputs: no tax rate stored gives no scenario figure, naming the rate, and the no-change runway stays', () => {
     const w = world(m)
-    const built = buildOf(m, w, { tax: { rate: null, missing: 'FCT_Race.ShippingLineTax' }, governmentCost: '0' })
+    const built = buildOf(m, w, { tax: { rate: null, missing: 'the race\'s shipping line tax' }, governmentCost: '0' })
 
-    return ['delay', 'government'].every((id) => value(scenarioOf(built, id).exhaustion) === null) && built.taxRate.inputs.missing.join().includes('FCT_Race.ShippingLineTax') && value(built.taxRate) === null && none(built).exhaustion === w.ledger.runway ? true : 'a figure'
+    return ['delay', 'government'].every((id) => value(scenarioOf(built, id).exhaustion) === null) && built.taxRate.inputs.missing.join().includes('shipping line tax') && value(built.taxRate) === null && none(built).exhaustion === w.ledger.runway ? true : 'a figure'
   })
   add('inputs: a tax rate that has not been read (null) is unknown, a rate of 0 is a rate, and a negative rate is no rate', () => same([value(sr.taxRateResult(null)), value(sr.taxRateResult({ rate: 0, missing: '' })), value(sr.taxRateResult({ rate: -0.1, missing: '' })), value(sr.taxRateResult({ rate: 0.25, missing: '' }))], [null, 0, null, 0.25]))
   add('inputs: a tax rate of 100 % leaves no fare to imply from the receipt, so no scenario figure, with contracts logged or none', () => [world(m), world(m, { perCycle: { 11: 40, 5: 60 } })].every((w) => value(scenarioOf(buildOf(m, w, { tax: { rate: 1, missing: '' } }), 'delay').exhaustion) === null) || 'a figure')

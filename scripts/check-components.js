@@ -408,7 +408,7 @@ const run = async () => {
     const missing = data.quantityOf(drive, 'htk')
     const totalCost = data.componentTotals([{ component: drive, count: 1 }]).results.cost
 
-    check('a recomputed figure is enveloped under the named design rule, with its versions, note and standing assumptions, and they reach an export', rule.assumptions.length >= 2 && figure.rule.id === 'design.selfJumpDrive' && sameValues(figure.rule.versions, rule.versions) && figure.rule.note === rule.note && figure.status === rule.verification && rule.assumptions.every((text) => figure.assumptions.includes(text) && exported.assumptions.includes(text) && totalCost.assumptions.includes(text)) && exported.rule === 'design.selfJumpDrive' && exported.versions === rule.versions.join(', ') && drive.source.origin === 'recomputed' && missing.status === STATUS.UNAVAILABLE && missing.rule.id === 'design.selfJumpDrive', `${rule.assumptions.length} assumptions`)
+    check('a recomputed figure is enveloped under the named design rule, with its note and standing assumptions, and they reach an export', rule.assumptions.length >= 2 && figure.rule.id === 'design.selfJumpDrive' && sameValues(figure.rule.versions, rule.versions) && figure.rule.note === rule.note && figure.status === rule.verification && rule.assumptions.every((text) => figure.assumptions.includes(text) && exported.assumptions.includes(text) && totalCost.assumptions.includes(text)) && exported.rule === 'design.selfJumpDrive' && drive.source.origin === 'recomputed' && missing.status === STATUS.UNAVAILABLE && missing.rule.id === 'design.selfJumpDrive', `${rule.assumptions.length} assumptions`)
 
     reloaded.close()
     ledgerEdited.close()

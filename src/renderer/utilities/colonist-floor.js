@@ -390,7 +390,7 @@ export const loadColonistSources = async (database, { GameID, RaceID }) => {
 
   return {
     rows: rows.map((row) => ({ PopulationID: row.PopulationID, ColonistDestination: numberOrNull(row.ColonistDestination), PoliticalStatus: numberOrNull(row.PoliticalStatus), MilitaryRestrictedColony: flagOrNull(row.MilitaryRestrictedColony), AvailableColonists: numberOrNull(row.AvailableColonists), ColonizationPressure: numberOrNull(row.ColonizationPressure) })),
-    problems: FIELDS.filter((name) => !columns.has(name)).map((name) => `FCT_Population.${name} is not in this save`),
+    problems: FIELDS.filter((name) => !columns.has(name)).map((name) => `the colony's ${name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()} is not in this save`),
     read: true,
   }
 }

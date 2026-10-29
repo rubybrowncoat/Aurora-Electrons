@@ -169,16 +169,23 @@ export const atMost = (result, maximum) => satisfies(result, (value) => value <=
 
 export const passes = (verdict) => verdict === true
 
+// A saved table or column in words for a note: `FCT_ShipClass` and `MaxSpeed` read as the max speed of ship class. Code names never reach the screen.
+const spaced = (name) => name.replace(/^(FCT|DIM|VIR)_/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').toLowerCase()
+
+export const inputWords = (table, column) => (column ? `the ${spaced(column)} of ${spaced(table)}` : `the ${spaced(table)} data`)
+
+// The assumption of a figure whose rule cannot be matched to the save: a save normally states the game rules it was played under, but a damaged one can lack the columns that tell.
+export const UNVERIFIED_SAVE = 'The save does not state which game rules it was played under, so the rule is not checked against the save'
+
 const joined = (list, separator = '; ') => list.join(separator)
 
-// A result in words for a tooltip or a screen reader: its status, rule and versions, then the assumptions and the missing inputs.
+// A result in words for a tooltip or a screen reader: its status and the rule's note (what the figure is read from, or why it is estimated), then the assumptions and the missing inputs. Neither the rule's id nor its game versions are shown: the id is a code name, and every save is of one line.
 export const describeResult = (result) => {
   if (!result) {
     return ''
   }
 
-  const mark = STATUS_MARKS[result.status]
-  const parts = [`${mark.label}: ${result.rule.id}, game ${joined(result.rule.versions, ', ')}`]
+  const parts = [`${STATUS_MARKS[result.status].label}: ${result.rule.note}`]
 
   if (result.assumptions.length) {
     parts.push(`Assumes ${joined(result.assumptions)}`)
@@ -188,23 +195,22 @@ export const describeResult = (result) => {
     parts.push(`Missing ${joined(result.inputs.missing, ', ')}`)
   }
 
-  return joined(parts, '. ')
+  return joined(parts.map((part) => part.replace(/\.$/, '')), '. ')
 }
 
-// The fields an export carries beside a figure, so a copy keeps what a screen showed: status, rule id, versions, assumptions and missing inputs, as plain text. An unavailable result exports an empty value, never 0.
+// The fields an export carries beside a figure, so a copy keeps what a screen showed: status, rule id, assumptions and missing inputs, as plain text. An unavailable result exports an empty value, never 0.
 export const exportFields = (result) => ({
   value: isAvailable(result) ? result.value : '',
   status: result ? result.status : '',
   rule: result ? result.rule.id : '',
-  versions: result ? joined(result.rule.versions, ', ') : '',
   assumptions: result ? joined(result.assumptions) : '',
   missing: result ? joined(result.inputs.missing, ', ') : '',
 })
 
-// A registered rule in words, for a mark that stands for the rule rather than one result: its verification, id, versions and note, then its standing assumptions.
+// A registered rule in words, for a mark that stands for the rule rather than one result: its verification and note, then its standing assumptions.
 export const describeRule = (id) => {
   const rule = requireRule(id)
-  const parts = [`${STATUS_MARKS[rule.verification].label}: ${rule.id}, game ${joined(rule.versions, ', ')}. ${rule.note}`]
+  const parts = [`${STATUS_MARKS[rule.verification].label}: ${rule.note}`]
 
   if (rule.assumptions.length) {
     parts.push(`Assumes ${joined(rule.assumptions)}`)

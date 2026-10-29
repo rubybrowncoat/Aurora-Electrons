@@ -324,7 +324,7 @@ const pure = (ctx) => {
 
     await db.close()
 
-    return loaded.deposits.length === 0 && loaded.problems.length === 1 && loaded.problems[0].includes('FCT_SystemBodySurveys') ? true : short(loaded)
+    return loaded.deposits.length === 0 && loaded.problems.length === 1 && loaded.problems[0].includes('system body surveys') ? true : short(loaded)
   })
   add('hidden: a column or table the save lacks reads as unknown, never 0 or none', async () => {
     const db = await memoryDeposits({ without: ['FCT_AlienPopulation', 'FCT_Population'], dropRadiation: true })

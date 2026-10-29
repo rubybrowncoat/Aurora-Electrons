@@ -534,7 +534,7 @@ export const groundRoute = ({ requirement, target, ground, factor, capacity, usa
   const reasons = []
 
   if (ruleSupports('mineBootstrap.groundAssistance', version) !== true) {
-    reasons.push(`the construction rating and command rules are mapped for 2.7 saves only (this save's formula version is ${version === null ? 'not known' : version})`)
+    reasons.push('the construction rating and command rules are mapped only for a save that states the game rules it was played under')
   }
 
   if (ground.gaps.length) {

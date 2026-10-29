@@ -48,7 +48,7 @@ registerRule({
   versions: CANDIDATE_VERSIONS,
   units: 't/yr',
   verification: 'assumed',
-  structure: ['DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.RadiationLevel'],
+  structure: ['the mining value of a civilian mining complex', 'the race\'s mine production', 'the accessibility of the deposit', 'the body\'s radiation level'],
   note: 'What the assumed number of civilian mining complexes would dig a year from one deposit at its current accessibility, worked as the surface mining rows work it: the complexes times the mining value of one complex, cut to a whole number of mine equivalents, times the race\'s mine production times accessibility times the body\'s radiation modifier (1 less the radiation level over 10,000, never below 0). Hypothetical: no colony exists on the body, so no governor or sector bonus applies. Unknown while a figure of it is not recorded or the number of complexes is blank or rejected.',
   assumptions: ['no governor or sector bonus applies, as no colony exists on a candidate body', 'every assumed complex works the deposit from now on'],
 })
@@ -167,7 +167,7 @@ const entered = (field) => (field.state === 'ok' ? ofRule({ rule: 'cmcCandidate.
 
 const fromSave = (rule, value, column) => (known(value) ? ofRule({ rule, value, inputs: { present: [column] } }) : unavailable({ rule, missing: [column] }))
 
-const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
+const DEPOSIT_COLUMNS = ['the amount', 'the accessibility']
 
 // Whether a deposit of Duranium or Gallicite that does not qualify for certain could still qualify: its amount or accessibility is not recorded, and what is recorded does not rule it out.
 const couldQualify = (deposit) => {
@@ -179,16 +179,16 @@ const couldQualify = (deposit) => {
 
 const mineralName = (id) => MINERALS.find((mineral) => mineral.id === id).name
 
-const declineResult = (deposit) => (known(deposit.HalfOriginalAmount) && known(deposit.OriginalAcc) ? ofRule({ rule: 'minerals.depletion', value: true, inputs: { present: ['FCT_MineralDeposit.HalfOriginalAmount', 'FCT_MineralDeposit.OriginalAcc'] } }) : unavailable({ rule: 'minerals.depletion', missing: ['FCT_MineralDeposit.HalfOriginalAmount, OriginalAcc'] }))
+const declineResult = (deposit) => (known(deposit.HalfOriginalAmount) && known(deposit.OriginalAcc) ? ofRule({ rule: 'minerals.depletion', value: true, inputs: { present: ['FCT_MineralDeposit.HalfOriginalAmount', 'FCT_MineralDeposit.OriginalAcc'] } }) : unavailable({ rule: 'minerals.depletion', missing: ['the original amount and accessibility of the deposit'] }))
 
 const rateResult = ({ deposit, body, race, complexes, count = null }) => combine({
   rule: 'cmcCandidate.rate',
   parts: {
     complexes,
-    complexMining: fromSave('cmcCandidate.rate', race.ComplexMining, 'DIM_PlanetaryInstallation.MiningProductionValue'),
-    mineProduction: fromSave('cmcCandidate.rate', race.MineProduction, 'FCT_Race.MineProduction'),
-    accessibility: fromSave('cmcCandidate.rate', deposit.Accessibility, 'FCT_MineralDeposit.Accessibility'),
-    radiation: fromSave('cmcCandidate.rate', body.RadiationLevel, 'FCT_SystemBody.RadiationLevel'),
+    complexMining: fromSave('cmcCandidate.rate', race.ComplexMining, 'the mining value of a civilian mining complex'),
+    mineProduction: fromSave('cmcCandidate.rate', race.MineProduction, 'the race\'s mine production'),
+    accessibility: fromSave('cmcCandidate.rate', deposit.Accessibility, 'the accessibility of the deposit'),
+    radiation: fromSave('cmcCandidate.rate', body.RadiationLevel, 'the body\'s radiation level'),
     ...(count ? { count } : {}),
   },
   compute: (values) => surfaceRate({ ManualMineCount: 0, AutomatedMineCount: 0, CivilianMineCount: values.complexes * values.complexMining, PurchaseCivilianMinerals: 1, Efficiency: 1, StabilityModifier: 1, MineProduction: values.mineProduction, Accessibility: values.accessibility, GovernorBonus: 1, SectorBonus: 1, RadiationModifier: 1 - values.radiation / 10000 }, false),
@@ -325,8 +325,8 @@ const assumptionLines = (ctx) => {
 
   return [
     line('complexes', 'Complexes assumed on every candidate', parsed.complexes.value, '', ctx.entered.complexes, 'A founding places only a few; more are added over time'),
-    line('complexMining', 'Mine equivalents of one complex', known(race.ComplexMining) ? race.ComplexMining : null, '', fromSave('cmcCandidate.rate', race.ComplexMining, 'DIM_PlanetaryInstallation.MiningProductionValue')),
-    line('mineProduction', 'Race mine production a mine equivalent', known(race.MineProduction) ? race.MineProduction : null, ' t a year at accessibility 1', fromSave('cmcCandidate.rate', race.MineProduction, 'FCT_Race.MineProduction')),
+    line('complexMining', 'Mine equivalents of one complex', known(race.ComplexMining) ? race.ComplexMining : null, '', fromSave('cmcCandidate.rate', race.ComplexMining, 'the mining value of a civilian mining complex')),
+    line('mineProduction', 'Race mine production a mine equivalent', known(race.MineProduction) ? race.MineProduction : null, ' t a year at accessibility 1', fromSave('cmcCandidate.rate', race.MineProduction, 'the race\'s mine production')),
     line('bonuses', 'Governor and sector bonuses', null, '', ofRule({ rule: 'cmcCandidate.rate', value: true, inputs: { present: ['no colony on a candidate body'] } }), 'Left out, as no colony exists; the radiation of the body lowers the output'),
     line('horizon', 'Lifetime horizon', parsed.horizon.value, ' years', ctx.entered.horizon, 'A lifetime beyond it counts as the horizon'),
     line('reference', 'Reserve reference', parsed.reference.value, ' t', ctx.entered.reference, 'A reserve beyond it counts as the reference'),

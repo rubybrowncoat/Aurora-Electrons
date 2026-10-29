@@ -56,7 +56,7 @@ registerRule({
   units: 'atm of an Earth-sized body a year',
   verification: 'estimated',
   structure: ['FCT_Race.TerraformingRate', 'FCT_Game.TerraformingSpeed'],
-  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (terraform.capacity: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered.',
+  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (the terraforming capacity rule: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered.',
   assumptions: ['no output modifier on the terraformers entered'],
 })
 
@@ -66,7 +66,7 @@ registerRule({
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier'],
-  note: 'Millions of people a body holds before growth stops: surface area times the species\' density, less above 75% water and a fifth on a tide-locked planet (colonies.js bodyCapacity, the rule of docs/DATABASE.md). The save stores no capacity to compare with, so the figure is not checked against saved values.',
+  note: 'Millions of people a body holds before growth stops: surface area times the species\' density, less above 75% water and a fifth on a tide-locked planet. The save stores no capacity to compare with, so the figure is not checked against saved values.',
 })
 
 registerRule({
@@ -75,7 +75,7 @@ registerRule({
   units: 'deposit value',
   verification: 'assumed',
   structure: ['FCT_MineralDeposit.Amount, Accessibility', 'FCT_SystemBodySurveys', 'FCT_RaceMineralData'],
-  note: 'The sum over a body\'s surveyed deposits of the deposit value (accessibility, raised for a big easy deposit and halved for a small one; minerals.js depositValue) times the mineral\'s weight set in Ranking times the race\'s scarcity factor from the Mineral Outlook runway. A deposit with no recorded amount (or, over the minimum amount, no accessibility), or of a mineral whose runway is unknown, leaves the sum unknown; a mineral weighted 0 counts for nothing. The weights and the scarcity bands are the Planner\'s choice, and the deposit value is not compared with a stored value.',
+  note: 'The sum over a body\'s surveyed deposits of the deposit value (accessibility, raised for a big easy deposit and halved for a small one) times the mineral\'s weight set in Ranking times the race\'s scarcity factor from the Mineral Outlook runway. A deposit with no recorded amount (or, over the minimum amount, no accessibility), or of a mineral whose runway is unknown, leaves the sum unknown; a mineral weighted 0 counts for nothing. The weights and the scarcity bands are the Planner\'s choice, and the deposit value is not compared with a stored value.',
   assumptions: ['mineral weights as set in Ranking'],
 })
 
@@ -85,7 +85,7 @@ registerRule({
   units: 'km, jumps',
   verification: 'estimated',
   structure: ['FCT_RaceJumpPointSurvey.Charted, Explored, IgnoreForDistance', 'FCT_JumpPoint', 'FCT_Population.Capital, Population', 'FCT_SystemBody.Xcor, Ycor'],
-  note: 'The kilometres and jumps of the shortest route over the race\'s charted and explored jump points from the nearest colony with people, the capital included (jump-graph.js). The fewest-jump search reproduced 109 of 110 transit chains stored in move orders (docs/DATABASE.md, Routes); the kilometre route and the choice of the nearest colony as the place to measure from are the Planner\'s reading and have no stored value.',
+  note: 'The kilometres and jumps of the shortest route over the race\'s charted and explored jump points from the nearest colony with people, the capital included. The fewest-jump search reproduced 109 of 110 transit chains stored in move orders; the kilometre route and the choice of the nearest colony as the place to measure from are the Planner\'s reading and have no stored value.',
 })
 
 registerRule({
@@ -94,7 +94,7 @@ registerRule({
   units: '% of the best target',
   verification: 'assumed',
   structure: ['FCT_SystemBody', 'FCT_Species', 'FCT_MineralDeposit', 'FCT_Population', 'FCT_RaceJumpPointSurvey'],
-  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read in colonization.js; none of it is compared with a game value.',
+  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
   assumptions: ['mineral weights, discount scales and thresholds as set in Ranking'],
 })
 

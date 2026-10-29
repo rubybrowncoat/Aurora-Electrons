@@ -630,9 +630,9 @@ const pure = (ctx) => {
     const unknown = runGround({ version: null })
 
     assert.equal(old.status, 'unavailable')
-    assert.ok(old.limits[0].includes('mapped for 2.7 saves only'))
+    assert.equal(old.limits.length, 1)
     assert.equal(unknown.status, 'unavailable')
-    assert.ok(unknown.limits[0].includes('not known'))
+    assert.equal(unknown.limits.length, 1)
     assert.deepEqual(old.figures, {})
 
     return true
@@ -747,11 +747,11 @@ const pure = (ctx) => {
 
     ;[requirement.bp, requirement.tonnes, requirement.workers].forEach((result) => {
       assert.equal(result.status, 'unavailable')
-      assert.ok(result.inputs.missing.some((text) => text.includes('NoBuild')))
+      assert.ok(result.inputs.missing.some((text) => text.includes('whether Mine can be built')))
     })
     assert.equal(runLocal({ requirement }).status, 'unavailable')
     assert.equal(runImport({}, requirement).status, 'unavailable')
-    assert.ok(runGround({ requirement }).missing.some((text) => text.includes('NoBuild')))
+    assert.ok(runGround({ requirement }).missing.some((text) => text.includes('whether Mine can be built')))
 
     return true
   })
@@ -1380,9 +1380,9 @@ const loaders = (ctx) => {
     const column = await data.loadGroundFormations(await fixtureDatabase(['FCT_GroundUnitClass.ConstructionRating']), scope)
     const table = await data.loadGroundFormations(await fixtureDatabase(['FCT_CommanderBonuses']), scope)
 
-    assert.deepEqual(column.gaps, ['FCT_GroundUnitClass.ConstructionRating'])
+    assert.deepEqual(column.gaps, ['the construction rating of ground unit class'])
     assert.deepEqual(column.formations, [])
-    assert.deepEqual(table.gaps, ['FCT_CommanderBonuses (table)'])
+    assert.deepEqual(table.gaps, ['the commander bonuses data'])
 
     return true
   })
@@ -1460,7 +1460,7 @@ const loaders = (ctx) => {
     assert.equal(jumps.colonies.length, 2)
     assert.equal(jumps.freighters.length, 1)
     assert.deepEqual(freight.problems.map((problem) => problem.source), ['freight'])
-    assert.ok(freight.problems[0].text.includes('FCT_ShipClass.CargoCapacity'))
+    assert.ok(freight.problems[0].text.includes('the cargo capacity of ship class'))
     assert.deepEqual(freight.freighters, [])
     assert.equal(freight.types.length, 3)
 
@@ -1474,16 +1474,16 @@ const loaders = (ctx) => {
     const noTechColumn = await data.loadMineTypes(await fixtureDatabase(['DIM_PlanetaryInstallation.RequiredTechID']), scope)
     const noTechTable = await data.loadMineTypes(await fixtureDatabase(['FCT_RaceTech']), scope)
 
-    assert.ok(named(flags, 'Mine').eligibility.some((text) => text.includes('NoBuild')))
-    assert.ok(named(flags, 'Automated Mine').eligibility.some((text) => text.includes('CivilianInstallation')))
-    assert.ok(named(flags, 'Unknown Recipe Mine').eligibility.some((text) => text.includes('RequiredTechID')))
+    assert.ok(named(flags, 'Mine').eligibility.some((text) => text.includes('barred from building')))
+    assert.ok(named(flags, 'Automated Mine').eligibility.some((text) => text.includes('a civilian one')))
+    assert.ok(named(flags, 'Unknown Recipe Mine').eligibility.some((text) => text.includes('technology for the installation')))
     assert.deepEqual(flags.map((type) => type.Name), ['Automated Mine', 'Mine', 'Unknown Recipe Mine'])
     assert.equal(mb.mineRequirements(named(flags, 'Mine'), 10).bp.status, 'unavailable')
-    assert.ok(noColumn.length >= 3 && noColumn.every((type) => type.eligibility.some((text) => text.includes('NoBuild'))))
+    assert.ok(noColumn.length >= 3 && noColumn.every((type) => type.eligibility.some((text) => text.includes('barred from building'))))
     assert.ok(noColumn.some((type) => type.Name === 'Conventional Industry'))
-    assert.ok(noTechColumn.every((type) => type.eligibility.some((text) => text.includes('RequiredTechID'))))
+    assert.ok(noTechColumn.every((type) => type.eligibility.some((text) => text.includes('technology for the installation'))))
     assert.deepEqual(named(noTechTable, 'Mine').eligibility, [])
-    assert.ok(named(noTechTable, 'Automated Mine').eligibility.some((text) => text.includes('RequiredTechID')))
+    assert.ok(named(noTechTable, 'Automated Mine').eligibility.some((text) => text.includes('technology for the installation')))
     assert.ok(named(noTechTable, 'Locked Mine').eligibility.length > 0)
 
     return true
@@ -2063,7 +2063,7 @@ const saveStatements = async (ctx, save) => {
       const routes = routesOf(vm)
 
       assert.equal(routes.ground.status, 'unavailable')
-      assert.ok(routes.ground.limits[0].includes('FCT_GroundUnitClass.ConstructionRating'))
+      assert.ok(routes.ground.limits[0].includes('the construction rating of ground unit class'))
       assert.notEqual(routes.local.status, 'unavailable')
     } finally {
       await database.overlay(['drop table temp.FCT_GroundUnitClass'])

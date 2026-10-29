@@ -72,7 +72,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility'],
-  note: 'What one mine digs a year at the deposit\'s current accessibility: the race\'s mine production times accessibility, before the colony\'s efficiency, stability, governor and radiation. The full surface rate of this product reproduced the logged mining of 385 colony-by-mineral series in the sample save (docs/plans/aurcalcs/sql-mining.md); this page\'s product on its own was not re-checked. A race with no mine production recorded has no figure.',
+  note: 'What one mine digs a year at the deposit\'s current accessibility: the race\'s mine production times accessibility, before the colony\'s efficiency, stability, governor and radiation. The full surface rate of this product reproduced the logged mining of 385 colony-by-mineral series in the sample save; this page\'s product on its own was not re-checked. A race with no mine production recorded has no figure.',
 })
 
 registerRule({
@@ -81,7 +81,7 @@ registerRule({
   units: 'deposit state',
   verification: 'estimated',
   structure: ['FCT_MineralDeposit.Amount, HalfOriginalAmount'],
-  note: 'A deposit is past half when its amount is under its stored half of the original amount, and accessibility then falls with what is left; above it, the amount above half holds accessibility. The decline model fit 37 declining deposits within 0.005 (docs/plans/aurcalcs/sql-mining.md); deposits upgraded by a ground survey keep a stale original amount, which this page reads as stored. A deposit with no recorded half has no state.',
+  note: 'A deposit is past half when its amount is under its stored half of the original amount, and accessibility then falls with what is left; above it, the amount above half holds accessibility. The decline model fit 37 declining deposits within 0.005; deposits upgraded by a ground survey keep a stale original amount, which this page reads as stored. A deposit with no recorded half has no state.',
 })
 
 registerRule({
@@ -173,7 +173,7 @@ export const scarcityOf = (runway) => (Number.isFinite(runway) && SCARCITY.find(
 const known = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const inputsOfDeposit = (deposit, columns = ['Amount', 'Accessibility']) => ({
   present: columns.filter((column) => deposit && known(deposit[column])).map((column) => `FCT_MineralDeposit.${column}`),
-  missing: columns.filter((column) => !deposit || !known(deposit[column])).map((column) => `FCT_MineralDeposit.${column}`),
+  missing: columns.filter((column) => !deposit || !known(deposit[column])).map((column) => `the ${column.toLowerCase()} of the deposit`),
 })
 
 // Whether a deposit has the amount and accessibility every score of it reads.
@@ -234,7 +234,7 @@ export const withinOrbitalReach = (diameter, maximum) => (known(diameter) && kno
 
 // What one mine digs a year at each of `deposits`' accessibility, summed, at the race's `mineProduction`: unavailable when the race's mine production or a deposit's accessibility is not recorded.
 export const perMineResult = (mineProduction, deposits) => {
-  const missing = [...(known(mineProduction) ? [] : ['FCT_Race.MineProduction']), ...(deposits.every((deposit) => known(deposit.Accessibility)) ? [] : ['FCT_MineralDeposit.Accessibility'])]
+  const missing = [...(known(mineProduction) ? [] : ['the race\'s mine production']), ...(deposits.every((deposit) => known(deposit.Accessibility)) ? [] : ['the accessibility of a deposit'])]
 
   return missing.length ? unavailable({ rule: 'minerals.perMine', missing }) : ofRule({ rule: 'minerals.perMine', value: deposits.reduce((total, deposit) => total + mineProduction * deposit.Accessibility, 0), inputs: { present: ['FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility'] } })
 }
@@ -242,7 +242,7 @@ export const perMineResult = (mineProduction, deposits) => {
 // A body's distance from the race's colonies as a result (value: { km, jumps, from } of `buildDistanceMap`). `route` is the route found or null; `origins` how many capitals and colonies the routes start from; `placed` whether the body has a position.
 export const miningDistanceResult = (route, { origins, placed }) => {
   if (!placed) {
-    return unavailable({ rule: 'minerals.distance', missing: ['FCT_SystemBody.Xcor, Ycor'] })
+    return unavailable({ rule: 'minerals.distance', missing: ['the position of the body'] })
   } else if (!origins) {
     return unavailable({ rule: 'minerals.distance', missing: ['a capital or colony to route from'] })
   }
@@ -254,7 +254,7 @@ export const miningDistanceResult = (route, { origins, placed }) => {
 export const MASS_DRIVER_TONS = 5000
 
 // What a colony's `drivers` can send a year, as a result; unavailable when the driver count is not recorded, or when `gaps` of the installations it sums over (an amount or a driver value not recorded) are.
-export const massDriverRateResult = (drivers, gaps = 0) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: drivers * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] }))
+export const massDriverRateResult = (drivers, gaps = 0) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: drivers * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] }))
 
 export const SECONDS_PER_DAY = 86400
 

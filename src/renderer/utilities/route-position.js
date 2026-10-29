@@ -89,7 +89,7 @@ registerRule({
   units: '',
   verification: 'estimated',
   structure: ['FCT_Game.GameTime, LastGrowthTime, OrbitalMotion, OrbitalMotionAst', 'FCT_SystemBody.Xcor, Ycor', 'FCT_Fleet.LastMoveTime, OrbitBodyID, Xcor, Ycor', 'FCT_MoveOrders.FleetID', 'FCT_Contacts.LastUpdate'],
-  note: 'A figure that rests on the positions the save stores. A body, a colony and a Lagrange point are stored as of the last body update, which trails the game time by up to a few days in the saves examined; the body keeps moving while a fleet flies to it, so a long flight to a body is off by the distance it moves. A fleet with queued orders and a contact have no known later position and none is invented. Places that never move are exact. A figure that takes the adapters (utilities/orbit-propagation.js) moves a supported body on to the arrival time and is propagated; every other figure, and every endpoint the adapters decline, keeps the saved position and says why.',
+  note: 'A figure that rests on the positions the save stores. A body, a colony and a Lagrange point are stored as of the last body update, which trails the game time by up to a few days in the saves examined; the body keeps moving while a fleet flies to it, so a long flight to a body is off by the distance it moves. A fleet with queued orders and a contact have no known later position and none is invented. Places that never move are exact. A figure that takes the adapters moves a supported body on to the arrival time and is propagated; every other figure, and every endpoint the adapters decline, keeps the saved position and says why.',
   assumptions: ['an endpoint is held at the position the save stores unless an adapter moves it on to the arrival time'],
 })
 
@@ -575,7 +575,7 @@ export const loadPositionFacts = async (database, { GameID, RaceID }) => {
   }
 
   if (clock.gameTime === null || clock.lastGrowthTime === null) {
-    problems.push(`FCT_Game has no ${clock.gameTime === null ? 'GameTime' : 'LastGrowthTime'} in this save`)
+    problems.push(`the save has no ${clock.gameTime === null ? 'game time' : 'last growth time'}`)
   }
 
   const fleets = {}
@@ -592,7 +592,7 @@ export const loadPositionFacts = async (database, { GameID, RaceID }) => {
       fleets[row.FleetID] = Object.freeze({ lastMoveTime: timeOrNull(row.LastMoveTime), following: row.Following === null || row.Following === undefined ? null : Number(row.Following) === 1, group: fleetGroups[row.OrbitBody] || null, orders: row.Orders === null || row.Orders === undefined ? null : Number(row.Orders), anchor: row.Anchor === null || row.Anchor === undefined ? null : Number(row.Anchor) })
     })
   } else {
-    problems.push('FCT_Fleet has no FleetID, GameID or RaceID in this save, so no fleet position could be read')
+    problems.push('the save has no fleet, game or race identifier on fleets, so no fleet position could be read')
   }
 
   const waypoints = {}
@@ -606,7 +606,7 @@ export const loadPositionFacts = async (database, { GameID, RaceID }) => {
       waypoints[row.WaypointID] = Object.freeze({ orbit: row.Orbit === null || row.Orbit === undefined ? null : Number(row.Orbit), group: owners[row.Orbit] || null })
     })
   } else {
-    problems.push('FCT_Waypoint has no WaypointID, GameID, RaceID or OrbitBodyID in this save, so whether a body carries a waypoint could not be read')
+    problems.push('the save has no waypoint, game, race or orbit body identifier on waypoints, so whether a body carries a waypoint could not be read')
   }
 
   return Object.freeze({ clock: Object.freeze(clock), fleets: Object.freeze(fleets), waypoints: Object.freeze(waypoints), problems: Object.freeze(problems) })

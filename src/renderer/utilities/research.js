@@ -25,7 +25,7 @@ registerRule({
   units: 'technologies',
   verification: 'confirmed',
   structure: ['FCT_TechSystem', 'FCT_RaceTech.TechID', 'FCT_ResearchProject.TechID', 'FCT_ResearchQueue.TechSystemID', 'FCT_EligibleProjects.TechSystemID'],
-  note: 'Count of the techs in a state (researched, running, queued, available, locked or out of reach) from the race\'s own research rows and the catalogue. Out of reach techs are left out of what the race can research. The state follows the researchable-list rule written above `evaluateResearch` and is not compared with the game\'s own count.',
+  note: 'Count of the techs in a state (researched, running, queued, available, locked or out of reach) from the race\'s own research rows and the catalogue. Out of reach techs are left out of what the race can research. The state follows the researchable-list rule written above the evaluation and is not compared with the game\'s own count.',
 })
 
 registerRule({

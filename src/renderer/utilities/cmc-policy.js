@@ -30,7 +30,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.RadiationLevel', 'FCT_CommanderBonuses.BonusValue'],
-  note: 'What the complexes dig a year at each deposit\'s current accessibility: their capacity cut to a whole number, times the race\'s mine production, the accessibility, the governor\'s and a quarter of the sector commander\'s mining bonus and the radiation modifier; efficiency, stability and political status do not apply. Each colony that buys and exports in the 2.7.1 sample save shipped exactly this output times the last update\'s length; a year ahead is an estimate, as accessibility falls past half a deposit.',
+  note: 'What the complexes dig a year at each deposit\'s current accessibility: their capacity cut to a whole number, times the race\'s mine production, the accessibility, the governor\'s and a quarter of the sector commander\'s mining bonus and the radiation modifier; efficiency, stability and political status do not apply. Each colony that buys and exports in the sample save shipped exactly this output times the last update\'s length; a year ahead is an estimate, as accessibility falls past half a deposit.',
 })
 
 registerRule({
@@ -39,7 +39,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'confirmed',
   structure: ['FCT_PopulationInstallations.Amount', 'FCT_WealthData.Amount, UseID'],
-  note: 'The race pays 250 wealth a year for each complex whose output it buys and collects 125 a year from each complex it taxes; an NPR pays and collects nothing. The save stores no rate: these are the game\'s 2.7 constants, reproduced to the unit from each colony\'s entry in the wealth ledger (uses 35 and 36) of the 2.7.1 sample save over five updates. A save of any other version has no rate.',
+  note: 'The race pays 250 wealth a year for each complex whose output it buys and collects 125 a year from each complex it taxes; an NPR pays and collects nothing. The save stores no rate: these are the game\'s constants, reproduced to the unit from each colony\'s entry in the wealth ledger (uses 35 and 36) of the sample save over five updates. A save whose game rules are not known has no rate.',
 })
 
 registerRule({
@@ -66,7 +66,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue, MiningProductionValue', 'FCT_MassDriverPackets.TotalSize, Speed'],
-  note: 'A bought output leaves each update in a packet of its own, whatever the source\'s drivers can send: in the 2.7.1 sample save, colonies digging up to three times their drivers\' 5,000 t a year shipped their whole output. The drivers\' capacity limits what else ships, the stock above the reserve. A destination alone does not show what arrives, so the output and the capacity are compared only where both are known.',
+  note: 'A bought output leaves each update in a packet of its own, whatever the source\'s drivers can send: in the sample save, colonies digging up to three times their drivers\' 5,000 t a year shipped their whole output. The drivers\' capacity limits what else ships, the stock above the reserve. A destination alone does not show what arrives, so the output and the capacity are compared only where both are known.',
 })
 
 registerRule({
@@ -144,17 +144,17 @@ const choiceOf = (row) => {
   return row.PurchaseCivilianMinerals === 1 ? 'buy' : row.PurchaseCivilianMinerals === 0 ? 'tax' : null
 }
 
-const choiceResult = (row, choice) => (choice ? ofRule({ rule: 'cmcPolicy.choice', value: choice, inputs: { present: ['FCT_Population.PurchaseCivilianMinerals', 'FCT_Race.NPR'] } }) : unavailable({ rule: 'cmcPolicy.choice', missing: [row.NPR === 0 || row.NPR === 1 ? 'FCT_Population.PurchaseCivilianMinerals' : 'FCT_Race.NPR'] }))
+const choiceResult = (row, choice) => (choice ? ofRule({ rule: 'cmcPolicy.choice', value: choice, inputs: { present: ['FCT_Population.PurchaseCivilianMinerals', 'FCT_Race.NPR'] } }) : unavailable({ rule: 'cmcPolicy.choice', missing: [row.NPR === 0 || row.NPR === 1 ? 'the colony\'s civilian mineral purchase setting' : 'whether the race is an NPR'] }))
 
 // Whether the complexes produce: true or false, or null while an input that could decide it is not recorded. One condition known to fail settles it as false.
 const productionResult = (row) => {
   const capacityKnown = known(row.CivilianCapacity) && !(row.CivilianGaps > 0)
   const depositsKnown = row.Deposits > 0 || !(row.DepositGaps > 0)
   const conditions = [
-    [capacityKnown ? whole(row.CivilianCapacity) >= 1 : null, 'FCT_PopulationInstallations.Amount of a civilian mining complex'],
-    [known(row.MineProduction) ? row.MineProduction > 0 : null, 'FCT_Race.MineProduction'],
-    [known(row.RadiationLevel) ? row.RadiationLevel < 10000 : null, 'FCT_SystemBody.RadiationLevel'],
-    [depositsKnown ? row.Deposits > 0 : null, 'FCT_MineralDeposit.Amount'],
+    [capacityKnown ? whole(row.CivilianCapacity) >= 1 : null, 'the number of civilian mining complexes on the colony'],
+    [known(row.MineProduction) ? row.MineProduction > 0 : null, 'the race\'s mine production'],
+    [known(row.RadiationLevel) ? row.RadiationLevel < 10000 : null, 'the body\'s radiation level'],
+    [depositsKnown ? row.Deposits > 0 : null, 'the amount of the deposits'],
   ]
   const present = ['FCT_PopulationInstallations.Amount', 'FCT_Race.MineProduction', 'FCT_SystemBody.RadiationLevel', 'FCT_MineralDeposit.Amount']
 
@@ -194,16 +194,16 @@ const rateResult = (complexes, perComplex, version) => {
   if (ruleSupports('cmcPolicy.rates', version) !== true) {
     return unavailable({ rule: 'cmcPolicy.rates', missing: [RATES_MISSING] })
   } else if (complexes === null) {
-    return unavailable({ rule: 'cmcPolicy.rates', missing: ['FCT_PopulationInstallations.Amount of a civilian mining complex'] })
+    return unavailable({ rule: 'cmcPolicy.rates', missing: ['the number of civilian mining complexes on the colony'] })
   }
 
-  return ofRule({ rule: 'cmcPolicy.rates', value: complexes * perComplex, inputs: { present: ['FCT_PopulationInstallations.Amount', 'the 2.7 purchase and tax rates'] } })
+  return ofRule({ rule: 'cmcPolicy.rates', value: complexes * perComplex, inputs: { present: ['FCT_PopulationInstallations.Amount', 'the purchase and tax rates'] } })
 }
 
 // The wealth the choice moves a year now: the purchase cost as a negative, the tax as a positive, 0 for an NPR. Unavailable while it is not known that the complexes produce, as the game charges and pays only for production.
 const wealthResult = (choice, complexes, production, version) => {
   if (!choice) {
-    return unavailable({ rule: 'cmcPolicy.rates', missing: ['FCT_Population.PurchaseCivilianMinerals'] })
+    return unavailable({ rule: 'cmcPolicy.rates', missing: ['the colony\'s civilian mineral purchase setting'] })
   } else if (!isAvailable(production)) {
     return unavailable({ rule: 'cmcPolicy.rates', missing: production.inputs.missing })
   }
@@ -247,15 +247,15 @@ export const targetOf = (row, RaceID) => {
   return row.DestinationSystemID === row.SystemID ? 'valid' : 'elsewhere'
 }
 
-const targetResult = (row, target) => (target ? ofRule({ rule: 'cmcPolicy.destination', value: target, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_Population.RaceID, SystemID'] } }) : unavailable({ rule: 'cmcPolicy.destination', missing: [Number.isInteger(row.MassDriverDest) ? 'FCT_Population.RaceID or SystemID of the destination' : 'FCT_Population.MassDriverDest'] }))
+const targetResult = (row, target) => (target ? ofRule({ rule: 'cmcPolicy.destination', value: target, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_Population.RaceID, SystemID'] } }) : unavailable({ rule: 'cmcPolicy.destination', missing: [Number.isInteger(row.MassDriverDest) ? 'the race or system of the destination colony' : 'the colony\'s mass driver destination'] }))
 
 // Whether a colony has a mass driver: true or false, or null when a driver installation's amount or value is not recorded.
-const driverResult = (drivers, gaps, where) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'cmcPolicy.drivers', value: whole(drivers) >= 1, inputs: { present: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] } }) : unavailable({ rule: 'cmcPolicy.drivers', missing: [`FCT_PopulationInstallations.Amount or DIM_PlanetaryInstallation.MassDriverValue at ${where}`] }))
+const driverResult = (drivers, gaps, where) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'cmcPolicy.drivers', value: whole(drivers) >= 1, inputs: { present: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] } }) : unavailable({ rule: 'cmcPolicy.drivers', missing: [`the number of mass drivers or their driver value at ${where}`] }))
 
 // The bought output against what the source's drivers can send: `state` 'unbought' (the output does not ship), 'stays' (no destination to ship to), 'invalid', 'unknown' (the output or the capacity is not known, `result` names which), 'within' or 'over' (the output above the drivers' capacity, which ships in full all the same; the capacity limits the stock above the reserve).
 const throughputOf = (choice, target, output, capacity) => {
   if (choice !== 'buy') {
-    return { state: choice ? 'unbought' : 'unknown', result: choice ? null : unavailable({ rule: 'cmcPolicy.throughput', missing: ['FCT_Population.PurchaseCivilianMinerals'] }) }
+    return { state: choice ? 'unbought' : 'unknown', result: choice ? null : unavailable({ rule: 'cmcPolicy.throughput', missing: ['the colony\'s civilian mineral purchase setting'] }) }
   } else if (STAYS.includes(target)) {
     return { state: 'stays', result: ofRule({ rule: 'cmcPolicy.throughput', value: { shipped: 0 }, inputs: { present: ['FCT_Population.MassDriverDest'] } }) }
   } else if (INVALID.includes(target)) {
@@ -309,7 +309,7 @@ export const cmcPolicyRows = ({ colonies, surface }, { RaceID, version, acknowle
 
     const choice = choiceOf(row)
     const complexes = complexesOf(row)
-    const output = complexes === null ? unavailable({ rule: 'cmcPolicy.output', missing: ['FCT_PopulationInstallations.Amount of a civilian mining complex'] }) : outputResult(depositsBy[row.PopulationID] || [])
+    const output = complexes === null ? unavailable({ rule: 'cmcPolicy.output', missing: ['the number of civilian mining complexes on the colony'] }) : outputResult(depositsBy[row.PopulationID] || [])
     const target = targetOf(row, RaceID)
     const capacity = massDriverRateResult(row.Drivers, row.DriverGaps)
     const sourceDrivers = driverResult(row.Drivers, row.DriverGaps, 'the source')

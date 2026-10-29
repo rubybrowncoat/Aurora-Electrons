@@ -686,7 +686,7 @@ const GROUND_POD_REASON = 'a ground pod\'s size, cost and Vendarite are not cove
 const ENHANCED_RADIATION_REASON = 'the cost of a warhead with an enhanced radiation share is not covered by the missile accounting rules'
 const RETARGETING_REASON = `a retargeting level above ${VALIDATED_RETARGETING} has no saved design to check its size and cost against`
 const MULTIPLE_WARHEADS_ASSUMPTION = 'Each warhead after the first adds 0.1 MSP, which the size floor or limit of some saved designs hides'
-const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design but one (design 154678 of the stock 2.7.1 sample, 0.08% under, the cause not identified), so they are not confirmed'
+const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design but one (design 154678 of the stock sample, 0.08% under, the cause not identified), so they are not confirmed'
 
 // The quantities the cost and mineral formulas read, each { id, label, read(input, raw) }: the value in a candidate, null where the candidate does not give it (an unknown tech) or the quantity does not apply. The ids are those of MISSILE_COST_DOMAIN.
 const COST_QUANTITIES = Object.freeze([
@@ -1376,7 +1376,6 @@ export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating
 
 // The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
 const DESIGN_VERSIONS = ['2.7.x']
-const SAVE_CHECK = 'scripts/check-design-rules.js'
 
 registerRule({
   id: 'design.engineDesign',
@@ -1384,7 +1383,7 @@ registerRule({
   units: 'EP, L/EPH, HS, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.EnginePowerMod', 'FCT_ShipDesignComponents.BGTech1..3', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
-  note: `Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of a stock 2.7.1 save and a modded 2.7.0 save (${SAVE_CHECK}); the modded rows it cannot reproduce are listed there as set outside the rule. docs/DATABASE.md § Design rules.`,
+  note: 'Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of a stock sample save and a modded save; the modded rows it cannot reproduce are set outside the rule.',
 })
 
 registerRule({
@@ -1393,7 +1392,7 @@ registerRule({
   units: 'km/s',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.EnginePower, Size, MaxSpeed', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue'],
-  note: `Reproduces the stored top speed of every class of both sample saves (${SAVE_CHECK}). A class without engines keeps the game's starting speed of 1, which this formula does not give.`,
+  note: 'Reproduces the stored top speed of every class of both sample saves. A class without engines keeps the game\'s starting speed of 1, which this formula does not give.',
 })
 
 registerRule({
@@ -1402,7 +1401,7 @@ registerRule({
   units: 'L/h',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.ComponentValue, FuelEfficiency', 'FCT_ClassComponent.NumComponent'],
-  note: `Engine power times the share in use times the fuel per engine-power hour. The stored class fuel efficiency it starts from is reproduced from the class's engines (${SAVE_CHECK}); the linear burn is settled in docs/plans/planners/mechanics-operations.md.`,
+  note: 'Engine power times the share in use times the fuel per engine-power hour. The stored class fuel efficiency it starts from is reproduced from the class\'s engines.',
 })
 
 registerRule({
@@ -1411,7 +1410,7 @@ registerRule({
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.FuelCapacity, FuelEfficiency, EnginePower, MaxSpeed'],
-  note: `Fuel over the full-power burn, times the speed, times 3,600: the class window's figure, in km and the same at any speed (docs/plans/planners/mechanics-operations.md, settled). The stored fuel efficiency it uses is reproduced for every class with fuel (${SAVE_CHECK}).`,
+  note: 'Fuel over the full-power burn, times the speed, times 3,600: the class window\'s figure, in km and the same at any speed. The stored fuel efficiency it uses is reproduced for every class with fuel.',
 })
 
 registerRule({
@@ -1420,7 +1419,7 @@ registerRule({
   units: 'hours',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.FuelCapacity, FuelEfficiency, EnginePower'],
-  note: 'Fuel over the burn at the share of power in use; the burn rule is the one of design.burnPerHour.',
+  note: 'Fuel over the burn at the share of power in use; the burn rule is the one of the burn per hour rule.',
 })
 
 registerRule({
@@ -1429,7 +1428,7 @@ registerRule({
   units: 'thermal signature',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.StealthRating, ComponentValue', 'FCT_ClassComponent.NumComponent', 'FCT_ShipClass.ClassThermal, EnginePower, Size'],
-  note: 'The signature of a ship under way is the engines\' power times their thermal rating times the share of top speed it moves at, never under a twentieth of its size, and a ship with no move orders shows that floor (docs/plans/planners/mechanics-operations.md, docs/plans/planners/mechanics-sensors.md). The saves store the sum at full power (design.classThermal) and no live signature, so the speed-share rule is not compared with a saved outcome.',
+  note: 'The signature of a ship under way is the engines\' power times their thermal rating times the share of top speed it moves at, never under a twentieth of its size, and a ship with no move orders shows that floor. The saves store the sum at full power (the class thermal signature) and no live signature, so the speed-share rule is not compared with a saved outcome.',
   assumptions: ['The share of top speed the ship moves at is chosen by the player', 'The engines are all at their nominal count: damage is ignored', 'No ship is under tow, which would raise the mass that sets the speed', 'The ship is one of a fleet with move orders: with none the signature is the floor of a twentieth of the size'],
 })
 
@@ -1439,7 +1438,7 @@ registerRule({
   units: 'thermal signature',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.ClassThermal', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentValue, StealthRating of the engines'],
-  note: 'The sum over the class\'s engines of the count times the engine power times its thermal rating reproduces the stored thermal signature of every class of the saves, but for two classes of one modded save, which store 12.5 times the sum and are pinned in the check (scripts/check-signatures.js). The game allows one engine design to a class, so a class of several designs is only hypothetical or modded: the sum is then power-weighted and estimated, never the mean of the ratings (docs/plans/planners/mechanics-ships.md).',
+  note: 'The sum over the class\'s engines of the count times the engine power times its thermal rating reproduces the stored thermal signature of every class of the saves, but for two classes of one modded save, which store 12.5 times the sum and are pinned in the check. The game allows one engine design to a class, so a class of several designs is only hypothetical or modded: the sum is then power-weighted and estimated, never the mean of the ratings.',
   assumptions: ['The class mounts one engine design, as the game\'s class designer requires'],
 })
 
@@ -1449,7 +1448,7 @@ registerRule({
   units: 'HS',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.ClassCrossSection, SensorReduction, Size', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentValue, CloakRating of the cloaks'],
-  note: 'The size times the sensor reduction, never under 0.3 HS, reproduces the stored cross-section of every class of the saves; the stored reduction is the rating of the last fitted cloak whose largest ship is at least the class\'s size, else 1 (scripts/check-signatures.js, docs/plans/planners/mechanics-ships.md). An active sensor sees the cross-section while the cloak is undamaged and the size once it is damaged (docs/plans/planners/mechanics-operations.md).',
+  note: 'The size times the sensor reduction, never under 0.3 HS, reproduces the stored cross-section of every class of the saves; the stored reduction is the rating of the last fitted cloak whose largest ship is at least the class\'s size, else 1. An active sensor sees the cross-section while the cloak is undamaged and the size once it is damaged.',
   assumptions: ['The cloak is undamaged for the cross-section; the size is the cross-section of a class whose cloak is damaged'],
 })
 
@@ -1459,7 +1458,7 @@ registerRule({
   units: 'HS',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size'],
-  note: 'The size the save stores for the class, in HS; the tons are the size times 50 (docs/plans/planners/mechanics-ships.md). The size is read as stored, never rebuilt from the components, and is the base of the cross-section and of the idle thermal signature (design.classCrossSection, design.thermalSignature).',
+  note: 'The size the save stores for the class, in HS; the tons are the size times 50. The size is read as stored, never rebuilt from the components, and is the base of the cross-section and of the idle thermal signature (the class cross section rule, the thermal signature rule).',
   assumptions: ['A class whose save stores no size has an unknown size and no tons, never 0'],
 })
 
@@ -1469,7 +1468,7 @@ registerRule({
   units: 'EM signature',
   verification: 'estimated',
   structure: ['FCT_ShipClass.ShieldStrength', 'FCT_ShipDesignComponents.ComponentValue, Resolution of the active sensors'],
-  note: 'The EM signature is the shield strength times 30 while the shields are up, or the active sensor\'s strength times its resolution (each cut to a whole number, never under 1) while it is switched on, each active sensor design seen on its own and never summed (docs/plans/planners/mechanics-sensors.md). The saves store no emission, so the rule is arithmetic on stored strengths and is not compared with a saved outcome (scripts/check-signatures.js).',
+  note: 'The EM signature is the shield strength times 30 while the shields are up, or the active sensor\'s strength times its resolution (each cut to a whole number, never under 1) while it is switched on, each active sensor design seen on its own and never summed. The saves store no emission, so the rule is arithmetic on stored strengths and is not compared with a saved outcome.',
   assumptions: ['Shields are up at their full strength: live shields may be lower', 'An active sensor is switched on'],
 })
 
@@ -1479,7 +1478,7 @@ registerRule({
   units: 'HS, L, BP',
   verification: 'assumed',
   structure: ['FCT_ShipDesignComponents.Size, ComponentValue, Cost of the race\'s stock fuel tanks'],
-  note: 'The game has no packing rule: the objective is the planner\'s own (fewest HS, then fewest BP, then fewest tanks; the cheapest package takes the fewest BP first). Under it the package is exact, not a heuristic: a table over whole-number litres, HS and BP, with a repeating pattern checked on the table for the requests past its size, equal to the exhaustive enumeration of every package on the stock tanks, on the modded save\'s tanks and on synthetic catalogues (scripts/check-tank-packing.js), and every package holds the litres it was asked for, from the catalogue\'s own rows. The litres each tank holds and its cost are stored figures. A result says whether it is proved: a package a bound cut short is estimated, and a request no tank can hold is unavailable.',
+  note: 'The game has no packing rule: the objective is the planner\'s own (fewest HS, then fewest BP, then fewest tanks; the cheapest package takes the fewest BP first). Under it the package is exact, not a heuristic: a table over whole-number litres, HS and BP, with a repeating pattern checked on the table for the requests past its size, equal to the exhaustive enumeration of every package on the stock tanks, on the modded save\'s tanks and on synthetic catalogues, and every package holds the litres it was asked for, from the catalogue\'s own rows. The litres each tank holds and its cost are stored figures. A result says whether it is proved: a package a bound cut short is estimated, and a request no tank can hold is unavailable.',
   assumptions: ['The package is chosen by the planner\'s own objective, which the game does not apply', `A request is met when the litres held reach it within ${REQUEST_TOLERANCE} of it`],
 })
 
@@ -1489,7 +1488,7 @@ registerRule({
   units: 'HS, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, BGTech1..4', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
-  note: `Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded 2.7.0 save (${SAVE_CHECK}). The one commercial drive of the stock 2.7.1 save was designed under an older rule that kept the size to 1 decimal, and is listed there as explained.`,
+  note: 'Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded save. The one commercial drive of the stock sample save was designed under an older rule that kept the size to 1 decimal, and is explained, not reproduced.',
 })
 
 registerRule({
@@ -1535,7 +1534,7 @@ registerRule({
   units: 'BP',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.Cost of the stock tanks', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the engine, fuel and thermal techs'],
-  note: 'The engine cost rule reproduces every stored engine\'s cost, bar one modded row (design.engineDesign), but the engines of a set are not yet designed in the game, the tank mix is the planner\'s own lightest package (design.packTanks) and the figure leaves out the rest of the class.',
+  note: 'The engine cost rule reproduces every stored engine\'s cost, bar one modded row (the engine design rule), but the engines of a set are not yet designed in the game, the tank mix is the planner\'s own lightest package (the tank packing rule) and the figure leaves out the rest of the class.',
   assumptions: ['Engines are priced by the design rule, not by a stored component', 'Tanks are the planner\'s own lightest package, which the game does not apply', 'Only the engines and fuel tanks are counted, not the rest of the class'],
 })
 
@@ -1545,7 +1544,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size, Cost, MaintSupplies', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
-  note: `Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored MaintSupplies of a stock 2.7.1 save and a modded 2.7.0 save, bar the rows ${SAVE_CHECK} lists as explained.`,
+  note: 'Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored maintenance supplies of a stock sample save and a modded save, bar the rows explained as set outside the rule.',
 })
 
 registerRule({
@@ -1554,7 +1553,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.ComponentTypeID 47, ComponentValue', 'FCT_ClassComponent.NumComponent'],
-  note: `Each storage component's value times its count, cut to a whole number, summed. Reproduced with the engineering rule in the stored MaintSupplies (${SAVE_CHECK}).`,
+  note: 'Each storage component\'s value times its count, cut to a whole number, summed. Reproduced with the engineering rule in the stored maintenance supplies.',
 })
 
 registerRule({
@@ -1563,7 +1562,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MaintSupplies', 'design.engineeringMsp', 'design.maintenanceStorage'],
-  note: `Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored MaintSupplies of every class of both sample saves (${SAVE_CHECK}).`,
+  note: 'Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored maintenance supplies of every class of both sample saves.',
   assumptions: ['The class is a stored or designed class whose cost, size and component rows are final'],
 })
 
@@ -1573,7 +1572,7 @@ registerRule({
   units: '% a year',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size, BaseFailureChance', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
-  note: `Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored BaseFailureChance of every class of both sample saves (${SAVE_CHECK}).`,
+  note: 'Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored base failure chance of every class of both sample saves.',
 })
 
 registerRule({
@@ -1582,7 +1581,7 @@ registerRule({
   units: 'damage roll',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MaxDACRoll', 'FCT_ClassComponent.ChanceToHit, NumComponent', 'FCT_ShipDesignComponents.Size, ComponentTypeID 11'],
-  note: `Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and MaxDACRoll the sum. Compared with every stored MaxDACRoll and ChanceToHit of both sample saves (${SAVE_CHECK}).`,
+  note: 'Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and damage allocation roll the sum. Compared with every stored damage allocation roll and chance to hit of both sample saves.',
 })
 
 registerRule({
@@ -1591,7 +1590,7 @@ registerRule({
   units: 'MSP',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost'],
-  note: 'Each component\'s cost weighted by the difference of its damage allocation threshold and the one before it over MaxDACRoll. The thresholds and the roll it weighs by are reproduced by design.damageAllocation, but the save stores no repair cost to compare the figure with; docs/plans/backlog/evidence/AE-106-01.md works one saved class through by hand.',
+  note: 'Each component\'s cost weighted by the difference of its damage allocation threshold and the one before it over damage allocation roll. The thresholds and the roll it weighs by are reproduced by the damage allocation rule, but the save stores no repair cost to compare the figure with.',
 })
 
 registerRule({
@@ -1620,7 +1619,7 @@ registerRule({
   units: 'EP, L/EPH, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, ComponentValue, FuelEfficiency of a missile engine', 'FCT_TechSystem.AdditionalInfo of the engine, fuel and greatest thrust techs'],
-  note: `A missile engine's power, fuel use and cost from its size, thrust modifier and techs; the fuel use is boosted four times over the excess of the thrust over the race's greatest. Reproduces the thrust of every missile engine a saved design uses, to the rounding of its stored power (${SAVE_CHECK}).`,
+  note: 'A missile engine\'s power, fuel use and cost from its size, thrust modifier and techs; the fuel use is boosted four times over the excess of the thrust over the race\'s greatest. Reproduces the thrust of every missile engine a saved design uses, to the rounding of its stored power.',
   assumptions: ['The engine techs are the levels the race held at the highest development cost'],
 })
 
@@ -1630,7 +1629,7 @@ registerRule({
   units: 'MSP, BP, minerals',
   verification: 'confirmed',
   structure: ['FCT_MissileType.Size, Cost, MSPFuel, MSPWarhead, MSPActive, MSPThermal, MSPEM, MSPGeo, MSPReactor, NumDecoys, MultipleWarheads, NumEngines, NumSS, ECCM, ATG, Retargeting, LaserWarhead, Speed, Endurance, MaxRange, FuelRequired, TotalFlightTime', 'FCT_MissileType.Corbomite, Tritanium, Boronide, Uridium, Gallicite', 'FCT_TechSystem.AdditionalInfo of the warhead, sensor, power plant and laser efficiency techs'],
-  note: `The size, cost and minerals of a missile as the sum of its options (engine, fuel, warhead, sensor reactor, four sensors, ECM decoys, extra warheads, second stage, ECCM, terminal guidance, retargeting, laser warhead), with the speed, endurance and range they give. Compared with every stored design of six saves of two game versions (${SAVE_CHECK}): the rows it does not reproduce are listed there as explained or as unknown where a tech level is not held. An option the rules do not cover (a ground pod, an enhanced radiation warhead, a retargeting level above ${VALIDATED_RETARGETING}) is unavailable, never 0.`,
+  note: `The size, cost and minerals of a missile as the sum of its options (engine, fuel, warhead, sensor reactor, four sensors, ECM decoys, extra warheads, second stage, ECCM, terminal guidance, retargeting, laser warhead), with the speed, endurance and range they give. Compared with every stored design of six saves: the rows it does not reproduce are explained, or unknown where a tech level is not held. An option the rules do not cover (a ground pod, an enhanced radiation warhead, a retargeting level above ${VALIDATED_RETARGETING}) is unavailable, never 0.`,
   assumptions: ['The techs are the levels the race held at the highest development cost', 'The sensor, warhead, laser and reactor figures are read from the tech level the stored figure resolves to'],
 })
 
@@ -1640,8 +1639,8 @@ registerRule({
   units: 'BP, minerals, seconds, km',
   verification: 'estimated',
   structure: ['design.missileAccounting', 'FCT_MissileType.Cost, Uridium, Corundium, Endurance, MaxRange, TotalFlightTime of designs 500724 (game 140) and 154678 (game 138)'],
-  note: `The cost and minerals of a missile in which a quantity the cost formulas read (a size, a sensor strength, a warhead damage, the reactor output, the engine cost and power, a count or level; MISSILE_COST_DOMAIN) is above the highest of a saved design whose cost reproduces (${SAVE_CHECK}), and the endurance, range and flight time of one with second stages: the accounting's formulas applied past what a saved design confirms. The modded design 500724 (thermal sensor strength 150, reactor output 30, laser 90) is stored 137.2 BP under the rule with its Uridium and Corundium short, and design 154678 (nine second stages) 0.08% under in endurance; the cause of neither is identified. The bound is on the quantities the formulas read, not on a tech level alone: a size and a tech that give the same strength are the same case.`,
-  assumptions: ['The formulas of design.missileAccounting hold past the quantities and the stage counts a saved design reproduces'],
+  note: 'The cost and minerals of a missile in which a quantity the cost formulas read (a size, a sensor strength, a warhead damage, the reactor output, the engine cost and power, a count or level; the checked missile cost domain) is above the highest of a saved design whose cost reproduces, and the endurance, range and flight time of one with second stages: the accounting\'s formulas applied past what a saved design confirms. The modded design 500724 (thermal sensor strength 150, reactor output 30, laser 90) is stored 137.2 BP under the rule with its Uridium and Corundium short, and design 154678 (nine second stages) 0.08% under in endurance; the cause of neither is identified. The bound is on the quantities the formulas read, not on a tech level alone: a size and a tech that give the same strength are the same case.',
+  assumptions: ['The formulas of the missile accounting rule hold past the quantities and the stage counts a saved design reproduces'],
 })
 
 registerRule({
@@ -1650,7 +1649,7 @@ registerRule({
   units: 'MSP, BP, minerals',
   verification: 'confirmed',
   structure: ['design.missileAccounting'],
-  note: `Whether a candidate's size, cost and minerals are within the limits it was given: each over a limit by more than ${REPRODUCTION_TOLERANCE} of it is a violation. Only a candidate whose every option is known is judged; a candidate with an unknown or an unsupported option has no verdict (${SAVE_CHECK}).`,
+  note: `Whether a candidate's size, cost and minerals are within the limits it was given: each over a limit by more than ${REPRODUCTION_TOLERANCE} of it is a violation. Only a candidate whose every option is known is judged; a candidate with an unknown or an unsupported option has no verdict.`,
   assumptions: ['The limits are the player\'s own, not the game\'s'],
 })
 
@@ -1660,7 +1659,7 @@ registerRule({
   units: '',
   verification: 'assumed',
   structure: ['design.missileAccounting', 'the missileHit rules'],
-  note: `The effects a candidate's options are meant to have, apart from the accounting. Only an effect whose rule is confirmed against saved data counts toward a ranking, and no effect adds a score of its own: the planner's own policy, since the game has no such rule (${SAVE_CHECK}).`,
+  note: 'The effects a candidate\'s options are meant to have, apart from the accounting. Only an effect whose rule is confirmed against saved data counts toward a ranking, and no effect adds a score of its own: the planner\'s own policy, since the game has no such rule.',
   assumptions: ['An effect counts only when its rule is confirmed against saved data'],
 })
 
@@ -1670,7 +1669,7 @@ registerRule({
   units: 'HS, km, BP, minerals',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, MaxSensorRange, Resolution, ECCM, ElectronicCTD, Uridium, Corbomite of an active sensor or a missile fire control', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the active sensor strength, EM sensitivity, hardening and ECCM techs'],
-  note: `An active sensor or missile fire control from its size, resolution and techs: the strength is the size times the strength tech, the range the square root of strength times the EM sensitivity times the resolution to the power of two thirds over pi (3.1416), in millions of km, doubled for a missile fire control. The Uridium is the strength times the hardening cost factor to 1 decimal, the cost that times the ECCM cost factor. Reproduces the strength, range, cost, minerals, crew, HTK, ECCM and CTD of every owned sensor of the stock saves, and of the modded save but for the rows listed there (${SAVE_CHECK}).`,
+  note: 'An active sensor or missile fire control from its size, resolution and techs: the strength is the size times the strength tech, the range the square root of strength times the EM sensitivity times the resolution to the power of two thirds over pi (3.1416), in millions of km, doubled for a missile fire control. The Uridium is the strength times the hardening cost factor to 1 decimal, the cost that times the ECCM cost factor. Reproduces the strength, range, cost, minerals, crew, HTK, ECCM and CTD of every owned sensor of the stock saves, and of the modded save but for the rows set outside the rule.',
   assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type', 'The pi of the range is 3.1416'],
 })
 
@@ -1680,7 +1679,7 @@ registerRule({
   units: 'HS, sensitivity, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, ElectronicCTD, Uridium of a thermal or EM sensor', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the sensitivity and hardening techs'],
-  note: `A thermal or EM sensor from its size and techs: the sensitivity is the size times the sensitivity tech, the cost that times the hardening cost factor to 1 decimal, all of it Uridium. Reproduces every owned passive sensor of the stock saves, and of the modded save but for the rows listed there (${SAVE_CHECK}).`,
+  note: 'A thermal or EM sensor from its size and techs: the sensitivity is the size times the sensitivity tech, the cost that times the hardening cost factor to 1 decimal, all of it Uridium. Reproduces every owned passive sensor of the stock saves, and of the modded save but for the rows set outside the rule.',
   assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type'],
 })
 
@@ -1690,7 +1689,7 @@ registerRule({
   units: 'km, km/s, HS, BP, minerals',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, TrackingSpeed, FCRangeModifier, FCSpeedModifier, SpecialFunction, ECCM, ElectronicCTD, Uridium, Corbomite of a beam fire control', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the fire control distance, speed, single weapon, hardening and ECCM techs'],
-  note: `A beam fire control from its range and tracking multipliers and techs: the range is the range multiplier times the distance rating tech, the tracking the tracking multiplier times the speed rating tech, the size half the product of the multipliers times the single weapon number, to 2 decimals, the crew four a HS. The Uridium is the range over 20,000 times the tracking over 1,000 cut to a whole number times the hardening cost factor and the weapon number, to 1 decimal; the cost is that times the ECCM cost factor. Reproduces range, tracking, size, crew, cost and minerals of every owned fire control of the stock saves, and of the modded save but for the rows listed there (${SAVE_CHECK}).`,
+  note: 'A beam fire control from its range and tracking multipliers and techs: the range is the range multiplier times the distance rating tech, the tracking the tracking multiplier times the speed rating tech, the size half the product of the multipliers times the single weapon number, to 2 decimals, the crew four a HS. The Uridium is the range over 20,000 times the tracking over 1,000 cut to a whole number times the hardening cost factor and the weapon number, to 1 decimal; the cost is that times the ECCM cost factor. Reproduces range, tracking, size, crew, cost and minerals of every owned fire control of the stock saves, and of the modded save but for the rows set outside the rule.',
   assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type', 'The single weapon tech\'s number is 1 for a full fire control and under 1 for a single weapon one'],
 })
 
@@ -1700,7 +1699,7 @@ registerRule({
   units: 'km, HS',
   verification: 'estimated',
   structure: ['design.beamFireControlDesign', 'FCT_ShipDesignComponents.ComponentValue, Size of beam fire controls'],
-  note: `The range of a beam fire control never above ${BEAM_FIRE_CONTROL_MAX_RANGE_KM} km and its size never below ${BEAM_FIRE_CONTROL_MIN_SIZE_HS} HS. No sampled stock-save fire control reaches the range limit (the greatest range observed is 384,000 km, in the 1973 save) and the modded save stores ranges up to 40,000,000 km, so no saved row shows the cap applied and the cap is checked only on a synthetic design; the size floor is seen only on a modded row (${SAVE_CHECK}).`,
+  note: `The range of a beam fire control never above ${BEAM_FIRE_CONTROL_MAX_RANGE_KM} km and its size never below ${BEAM_FIRE_CONTROL_MIN_SIZE_HS} HS. No sampled stock-save fire control reaches the range limit (the greatest range observed is 384,000 km, in the 1973 save) and the modded save stores ranges up to 40,000,000 km, so no saved row shows the cap applied and the cap is checked only on a synthetic design; the size floor is seen only on a modded row.`,
   assumptions: ['The limits hold as stated for a stock design', 'A modded save storing an uncapped range is outside them'],
 })
 
@@ -1710,7 +1709,7 @@ registerRule({
   units: 'km',
   verification: 'estimated',
   structure: ['design.activeSensorDesign', 'design.passiveSensorDesign'],
-  note: `The range a sensor detects a target at: the maximum range times the square of the target's signature over the resolution when the signature is below it, times 0.75 to the power of the target's jammer less the sensor's ECCM when the jammer is the stronger, for a ship target; a missile is seen by a signature of its size in MSP over ${MSP_PER_HS}, never below ${MISSILE_SIGNATURE_MIN} HS, and no jammer applies to it; a passive sensor sees a signature at the square root of sensitivity times signature times ${PASSIVE_RANGE_MULTIPLIER} km. The saves store no detection result, so these are checked as arithmetic of the stated rules and as the way the stored maximum range is used, not against a saved outcome (${SAVE_CHECK}). The jammer rule is not the missile hit penalty, which takes 0.75 to the whole jammer.`,
+  note: `The range a sensor detects a target at: the maximum range times the square of the target's signature over the resolution when the signature is below it, times 0.75 to the power of the target's jammer less the sensor's ECCM when the jammer is the stronger, for a ship target; a missile is seen by a signature of its size in MSP over ${MSP_PER_HS}, never below ${MISSILE_SIGNATURE_MIN} HS, and no jammer applies to it; a passive sensor sees a signature at the square root of sensitivity times signature times ${PASSIVE_RANGE_MULTIPLIER} km. The saves store no detection result, so these are checked as arithmetic of the stated rules and as the way the stored maximum range is used, not against a saved outcome. The jammer rule is not the missile hit penalty, which takes 0.75 to the whole jammer.`,
   assumptions: ['The resolution and the signature are in the same unit (HS)', 'No target jammer means a jammer of 0'],
 })
 
@@ -1720,6 +1719,6 @@ registerRule({
   units: 'HS, km',
   verification: 'estimated',
   structure: ['design.activeSensorDesign', 'design.sensorDetection', 'design.beamFireControlDesign'],
-  note: `The smallest legal size of an active sensor or missile fire control, or the smallest legal multipliers of a beam fire control, that reaches a wanted range, by the forward rules; the next smaller legal size falls short of it, or a minimum or a beyond-largest bound is reported. The legal sizes are the design window's lists, which the saves do not store: the AI's own sensors are saved at sizes off them (${SAVE_CHECK}).`,
+  note: 'The smallest legal size of an active sensor or missile fire control, or the smallest legal multipliers of a beam fire control, that reaches a wanted range, by the forward rules; the next smaller legal size falls short of it, or a minimum or a beyond-largest bound is reported. The legal sizes are the design window\'s lists, which the saves do not store: the AI\'s own sensors are saved at sizes off them.',
   assumptions: ['The legal sizes, resolutions and multipliers are those the design window offers', 'The techs are the levels the race holds'],
 })

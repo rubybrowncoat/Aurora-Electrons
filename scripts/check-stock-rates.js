@@ -415,7 +415,7 @@ const pure = (ctx) => {
       const rate = item('Rate')[0]
       const depletion = item('Depletion estimate')[0]
 
-      if (!(rate && rate.Value === '-80' && rate.Status === 'confirmed' && rate.Rule === 'stockRates.rate' && /2\.7/.test(rate.Versions) && rate.Unit === 'L/yr')) {
+      if (!(rate && rate.Value === '-80' && rate.Status === 'confirmed' && rate.Rule === 'stockRates.rate' && rate.Unit === 'L/yr')) {
         problems.push(`rate ${short(rate)}`)
       }
 
@@ -1106,7 +1106,7 @@ const MUTATIONS = [
   { name: 'a colony with no figure read as 0', file: U, find: 'return isKnownNumber(value) ? ofRule(', replace: 'return true ? ofRule(', fails: ['colony'] },
   { name: 'a snapshot without the colony counted as unrecorded', file: U, find: 'return entry ? [{ t: snapshot.t, result: colonyResult(entry, stock, columns) }] : []', replace: 'return [{ t: snapshot.t, result: entry ? colonyResult(entry, stock, columns) : unavailable({ rule: \'stockRates.colonyStock\', missing: [\'colony\'], units: stock.unit }) }]', fails: ['colony'] },
   { name: 'the treasury offered for a colony', file: U, find: '(scope === SCOPES.COLONY ? stock.colony !== null : true)', replace: '(scope === SCOPES.COLONY ? true : true)', fails: ['colony', 'panel-colony', 'panel-defaults'] },
-  { name: 'the rules registered for the 2.6 line', file: U, find: 'const STOCK_VERSIONS = [\'2.7.x\']', replace: 'const STOCK_VERSIONS = [\'2.6.x\']', fails: ['registry', 'csv'] },
+  { name: 'the rules registered for the 2.6 line', file: U, find: 'const STOCK_VERSIONS = [\'2.7.x\']', replace: 'const STOCK_VERSIONS = [\'2.6.x\']', fails: ['registry'] },
   { name: 'the rate registered as estimated', file: U, find: 'id: \'stockRates.rate\',\n  versions: STOCK_VERSIONS,\n  units: \'per game year\',\n  verification: \'confirmed\',', replace: 'id: \'stockRates.rate\',\n  versions: STOCK_VERSIONS,\n  units: \'per game year\',\n  verification: \'estimated\',', fails: ['registry', 'estimate', 'csv'] },
   { name: 'the panel\'s window ignored', file: V, find: 'years: this.rateWindow', replace: 'years: 0', fails: ['panel-defaults'] },
   { name: 'the colony chosen ignored', file: V, find: 'return this.colonyOptions.some((option) => option.value === this.rateColony) ? this.rateColony :', replace: 'return false ? this.rateColony :', fails: ['panel-colony'] },

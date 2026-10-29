@@ -5,6 +5,7 @@
 // What is not known: how often the game updates an eccentric body, which the saves do not record. The positions here are continuous in time, and the eccentric bearing is stepped by `ECCENTRIC_STEP_SECONDS`, a number fitted to saves (the step that gave the least error between two saves of one game), not one the game states, so an eccentric position carries an error that grows with the time ahead (the 'eccentric-step' condition); a circular position does not depend on the step.
 
 import { KM_PER_AU } from './jump-graph'
+import { inputWords } from './provenance'
 import { derive } from './query-cache'
 
 // A fleet's arrival is solved to this many seconds and in at most this many evaluations of the body's position, as the bounded fixed point the saves converged in (at most four evaluations to one second in 3,000 body legs at 5,000 km/s).
@@ -491,7 +492,7 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
     const missing = (columns, have) => columns.filter((name) => !have.has(name))
     const lacking = [['FCT_SystemBody', BODY_COLUMNS, bodyColumns], ['FCT_Star', ['StarID', 'Component', 'Xcor', 'Ycor'], starColumns], ['FCT_RaceSysSurvey', ['SystemID', 'GameID', 'RaceID'], surveyColumns]].map(([table, columns, have]) => [table, missing(columns, have)]).filter(([, absent]) => absent.length)
 
-    lacking.forEach(([table, absent]) => problems.push(`${table} has no ${absent.join(', ')} in this save, so no orbit could be read`))
+    lacking.forEach(([table, absent]) => problems.push(`the save has no ${absent.map((column) => inputWords(table, column)).join(', ')}, so no orbit could be read`))
 
     const none = Object.freeze({ bodies: Object.freeze({}), stars: Object.freeze({}), points: Object.freeze({}), bodyOf: Object.freeze({}), hidden: Object.freeze({}), hiddenPoints: Object.freeze({}), problems: Object.freeze(problems) })
 

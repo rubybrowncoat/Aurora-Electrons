@@ -3,11 +3,9 @@
 import { roundHalfEven } from './design-rules'
 import { MINERALS } from './minerals'
 import { finishDays, flagOf, shipRate, shipyardFinish, shipyardUpgradeRate } from './production'
-import { combine, envelope, getRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
+import { UNVERIFIED_SAVE, combine, envelope, getRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 
 const REFIT_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
-
 // A refit adds 20% for the yard work, and the size change adds its own share of the added cost.
 export const REFIT_OVERHEAD = 0.2
 // A yard tooled for a class builds, or refits to, another within 20% of its size without retooling when the refit costs at most a fifth of the tooled class.
@@ -31,7 +29,7 @@ registerRule({
   units: 'BP',
   verification: 'confirmed',
   structure: ['FCT_ClassComponent.ClassID, ComponentID, NumComponent', 'FCT_ShipDesignComponents.Cost', 'FCT_ShipClass.Size'],
-  note: 'The cost of refitting a ship from class A to class B: for each component of B, the count B has above A\'s (all of it when A lacks the component) times the component\'s cost, then times 1.2 plus the size change, the absolute size difference over A\'s size. Components B has fewer of, or lacks, earn no credit. A to B and B to A are two figures. Reproduced from the total of the stored refit tasks of 2.7-shaped saves.',
+  note: 'The cost of refitting a ship from class A to class B: for each component of B, the count B has above A\'s (all of it when A lacks the component) times the component\'s cost, then times 1.2 plus the size change, the absolute size difference over A\'s size. Components B has fewer of, or lacks, earn no credit. A to B and B to A are two figures. Reproduced from the total of the stored refit tasks of saves.',
 })
 
 registerRule({
@@ -40,7 +38,7 @@ registerRule({
   units: 'units',
   verification: 'confirmed',
   structure: ['FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Duranium, Neutronium, Corbomite, Tritanium, Boronide, Mercassium, Vendarite, Sorium, Uridium, Corundium, Gallicite'],
-  note: 'The minerals of a refit: each component\'s added count, rounded to one decimal (a midpoint to the even neighbour), times its mineral cost, summed over the added components. The 20% overhead and the size surcharge add no minerals. Reproduced from the minerals of the stored refit tasks of 2.7-shaped saves.',
+  note: 'The minerals of a refit: each component\'s added count, rounded to one decimal (a midpoint to the even neighbour), times its mineral cost, summed over the added components. The 20% overhead and the size surcharge add no minerals. Reproduced from the minerals of the stored refit tasks of saves.',
 })
 
 registerRule({
@@ -76,7 +74,7 @@ registerRule({
   units: '',
   verification: 'estimated',
   structure: ['FCT_Shipyard.SYType, Slipways, Capacity, BuildClassID, RetoolClassID, TaskType', 'FCT_ShipyardTask.ShipyardID', 'FCT_ShipClass.Size, Cost, Commercial, Obsolete, ClassShippingLineID, OtherRaceClassID', 'refit.noRetool'],
-  note: 'Whether a yard can take work on a class, for one operation. Build and refit: the class a yard is tooled for is always offered; another class is offered without a retool when it is not obsolete, not a shipping line\'s or another race\'s, within the yard\'s capacity (50 tons to the size unit) and, at a commercial yard, a commercial class, and also within 20% of the tooled class\'s size with a refit from the tooled class costing at most a fifth of its cost. A class that fails only the size window or the cost needs a retool; one that fails the other filters, or has prototype components, cannot be taken. A refit also needs its source class within the capacity and, at a commercial yard, commercial, and within 20% of the size of the class the yard is tooled for when the work starts, and costs something. Repair: a ship of the class within the capacity at a naval or repair yard, or a commercial class at a commercial yard, with no tooling. Every operation needs a free slipway (the yard\'s slipways less its tasks). The class window\'s own marks are not copied: they compare two classes, not a yard. Only the 2.7 yard types (naval, commercial, repair) are covered: another type stays unsupported, and none of the unreleased Light Naval Shipyard rules (a fixed 1,000 ton capacity, slipway growth, no tooling up to 1,000 tons) is applied to a 2.7 save. The rule is the documented one; no stored task decides a threshold case.',
+  note: 'Whether a yard can take work on a class, for one operation. Build and refit: the class a yard is tooled for is always offered; another class is offered without a retool when it is not obsolete, not a shipping line\'s or another race\'s, within the yard\'s capacity (50 tons to the size unit) and, at a commercial yard, a commercial class, and also within 20% of the tooled class\'s size with a refit from the tooled class costing at most a fifth of its cost. A class that fails only the size window or the cost needs a retool; one that fails the other filters, or has prototype components, cannot be taken. A refit also needs its source class within the capacity and, at a commercial yard, commercial, and within 20% of the size of the class the yard is tooled for when the work starts, and costs something. Repair: a ship of the class within the capacity at a naval or repair yard, or a commercial class at a commercial yard, with no tooling. Every operation needs a free slipway (the yard\'s slipways less its tasks). The class window\'s own marks are not copied: they compare two classes, not a yard. Only the naval, commercial and repair yard types are covered: another type stays unsupported, and none of the unreleased Light Naval Shipyard rules (a fixed 1,000 ton capacity, slipway growth, no tooling up to 1,000 tons) is applied to a save. The rule is the documented one; no stored task decides a threshold case.',
 })
 
 registerRule({

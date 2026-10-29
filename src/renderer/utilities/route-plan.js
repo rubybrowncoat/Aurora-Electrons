@@ -344,7 +344,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['route.distanceKm', 'route.effectiveSpeed'],
-  note: 'The route\'s distance divided by one speed, in the unit that reads best. A transit takes no time, and the jump shock a fleet waits out after each and the nebula speed caps are not in this figure: `route.jumpWait` and `route.elapsedTime` count them where the fleet\'s crew is read. Acceleration and refuelling are left out, so the figure is not compared with times the game stores.',
+  note: 'The route\'s distance divided by one speed, in the unit that reads best. A transit takes no time, and the jump shock a fleet waits out after each and the nebula speed caps are not in this figure: the jump wait and the elapsed time count them where the fleet\'s crew is read. Acceleration and refuelling are left out, so the figure is not compared with times the game stores.',
   assumptions: ['one speed all the way', 'no nebula limits or refuelling stops'],
 })
 
@@ -373,7 +373,7 @@ registerRule({
   units: 'systems',
   verification: 'confirmed',
   structure: ['FCT_RaceSysSurvey', 'FCT_JumpPoint', 'FCT_RaceJumpPointSurvey.Explored'],
-  note: 'Counts of the known systems by how an explored route from the first stop meets them: reached, avoided by an option, cut off by an option or out of reach. Which systems an option avoids is its own rule (`route.avoidance`).',
+  note: 'Counts of the known systems by how an explored route from the first stop meets them: reached, avoided by an option, cut off by an option or out of reach. Which systems an option avoids is its own rule .',
   assumptions: ['the avoid and transit options chosen here'],
 })
 

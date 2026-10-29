@@ -1,4 +1,4 @@
-import { combine, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
+import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 
 // The hit chance of a missile against a target, as scenarios: the raw continuous chance the speeds, guidance, tactical modifier and jammer give, the chance capped at 100, and the whole-number chance one warhead has on its roll, each its own figure with its own rule so none is read for another. Every function is pure and returns provenance results (utilities/provenance.js): a missing, zero or invalid input leaves a result with no value, never 0.
 
@@ -76,8 +76,6 @@ registerRule({
   note: 'The target speed at which the raw hit chance equals a given percentage: the missile\'s speed times 10, the tactical modifier, the terminal guidance and the jammer effect, over the percentage. At 100 it is the fastest target the missile hits at the cap.',
 })
 
-const UNVERIFIED = 'The save is not shown to be a 2.7 save, so the rule is not verified for its game version'
-
 const MISSILE_SPEED = 'a missile speed above 0'
 const TARGET_SPEED = 'a target speed of 0 or more'
 const GUIDANCE = 'the missile\'s terminal guidance'
@@ -102,7 +100,7 @@ export const entered = (value) => {
   return null
 }
 
-const versionNotes = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED])
+const versionNotes = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE])
 
 // The sentence a panel states when the save's game version is not shown to be one the rules were read for, or an empty text when it is; the same note every result of the rules carries among its assumptions.
 export const versionLimit = (version) => versionNotes(HIT_RULES.raw, version)[0] || ''

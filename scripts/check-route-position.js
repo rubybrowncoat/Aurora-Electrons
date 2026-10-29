@@ -961,7 +961,7 @@ check('loader-schema', 'the read gives the clock, the race\'s fleets and waypoin
   assert.equal(read.fleets[5].orders, null, 'a missing orders table is unknown, not none')
   assert.equal(read.fleets[5].anchor, null, 'a missing anchor column is unknown, not none')
   assert.deepEqual(read.waypoints, {}, 'a missing waypoint table reads no waypoints')
-  assert.ok(read.problems.some((problem) => problem.includes('FCT_Waypoint')), 'and names what it lacks')
+  assert.ok(read.problems.some((problem) => problem.includes('waypoint')), 'and names what it lacks')
   assert.equal(rp.routePositions([WAYPOINTS[31]], { facts: read }).records[0].unknown, true, 'a waypoint of such a save is not said to stay')
   assert.equal(rp.routePositions([IDLE], { facts: read }).records[0].age, null)
   old.close()

@@ -34,7 +34,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_WealthData.TimeUsed'],
-  note: 'The cycle length is the shortest gap between the logged cycle ends. In the modded save every one of 73 gaps is 5 days; in the stock 2.7.1 save the 723 gaps run from 30 minutes to about 2 days, so there the shortest gap is not one cycle length and the longest gap is shown beside it. One logged cycle end has no gap to measure, so a default length is assumed.',
+  note: 'The cycle length is the shortest gap between the logged cycle ends. In the modded save every one of 73 gaps is 5 days; in the stock sample save the 723 gaps run from 30 minutes to about 2 days, so there the shortest gap is not one cycle length and the longest gap is shown beside it. One logged cycle end has no gap to measure, so a default length is assumed.',
 })
 
 registerRule({
@@ -61,7 +61,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'The window\'s total scaled to 365 days by the time the window spans. Over the 30 days to today the modded save\'s scaled income was within 0.01% of the stored annual wealth figure (26324711 against 26325265); over 365 days it was 0.8% under. In the stock 2.7.1 save the scaled income was 9% to 12% above the stored figure (256977 to 265046 against 237291), so the two do not agree there; the stored figure\'s own definition is not known here.',
+  note: 'The window\'s total scaled to 365 days by the time the window spans. Over the 30 days to today the modded save\'s scaled income was within 0.01% of the stored annual wealth figure (26324711 against 26325265); over 365 days it was 0.8% under. In the stock sample save the scaled income was 9% to 12% above the stored figure (256977 to 265046 against 237291), so the two do not agree there; the stored figure\'s own definition is not known here.',
   assumptions: ['the rate over the window holds for a year'],
 })
 

@@ -97,11 +97,11 @@ registerRule({
   units: 'M people',
   verification: 'confirmed',
   structure: ['FCT_Population.Population, SpeciesID, RaceID'],
-  note: 'The sum of the stored FCT_Population.Population over the race\'s colonies of the species, as saved; no calculation beyond the sum.',
+  note: 'The sum of the stored population over the race\'s colonies of the species, as saved; no calculation beyond the sum.',
 })
 
 // A species' population (millions) as a result: unavailable when any of its colonies has no recorded population (the sum would be partial), never 0. A species whose colonies hold no people is a real 0.
-export const speciesPopulationResult = (species) => (Number.isFinite(species.TotalPopulation) ? ofRule({ rule: 'habitability.speciesPopulation', value: species.TotalPopulation, inputs: { present: ['FCT_Population.Population'] } }) : unavailable({ rule: 'habitability.speciesPopulation', missing: ['FCT_Population.Population'] }))
+export const speciesPopulationResult = (species) => (Number.isFinite(species.TotalPopulation) ? ofRule({ rule: 'habitability.speciesPopulation', value: species.TotalPopulation, inputs: { present: ['FCT_Population.Population'] } }) : unavailable({ rule: 'habitability.speciesPopulation', missing: ['the population of the species'] }))
 
 // What the race rules are while unread, and when the save has no race row: nothing is known, so no default stands in for a missing rate or skill (colonization.js `terraformCapacityResult` and `assessBodies` say what each missing one does).
 export const NO_RACE_RULES = Object.freeze({ ColonizationSkill: null, TerraformingRate: null, TerraformingSpeed: null })

@@ -2,6 +2,7 @@
 
 import { loadJumpPoints } from './jump-graph'
 import { MINERALS } from './minerals'
+import { inputWords } from './provenance'
 import { JUMP_DRIVE_COLUMNS } from './transport'
 
 // The commander bonus the production of ground engineers rests on: Production.
@@ -32,7 +33,7 @@ export const selectedColumns = (alias, columns, names) => names.map((name) => (c
 
 export const hasAll = (columns, names) => names.every((name) => columns.has(name))
 
-export const gaps = (table, columns, wanted) => (columns.size === 0 ? [`${table} (table)`] : wanted.filter((name) => !columns.has(name)).map((name) => `${table}.${name}`))
+export const gaps = (table, columns, wanted) => (columns.size === 0 ? [inputWords(table)] : wanted.filter((name) => !columns.has(name)).map((name) => inputWords(table, name)))
 
 // Whether a stored flag is set: null when the save does not say (a null value or no column), never false.
 const isSet = (value) => (value === null || value === undefined ? null : Number(value) !== 0)
@@ -52,9 +53,9 @@ export const loadMineTypes = async (database, { GameID, RaceID }) => {
 
   return rows.map((row) => {
     const verdicts = [
-      { text: 'DIM_PlanetaryInstallation.NoBuild', blocks: isSet(row.NoBuild) },
-      { text: 'DIM_PlanetaryInstallation.CivilianInstallation', blocks: isSet(row.CivilianInstallation) },
-      { text: 'the race\'s technology for DIM_PlanetaryInstallation.RequiredTechID', blocks: row.Researched === null || row.Researched === undefined ? null : Number(row.Researched) === 0 },
+      { text: 'whether the installation is barred from building', blocks: isSet(row.NoBuild) },
+      { text: 'whether the installation is a civilian one', blocks: isSet(row.CivilianInstallation) },
+      { text: 'the race\'s technology for the installation', blocks: row.Researched === null || row.Researched === undefined ? null : Number(row.Researched) === 0 },
     ]
 
     return { row, verdicts }

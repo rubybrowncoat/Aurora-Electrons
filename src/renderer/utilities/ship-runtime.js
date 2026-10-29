@@ -11,7 +11,7 @@ import { combine, ofRule, registerRule, ruleSupports, unavailable } from './prov
 import { SECONDS_PER_YEAR } from './transport'
 
 const SECONDS_PER_MONTH = 2592000
-const UNSUPPORTED_VERSION = 'the save is not shown to be of game version 2.7, the version the hangar and shore-leave rates are read for'
+const UNSUPPORTED_VERSION = 'the game version the save was played under, which the hangar and shore-leave rates are read for'
 const RUNTIME_VERSIONS = ['2.7.x']
 // DIM_MaintenanceState: operational and under maintenance (an overhaul).
 const OPERATIONAL = 0
@@ -77,7 +77,7 @@ registerRule({
   units: '% a year',
   verification: 'estimated',
   structure: ['FCT_ShipClass.BaseFailureChance', 'FCT_DamagedComponent', 'FCT_ShipDesignComponents.ComponentTypeID'],
-  note: 'The ship\'s annual failure rate at a maintenance clock of one year: the class\'s stored rate (design.annualFailureRate reproduces it) while none of the ship\'s engineering is damaged. Damaged engineering raises the ship\'s own rate above the class\'s, so the figure is withheld for such a ship.',
+  note: 'The ship\'s annual failure rate at a maintenance clock of one year: the class\'s stored rate (the annual failure rate rule reproduces it) while none of the ship\'s engineering is damaged. Damaged engineering raises the ship\'s own rate above the class\'s, so the figure is withheld for such a ship.',
 })
 
 registerRule({
@@ -86,7 +86,7 @@ registerRule({
   units: '% a year',
   verification: 'estimated',
   structure: ['shipRuntime.failureRate', 'shipRuntime.maintenanceAge'],
-  note: 'The ship\'s annual failure rate at its present clock: its annual rate times its maintenance age in years. It is the base of the chance of a failure in one increment (design.incrementFailureChance), before the share of the ship left uncovered, its crew and its officers.',
+  note: 'The ship\'s annual failure rate at its present clock: its annual rate times its maintenance age in years. It is the base of the chance of a failure in one increment (the increment failure chance rule), before the share of the ship left uncovered, its crew and its officers.',
 })
 
 registerRule({

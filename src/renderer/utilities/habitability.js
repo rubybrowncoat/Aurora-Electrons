@@ -29,7 +29,7 @@ registerRule({
   units: 'colony cost',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, TidalLock, Eccentricity', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species', 'FCT_Race.ColonizationSkill'],
-  note: 'The largest of six environment factors (docs/DATABASE.md, Colony cost), worst of now, periapsis and apoapsis, times the race\'s colonisation skill. Checked against FCT_Population.ReqInf of the race\'s own colonies: the requirement per million people equals the cost now times the skill, times 100 (200 on low gravity), over PopulationDensityModifier, within 0.1% on 23 of 27 colonies of two saves and within 3.4% on the other four, all low gravity (the stored requirement may predate a change of population; not checked). Periapsis, apoapsis and the worst case have no stored value, and no unsettled body is checked.',
+  note: 'The largest of six environment factors, worst of now, periapsis and apoapsis, times the race\'s colonisation skill. Checked against the stored infrastructure requirement of the race\'s own colonies: the requirement per million people equals the cost now times the skill, times 100 (200 on low gravity), over the species\' density modifier, within 0.1% on 23 of 27 colonies of two saves and within 3.4% on the other four, all low gravity (the stored requirement may predate a change of population; not checked). Periapsis, apoapsis and the worst case have no stored value, and no unsettled body is checked.',
 })
 
 registerRule({
@@ -38,7 +38,7 @@ registerRule({
   units: 'infrastructure per million people',
   verification: 'estimated',
   structure: ['FCT_Species.PopulationDensityModifier', 'FCT_SystemBody.Gravity'],
-  note: 'ceil(colony cost x 100 x 2 on low gravity / PopulationDensityModifier), float noise rounded off first. Before the ceiling the figure matches FCT_Population.ReqInf over Population for the cost now (the check of habitability.colonyCost); the ceiling and the use of the worst cost of the orbit are the Planner\'s reading and have no stored value.',
+  note: 'The colony cost times 100 (200 on low gravity) over the species\' density modifier, rounded up, float noise rounded off first. Before the rounding the figure matches the stored infrastructure requirement over the population for the cost now (the check of the colony cost rule); the rounding and the use of the worst cost of the orbit are the planner\'s reading and have no stored value.',
 })
 
 const NOTHING = Object.freeze([])

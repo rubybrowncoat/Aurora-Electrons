@@ -4,10 +4,9 @@
 
 import { LOW_RATE_RECIPIENT_HS, REASONS as DONOR_REASONS, fuelDonor, isLowRate, loadFuelDonors } from './fuel-donors'
 import { columnsOf } from './mine-bootstrap-data'
-import { ofRule, registerRule, ruleSupports, unavailable } from './provenance'
+import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LEDGER_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the fuel service rules are not checked against the save.'
 const SECONDS_PER_HOUR = 3600
 
 registerRule({

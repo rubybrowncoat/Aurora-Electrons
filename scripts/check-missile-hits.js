@@ -189,11 +189,11 @@ const synthetic = ({ hit, provenance }) => {
     return unknown.secondStageId === null && noValue(scene.raw) && scene.raw.inputs.missing.some((text) => /whether the missile has a second stage/.test(text)) && noValue(hitScenario({ missile: { ...unknown, secondStageId: undefined }, targetSpeed: 10000 }).raw) && close(valueOrNull(hitScenario({ missile: none, targetSpeed: 10000 }).raw), 70) && none.secondStageId === 0
   })
   add('a proposed missile has a single stage, and its chance is available', () => proposedMissile({ speed: '50000', atg: '1.4', eccm: '3', warheads: '1' }).secondStageId === 0 && close(valueOrNull(hitScenario({ missile: proposedMissile({ speed: '50000', atg: '1.4', eccm: '3', warheads: '1' }), targetSpeed: 10000 }).raw), 70))
-  add('the version limit is stated for a save not shown to be 2.7 and not for a 2.7.1 save, in the words every result carries', () => {
+  add('the version limit is stated for a save that does not state its game rules and not for a 2.7.1 save, in the words every result carries', () => {
     const limit = versionLimit(null)
     const carried = scenario({ version: null }).capped.assumptions.includes(limit)
 
-    return /not shown to be a 2.7 save/.test(limit) && carried && versionLimit('2.7.1') === '' && versionLimit('2.7') === '' && versionLimit('2.6') !== ''
+    return /does not state which game rules/.test(limit) && carried && versionLimit('2.7.1') === '' && versionLimit('2.7') === '' && versionLimit('2.6') !== ''
   })
   add('multi-warhead: 4 warheads at 70% expect 2.8 hits, each warhead rolling alone', () => {
     const scene = scenario({}, { ...arrow, warheads: 4 })
@@ -291,13 +291,13 @@ const synthetic = ({ hit, provenance }) => {
     const other = raw({ version: '2.6.0' })
     const text = (result) => result.assumptions.join(' | ')
 
-    return /not shown to be a 2.7 save/.test(text(unknown)) && !/not shown to be a 2.7 save/.test(text(stock)) && /not shown to be a 2.7 save/.test(text(other)) && close(unknown.value, stock.value) ? true : `${text(unknown)} / ${text(stock)}`
+    return /does not state which game rules/.test(text(unknown)) && !/does not state which game rules/.test(text(stock)) && /does not state which game rules/.test(text(other)) && close(unknown.value, stock.value) ? true : `${text(unknown)} / ${text(stock)}`
   })
   add('the version note reaches the capped and expected hit results', () => {
     const scene = scenario({ version: null }, { ...arrow, warheads: 2 })
     const stock = scenario({ version: '2.7.1' }, { ...arrow, warheads: 2 })
 
-    return [scene.capped, scene.roll, scene.hitsCapped].every((result) => result.assumptions.some((text) => /not shown to be a 2.7 save/.test(text))) && [stock.capped, stock.roll, stock.hitsCapped].every((result) => !result.assumptions.some((text) => /not shown to be a 2.7 save/.test(text)))
+    return [scene.capped, scene.roll, scene.hitsCapped].every((result) => result.assumptions.some((text) => /does not state which game rules/.test(text))) && [stock.capped, stock.roll, stock.hitsCapped].every((result) => !result.assumptions.some((text) => /does not state which game rules/.test(text)))
   })
   add('2000 random cases: the raw, capped and whole-number roll chances equal the plain formula', () => {
     const next = generator(20260622)
@@ -393,7 +393,7 @@ const MUTATIONS = [
   ['a warhead count of 0 accepted', 'count < 1', 'count < 0'],
   ['the roll expected hits worked from the capped chance', 'hitsRoll: expectedWarheadHits({ chance: roll,', 'hitsRoll: expectedWarheadHits({ chance: capped,'],
   ['a ship decoy given a chance', 'if (missile.shipDecoy) {', 'if (false) {'],
-  ['the version note never added', 'ruleSupports(rule, version) === true ? [] : [UNVERIFIED]', '[]'],
+  ['the version note never added', 'ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE]', '[]'],
   ['the curve steps not kept in order', '.sort((a, b) => a - b)', '.sort()'],
   ['the entered curve value added twice', '!steps.includes(number) ? [...steps, number]', 'true ? [...steps, number]'],
   ['a missing figure of the table row read as 0', 'rawValue: valueOrNull(scenario.raw),', 'rawValue: valueOrNull(scenario.raw) || 0,'],

@@ -321,7 +321,7 @@ const BREAKDOWN_CHECKS = {
       unavailable(at({ ships: [ship({ modules: null })] }), 'orbital', /modules/, 'unknown modules')
       unavailable(at({ ships: [ship({ captain: null, captained: false })] }), 'orbital', /captain/, 'unknown captain bonus')
       unavailable(at({}, { admins: { 1: adminOf({ BonusValue: null, Unknown: 'FCT_Commander.RankID' }) } }), 'orbital', /RankID/, 'unknown admin chain')
-      unavailable(at({ shipsKnown: false, ships: [] }), 'orbital', /AssignedPopulationID/, 'unknown fleet assignment')
+      unavailable(at({ shipsKnown: false, ships: [] }), 'orbital', /assigned to the colony/, 'unknown fleet assignment')
       unavailable(at({ installations: null }), 'installations', /installations/, 'unknown installations')
       unavailable(at({ modifier: { ...handSource().modifier, governor: null } }), 'installations', /governor/, 'unknown governor')
       unavailable(at({ modifier: { ...handSource().modifier, efficiency: null } }), 'installations', /efficiency/, 'unknown efficiency')
@@ -338,6 +338,29 @@ const BREAKDOWN_CHECKS = {
     },
   },
   'rate Falryx': { needs: [falryx(2904201340)], run: (modules) => rateOnSave(modules, falryx(2904201340), 141, 791) },
+  'speed Falryx': {
+    needs: [falryx(2904201340)],
+    run: async (modules) => {
+      const { terraformBreakdown, hasTerraformers } = modules['terraform-capacity']
+      const sources = await sourcesOf(modules, falryx(2904201340), 141, 791)
+      const admins = await adminsOf(modules, falryx(2904201340), 141, 791)
+      let compared = 0
+
+      for (const source of Object.values(sources.colonies).filter(hasTerraformers)) {
+        const base = terraformBreakdown({ raceRate: sources.raceRate, speed: 100, source, admins }).capacity.value
+
+        assert.ok(base > 0, `${source.PopName}: capacity at the game speed 100 is ${base}`)
+
+        for (const speed of [50, 300, 500]) {
+          near(terraformBreakdown({ raceRate: sources.raceRate, speed, source, admins }).capacity.value, base * speed / 100, 1e-9, `${source.PopName} at the game speed ${speed}`)
+        }
+
+        compared += 1
+      }
+
+      assert.ok(compared > 0, 'no colony with terraformers')
+    },
+  },
   'rate passive moon': { needs: [passive(2)], run: (modules) => rateOnSave(modules, passive(2), 139, 2) },
   'pairs Falryx A': { needs: [falryx(2713949950), falryx(2740177930)], run: (modules) => pairsFrom(modules, falryx(2713949950)) },
   'pairs Falryx B': { needs: [falryx(2794985390), falryx(2810693885)], run: (modules) => pairsFrom(modules, falryx(2794985390)) },
@@ -596,12 +619,12 @@ const BREAKDOWN_CHECKS = {
 const BREAKDOWN_FAULTS = [
   { label: 'installation sum not rounded down', from: 'raceRate * Math.trunc(source.installations) * modifier.value', to: 'raceRate * source.installations * modifier.value', fails: ['arith', 'truncation', 'rate Falryx'] },
   { label: 'Math.PI for the body area', from: 'export const SURFACE_PI = 3.1416', to: 'export const SURFACE_PI = Math.PI', fails: ['arith', 'rate Falryx'] },
-  { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith'] },
+  { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith', 'speed Falryx'] },
   { label: 'naval admin chain ignored', from: 'group.admin * group.effective', to: 'group.effective', fails: ['arith'] },
   { label: 'crew share ignored', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules', fails: ['arith', 'unknown'] },
   { label: 'unknown crew read as 1', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules * (known(ship.crew) ?? 1)', fails: ['unknown'] },
   { label: 'unknown captain bonus read as 1', from: 'staffed === null || known(ship.captain) === null ? null : staffed * ship.captain', to: 'staffed === null ? null : staffed * (known(ship.captain) ?? 1)', fails: ['unknown'] },
-  { label: 'unknown fleet assignment read as no ships', from: "source.shipsKnown === false ? ['the fleets assigned to the colony (FCT_Fleet.AssignedPopulationID)'] : []", to: '[]', fails: ['unknown'] },
+  { label: 'unknown fleet assignment read as no ships', from: "source.shipsKnown === false ? ['the fleets assigned to the colony'] : []", to: '[]', fails: ['unknown'] },
   { label: 'the sector bonus counted in full', from: '1 + (modifier.sector - 1) / 4', to: 'modifier.sector', fails: ['arith', 'rate Falryx'] },
   { label: 'a missing captain read as 0', from: ': null) : 1)', to: ': null) : 0)', fails: ['rate Falryx'] },
   { label: 'an unconfirmed commander bonus read as 1', from: 'captain: row.BonusUnknown ? null : bonusOf(', to: 'captain: bonusOf(', fails: ['blocked'] },

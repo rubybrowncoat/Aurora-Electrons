@@ -106,7 +106,7 @@ const queueNeedsOf = (needs, populationId, name) => {
 
   const row = needs[populationId]
 
-  return row ? summed('minerals.queueNeeds', row, name, `the queue cost of ${name} (FCT_IndustrialProjects.${name}, Amount; FCT_ShipyardTask.${name}, TotalBP, CompletedBP)`) : ofRule({ rule: 'minerals.queueNeeds', value: 0, inputs: { present: ['FCT_IndustrialProjects', 'FCT_ShipyardTask'] } })
+  return row ? summed('minerals.queueNeeds', row, name, `the queue cost of ${name} in industrial projects and shipyard tasks`) : ofRule({ rule: 'minerals.queueNeeds', value: 0, inputs: { present: ['FCT_IndustrialProjects', 'FCT_ShipyardTask'] } })
 }
 
 // What is on its way to a colony by mass driver. `packets` is the whole of `loadPacketsInFlight` (null when it was not read); a colony with no row has no packet bound for it.
@@ -117,16 +117,16 @@ const inboundOf = (packets, populationId, name) => {
 
   const row = packets[populationId]
 
-  return row ? summed('minerals.inFlight', row, name, `FCT_MassDriverPackets.${name}`) : ofRule({ rule: 'minerals.inFlight', value: 0, inputs: { present: ['FCT_MassDriverPackets'] } })
+  return row ? summed('minerals.inFlight', row, name, `the ${name} in the mass driver packets`) : ofRule({ rule: 'minerals.inFlight', value: 0, inputs: { present: ['FCT_MassDriverPackets'] } })
 }
 
 // A colony's stock of one mineral and what is on its way to it by mass driver, as results: the part of `colonyMineralResults` that needs neither the reserve nor the queue.
-export const stockAndInbound = (colony, packets, mineral) => ({ stock: stored('minerals.colonyStock', colony[mineral.name], `FCT_Population.${mineral.name}`), inbound: inboundOf(packets, colony.PopulationID, mineral.name) })
+export const stockAndInbound = (colony, packets, mineral) => ({ stock: stored('minerals.colonyStock', colony[mineral.name], `the ${mineral.name} stockpiled at the colony`), inbound: inboundOf(packets, colony.PopulationID, mineral.name) })
 
 // `colonyMinerals` with the unknown kept apart from 0: each of a mineral's stock, reserve, free, needs, inbound and state is a provenance result in `results`, and the same name holds its value, or null when unknown. A colony whose stock or reserve is not recorded has no free stock and no state; one whose queue needs are unknown has no state. `needs` and `packets` are the whole reads (`loadQueueNeeds`, `loadPacketsInFlight`), or null when one was not made; `exporting` is whether the colony's mass driver ships somewhere.
 export const colonyMineralResults = (colony, needs, packets, exporting = false) => MINERALS.map((mineral) => {
   const { stock, inbound } = stockAndInbound(colony, packets, mineral)
-  const reserve = stored('minerals.colonyStock', colony[`Reserve${mineral.name}`], `FCT_Population.Reserve${mineral.name}`)
+  const reserve = stored('minerals.colonyStock', colony[`Reserve${mineral.name}`], `the ${mineral.name} reserve of the colony`)
   const needsResult = queueNeedsOf(needs, colony.PopulationID, mineral.name)
   const results = {
     stock,

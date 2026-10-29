@@ -46,7 +46,7 @@ registerRule({
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentValue, ComponentTypeID 17, SpecialFunction 7', 'FCT_DamagedComponent.Number'],
-  note: 'Millions of colonists the ship\'s standard berths hold: the standard-berth modules of its class times their capacity, less the damaged ones. The sum without damage matched the stored class colonist capacity of every Ark class in the modded 2.7 save and the stock 2.7.1 save; no save has a damaged Ark module, so the damage rule is read from the game, not observed. Cryogenic berths on the same ship are not counted: people in them are not orbital population.',
+  note: 'Millions of colonists the ship\'s standard berths hold: the standard-berth modules of its class times their capacity, less the damaged ones. The sum without damage matched the stored class colonist capacity of every Ark class in the modded save and the stock sample save; no save has a damaged Ark module, so the damage rule is read from the game, not observed. Cryogenic berths on the same ship are not counted: people in them are not orbital population.',
 })
 
 registerRule({

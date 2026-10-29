@@ -265,8 +265,8 @@ export const diagnose = (inputs, seconds) => {
     failed: failed ? failed.message : null,
     results: {
       events: eventsResult(coverage, reasons, { from, to, observed, verdict }),
-      hidden: setResult(hidden, 'logDiagnostic.hidden', 'FCT_HideEvents', hidden ? [...hidden].sort((a, b) => a - b) : []),
-      types: setResult(listed, 'logDiagnostic.types', 'DIM_EventType', listed ? [...listed].sort((a, b) => a - b) : []),
+      hidden: setResult(hidden, 'logDiagnostic.hidden', 'the event types the race hides', hidden ? [...hidden].sort((a, b) => a - b) : []),
+      types: setResult(listed, 'logDiagnostic.types', 'the event types the game lists', listed ? [...listed].sort((a, b) => a - b) : []),
       fleet: unavailable({ rule: 'logDiagnostic.fleet', missing: ['ship, fleet and boarding-party state'] }),
     },
   }

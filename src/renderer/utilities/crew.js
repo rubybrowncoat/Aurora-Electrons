@@ -1,11 +1,9 @@
 // How short a ship's crew is and what that costs: the one crew share every figure that scales with the crew aboard takes, and the activities a deficit slows. Handling (utilities/transport.js), harvesters (logistics.js), survey (survey.js), orbital mining (minerals.js) and the crew warning (warnings/ships.js) all read the share from `crewFraction`, so the same ship gives the same number everywhere. Evidence: docs/plans/backlog/evidence/AE-103-01.md.
 
 import { roundToDecimal } from './math'
-import { ofRule, registerRule, ruleSupports, unavailable } from './provenance'
+import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const CREW_VERSIONS = ['2.7.x']
-const UNVERIFIED_SAVE = 'The save lacks the AllowCMC or AncientRelics column of FCT_Game, which its formula version is read from, so the rule is not checked against the save.'
-
 // The share of its class crew a ship has aboard, as the game scales a ship's modules and its cargo handling: Current Crew / Class Crew, 1 once the class crew is aboard (an over-crewed ship is no faster) and 1 for a class without crew (the game never scales it, so there is no division by zero). A ship with no crew aboard has 0, and a missing crew or class crew gives null, never 1. `ship`: { CurrentCrew, ClassCrew }.
 export const crewFraction = (ship) => {
   if (!Number.isFinite(ship.ClassCrew)) {
@@ -24,14 +22,14 @@ export const crewFractionSql = (ship = 'FCT_Ship', shipClass = 'FCT_ShipClass') 
 
 const BASE_STRUCTURE = ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew']
 const MODULE_STRUCTURE = [...BASE_STRUCTURE, 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent']
-const STANDING = 'Estimated: read from the game\'s rules for 2.7; no saved game shows a short-crewed ship doing this, so it is checked against nothing stored.'
+const STANDING = 'Estimated: read from the game\'s rules; no saved game shows a short-crewed ship doing this, so it is checked against nothing stored.'
 
 // The activities a crew deficit slows. `types`: the module types (DIM_ComponentType) whose undamaged modules the share scales, `time` that the game lengthens the time instead of cutting a rate (the speed is the same share), `twice` that the share counts twice, `zero` what a ship with no crew aboard does where the game's rule divides by the crew.
 const ACTIVITIES = [
   { key: 'handling', label: 'Cargo handling', time: true, zero: 'blocked', structure: [...BASE_STRUCTURE, 'FCT_ShipClass.CargoCapacity, ColonistCapacity, TroopCapacity'], note: 'A ship short of crew takes Class Crew / Current Crew times as long to load or unload cargo, colonists and troops, so it works at the share of its crew aboard; an over-crewed ship is no faster. The game divides by the crew, so a ship with no crew aboard has no defined time and loads nothing here (inferred, not checked against saved data). Logistics bonuses and the shuttle strength are separate terms.' },
-  { key: 'survey', label: 'Survey', types: [6, 7], twice: true, structure: [...MODULE_STRUCTURE, 'FCT_Ship.CrewMorale'], note: 'A short-crewed ship\'s survey sensors run at the share of its crew aboard, and the game applies the share again to the fleet\'s running total, so a lone ship surveys at the share squared and in a fleet of several the order of the ships changes the result (survey.js). Crew morale is a separate factor.' },
-  { key: 'harvesting', label: 'Harvesting', types: [32], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s Sorium harvester modules work at the share of its crew aboard, on top of the racial rate, the commander and admin Mining bonuses and the deposit\'s accessibility (logistics.js).' },
-  { key: 'mining', label: 'Orbital mining', types: [38], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s orbital mining modules work at the share of its crew aboard, on top of the racial mine production, the Mining bonuses and the deposit\'s accessibility (minerals.js).' },
+  { key: 'survey', label: 'Survey', types: [6, 7], twice: true, structure: [...MODULE_STRUCTURE, 'FCT_Ship.CrewMorale'], note: 'A short-crewed ship\'s survey sensors run at the share of its crew aboard, and the game applies the share again to the fleet\'s running total, so a lone ship surveys at the share squared and in a fleet of several the order of the ships changes the result. Crew morale is a separate factor.' },
+  { key: 'harvesting', label: 'Harvesting', types: [32], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s Sorium harvester modules work at the share of its crew aboard, on top of the racial rate, the commander and admin Mining bonuses and the deposit\'s accessibility.' },
+  { key: 'mining', label: 'Orbital mining', types: [38], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s orbital mining modules work at the share of its crew aboard, on top of the racial mine production, the Mining bonuses and the deposit\'s accessibility.' },
   { key: 'maintenance', label: 'Maintenance', types: [48], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s maintenance modules give the share of their capacity that its crew aboard bears to the class crew.' },
   { key: 'salvage', label: 'Salvage', types: [39], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s salvage modules work at the share of its crew aboard, on top of the commander\'s Production bonus.' },
   { key: 'terraforming', label: 'Terraforming', types: [33], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s terraforming modules work at the share of its crew aboard, on top of the racial rate and the commander\'s and admin Terraforming bonuses.' },

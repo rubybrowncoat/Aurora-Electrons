@@ -28,7 +28,7 @@ registerRule({
   units: 'salvos',
   verification: 'estimated',
   structure: ['FCT_MissileSalvo.MissileSalvoID', 'FCT_MissileSalvo.RaceID', 'FCT_MissileSalvo.MissileSpeed', 'FCT_MissileSalvo.SystemID', 'FCT_MissileSalvo.Xcor', 'FCT_MissileSalvo.Ycor', 'FCT_MissileType.SecondStageID', ...STRUCTURE_POINT],
-  note: 'Mines and sensor buoys have no table of their own: they are the race\'s stationary missile salvos, one count per salvo ID. A salvo of a design with a second stage is taken as a mine and one without as a buoy; that split matches the designs\' names in a 2.7 save but is not confirmed by the game\'s rules. A salvo counts at a point when it is in the same system within 1 km of it on each axis. A salvo counts as one object, not as the missiles in it.',
+  note: 'Mines and sensor buoys have no table of their own: they are the race\'s stationary missile salvos, one count per salvo ID. A salvo of a design with a second stage is taken as a mine and one without as a buoy; that split matches the designs\' names in a save but is not confirmed by the game\'s rules. A salvo counts at a point when it is in the same system within 1 km of it on each axis. A salvo counts as one object, not as the missiles in it.',
   assumptions: ['a stationary salvo of a design with a second stage is a mine', 'a stationary salvo of a design without a second stage is a buoy'],
 })
 
