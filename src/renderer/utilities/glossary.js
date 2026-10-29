@@ -10,14 +10,13 @@ export const GAME_VERSION = '2.7.x'
 // When the entries below were last read against the pages that show them and the reachable links last opened.
 export const REVIEWED = '2026-10-13'
 
-// A version status says how a link stands against GAME_VERSION: 'older' (written for an earlier release, so rules and menus may differ), 'current' (written for it, or tied to no release) or 'unknown' (the release is not stated and could not be told).
-export const VERSION_STATUS = Object.freeze({ OLDER: 'older', CURRENT: 'current', UNKNOWN: 'unknown' })
+// A version status says how a link stands against GAME_VERSION: 'older' (written for an earlier release, so rules and menus may differ) or 'current' (written for it, or tied to no release).
+export const VERSION_STATUS = Object.freeze({ OLDER: 'older', CURRENT: 'current' })
 
 // How a status reads beside a link.
 export const VERSION_STATUS_TEXT = Object.freeze({
   [VERSION_STATUS.OLDER]: 'Written for an older release: rules and menus may differ',
   [VERSION_STATUS.CURRENT]: 'Not tied to an older release',
-  [VERSION_STATUS.UNKNOWN]: 'Release not known',
 })
 
 // Nothing written before this month can describe a 2.7 release, so a link dated earlier must be marked older.
@@ -89,13 +88,12 @@ export const TERMS = Object.freeze([
 
 const link = (fields) => Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })
 
-// `title` and `covers` say what the pointer is and what it deals with, in the words of this app, never as a verification. `written` is the month the material was written (null for a living site), `gameVersion` the release it describes in its own words, `status` how that stands against GAME_VERSION and `reached` the date the address answered at the review (null when it did not).
+// `title` and `covers` say what the pointer is and what it deals with, in the words of this app, never as a verification. `written` is the month the material was written (null for a living site), `gameVersion` the release it describes in its own words, `status` how that stands against GAME_VERSION and `reached` the date the address answered at the review.
 export const LINKS = Object.freeze([
   link({ id: 'community-forum', title: 'Aurora 4X community forum', source: 'Aurora 4X community', url: 'https://aurora4x.com/', covers: 'Discussion of the game and its releases, and the place to ask for help.', gameVersion: 'Live discussion, not tied to one release', status: VERSION_STATUS.CURRENT }),
-  link({ id: 'community-wiki', title: 'Aurora community wiki', source: 'Aurora 4X community', url: 'https://aurorawiki.pentarch.org/index.php?title=Main_Page', covers: 'Reference pages on game terms; its C# part is largely the release changelogs, formatted.', gameVersion: 'Mixed releases; the page does not say which', status: VERSION_STATUS.UNKNOWN, reached: null }),
 ])
 
-const RESOURCES = ['community-forum', 'community-wiki']
+const RESOURCES = ['community-forum']
 
 // What each page's help shows: terms in reading order and links, by route. A route is a page of the registry (utilities/navigation.js); scripts/check-glossary.js holds every page that belongs to a section to an entry.
 const PAGE_HELP = Object.freeze({

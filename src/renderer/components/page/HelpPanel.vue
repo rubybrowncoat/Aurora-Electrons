@@ -32,8 +32,8 @@
           </div>
         </dl>
 
-        <h3 class="help__heading">Learning links</h3>
-        <p class="help__note">Links open in the browser. They explain terms and workflows and are no source for any figure; the mark beside a figure states how far it holds.</p>
+        <h3 class="help__heading">Learning link</h3>
+        <p class="help__note">The link opens in the browser. It explains terms and workflows and is no source for any figure; the mark beside a figure states how far it holds.</p>
         <ul class="help__links">
           <li v-for="item in help.links" :key="item.id" class="help__link" :data-link="item.id">
             <external-link :href="item.url">{{ item.title }}</external-link>
@@ -43,8 +43,7 @@
               <span>{{ item.gameVersion }}</span>
               <span class="help__status" :class="`help__status--${item.status}`"><v-icon x-small>{{ statusIcon[item.status] }}</v-icon>{{ statusText[item.status] }}</span>
               <span>Reviewed {{ item.reviewed }}</span>
-              <span v-if="item.reached" class="help__reach">Reachable at the review</span>
-              <span v-else class="help__reach help__reach--down">Not reachable at the review</span>
+              <span class="help__reach">Reachable at the review</span>
             </div>
           </li>
         </ul>
@@ -73,7 +72,7 @@ export default {
     return {
       open: false,
       statusText: VERSION_STATUS_TEXT,
-      statusIcon: { [VERSION_STATUS.OLDER]: 'mdi-history', [VERSION_STATUS.CURRENT]: 'mdi-check', [VERSION_STATUS.UNKNOWN]: 'mdi-help' },
+      statusIcon: { [VERSION_STATUS.OLDER]: 'mdi-history', [VERSION_STATUS.CURRENT]: 'mdi-check' },
     }
   },
   computed: {
@@ -329,11 +328,6 @@ export default {
 }
 
 .help__status--older {
-  color: var(--ae-ink);
-}
-
-.help__reach--down {
-  font-weight: 600;
   color: var(--ae-ink);
 }
 </style>

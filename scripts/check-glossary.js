@@ -220,7 +220,7 @@ const synthetic = (m, tree) => {
       }
     }))],
 
-    ['the date a link was reached is null, or a past date no later than its review', async () => firstProblem(LINKS.map((item) => [item.id, item.reached === null || (validDate(item.reached) && item.reached <= item.reviewed) ? '' : `reached ${phraseOf(item.reached)}`]))],
+    ['the date a link was reached is a past date no later than its review', async () => firstProblem(LINKS.map((item) => [item.id, (validDate(item.reached) && item.reached <= item.reviewed) ? '' : `reached ${phraseOf(item.reached)}`]))],
 
     ['a link has a written month or none, and material written before any 2.7 release is marked older', async () => firstProblem(LINKS.map((item) => {
       if (item.written !== null && !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(phraseOf(item.written))) {
@@ -434,7 +434,7 @@ const MUTATIONS = [
   ['a link loses its reviewed date', GLOSSARY, 'Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })', 'Object.freeze({ reached: REVIEWED, written: null, ...fields })', ['every link has a title']],
   ['a link loses its version label', GLOSSARY, 'gameVersion: \'Live discussion, not tied to one release\', ', '', ['every link has a title']],
   ['the older words stop saying older', GLOSSARY, 'Written for an older release: rules and menus may differ', 'Rules and menus may differ', ['the older status reads as older']],
-  ['a link claims to verify a formula', GLOSSARY, 'Reference pages on game terms;', 'Verifies the formulas; reference pages on game terms;', ['no link text claims to verify a figure']],
+  ['a link claims to verify a formula', GLOSSARY, 'Discussion of the game and its releases,', 'Verifies the formulas; discussion of the game and its releases,', ['no link text claims to verify a figure']],
   ['a link names a rule', GLOSSARY, 'link({ id: \'community-forum\', ', 'link({ rule: \'finances.treasury\', id: \'community-forum\', ', ['no entry names a rule or a verification']],
   ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
