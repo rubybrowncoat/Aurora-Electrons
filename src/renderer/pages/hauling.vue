@@ -15,7 +15,7 @@
             </span>
           </div>
           <div v-if="avoidNote" class="panel-body py-2 caption" :class="avoidNote.tone" data-avoid-note>{{ avoidNote.text }}<v-btn v-if="avoidState.failed" x-small text class="ml-2" @click="retryAvoid">Retry</v-btn></div>
-          <route-positions v-if="planPositions.records.length" :positions="planPositions" :state="positionState" class="panel-body py-2" @retry="retryPosition" />
+          <route-positions v-if="planPositions.records.length" :positions="planPositions" :state="positionState" :collapsed.sync="positionsCollapsed" class="panel-body py-2" @retry="retryPosition" />
           <v-data-table :headers="planHeaders" :items="planRows" item-key="key" :expanded.sync="planExpanded" show-expand single-expand :sort-by.sync="planTable.sortBy" :sort-desc.sync="planTable.sortDesc" :items-per-page.sync="planTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" :no-data-text="planEmptyText" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.toName`]="{ item }">
               <div class="py-2">
@@ -96,7 +96,7 @@
             <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
           <div v-if="handlingSupportNote" class="panel-body py-2 caption" :class="handlingSupportNote.tone" data-handling-note>{{ handlingSupportNote.text }}<v-btn v-if="handlingSupportState.failed" x-small text class="ml-2" @click="retryHandlingSupport">Retry</v-btn></div>
-          <route-positions v-if="fleetPositions.records.length" :positions="fleetPositions" :state="positionState" class="panel-body py-2" @retry="retryPosition" />
+          <route-positions v-if="fleetPositions.records.length" :positions="fleetPositions" :state="positionState" :collapsed.sync="positionsCollapsed" class="panel-body py-2" @retry="retryPosition" />
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
@@ -352,6 +352,7 @@ export default {
     loadState(INPUT_LABELS),
     persistedView({
       planReserves: { key: 'haulingPlanReserves', default: false },
+      positionsCollapsed: { key: 'haulingPositionsCollapsed', default: true, valid: (value) => typeof value === 'boolean' },
       ...avoidFields('hauling'),
       planTable: tableView('haulingPlanTable', { sortBy: ['tonnes'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: ROUTE_PAGE_SIZES }),
       routesTable: tableView('haulingRoutesTable', { sortBy: ['movedSort'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: ROUTE_PAGE_SIZES }),

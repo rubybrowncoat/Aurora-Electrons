@@ -2,7 +2,7 @@
   <v-card class="panel route-desires" data-summary="The routes the player wants between two colonies, kept as local records apart from the observed routes and set against them: whether a capable fleet runs each, and what its capacity covers. A record gives the game no order." elevation="1" data-route-desires>
     <div class="panel-head">
       <span>Desired routes</span>
-      <v-chip v-if="read && !read.error && !repositoryError && scope" small data-desire-count><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</v-chip>
+      <v-chip v-if="read && !read.error && !repositoryError && scope" small data-desire-count><span><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</span></v-chip>
     </div>
     <div v-if="state.loading || state.failed" class="px-4 py-2" data-desire-state>
       <load-state :failed="state.failed" :error="state.error" :loading="state.loading" @retry="$emit('retry')" />
@@ -69,12 +69,18 @@
           </div>
         </template>
         <template #[`item.actions`]="{ item }">
-          <v-btn x-small text :disabled="busy" data-desire-edit @click="startEdit(item.entry)">Edit</v-btn>
-          <v-btn v-if="deleting !== item.entry.uuid" x-small text color="error" :disabled="busy" data-desire-delete @click="deleting = item.entry.uuid">Delete</v-btn>
-          <template v-else>
-            <v-btn x-small depressed color="error" :disabled="busy" data-desire-delete-confirm @click="remove(item.entry)">Delete it</v-btn>
-            <v-btn x-small text data-desire-delete-cancel @click="deleting = null">Keep</v-btn>
-          </template>
+          <div class="route-desires__row-actions">
+            <v-btn x-small text :disabled="busy" data-desire-edit @click="startEdit(item.entry)">Edit</v-btn>
+            <div class="route-desires__delete">
+              <div :class="{ 'route-desires__delete-state--off': deleting === item.entry.uuid }">
+                <v-btn x-small text color="error" :disabled="busy" data-desire-delete @click="deleting = item.entry.uuid">Delete</v-btn>
+              </div>
+              <div :class="{ 'route-desires__delete-state--off': deleting !== item.entry.uuid }">
+                <v-btn x-small depressed color="error" :disabled="busy" data-desire-delete-confirm @click="remove(item.entry)">Delete it</v-btn>
+                <v-btn x-small text data-desire-delete-cancel @click="deleting = null">Keep</v-btn>
+              </div>
+            </div>
+          </div>
         </template>
       </v-data-table>
       <div v-for="note in read.notes" :key="note.uuid" class="px-4 py-1 caption text--secondary" data-desire-note-unlisted>{{ note.reason }}</div>
@@ -297,6 +303,27 @@ export default {
     display: flex;
     gap: 8px;
     margin-top: 8px;
+  }
+
+  // Both states of the delete action are laid out in one cell, one over the other, and the one not in use is only hidden: the column is as wide as the wider of them, so asking to delete a route never moves the columns.
+  .route-desires__row-actions {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .route-desires__delete {
+    display: grid;
+
+    > div {
+      grid-area: 1 / 1;
+      display: flex;
+      align-items: center;
+    }
+  }
+
+  .route-desires__delete-state--off {
+    visibility: hidden;
   }
 }
 </style>

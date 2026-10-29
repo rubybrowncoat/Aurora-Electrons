@@ -1567,6 +1567,51 @@ check('strip-component', 'the strip says it is reading while the read is in flig
   assert.ok(rp.ageResult(positions).rule.id === 'route.positionAge')
 })
 
+check('strip-collapse', 'a strip that has a choice to fold shows its groups unless folded, states how many groups are folded away and how many of them have unknowns, and hands back the opposite choice on its toggle; Hauling binds both its strips to one choice that starts folded', async (w) => {
+  const rp = (await w.modules())['route-position']
+  const component = await w.component()
+  const positions = rp.routePositions([BODY, BUSY, SEEN, FIXED], { facts: FACTS })
+  const groups = rp.describePositions(positions)
+  const unknown = groups.filter((group) => group.conditions.length).length
+  const nodes = elementsOf(templateOf(w.text.component, 'RoutePositions.vue'))
+  const find = (name) => nodes.find((node) => node.attrsList.some((attr) => attr.name === name) || classTokens(node).includes(name))
+  const list = find('route-positions__groups')
+  const toggle = find('data-positions-toggle')
+  const hidden = find('data-positions-hidden')
+  const emitted = []
+  const vmOf = (collapsed) => instantiate(component, { $store: STORE, data: { positions, state: { loading: false, failed: '', error: '' }, collapsed } })
+  const shown = (node, vm) => node.if === undefined || Boolean(evaluated(node.if, scopeOf(vm)))
+  const clicked = (vm) => {
+    const scope = scopeOf(vm)
+
+    evaluated(toggle.events.click.value, new Proxy({}, { has: (_target, key) => key === '$emit' || key in scope, get: (_target, key) => (key === '$emit' ? (...args) => emitted.push(args) : scope[key]) }))
+  }
+
+  assert.ok(list && toggle && hidden, 'the strip has its list of groups, its toggle and its count of the groups folded away')
+  assert.ok(unknown > 0 && unknown < groups.length, 'the fixture has groups with unknowns and groups without')
+
+  const open = vmOf(false)
+  const folded = vmOf(true)
+  const fixed = vmOf(null)
+
+  assert.equal(shown(list, open) && shown(list, fixed), true, 'the groups show unless the strip is folded')
+  assert.equal(shown(list, folded), false, 'a folded strip leaves its groups out')
+  assert.deepEqual([shown(toggle, open), shown(toggle, folded), shown(toggle, fixed)], [true, true, false], 'the toggle shows where the host keeps a choice, and only there')
+  assert.deepEqual([shown(hidden, open), shown(hidden, folded), shown(hidden, fixed)], [false, true, false], 'the count of what is folded away shows only on a folded strip')
+  assert.deepEqual(folded.hiddenText.match(/\d+/g), [String(groups.length), String(unknown)], 'it counts the groups and those with unknowns')
+
+  clicked(open)
+  clicked(folded)
+  assert.deepEqual(emitted, [['update:collapsed', true], ['update:collapsed', false]], 'the toggle hands back the opposite choice')
+
+  const hauling = await w.hauling()
+  const strips = elementsOf(templateOf(w.text.haulingPage, 'hauling.vue')).filter((node) => node.tag === 'route-positions')
+
+  assert.equal(strips.length, 2, 'Hauling has two strips')
+  strips.forEach((strip) => assert.ok(strip.attrsList.some((attr) => attr.name === ':collapsed.sync' && attr.value === 'positionsCollapsed'), 'each strip of Hauling keeps its choice in the one field'))
+  assert.equal(instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2 }).positionsCollapsed, true, 'the groups start folded on Hauling')
+})
+
 const UNSURE = { ...FACTS, clock: { ...CLOCK, orbitalMotion: null } }
 
 const SPEED = { status: 'assumed', value: 1000, rule: { id: 'route.speed' }, inputs: { present: [], missing: [] }, assumptions: [], units: 'km/s' }
@@ -2870,6 +2915,13 @@ const FAULTS = [
   ['a Lagrange point moves with an owner that is no planet or moon', 'orbit', 'if (body && endpoint.family === \'lagrange-point\' && ', 'if (false && body && endpoint.family === \'lagrange-point\' && ', ['lagrange-owner-class', 'motion-matrix']],
   ['a Lagrange point stays only with an asteroid owner', 'orbit', 'isNumber(body.bodyClass) && !POINT_OWNER_CLASSES.includes(body.bodyClass)', 'body.bodyClass === 3', ['lagrange-owner-class']],
   ['a Lagrange point of a body that is no planet or moon is propagated', 'orbit', 'if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {', 'if (false && !POINT_OWNER_CLASSES.includes(body.bodyClass)) {', ['lagrange-owner-class']],
+  ['the strip shows its groups when folded', 'component', '<ul v-if="!collapsed" class="route-positions__groups">', '<ul class="route-positions__groups">', ['strip-collapse']],
+  ['the strip hides its groups when not folded', 'component', '<ul v-if="!collapsed" class="route-positions__groups">', '<ul v-if="collapsed === null" class="route-positions__groups">', ['strip-collapse']],
+  ['the toggle hands back the choice it has', 'component', '@click="$emit(\'update:collapsed\', !collapsed)"', '@click="$emit(\'update:collapsed\', collapsed)"', ['strip-collapse']],
+  ['the folded strip counts every group as one with unknowns', 'component', 'this.groups.filter((group) => group.conditions.length).length', 'this.groups.length', ['strip-collapse']],
+  ['Hauling does not keep the choice of the plan strip', 'haulingPage', /(<route-positions(?=[^>]*:positions="planPositions")[^>]*?) :collapsed\.sync="positionsCollapsed"/, (m) => m[1], ['strip-collapse']],
+  ['Hauling does not keep the choice of the routes strip', 'haulingPage', /(<route-positions(?=[^>]*:positions="fleetPositions")[^>]*?) :collapsed\.sync="positionsCollapsed"/, (m) => m[1], ['strip-collapse']],
+  ['Hauling starts with its groups showing', 'haulingPage', "positionsCollapsed: { key: 'haulingPositionsCollapsed', default: true,", "positionsCollapsed: { key: 'haulingPositionsCollapsed', default: false,", ['strip-collapse']],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -2884,7 +2936,7 @@ const BENIGN = [
   { label: 'the label of the read reworded', target: 'mixin', at: new RegExp(`(\\n {2}positionFacts: )${STRING}`), to: (m) => `${m[1]}'when each saved position was stored'` },
   { label: 'the strip attributes reordered and its retry written with v-on longhand', target: 'routesPage', at: /<route-positions (:positions="[^"]*") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[4].replace('@retry', 'v-on:retry')} ${m[3]} ${m[2]} ${m[1]} />` },
   { label: 'the attributes of the strip of Transport reordered', target: 'transportPage', at: /<route-positions (v-if="[^"]*") (:positions="[^"]*") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[5]} ${m[4]} ${m[3]} ${m[2]} ${m[1]} />` },
-  { label: 'the attributes of the strip of Hauling plan reordered', target: 'haulingPage', at: /<route-positions (v-if="planPositions[^"]*") (:positions="planPositions") (:state="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[5]} ${m[4]} ${m[3]} ${m[2]} ${m[1]} />` },
+  { label: 'the attributes of the strip of Hauling plan reordered', target: 'haulingPage', at: /<route-positions (v-if="planPositions[^"]*") (:positions="planPositions") (:state="[^"]*") (:collapsed\.sync="[^"]*") (class="[^"]*") (@retry="[^"]*") \/>/, to: (m) => `<route-positions ${m[6]} ${m[5]} ${m[4]} ${m[3]} ${m[2]} ${m[1]} />` },
   { label: 'the summary of the Hauling plan panel reworded', target: 'haulingPage', at: /(<v-card class="panel" data-summary=")[^"]*("[^>]*>(?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, to: (m) => `${m[1]}Hauls that would cover what colonies lack, from the nearest colony with stock, and what each freighter class takes${m[2]}` },
   { label: 'the attributes of the Hauling plan panel reordered', target: 'haulingPage', at: /<v-card class="panel" (data-summary="[^"]*") (elevation="1")([^>]*)>((?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, to: (m) => `<v-card class="panel" ${m[2]} ${m[1]}${m[3]}>${m[4]}` },
   { label: 'the optional inputs of Transport listed in the opposite order', target: 'transportPage', at: /(const OPTIONAL_INPUTS = )\[('[^']*'(?:, '[^']*')*), (\.\.\.POSITION_INPUTS)\]/, to: (m) => `${m[1]}[${m[3]}, ${m[2].split(', ').reverse().join(', ')}]` },
@@ -3016,6 +3068,8 @@ const COMPOSED = new Set([
   244,
   247,
   248,
+  251,
+  254,
 ])
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------

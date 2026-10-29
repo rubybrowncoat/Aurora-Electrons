@@ -1,6 +1,6 @@
 <template>
   <div class="system-map" :style="{ height }">
-    <canvas ref="canvas" class="system-map__canvas" :class="{ 'system-map__canvas--dragging': dragging, 'system-map__canvas--over': hoverId !== null }" role="img" :aria-label="ariaLabel" :title="hoverTitle" @wheel.prevent="wheel" @pointerdown="press" @pointermove="move" @pointerup="release" @pointercancel="cancel" @pointerleave="leave" />
+    <canvas ref="canvas" class="system-map__canvas" :class="{ 'system-map__canvas--dragging': dragging, 'system-map__canvas--over': hoverId !== null }" role="img" :aria-label="ariaLabel" :title="hoverTitle" @wheel="wheel" @pointerdown="press" @pointermove="move" @pointerup="release" @pointercancel="cancel" @pointerleave="leave" />
     <div class="system-map__controls">
       <v-btn icon small aria-label="Zoom in" title="Zoom in" @click="zoomBy(zoomStep)"><v-icon small>mdi-plus</v-icon></v-btn>
       <v-btn icon small aria-label="Zoom out" title="Zoom out" @click="zoomBy(1 / zoomStep)"><v-icon small>mdi-minus</v-icon></v-btn>
@@ -27,7 +27,7 @@ const HIT_SLACK = 3
 const LABEL_SIZE = 11
 const LABEL_CELL = 64
 
-// The known systems at their places on the game's galactic map (FCT_RaceSysSurvey.Xcor/Ycor), joined by their jump links; systems the game left at its centre get a place beside a linked system. The wheel zooms round the pointer (faster with Shift), dragging pans, and the buttons zoom or fit the map again. Sizes and strokes are in screen pixels whatever the zoom. The map draws on a canvas: as SVG, a few thousand systems made every zoom step restyle and lay out the whole drawing for a second or more. Nodes draw in the order given, so put the ones that matter last: the last one under the pointer is the one clicked, its `title` shows on hover, and its name wins where names would cover each other.
+// The known systems at their places on the game's galactic map (FCT_RaceSysSurvey.Xcor/Ycor), joined by their jump links; systems the game left at its centre get a place beside a linked system. The wheel zooms round the pointer (faster with Shift), and scrolls the page instead where it would zoom out of a map that is fully zoomed out; dragging pans, and the buttons zoom or fit the map again. Sizes and strokes are in screen pixels whatever the zoom. The map draws on a canvas: as SVG, a few thousand systems made every zoom step restyle and lay out the whole drawing for a second or more. Nodes draw in the order given, so put the ones that matter last: the last one under the pointer is the one clicked, its `title` shows on hover, and its name wins where names would cover each other.
 export default {
   name: 'SystemMap',
   props: {
@@ -423,9 +423,16 @@ export default {
       return null
     },
 
-    // Wheel events come faster than frames: their zoom adds up and applies once a frame.
+    // Wheel events come faster than frames: their zoom adds up and applies once a frame. A wheel turned to zoom out of a map that is already fully zoomed out (everything fitted, with the zoom of this frame's earlier events counted) zooms nothing, so it is left to scroll the page; every other wheel zooms and is kept from scrolling it.
     wheel(event) {
-      this.wheelFactor *= wheelZoom(event)
+      const factor = wheelZoom(event)
+
+      if (factor < 1 && this.view.zoom * this.wheelFactor <= 1) {
+        return
+      }
+
+      event.preventDefault()
+      this.wheelFactor *= factor
       this.wheelAt = this.pointer(event)
       this.queueFrame()
     },

@@ -1925,6 +1925,7 @@ const readDesires = () => {
     form: entries(panel, 'data-desire-form').length,
     messages: texts(panel, 'data-desire-message'),
     count: texts(panel, 'data-desire-count-number'),
+    countText: ((chips) => (chips.length ? chips[0].innerText : null))(panel.querySelectorAll('[data-desire-count]')),
     rows,
   }
 }
@@ -2121,7 +2122,12 @@ const openDesires = async (browser, url, world, labels, refresh = false) => {
     }
 
     step(`deleting ${REMOVED}`)
+
+    const headers = () => page.evaluate(() => [...document.querySelectorAll('[data-route-desires] thead th')].map((th) => Math.round(th.getBoundingClientRect().left * 10) / 10))
+    const resting = await headers()
+
     await remover.click({ timeout: FORM_WAIT })
+    stages.columns = { resting, asking: await headers() }
     await desireRowOf(page, REMOVED).locator('[data-desire-delete-confirm]').click({ timeout: FORM_WAIT })
     stages.deleted = await stageOf(page, step, 'the panel without the deleted route', { tombstones: stages.reloaded.stored.tombstones.length + 1 })
     await arrive(page, step, url, { reload: true })
@@ -2246,6 +2252,7 @@ addDesire('desire-panel', 'the panel of the desired routes is ready for a save w
   assert.deepEqual([stage.waiting, stage.errors, stage.newButton, stage.form], [0, 0, 1, 0], 'the panel is ready with no form open')
   assert.deepEqual(stage.rows, [], 'no route is drawn')
   assert.equal(countOf(stage, 'none kept'), 0, 'the number of routes counted')
+  assert.ok(typeof stage.countText === 'string' && !stage.countText.includes('\n') && !/\d[^\W\d_]|[^\W\d_]\d/.test(stage.countText), `the number of routes is set apart from its word, on one line: ${JSON.stringify(stage.countText)}`)
   assert.deepEqual([stage.stored.records, stage.stored.tombstones], [[], []], 'nothing is kept')
 })
 
@@ -2307,6 +2314,13 @@ addDesire('desire-deleted', 'a desired route deleted is gone from the panel and 
   }
 
   assert.deepEqual(seen.stages.reloadedAfterDelete.rows, seen.stages.deleted.rows, 'the routes after the reload are the routes before it')
+})
+
+addDesire('desire-columns', 'asking to delete a desired route leaves every column of the table where it was', ({ seen }) => {
+  const { columns } = seen.stages
+
+  assert.ok(columns && columns.resting.length >= 4, `the columns were measured before and while asking: ${seen.aborted}`)
+  assert.deepEqual(columns.asking, columns.resting, 'the left edges of the headers of the table')
 })
 
 addRefresh('desire-refreshed', 'while the saved orders are read again the desired routes stay as records and draw no coverage from the orders of the read before, and the coverage is back once they are read', ({ seen, world, labels }) => {
@@ -2376,6 +2390,8 @@ const BROWSER_MUTATIONS = [
   { name: 'a desired route kept without demand does not say so', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div v-if="false" class="caption text--secondary" data-desire-demand-none>', fails: ['desire-created'] },
   { name: 'a desired route kept with a demand says that none is set', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div class="caption text--secondary" data-desire-demand-none>', fails: ['desire-created'] },
   { name: 'the conditional status of a fleet is hidden', file: G, find: '<span data-route-conditional-status>', to: '<span v-show="false" data-route-conditional-status>', fails: ['screen-flags'] },
+  { name: 'the number of the desired routes is glued to its word', file: 'desireView', find: "data-desire-count><span><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</span></v-chip>", to: "data-desire-count><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</v-chip>", fails: ['desire-panel'] },
+  { name: 'the confirmation of a deletion is drawn only while it is asked', file: 'desireView', find: '<div :class="{ \'route-desires__delete-state--off\': deleting !== item.entry.uuid }">', to: '<div v-if="deleting === item.entry.uuid">', fails: ['desire-columns'] },
 ]
 
 const BROWSER_BENIGN = [
