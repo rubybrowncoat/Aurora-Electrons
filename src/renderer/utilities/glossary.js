@@ -145,7 +145,7 @@ const PAGE_HELP = Object.freeze({
   '/minerals': {
     overview: 'Mineral Breakdown sets each mineral\'s deposits in the ground against what is mined, held and needed in the colonies, so the next mining site, mining ship or transfer can be chosen. It reads the surveyed deposits, the colonies\' stocks, reserves and queues, the mass drivers and the civilian mining complexes of the save. Figures are as of the save, the policy acknowledgments are the app\'s own records, and the save is only read.',
     usage: [
-      'Mineral focuses every section on one mineral; Systems limits them to all known systems, those with colonies, those with people or the unrestricted ones; a system clicked on the map narrows them further until the chip Show every system again clears it.',
+      'Mineral focuses the page on one mineral; Systems limits it to all known systems, those with colonies, those with people or the unrestricted ones; a system clicked on the map narrows it further until the chip Show every system again clears it. Civilian mining candidates and Civilian mining policy take neither: they always cover every mineral and system.',
       'Deposit options filters the deposits by body kind, accessibility and tonnes, and Reset options restores the defaults.',
       'By mineral counts, for each mineral, what lies in the ground, what is mined, what is held and which colonies are short; click a mineral to focus the page on it, and the link beside the title opens its runway in Mineral Outlook.',
       'Deposits by system sizes each known system by what its deposits hold of the focused mineral; click a system to narrow the deposits and colonies to it.',
@@ -182,7 +182,7 @@ const PAGE_HELP = Object.freeze({
       'Treasury charts the balance over the window.',
       'Treasury against the log compares the stored treasury between two recorded snapshots with the logged cycles between them and names the residual the log does not account for; a dash is a span that cannot be compared.',
       'Civilian shipping-line payouts shows the rates a line is paid, and a Category, the Units carried and the One-way loaded distance give a worked payout estimate.',
-      'Treasury runway under shipping scenarios projects when the treasury runs out over the Horizon chosen under a Future shipping tax, paused contracts, a government transport\'s running cost and new contracts added with Add a contract; the scenario is the app\'s own, and Empire History holds the snapshots it draws on.',
+      'Treasury runway under shipping scenarios projects when the treasury runs out over the Horizon chosen under a Future shipping tax, paused contracts, a government transport\'s running cost and new contracts added with Add a contract; it starts from the treasury now and the rates of the wealth log\'s window, its past is worked back from the log, and the scenario is the app\'s own. The observed past rate of the treasury is the Stock rates panel of Empire History.',
       'Logged amounts are observed; every runway and payout is an estimate with a mark.',
     ],
     terms: ['wealth', 'production-cycle', 'civilian-shipping', 'civilian-mining', 'runway', 'estimated-output'],

@@ -153,7 +153,7 @@
             <div class="panel-head">
               <span>Sorium harvesters<provenance-mark rule="logistics.harvesterOutput" label /><provenance-mark rule="logistics.harvesterObtainable" /></span>
               <span class="d-flex align-center">
-                <v-chip small class="mr-3">{{ formulaVersion ? 'Rates follow the game rules' : 'Rates are estimates' }}</v-chip>
+                <v-chip small class="mr-3">{{ formulaVersion ? 'Rates follow the game\'s rules' : 'Rates are estimates' }}</v-chip>
                 <span class="caption text--secondary mr-2">Fits over</span>
                 <v-btn-toggle v-model="harvesterHorizon" mandatory dense>
                   <v-btn v-for="option in horizonOptions" :key="option.years" :value="option.years" small>{{ option.label }}</v-btn>
