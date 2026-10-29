@@ -683,6 +683,17 @@ check('unsurveyed-read', 'orbit fields are read only for systems the race has su
   const none = await m.loadOrbitFacts(bare, { GameID: GAME, RaceID: RACE }, [ENDPOINTS.b10])
 
   assert.ok(none.problems.length > 0, 'a save without the tables says what it lacks')
+
+  const noneOf = await m.loadOrbitFacts(bare, { GameID: GAME, RaceID: RACE }, [ENDPOINTS.b10, ENDPOINTS.c701, ENDPOINTS.p31])
+
+  assert.equal(noneOf.problems.length, 3, 'a body, a star and a survey table without their columns each say so')
+
+  const narrow = await databaseOf(SCHEMA.replace('create table FCT_Population (PopulationID integer, GameID integer, SystemBodyID integer);', 'create table FCT_Population (GameID integer);').replace(/create table FCT_LagrangePoint \([^)]*\);/, 'create table FCT_LagrangePoint (LagrangePointID integer);'), '')
+  const narrowFacts = await m.loadOrbitFacts(narrow, { GameID: GAME, RaceID: RACE }, [ENDPOINTS.c701, ENDPOINTS.p31])
+
+  assert.equal(narrowFacts.problems.length, 2, 'a colony and a Lagrange point without their columns each say so')
+  ;[...noneOf.problems, ...narrowFacts.problems].forEach((text) => assert.ok(text.startsWith('The save lacks ') || text.startsWith('the save has no '), `${text} says what the save lacks`))
+  ;[...noneOf.problems, ...narrowFacts.problems].forEach((text) => assert.ok(!/\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/.test(text), `${text} names no table or column`))
   assert.deepEqual(none.bodies, {})
   assert.deepEqual(m.orbitAdapter(ENDPOINTS.b10, { facts: { clock: CLOCK, orbits: none }, at: GAME_TIME + 1 }).reasons, ['orbit-missing'])
 })
@@ -1099,6 +1110,9 @@ check('review-round-1-read', 'a Lagrange point of an unsurveyed system has none 
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
+  ['the empty read freezes the list the later reads add to', 'orbit', 'problems: Object.freeze([...problems])', 'problems: Object.freeze(problems)', ['unsurveyed-read']],
+  ['the colony read names its columns', 'orbit', "'The save lacks the ID and body of the colonies, so the bodies of colonies could not be read'", "'FCT_Population has no PopulationID or SystemBodyID in this save, so the bodies of colonies could not be read'", ['unsurveyed-read']],
+  ['the Lagrange point read names its columns', 'orbit', "'The save lacks the identity, system, parent body, distance, bearing, position or game of the Lagrange points, so the orbits of Lagrange points could not be read'", "'FCT_LagrangePoint has no LagrangePointID, SystemID, PlanetID, Distance, Bearing, Xcor, Ycor or GameID in this save, so the orbits of Lagrange points could not be read'", ['unsurveyed-read']],
   ['an arrival is solved only to a minute', 'orbit', 'export const ARRIVAL_TOLERANCE_SECONDS = 1', 'export const ARRIVAL_TOLERANCE_SECONDS = 60', ['circular-arrival', 'registration']],
   ['an arrival is searched for eighty times', 'orbit', 'export const ARRIVAL_MAX_EVALUATIONS = 8', 'export const ARRIVAL_MAX_EVALUATIONS = 80', ['solver-bounds', 'registration']],
   ['a rebuild is trusted a kilometre in a thousand', 'orbit', 'export const REBUILD_TOLERANCE_KM = 1', 'export const REBUILD_TOLERANCE_KM = 1000', ['rebuild', 'registration']],

@@ -181,6 +181,17 @@ export const fieldWords = (field) => {
   return inputWords(table, column === '*' ? '' : column)
 }
 
+// Capability fields in words, as one list for a notice.
+export const fieldList = (fields) => fields.map(fieldWords).join(', ')
+
+// What a failed read says on screen: the first line of the error, with the table or column a database error names put in words and its SQLite code dropped (`no such column: FCT_Ship.CurrentCrew` reads as the save lacking the current crew of ship).
+export const failureWords = (error) => {
+  const text = String(error && error.message !== undefined ? error.message : error).split('\n')[0]
+  const named = (name) => (name.includes('.') || /^(?:FCT|DIM|VIR)_/.test(name) ? fieldWords(name) : `the ${spaced(name)}`)
+
+  return text.replace(/^SQLITE_\w+: /, '').replace(/no such (?:column|table): (\S+)/g, (_found, name) => `the save lacks ${named(name)}`).replace(/ambiguous column name: (\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`).replace(/has no column named (\S+)/g, (_found, name) => `lacks ${named(name)}`).replace(/\b(?:FCT|DIM|VIR)_\w+(?:\.\w+)?/g, named)
+}
+
 // The assumption of a figure whose rule cannot be matched to the save: a save normally states the game rules it was played under, but a damaged one can lack the columns that tell.
 export const UNVERIFIED_SAVE = 'The save does not state which game rules it was played under, so the rule is not checked against the save'
 

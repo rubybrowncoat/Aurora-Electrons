@@ -244,7 +244,7 @@
               <v-chip small>{{ count(formationList.length) }} of {{ count(formationTotals.formations) }} {{ formationTotals.formations === 1 ? 'formation' : 'formations' }}</v-chip>
             </span>
           </div>
-          <div v-if="!formationModel" class="panel-body text--secondary">The save lacks {{ formations.missing.join(', ') }}, so the race's ground formations cannot be listed.</div>
+          <div v-if="!formationModel" class="panel-body text--secondary">The save lacks {{ formationGaps }}, so the race's ground formations cannot be listed.</div>
           <template v-else>
             <div class="panel-body pb-0">
               <v-chip-group v-model="remoteRoles" multiple column aria-label="Roles shown">
@@ -369,7 +369,7 @@ import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { navalAdminChain } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { sumResults, unavailable, valueOrNull } from '../utilities/provenance'
+import { failureWords, fieldList, fieldWords, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
 import { bodyPointsSql, fleetSurveyRate, groundCommandMultipliers, groundSurveyRate, loadGroundCommand, loadSurveyShips, surveyShipSql } from '../utilities/survey'
 import { surveyDays } from '../utilities/survey-eta'
 import { formationRows, remoteOnlyView, REMOTE_DEFINITION, ROLE_OPTIONS, rolesView, rowTotals, selectRows } from '../utilities/remote-formations'
@@ -696,6 +696,10 @@ export default {
     },
 
     // The model of the race's ground formations when the save has what it needs, else null.
+    formationGaps() {
+      return fieldList(this.formations.missing)
+    },
+
     formationModel() {
       return this.formations && this.formations.supported ? this.formations : null
     },
@@ -722,7 +726,7 @@ export default {
       const report = this.$store.getters['capabilities/report']('/survey-progress')
       const entry = report && report.degraded.find((degraded) => degraded.key === 'observationRead')
 
-      return entry ? entry.fields : []
+      return entry ? entry.fields.map(fieldWords) : []
     },
 
     // The observation can be chosen when it is offered and the save holds what its read takes.
@@ -771,7 +775,7 @@ export default {
       }
 
       if (this.observationRead && this.observationRead.failed) {
-        return `The open save could not be read for the observation (${this.observationRead.failed.message}).`
+        return `The open save could not be read for the observation (${failureWords(this.observationRead.failed)}).`
       }
 
       if (this.observationRead && this.observationRead.objects && !this.observationRead.open) {

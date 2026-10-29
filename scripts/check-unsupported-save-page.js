@@ -298,7 +298,7 @@ const noticeProblems = (screen, scene, t) => {
   const problems = []
   const cards = shown(screen.card).length
   const reasons = shown(screen.reason).map((entry) => labelKey(entry.text, t.notices))
-  const columns = pairedBy('the columns listed', shown(screen.columns), scene.absent, (entry) => entry.text, (column) => column)
+  const columns = pairedBy('the columns listed', shown(screen.columns), scene.absent, (entry) => entry.text, (column) => t.words(column))
   const release = screen.release
 
   if (cards !== 1) {
@@ -437,7 +437,7 @@ const cleanups = []
 // What a worker sets up once before its first variant: a copy of the save for each scene with what SQL says of it, the module's words, the text of the files the faults change, and one page server, warmed, with one Chromium.
 const setUp = async () => {
   const { startPageServer } = require('./lib/page-server')
-  const { capabilities } = await loadUtilities(['capabilities'])
+  const { capabilities, provenance } = await loadUtilities(['capabilities', 'provenance'])
   const scenes = {}
 
   for (const scene of SCENES) {
@@ -454,6 +454,7 @@ const setUp = async () => {
     statuses: Object.fromEntries(reasons.map((reason) => [reason, capabilities.REFUSALS[reason].status])),
     version: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version,
     line: capabilities.STATED_FORMULA_VERSION,
+    words: provenance.fieldWords,
   }
   const env = { scenes, truth, originals: Object.fromEntries(FILES.map((file) => [file, fs.readFileSync(path.join(root, file), 'utf8')])), baseline: null }
 

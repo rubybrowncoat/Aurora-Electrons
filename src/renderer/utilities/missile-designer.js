@@ -9,7 +9,7 @@
 import { MIN_SENSOR_MSP, MSP_PER_HS, SENSOR_RULES, TONS_PER_HS, VALIDATED_RETARGETING, agrees, evaluateMissile, missileEngineDesign, missileSignature, roundHalfEven, sensorEffectiveRange, thrustOfMissileEngine } from './design-rules'
 import { LINE_STATE, MISSILE_TECH, heldMissileLevels, loadMissileFixture, matchLevels, missileEngineOf, missileLevelRecord, missileStageOf, ownedMissiles, resolveMissileLevels, savedMissileCandidate } from './design-data'
 import { entered, hitScenario, versionLimit } from './missile-hit'
-import { STATUS, combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+import { STATUS, combine, failureWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { hypotheticalOf, markHypothetical } from './tech-scenarios'
 
 export const MAX_ALTERNATIVES = 3
@@ -760,7 +760,7 @@ const savedColumnOf = (context, spec, scenario) => {
   try {
     return savedColumn({ role: spec.role, key: spec.key, saved, scenario, version: context.version, obsolete: Boolean(context.obsolete[spec.savedId]), name: spec.name || null })
   } catch (error) {
-    return missingColumn(spec, `The saved design cannot be rebuilt: ${error.message}`)
+    return missingColumn(spec, `The saved design cannot be rebuilt: ${failureWords(error)}`)
   }
 }
 

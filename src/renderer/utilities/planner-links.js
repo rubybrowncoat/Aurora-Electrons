@@ -6,7 +6,7 @@
 
 import { cutText } from './deep-links'
 import { SENSOR_RESOLUTIONS_HS, SENSOR_RULES } from './design-rules'
-import { STATUS, getRule } from './provenance'
+import { STATUS, failureWords, getRule } from './provenance'
 import { describeHypothetical, resolveChoices } from './tech-scenarios'
 
 export const STANDING = Object.freeze({ HELD: 'held', MISSING: 'missing', OTHER_RACE: 'other-race', UNOWNED: 'unowned', NOT_RESEARCHED: 'not-researched', UNKNOWN: 'unknown', CHANGED: 'changed' })
@@ -132,7 +132,7 @@ export const loadMissileStanding = async (database, { GameID, RaceID }, id) => {
 
     return missileStanding({ id, row: rows[0] || null, raceId: RaceID })
   } catch (error) {
-    return { id, state: STANDING.UNKNOWN, name: '', text: `The missile ${id} could not be checked against the save (${error.message}).` }
+    return { id, state: STANDING.UNKNOWN, name: '', text: `The missile ${id} could not be checked against the save (${failureWords(error)}).` }
   }
 }
 
@@ -143,7 +143,7 @@ export const loadComponentStanding = async (database, { GameID, RaceID }, id) =>
 
     return componentStanding({ id, row: rows[0] || null })
   } catch (error) {
-    return { id, state: STANDING.UNKNOWN, name: '', type: null, text: `The design ${id} could not be checked against the save (${error.message}).` }
+    return { id, state: STANDING.UNKNOWN, name: '', type: null, text: `The design ${id} could not be checked against the save (${failureWords(error)}).` }
   }
 }
 

@@ -5,9 +5,9 @@
       <p class="body-1" :data-unsupported-reason="line.reason">{{ refusal.notice }}</p>
       <p>Aurora Electrons <span data-unsupported-version>{{ version }}</span> reads Aurora <span data-unsupported-line>{{ stated }}</span> saves only: a save of any other Aurora version is not read, and no figure on any page is for it. Open an Aurora {{ lineName }} save from the Empires page, or use Aurora Electrons <a :href="releaseUrl" target="_blank" rel="noopener" data-unsupported-release>{{ releaseVersion }}</a>, the last release that read older saves.</p>
       <template v-if="line.missing.length">
-        <p class="mb-1">Columns Aurora {{ lineName }} added, absent from the save:</p>
+        <p class="mb-1">Data Aurora {{ lineName }} added, absent from the save:</p>
         <ul class="unsupported-save__list">
-          <li v-for="column in line.missing" :key="column" data-unsupported-column>{{ column }}</li>
+          <li v-for="words in missingWords" :key="words" data-unsupported-column>{{ words }}</li>
         </ul>
       </template>
     </v-card-text>
@@ -21,6 +21,7 @@
 import { mapActions, mapGetters } from 'vuex'
 
 import { LINE_NAME, REFUSALS, STATED_FORMULA_VERSION } from '../../utilities/capabilities'
+import { fieldWords } from '../../utilities/provenance'
 import { version } from '../../../../package.json'
 
 // The release of Aurora Electrons that still reads saves older than the line the app is for.
@@ -46,6 +47,9 @@ export default {
     ]),
     checking () {
       return this.status === 'checking'
+    },
+    missingWords () {
+      return this.line.missing.map(fieldWords)
     },
     refusal () {
       return this.line ? REFUSALS[this.line.reason] : undefined

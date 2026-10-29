@@ -476,6 +476,27 @@ const alteredChecks = async (capabilities, source) => {
       }
     }
 
+    const noticeFields = (mods, result, route) => {
+      const notice = mods.describeReport(result.reports[route])
+
+      return [...notice.unchecked, ...notice.missing, ...notice.degraded.filter((entry) => !entry.gate)].flatMap((entry) => entry.fields)
+    }
+    const namesColumns = (text) => /\b(?:FCT|DIM|VIR)_|\.|[a-z][A-Z]/.test(text)
+
+    check('altered: the notice of a report says what the save lacks in words, with no table or column name, for a degraded and an unsupported report', noticeFields(capabilities, crew, '/lagrange').join() === 'the current crew of ship' && noticeFields(capabilities, mineral, '/mineral-outlook').includes('the duranium of population') && ['/lagrange', '/mineral-outlook'].every((route) => [crew, mineral].every((result) => !noticeFields(capabilities, result, route).some(namesColumns))), noticeFields(capabilities, crew, '/lagrange').concat(noticeFields(capabilities, mineral, '/mineral-outlook')).join(' | '))
+
+    {
+      const directory = mutatedCopy('utilities/capabilities.js', 'fields: entry.gate ? entry.fields : entry.fields.map(fieldWords),', 'fields: entry.fields,')
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+        check('altered: a copy of the code that shows the fields as stored makes the notice name a column, as the check above must notice', noticeFields(mutant, crew, '/lagrange').some(namesColumns))
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
+
     const DELAY_ROUTES = ['/colony-outlook', '/logistics', '/hauling', '/information', '/routes']
     const COMMAND_INPUTS = [['/production', 'page'], ['/habitability', 'BodyDetail']]
     const readsCommand = (mods) => COMMAND_INPUTS.every(([route, key]) => mods.INPUTS[route].some((input) => input.key === key && (input.reads.FCT_Fleet || []).includes('ParentCommandID')))

@@ -10,7 +10,7 @@ import { mergeObservations, observationBase, observationChosen, observationEverC
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
-import { combine, ofRule, registerRule, sumResults, unavailable } from './provenance'
+import { combine, failureWords, ofRule, registerRule, sumResults, unavailable } from './provenance'
 import { ReadOnly, recordingOwner, requireRecording, withRegistry } from './recording-owner'
 
 const HISTORY_VERSIONS = ['2.7.x']
@@ -1085,7 +1085,7 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
               let changed = merged.changed
 
               lost.forEach(({ RaceID, snapshot, eventRead }) => {
-                file.races[RaceID] = withFailure(file.races[RaceID] || null, { at: now(), t: snapshot.t, reason: eventRead.failed && eventRead.failed.message ? eventRead.failed.message : String(eventRead.failed) })
+                file.races[RaceID] = withFailure(file.races[RaceID] || null, { at: now(), t: snapshot.t, reason: failureWords(eventRead.failed) })
                 changed = true
               })
 
@@ -1109,7 +1109,7 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
               failed.push({ GameID, stage: 'observations', error: new Error(base.problem) })
             } else {
               const captures = watched.filter(({ read }) => read.objects).map(({ RaceID, snapshot, read }) => ({ RaceID, kind: read.kind, capture: { t: snapshot.t, n: observation.count, objects: read.objects } }))
-              const failures = watched.filter(({ read }) => read.failed).map(({ RaceID, snapshot, read }) => ({ RaceID, kind: read.kind, failure: { t: snapshot.t, at: now(), reason: read.failed.message ? read.failed.message : String(read.failed) } }))
+              const failures = watched.filter(({ read }) => read.failed).map(({ RaceID, snapshot, read }) => ({ RaceID, kind: read.kind, failure: { t: snapshot.t, at: now(), reason: failureWords(read.failed) } }))
               const forkOf = campaign.branches[resolution.branchId] ? campaign.branches[resolution.branchId].fork : null
               const merged = mergeObservations(base.value, { captures, failures, forkAt: forkOf && isKnownNumber(forkOf.t) ? forkOf.t : null })
 

@@ -494,7 +494,7 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
 
     lacking.forEach(([table, absent]) => problems.push(`the save has no ${absent.map((column) => inputWords(table, column)).join(', ')}, so no orbit could be read`))
 
-    const none = Object.freeze({ bodies: Object.freeze({}), stars: Object.freeze({}), points: Object.freeze({}), bodyOf: Object.freeze({}), hidden: Object.freeze({}), hiddenPoints: Object.freeze({}), problems: Object.freeze(problems) })
+    const none = Object.freeze({ bodies: Object.freeze({}), stars: Object.freeze({}), points: Object.freeze({}), bodyOf: Object.freeze({}), hidden: Object.freeze({}), hiddenPoints: Object.freeze({}), problems: Object.freeze([...problems]) })
 
     if (lacking.length) {
       return none
@@ -518,7 +518,7 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
         }
       })
     } else if (colonyIds.length) {
-      problems.push('FCT_Population has no PopulationID or SystemBodyID in this save, so the bodies of colonies could not be read')
+      problems.push('The save lacks the ID and body of the colonies, so the bodies of colonies could not be read')
     }
 
     if (pointIds.length && ['LagrangePointID', 'SystemID', 'PlanetID', 'Distance', 'Bearing', 'Xcor', 'Ycor', 'GameID'].every((name) => pointColumns.has(name))) {
@@ -537,7 +537,7 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
         }
       })
     } else if (pointIds.length) {
-      problems.push('FCT_LagrangePoint has no LagrangePointID, SystemID, PlanetID, Distance, Bearing, Xcor, Ycor or GameID in this save, so the orbits of Lagrange points could not be read')
+      problems.push('The save lacks the identity, system, parent body, distance, bearing, position or game of the Lagrange points, so the orbits of Lagrange points could not be read')
     }
 
     const starIds = new Set()

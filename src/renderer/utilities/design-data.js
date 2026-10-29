@@ -1,7 +1,7 @@
 // The race's ship classes and the parts the propulsion planner starts from: the classes with the engines, fuel tanks and jump drives they mount, the stock fuel tanks the race may fit, and the race's own engine designs; then the shared component contract every planner builds on (a component record with its quantities, flags and provenance, the loaders that read the race's own components, and additive totals that refuse to mix saves or races). Sizes are in hull spaces (HS), power in engine power (EP), fuel in litres, as in design-rules.js.
 
 import { MIN_SENSOR_MSP, MISSILE_STORED_MINERALS, MSP_PER_HS, TONS_PER_HS, agrees, missileLaserStrength, missileReactorMsp, missileReactorOutput, missileSensorStrength, missileWarheadStrength } from './design-rules'
-import { STATUS, combine, envelope, getRule, registerRule, ruleSupports, satisfies, unavailable } from './provenance'
+import { STATUS, combine, envelope, fieldList, getRule, inputWords, registerRule, ruleSupports, satisfies, unavailable } from './provenance'
 import { loadFormulaVersion } from './capabilities'
 
 const ENGINE_TECH_TYPE = 40
@@ -596,7 +596,7 @@ const componentsSql = (componentColumns, raceTechColumns, types, scope) => {
   const missing = missingColumns(componentColumns, raceTechColumns)
 
   if (missing.length) {
-    throw new Error(`The save lacks ${missing.join(', ')}, which the component read needs`)
+    throw new Error(`The save lacks ${fieldList(missing)}, which the component read needs`)
   }
 
   const selected = [...REQUIRED_COMPONENT_COLUMNS, ...OPTIONAL_COMPONENT_COLUMNS].map((column) => (componentColumns.has(column) ? `c.${column} as ${column}` : `null as ${column}`))
@@ -1163,7 +1163,7 @@ const requireColumns = (columns, table, names, read = 'signature read') => {
   const missing = names.filter((name) => !columns.has(name))
 
   if (missing.length) {
-    throw new Error(`The save lacks ${missing.map((name) => `${table}.${name}`).join(', ')}, which the ${read} needs`)
+    throw new Error(`The save lacks ${missing.map((name) => inputWords(table, name)).join(', ')}, which the ${read} needs`)
   }
 }
 

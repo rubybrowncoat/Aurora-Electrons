@@ -10,6 +10,8 @@
 //
 // Storage and the rules of a stale edit are the repository's. This module takes the repository as an argument and imports no package, so a check runs it on in-memory stores.
 
+import { failureWords } from './provenance'
+
 export const MILESTONE_KIND = 'history.milestone'
 export const MILESTONE_SCHEMA = 1
 export const TEXT_LENGTH = 200
@@ -207,7 +209,7 @@ export const loadObjects = async (database, { GameID, RaceID, increments = [] })
 
         objects[type] = new Map(rows.map((source) => definition.row(source)).map((row) => [row.id, row]))
       } catch (error) {
-        failed[type] = error && error.message ? error.message : String(error)
+        failed[type] = failureWords(error)
       }
     }),
     (async () => {
@@ -223,7 +225,7 @@ export const loadObjects = async (database, { GameID, RaceID, increments = [] })
 
         objects.event = events
       } catch (error) {
-        failed.event = error && error.message ? error.message : String(error)
+        failed.event = failureWords(error)
       }
     })(),
   ])

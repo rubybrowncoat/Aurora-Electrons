@@ -989,6 +989,14 @@ const page = (ctx) => {
 
     return missing.length === 0 ? true : `read only after the first await: ${missing.join(', ')}`
   })
+  add('page: a source that fails to read says what the save lacks in words, with no table or column name', async () => {
+    const failing = { query: async () => { throw new Error('SQLITE_ERROR: no such column: FCT_Population.PopName') } }
+    const vm = instantiate(ctx.livePageOptions, { $store: PAGE_STORE, database: failing, GameID: GAME, RaceID: RACE, data: { loadErrors: await settledOf() } })
+    const read = await vm.runAsync(OWN)
+    const texts = read.problems.map((problem) => problem.text)
+
+    return texts.length >= 5 && texts.every((text) => text.endsWith('could not be read (the save lacks the pop name of population)') && !/\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/.test(text)) ? true : short(texts)
+  })
   add('page: a read that settles with sources it could not read is a success of the read and names each source it lacks', async () => {
     const failing = { query: async () => { throw new Error('boom') } }
     const vm = instantiate(ctx.livePageOptions, { $store: PAGE_STORE, database: failing, GameID: GAME, RaceID: RACE, data: { loadErrors: await settledOf() } })
@@ -1204,6 +1212,8 @@ const MUTATIONS = [
   { name: 'the maintenance draw protected by the reserve', file: U, find: 'const allowed = NAMES.map((name) => held[name] / PER_MSP[name])', replace: 'const allowed = NAMES.map((name) => Math.max(0, held[name] - (exporter ? exporter.reserve[name] : 0)) / PER_MSP[name])', fails: ['export'] },
   { name: 'the export that ignores the reserve', file: U, find: 'const surplus = Object.fromEntries(NAMES.map((name) => [name, Math.max(0, held[name] - exporter.reserve[name])]))', replace: 'const surplus = Object.fromEntries(NAMES.map((name) => [name, Math.max(0, held[name])]))', fails: ['export'] },
   { name: 'the queue-first figure naming the failed read as it was stored', file: U, find: "missing: ['the queue needs of the input minerals'] })", replace: "missing: notCounted.filter((entry) => entry.kind === 'queue').map((entry) => entry.text) })", fails: ['unknown'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'a failed read showing the database error as it came', file: U, find: 'could not be read (${failureWords(error)})', replace: 'could not be read (${error.message})', fails: ['page'] },
   { name: 'the queue-first run that skips the queue', file: U, find: 'const low = colony.queue ? simulate({ ...colony, days }) : null', replace: 'const low = colony.queue ? simulate({ ...colony, queue: null, days }) : null', fails: ['queue'] },
   { name: 'the limiting mineral of the supplied output not named', file: U, find: 'limiting: run.limiting, delivery: deliveryOf(groups)', replace: 'limiting: null, delivery: deliveryOf(groups)', fails: ['limiting'] },
   { name: 'the conditional delivery of the stock-only output not named', file: U, find: 'limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups)', replace: 'limiting: allocation.stockOnly.limiting, delivery: null', fails: ['limiting'] },

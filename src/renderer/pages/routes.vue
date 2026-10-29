@@ -187,7 +187,7 @@ import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, routeResults, searchRo
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
-import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
+import { describeResult, describeRule, failureWords, valueOrNull } from '../utilities/provenance'
 import { fleetProfile, loadFleetShips } from '../utilities/fleet-profile'
 import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime, withoutWaits } from '../utilities/route-plan'
 import { ADAPTERS, lagrangeEndpoint, placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
@@ -1078,7 +1078,7 @@ export default {
       }, (error) => {
         if (token === this.largeToken) {
           this.largeRequests[request] = false
-          this.largeProblem = `The ${bodies ? 'bodies' : 'survey locations'} could not be read: ${error.message}`
+          this.largeProblem = `The ${bodies ? 'bodies' : 'survey locations'} could not be read: ${failureWords(error)}`
         }
       })
     },
@@ -1111,7 +1111,7 @@ export default {
         settle()
 
         if (token === this.largeToken) {
-          this.largeProblem = `Some stops could not be read: ${error.message}`
+          this.largeProblem = `Some stops could not be read: ${failureWords(error)}`
         }
       })
     },

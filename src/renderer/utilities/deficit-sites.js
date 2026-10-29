@@ -7,7 +7,7 @@ import { buildDaysResult, mineRequirements } from './mine-bootstrap'
 import { columnsOf, gaps, hasAll, loadBootstrapColonies, loadBootstrapProjects, loadMineTypes, selectedColumns } from './mine-bootstrap-data'
 import { depositForecastResult, miningSum, surfaceRateResult } from './mineral-outlook'
 import { depositForecast, depositStateAt } from './minerals'
-import { combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+import { combine, failureWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
 const VERSIONS = ['2.7.x']
 const DAYS_PER_YEAR = 365
@@ -204,7 +204,7 @@ export const loadDeploymentSources = async (database, { GameID, RaceID }) => {
     try {
       return await read()
     } catch (error) {
-      problems.push({ source, text: `${SOURCE_NAMES[source]} could not be read (${String(error.message).split('\n')[0]})` })
+      problems.push({ source, text: `${SOURCE_NAMES[source]} could not be read (${failureWords(error)})` })
 
       return fallback
     }

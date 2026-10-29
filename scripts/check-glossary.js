@@ -268,14 +268,44 @@ const synthetic = (m, tree) => {
     ['no unavailable result names a table or column among its missing inputs, as the provenance mark shows them', async () => {
       // A table or column name, qualified or bare (a CamelCase word such as PopulationGrowthModifier, or a word that is a key of the row the result was made from), as the mark would print it: a ship or a class name of the test data is one capitalised word and passes.
       const code = /\b(?:FCT|DIM|VIR)_\w+|\b[A-Za-z]+\.[A-Za-z]+\b|\b[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b|\b[a-z]+[A-Z][A-Za-z0-9]*\b/
+      // The names of the test data, which are not part of what the labels say: a person or a colony may be named McDonald or Eden, and the guard reads the generated words around them.
+      const FIXTURE_NAMES = ['McDonald', 'Ada', 'Hydra', 'Eden']
+      const generated = (text) => FIXTURE_NAMES.reduce((rest, name) => rest.split(name).join(''), text)
       const wholeColony = { Radius: 6000, HydroExt: 50, TidalLock: 0, BodyClass: 1, PopulationDensityModifier: 1, PopulationGrowthModifier: 1, PopulationGrowthBonus: 0, RadiationLevel: 0, Population: 1, BodyPopulation: 1, PopName: 'Eden' }
       const growthless = { ...wholeColony, PopulationGrowthModifier: null }
       const densityless = { ...wholeColony, PopulationDensityModifier: null }
       const capacityOf = (colony) => colonies.bodyCapacityResult(colony)
       const member = (colony) => ({ colony, inboundColonists: 0, capacity: capacityOf(colony), cap: capacityOf(colony) })
-      const results = [['no site to rank', minerals.bestSiteResult(null, null, 1)], ['unreadable deposits on a body', minerals.bodyPotentialResult([], 2)], ['no mine production', minerals.perMineResult(null, [{ Amount: 1, Accessibility: 1 }])], ['no mass drivers', minerals.massDriverRateResult(null)], ['no terraforming rate', colonization.terraformCapacityResult({}, 0)], ['no starting delay', routeTime.waitResult(null, routeTime.timingGaps({ speed: 1, shock: 1, startDelay: null }))], ['no post', commanders.assignmentResult({ Name: 'Ada', CommandType: null })], ['no award count', commanders.medalsResult({ Name: 'Ada', Medals: 1, MedalCount: null })], ['no career start', commanders.ageResult({ Name: 'Ada', GraduationAge: null, CareerStart: null }, null)], ['no class rank', commanders.specialistPost({ ClassName: 'Hydra', Terraformers: null, RankRequired: null })], ['no growth modifier', colonies.growthRateResult(growthless, capacityOf(wholeColony))], ['no density modifier', capacityOf(densityless)], ['a growth rate over a capacity without density', colonies.growthRateResult(wholeColony, capacityOf(densityless))], ['a projection with no growth modifier', colonies.projectionResults([member(growthless)], 10)[0]], ['a projection beside a colony with no density modifier', colonies.projectionResults([member(wholeColony), member(densityless)], 10)[0]], ['no population', colonies.crowdingResult({ Population: null, BodyPopulation: 1 }, capacityOf(wholeColony))]]
+      const results = [['no site to rank', minerals.bestSiteResult(null, null, 1)], ['unreadable deposits on a body', minerals.bodyPotentialResult([], 2)], ['no mine production', minerals.perMineResult(null, [{ Amount: 1, Accessibility: 1 }])], ['no mass drivers', minerals.massDriverRateResult(null)], ['no terraforming rate', colonization.terraformCapacityResult({}, 0)], ['no starting delay', routeTime.waitResult(null, routeTime.timingGaps({ speed: 1, shock: 1, startDelay: null }))], ['no post', commanders.assignmentResult({ Name: 'Ada', CommandType: null })], ['no post of a mixed-case name', commanders.assignmentResult({ Name: 'McDonald', CommandType: null })], ['no award count', commanders.medalsResult({ Name: 'Ada', Medals: 1, MedalCount: null })], ['no career start', commanders.ageResult({ Name: 'Ada', GraduationAge: null, CareerStart: null }, null)], ['no class rank', commanders.specialistPost({ ClassName: 'Hydra', Terraformers: null, RankRequired: null })], ['no growth modifier', colonies.growthRateResult(growthless, capacityOf(wholeColony))], ['no density modifier', capacityOf(densityless)], ['a growth rate over a capacity without density', colonies.growthRateResult(wholeColony, capacityOf(densityless))], ['a projection with no growth modifier', colonies.projectionResults([member(growthless)], 10)[0]], ['a projection beside a colony with no density modifier', colonies.projectionResults([member(wholeColony), member(densityless)], 10)[0]], ['no population', colonies.crowdingResult({ Population: null, BodyPopulation: 1 }, capacityOf(wholeColony))]]
 
-      return firstProblem(results.flatMap(([label, result]) => [[label, result && result.status === 'unavailable' ? '' : 'is not unavailable'], ...(result ? result.inputs.missing : []).map((text) => [label, code.test(text) ? `says "${code.exec(text)[0]}"` : ''])]))
+      return firstProblem(results.flatMap(([label, result]) => [[label, result && result.status === 'unavailable' ? '' : 'is not unavailable'], ...(result ? result.inputs.missing : []).map((text) => [label, code.test(generated(text)) ? `says "${code.exec(generated(text))[0]}"` : ''])]))
+    }],
+
+    ['the words of a missing field and of a failed read name no table or column, and keep the name they were given', async () => {
+      const code = /\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/
+      const fields = [['a column', 'FCT_Ship.CurrentCrew', 'the current crew of ship'], ['a whole table', 'FCT_Fleet.*', 'the fleet data'], ['a missing table', 'FCT_Fleet (table)', 'the fleet data'], ['a table alone', 'FCT_GroundUnitFormation', 'the ground unit formation data']]
+      const ambiguousError = (() => {
+        const database = new (require('bun:sqlite').Database)(':memory:')
+
+        try {
+          database.exec('create table A (RaceID integer); create table B (RaceID integer); insert into A values (1); insert into B values (1);')
+          database.query('select RaceID from A join B').all()
+
+          return 'the read did not fail'
+        } catch (error) {
+          return error.message
+        } finally {
+          database.close()
+        }
+      })()
+      const failures = [['a missing column', 'SQLITE_ERROR: no such column: FCT_Ship.CurrentCrew', 'the save lacks the current crew of ship'], ['a bare column', 'no such column: CurrentCrew', 'the save lacks the current crew'], ['a missing table', 'SQLITE_ERROR: no such table: FCT_Fleet', 'the save lacks the fleet data'], ['a table in a longer text', 'near FCT_Fleet.FleetName: syntax error', 'near the fleet name of fleet: syntax error'], ['a text with no name in it', 'database is locked', 'database is locked'], ['a prefixed text with no name in it', 'SQLITE_BUSY: database is locked', 'database is locked'], ['an ambiguous column', 'SQLITE_ERROR: ambiguous column name: RaceID', 'the read names the race id ambiguously'], ['a real ambiguous column', ambiguousError, 'the read names the race id ambiguously'], ['an insert of a missing column', 'table FCT_Ship has no column named CurrentCrew', 'table the ship data lacks the current crew']]
+
+      return firstProblem([
+        ...fields.map(([label, field, words]) => [label, provenance.fieldWords(field) === words ? '' : `reads "${provenance.fieldWords(field)}", not "${words}"`]),
+        ...failures.map(([label, text, words]) => [label, provenance.failureWords(new Error(text)) === words ? '' : `reads "${provenance.failureWords(new Error(text))}", not "${words}"`]),
+        ['a list', provenance.fieldList(['FCT_Ship.CurrentCrew', 'FCT_Fleet']) === 'the current crew of ship, the fleet data' ? '' : 'is not the words joined'],
+        ...[...fields.map(([, field]) => provenance.fieldWords(field)), ...failures.map(([, text]) => provenance.failureWords(new Error(text)))].map((text) => ['no name', code.test(text) ? `says "${code.exec(text)[0]}"` : '']),
+      ])
     }],
 
     ['a hauling shortfall counts stock and mass-driver packets as held, as its definition says', async () => {
@@ -442,6 +472,11 @@ const MUTATIONS = [
   ['a missing starting delay named by its saved column', path.join('utilities', 'route-time.js'), "const START_DELAY_GAP = 'the delay the fleet starts with'", "const START_DELAY_GAP = 'the delay the fleet starts with (FCT_Ship.SensorDelay)'", ['no unavailable result names a table or column']],
   ['a missing post named by its bare column', path.join('utilities', 'commanders.js'), 'missing: [`the post of $' + '{person.Name}`]', 'missing: [`CommandType of $' + '{person.Name}`]', ['no unavailable result names a table or column']],
   ['a missing growth modifier named by its bare column', path.join('utilities', 'colonies.js'), "PopulationGrowthModifier: 'the species\\' population growth modifier'", "PopulationGrowthModifier: 'PopulationGrowthModifier'", ['no unavailable result names a table or column']],
+  ['the words of a missing field keep the column name', path.join('utilities', 'provenance.js'), "  return inputWords(table, column === '*' ? '' : column)\n}", '  return field\n}', ['the words of a missing field and of a failed read']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the words of a failed read keep the column an ambiguous read names', path.join('utilities', 'provenance.js'), '.replace(/ambiguous column name: (\\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`)', '', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the code of the database error', path.join('utilities', 'provenance.js'), ".replace(/^SQLITE_\\w+: /, '')", '', ['the words of a missing field and of a failed read']],
+  ['the words of a failed read keep the table named in the error', path.join('utilities', 'provenance.js'), '.replace(/\\b(?:FCT|DIM|VIR)_\\w+(?:\\.\\w+)?/g, named)', '', ['the words of a missing field and of a failed read']],
   ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://aurora4x.com/.', ['no registered rule cites a glossary link']],
   ['the help card speaks to the reader', HELP_PANEL, 'Definitions kept in the app', 'Your definitions kept in the app', ['the help speaks in the impersonal voice']],
   ['a page overview speaks to the reader', GLOSSARY, 'overview: \'Production Recap lists every job', 'overview: \'Your Production Recap lists every job', ['the help speaks in the impersonal voice']],

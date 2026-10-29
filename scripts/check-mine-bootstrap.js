@@ -1449,6 +1449,17 @@ const loaders = (ctx) => {
 
     return true
   })
+  add('loaders: a source that fails to read says what the save lacks in words, with no table or column name', async () => {
+    const jumps = await data.loadBootstrapSources(await fixtureDatabase(['FCT_JumpPoint']), scope)
+    const freight = await data.loadBootstrapSources(await fixtureDatabase(['FCT_ShipClass.CargoCapacity']), scope)
+    const texts = [...jumps.problems, ...freight.problems].map((problem) => problem.text)
+
+    assert.equal(texts.length, 2)
+    assert.ok(texts.join(' / ') === 'the charted jump points could not be read (the save lacks the jump point data) / the save lacks the cargo capacity of ship class', texts.join(' / '))
+    texts.forEach((text) => assert.doesNotMatch(text, /\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/))
+
+    return true
+  })
   add('loaders: a source that fails to read is named in the problems and left empty while the others stand', async () => {
     const jumps = await data.loadBootstrapSources(await fixtureDatabase(['FCT_JumpPoint']), scope)
     const freight = await data.loadBootstrapSources(await fixtureDatabase(['FCT_ShipClass.CargoCapacity']), scope)
@@ -2157,6 +2168,8 @@ const MUTATIONS = [
   { name: 'a route with no idle capacity called open', file: U, find: 'if (rateWith !== null && isAvailable(rateWith) && !(rateWith.value > 0)) {', replace: 'if (false) {', fails: ['ground'] },
   { name: 'engineers aboard ships not named', file: U, find: 'if (aboard.length) {', replace: 'if (false) {', fails: ['ground'] },
   { name: 'the upper bound not said', file: U, find: 'are excluded by the game and the assignment is not saved, so the figure is an upper bound.', replace: 'are excluded by the game and the assignment is not saved, so the figure is exact.', fails: ['ground'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'a failed read showing the database error as it came', file: D, find: 'could not be read (${failureWords(error)})', replace: 'could not be read (${error.message})', fails: ['loaders'] },
   { name: 'the commander bonus lookup not honoured', file: D, find: 'bonus: blocked.has(PRODUCTION_BONUS) ? null : row.Rows === 0', replace: 'bonus: row.Rows === 0', fails: ['loaders'] },
   { name: 'a null bonus value taken as 1', file: D, find: 'row.Known === 0 ? null : row.BonusValue', replace: 'row.Known === 0 ? 1 : row.BonusValue', fails: ['loaders'] },
   { name: 'a commander with no bonus row taken as unknown', file: D, find: 'row.Rows === 0 ? 1 :', replace: 'row.Rows === 0 ? null :', fails: ['loaders'] },

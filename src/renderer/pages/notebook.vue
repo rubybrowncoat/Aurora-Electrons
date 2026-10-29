@@ -117,6 +117,7 @@ import { ALL_SYSTEMS, NEXT_LENGTH, NOTE_STATUSES, NOTE_TARGETS, NOTE_TARGET_KEYS
 import { campaignStorage } from '../utilities/history'
 import { LINK_STATUS_TEXT, branchLineage } from '../utilities/history-milestones'
 import { tracked } from '../utilities/load-tracking'
+import { failureWords } from '../utilities/provenance'
 
 const INPUT_LABELS = {
   objects: 'the colonies, fleets, techs and systems',
@@ -526,7 +527,7 @@ export default {
         try {
           return Object.freeze({ bodies: await loadBodies(database, { GameID, RaceID, bodyIds, systemId }), error: null, database, GameID, RaceID, requested: new Set(bodyIds) })
         } catch (error) {
-          return Object.freeze({ bodies: null, error: error && error.message ? error.message : String(error), database, GameID, RaceID, requested: new Set(bodyIds) })
+          return Object.freeze({ bodies: null, error: failureWords(error), database, GameID, RaceID, requested: new Set(bodyIds) })
         }
       },
       default: null,

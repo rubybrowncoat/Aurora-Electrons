@@ -1390,7 +1390,7 @@ const pageSuite = async (m, { target = null, find = null, replace = null } = {})
     const mount = await reads(mixinMounted(options, { inst, failing: ['FCT_SystemBody'] }))
 
     assert.equal(mount.vm.tagBodiesRead.bodies, null)
-    assert.match(mount.vm.tagBodiesRead.error, /FCT_SystemBody/)
+    assert.match(mount.vm.tagBodiesRead.error, /the save lacks the system body data/)
     assert.equal(mount.vm.tagContext, null)
     assert.equal(mount.vm.tagEntries[0].stale, false)
     assert.match(mount.vm.tagHint, /cannot give its bodies/)

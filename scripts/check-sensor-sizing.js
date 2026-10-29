@@ -1417,22 +1417,22 @@ check('loaders: a save without a column the read cannot do without is refused by
   const lacking = (column) => [component.replace(new RegExp(`, ${column} \\w+`), ''), 'create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer, Obsolete integer)']
 
   await withMemory(lacking('MaxSensorRange'), async (database) => {
-    await assert.rejects(() => m.dd.ownedActiveSensors(database, 1, 2), /The save lacks FCT_ShipDesignComponents\.MaxSensorRange, which the active sensor read needs/)
+    await assert.rejects(() => m.dd.ownedActiveSensors(database, 1, 2), /The save lacks the max sensor range of ship design components, which the active sensor read needs/)
     assert.deepEqual(await m.dd.ownedBeamFireControls(database, 1, 2), [], 'the beam read does not need the sensor range')
   })
 
   await withMemory(lacking('Resolution'), async (database) => {
-    await assert.rejects(() => m.dd.ownedActiveSensors(database, 1, 2), /FCT_ShipDesignComponents\.Resolution/)
+    await assert.rejects(() => m.dd.ownedActiveSensors(database, 1, 2), /the resolution of ship design components/)
   })
 
   await withMemory(lacking('TrackingSpeed'), async (database) => {
-    await assert.rejects(() => m.dd.ownedBeamFireControls(database, 1, 2), /The save lacks FCT_ShipDesignComponents\.TrackingSpeed, which the beam fire control read needs/)
+    await assert.rejects(() => m.dd.ownedBeamFireControls(database, 1, 2), /The save lacks the tracking speed of ship design components, which the beam fire control read needs/)
     assert.deepEqual(await m.dd.ownedActiveSensors(database, 1, 2), [], 'the sensor read does not need the tracking speed')
   })
 
   await withMemory([component, 'create table FCT_RaceTech (GameID integer, TechID integer)'], async (database) => {
-    await assert.rejects(() => m.dd.ownedActiveSensors(database, 1, 2), /FCT_RaceTech\.RaceID/)
-    await assert.rejects(() => m.dd.ownedBeamFireControls(database, 1, 2), /FCT_RaceTech\.RaceID/)
+    await assert.rejects(() => m.dd.ownedActiveSensors(database, 1, 2), /the race id of race tech/)
+    await assert.rejects(() => m.dd.ownedBeamFireControls(database, 1, 2), /the race id of race tech/)
   })
 
   await withMemory([component, 'create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer)', ...COMPONENT_ROWS, ...RACE_TECH_ROWS_PLAIN], async (database) => {

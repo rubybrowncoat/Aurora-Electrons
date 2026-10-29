@@ -5,6 +5,7 @@
 import { csvCell } from './csv-cell'
 import { fileSlug } from './file-slug'
 import { POSTS } from './commanders'
+import { fieldList } from './provenance'
 
 export const HIERARCHY_TREES = ['naval', 'ground']
 
@@ -278,8 +279,8 @@ export const hierarchyExport = (model, tree, format, empire = '', branch = null)
 // What the page says in place of the export, or null when the model can be exported: the model is not supported (the save lacks tables or columns), or the serving commanders could not be read (the posts then are not listed).
 export const hierarchyNotice = (model, tree) => {
   if (!model.supported) {
-    return `The save lacks ${model.missing.join(', ')}, so the ${TREE_NOUNS[tree]} cannot be listed.`
+    return `The save lacks ${fieldList(model.missing)}, so the ${TREE_NOUNS[tree]} cannot be listed.`
   }
 
-  return model.holders.read ? null : `The save lacks ${model.holders.missing.join(', ')}, so the serving commanders are not listed.`
+  return model.holders.read ? null : `The save lacks ${fieldList(model.holders.missing)}, so the serving commanders are not listed.`
 }

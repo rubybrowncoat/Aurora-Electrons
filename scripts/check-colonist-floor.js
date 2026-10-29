@@ -580,7 +580,7 @@ const pure = (ctx) => {
 
     await db.close()
 
-    return loaded.read === false && loaded.rows.length === 0 && loaded.problems.length === 1 && empty.read === false && empty.rows.length === 0 ? true : short([loaded, empty])
+    return loaded.read === false && loaded.rows.length === 0 && loaded.problems.length === 1 && !/\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/.test(loaded.problems[0]) && empty.read === false && empty.rows.length === 0 ? true : short([loaded, empty])
   })
   add('loader: the rows read give the colonies\' roles and pools to the assessment, and a colony the read lacks stays unknown', async () => {
     const db = await memorySources()
@@ -1149,6 +1149,7 @@ const saveStatements = async (ctx, save) => {
 
 /* eslint-disable no-template-curly-in-string */
 const MUTATIONS = [
+  { name: 'the missing keys named by their columns', file: U, find: "'The save lacks the ID, game and race of the colonies, so no colonist source field could be read'", replace: "'FCT_Population has no PopulationID, GameID or RaceID in this save, so no colonist source field could be read'", fails: ['loader'] },
   { name: 'a blank floor coerced to 0', file: U, find: 'if (trimmed === \'\') {\n    return { value: null, state: \'blank\' }', replace: 'if (trimmed === \'\') {\n    return { value: 0, state: \'ok\' }', fails: ['blank', 'floor'] },
   { name: 'future pickups worked out from the pool', file: U, find: '    future: futurePickupsResult(),', replace: '    future: ofRule({ rule: \'colonistFloor.futurePickups\', value: pool.value ? pool.value.stored : 0, inputs: { present: [\'the pool\'] } }),', fails: ['future'] },
   { name: 'the staffing floor taken at the grid step, without narrowing it', file: U, find: 'for (let round = 0; round < BISECTIONS; round += 1) {', replace: 'for (let round = 0; round < 0; round += 1) {', fails: ['staffing'] },

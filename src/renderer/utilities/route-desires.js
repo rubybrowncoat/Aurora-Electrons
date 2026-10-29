@@ -6,6 +6,7 @@
 
 import { NOTE_TARGETS, registerOnce } from './economy-notes'
 import { checkLink, failure, mayWrite, resolveLink } from './history-milestones'
+import { failureWords } from './provenance'
 import { DESIRE_CARGO, DESIRE_NAME_LENGTH, DESIRE_NOTE_LENGTH } from './route-signatures'
 
 export { scopeOf } from './history-milestones'
@@ -22,8 +23,6 @@ const isObject = (value) => value !== null && typeof value === 'object' && !Arra
 const isText = (value) => typeof value === 'string' && value.trim() !== ''
 
 const copyOf = (value) => JSON.parse(JSON.stringify(value))
-
-const messageOf = (error) => (error && error.message ? error.message : String(error))
 
 const refOk = (ref) => isObject(ref) && Number.isInteger(ref.id) && typeof ref.name === 'string' && (ref.systemId === null || Number.isInteger(ref.systemId)) && typeof ref.systemName === 'string' && isObject(ref.origin) && isText(ref.origin.campaignId) && isText(ref.origin.branchId)
 
@@ -96,7 +95,7 @@ export const loadDesireObjects = async (database, { GameID, RaceID }) => {
 
     objects.colony = new Map(rows.map((source) => NOTE_TARGETS.colony.row(source)).map((row) => [row.id, row]))
   } catch (error) {
-    failed.colony = messageOf(error)
+    failed.colony = failureWords(error)
   }
 
   return { objects, failed, GameID, RaceID }

@@ -31,6 +31,8 @@ const MUTATIONS = [
   ['logistics', 'its fuel balance ignores an unknown harvested total', 'const fuelNet = fuel.production === null ? null : fuel.production - fuel.high', 'const fuelNet = fuel.refineries === null ? null : (fuel.refineries + fuel.harvestersKnown) - fuel.high'],
   ['logistics', 'its harvester rows are not gated by the blocked Mining bonus', '.then(([items]) => gateHarvesterRows(items, blocked))', '.then(([items]) => items)'],
   ['production', 'its research read leaves the blocked Research bonus alone', 'blocked.has(RESEARCH_BONUS) ? projects.map(', 'false ? projects.map('],
+  ['recovery', 'its observation names the columns as stored', 'return entry ? entry.fields.map(fieldWords) : []\n    },\n\n    recoveryCanObserve', 'return entry ? entry.fields : []\n    },\n\n    recoveryCanObserve'],
+  ['survey-progress', 'its observation names the columns as stored', 'return entry ? entry.fields.map(fieldWords) : []\n    },\n\n    // The observation can be chosen', 'return entry ? entry.fields : []\n    },\n\n    // The observation can be chosen'],
   ['survey-progress', 'its observation ignores the columns of the capability report that the save lacks', 'return this.observable && this.observationGaps.length === 0', 'return this.observable'],
   ['survey-progress', 'its observation gaps are read from an input of another name', "report.degraded.find((degraded) => degraded.key === 'observationRead')", "report.degraded.find((degraded) => degraded.key === 'observationReads')"],
 ]
@@ -277,14 +279,27 @@ const surveyResults = async (context, fixtures, mutate) => {
     const vm = page(fixtures.noUnits, { database, data: { observeChoice: choice } })
     const asked = await vm.runAsync('observationRead')
 
-    holds(`on a save without FCT_GroundUnitFormationElement.Units the observation ${choice ? 'chosen' : 'not chosen'} is offered as unavailable, naming the column, and is not observing`, vm.observable && !vm.canObserve && !vm.observing && vm.observationGaps.includes('FCT_GroundUnitFormationElement.Units'))
+    holds(`on a save without FCT_GroundUnitFormationElement.Units the observation ${choice ? 'chosen' : 'not chosen'} is offered as unavailable, naming the column in words, and is not observing`, vm.observable && !vm.canObserve && !vm.observing && vm.observationGaps.join() === 'the units of ground unit formation element')
     holds(`on a save without FCT_GroundUnitFormationElement.Units the observation ${choice ? 'chosen' : 'not chosen'} reads nothing of the save`, asked === null && database.queries.length === 0)
   }
 
   return results
 }
 
-const PAGE_RESULTS = { lagrange: lagrangeResults, commanders: commandersResults, production: productionResults, logistics: logisticsResults, 'survey-progress': surveyResults }
+const recoveryResults = async (context, fixtures, mutate) => {
+  const text = fs.readFileSync(require('path').join(__dirname, '..', '..', 'src', 'renderer', 'mixins', 'recovery-ledger.js'), 'utf8')
+  const options = await loadPage('mixins/recovery-ledger', { stubs: context.stubs, sources: { 'mixins/recovery-ledger': mutate ? mutate(text) : text } })
+  const results = []
+  const holds = (statement, condition) => results.push([statement, Boolean(condition)])
+  const page = (result) => instantiate(options, { $store: storeOver(context.store, result), database: null, GameID: 1, RaceID: 2, data: {} })
+
+  holds('on a save with every column the life pod observation names no gap', page(fixtures.clean).recoveryObservationGaps.length === 0)
+  holds('on a save without FCT_Lifepods.Crew the life pod observation names the column in words', page(fixtures.noLifepodCrew).recoveryObservationGaps.join() === 'the crew of lifepods')
+
+  return results
+}
+
+const PAGE_RESULTS = { recovery: recoveryResults, lagrange: lagrangeResults, commanders: commandersResults, production: productionResults, logistics: logisticsResults, 'survey-progress': surveyResults }
 
 // The pages' wiring on the real page code (every statement a check line) and, with one gate cut out of a page's script, on mutants that must fail. `context`: { mods: the utilities the script loaded, stubs, source, check, alteredCopy, preflightOf, capabilities }.
 const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf }) => {
@@ -301,6 +316,7 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
   try {
     const fixtures = {
       clean: (await preflightOf(mods.capabilities, source)).result,
+      noLifepodCrew: await copy('lifepodcrew', ['alter table FCT_Lifepods drop column Crew']),
       noUnits: await copy('units', ['alter table FCT_GroundUnitFormationElement drop column Units']),
       renamed5: await copy('bonus5', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5"]),
       renamed3: await copy('bonus3', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 3"]),

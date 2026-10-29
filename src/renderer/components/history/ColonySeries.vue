@@ -42,6 +42,7 @@
 import { COLONY_BYTES, ColonyLimit, MAX_COLONIES, colonyEstimate, saveEntries, withColony, withoutColony } from '../../utilities/colony-series'
 import { campaignStorage } from '../../utilities/history'
 import { UNKNOWN_TEXT, countText } from '../../utilities/math'
+import { failureWords } from '../../utilities/provenance'
 
 // The panel of the History page that lets the player choose the colonies of the shown race to follow. `view` is { entries, followed, dropped, measured, snapshots, predicted, error } as the page reads it from the settings and the branch's colony file, or null while the campaign is not settled. A choice is written to the settings under the campaign and race, stamped with the game time of the open save, and the store is asked to read that save once more so the first reading is the save the colony was chosen in. `date` writes a game time as a date.
 export default {
@@ -202,7 +203,7 @@ export default {
         }
       } catch (error) {
         if (database === this.database) {
-          this.readError = error && error.message ? error.message : 'the read failed'
+          this.readError = error && error.message ? failureWords(error) : 'the read failed'
         }
       }
     },

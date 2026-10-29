@@ -234,6 +234,7 @@
 <script>
 import LoadState from '../page/LoadState.vue'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
+import { failureWords } from '../../utilities/provenance'
 import { NOTE_LENGTH, checklistOf, confirmTarget, deleteStation, loadStationBodies, rebaseStation, saveStation, stationChoices } from '../../utilities/fleet-stations'
 
 const ROLE_WORDS = { fleet: 'Fleet', station: 'Station', base: 'Supply base' }
@@ -243,8 +244,6 @@ const WHERE_WORDS = { 'other-system': 'in another system', 'other-orbit': 'orbit
 const VERDICT_WORDS = { evidence: 'Confirmed by the save', confirmed: 'Confirmed by the player', reused: 'Another object holds this ID', unwitnessed: 'Not shown to be the same' }
 
 const blankDraft = () => ({ open: false, uuid: null, revision: null, fleetPick: null, stationMode: 'none', stationSystem: null, stationPick: null, baseMode: 'none', basePick: null, note: '', campaignWide: false, scopeKey: null })
-
-const messageOf = (error) => (error && error.message ? error.message : String(error))
 
 // The intended station and supply base of each fleet as local notes (utilities/fleet-stations.js), with the fleet's location and its saved orders beside them as three separate regions. `view` is what the host's `stationView` gives; the reads behind it are the host's, each with its own loading, failure and Retry.
 export default {
@@ -474,7 +473,7 @@ export default {
         }
       } catch (error) {
         if (token === this.pickerToken) {
-          this.pickerError = messageOf(error)
+          this.pickerError = failureWords(error)
         }
       } finally {
         if (token === this.pickerToken) {

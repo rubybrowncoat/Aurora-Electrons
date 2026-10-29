@@ -72,6 +72,7 @@ import { eventEstimate, gapsOf, recordEvents } from '../../utilities/event-archi
 import { bytesText } from '../../utilities/history'
 import { gameDateText } from '../../utilities/history-milestones'
 import { gameMasterCount, playerConflicts } from '../../utilities/log-archive-view'
+import { failureWords } from '../../utilities/provenance'
 
 const REASONS = {
   ledger: 'the save names another increment with this number (another timeline)',
@@ -138,7 +139,7 @@ export default {
     },
 
     failures() {
-      return this.record && Array.isArray(this.record.failures) ? this.record.failures.slice(-SHOWN).reverse() : []
+      return this.record && Array.isArray(this.record.failures) ? this.record.failures.slice(-SHOWN).reverse().map((failure) => ({ ...failure, reason: failureWords(failure.reason) })) : []
     },
 
     captures() {

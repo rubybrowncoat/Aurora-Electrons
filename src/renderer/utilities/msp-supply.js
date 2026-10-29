@@ -9,7 +9,7 @@ import { KNOWN_SERVICE_COLUMNS, columnsOf, gaps, hasAll, knownServiceJoin, loadB
 import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
 import { routeResult, siteSupply } from './mineral-supply'
 import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
-import { combine, isAvailable, ofRule, registerRule, unavailable } from './provenance'
+import { combine, failureWords, isAvailable, ofRule, registerRule, unavailable } from './provenance'
 
 export const DAYS_PER_YEAR = 365
 // How far ahead the ledger looks, in years.
@@ -313,7 +313,7 @@ export const loadMspSupply = async (database, { GameID, RaceID, blocked = new Se
     try {
       return await read()
     } catch (error) {
-      problems.push({ source, retry: true, text: `${SOURCE_NAMES[source]} could not be read (${String(error.message).split('\n')[0]})` })
+      problems.push({ source, retry: true, text: `${SOURCE_NAMES[source]} could not be read (${failureWords(error)})` })
 
       return null
     }
@@ -375,7 +375,7 @@ export const timeHauls = ({ plan, freighters, shuttleTechnology, formulaVersion 
     try {
       estimates = freighters.map((shipClass, index) => ({ index, estimate: haulByClass(haul, shipClass, shuttleTechnology, formulaVersion) })).filter(({ estimate }) => estimate.status === 'ok' && isNumber(estimate.holds) && estimate.holds > 0 && isNumber(estimate.tripDays))
     } catch (error) {
-      return { haul, best: null, days: null, ships: 0, why: `its timing could not be worked out (${String(error.message).split('\n')[0]})` }
+      return { haul, best: null, days: null, ships: 0, why: `its timing could not be worked out (${failureWords(error)})` }
     }
 
     if (!estimates.length) {

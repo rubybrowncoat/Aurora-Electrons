@@ -388,6 +388,13 @@ const pure = (ctx) => {
 
     return row.eta === null && unavailable(row.deployment) && row.deployment.inputs.missing.some((text) => /cargo/.test(text)) ? true : short(row.deployment)
   })
+  add('unknown: a read that failed says what the save lacks in words, with no table or column name', async () => {
+    const broken = { query: async () => { throw new Error('SQLITE_ERROR: no such column: FCT_Population.PopName') } }
+    const loaded = await ds.loadDeploymentSources(broken, { GameID: GAME, RaceID: RACE })
+    const texts = loaded.problems.map((problem) => problem.text)
+
+    return texts.length === 7 && texts.every((text) => text.endsWith('could not be read (the save lacks the pop name of population)') && !/\b(?:FCT|DIM|VIR)_|\.\w|[a-z][A-Z]/.test(text)) ? true : short(texts)
+  })
   add('unknown: the sources load whatever can be read, name each read that failed and never throw, and a project read that failed is not an empty list', async () => {
     const broken = { query: async () => { throw new Error('no such table') } }
     const loaded = await ds.loadDeploymentSources(broken, { GameID: GAME, RaceID: RACE })
@@ -1052,6 +1059,8 @@ const saveStatements = async (ctx, save) => {
 // A planted fault and the checks that must fail for it: each name is the key of a check (the text before its colon), and the fault is caught only when every one of them fails.
 /* eslint-disable no-template-curly-in-string */
 const MUTATIONS = [
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'a failed read showing the database error as it came', file: U, find: 'could not be read (${failureWords(error)})', replace: 'could not be read (${error.message})', fails: ['unknown'] },
   { name: 'a body the race has not surveyed taken as a candidate', file: U, find: 'if (deposit.Surveyed !== 1) {', replace: 'if (false) {', fails: ['hidden'] },
   { name: 'a deposit under an alien colony taken as a candidate', file: U, find: '} else if (isNumber(deposit.AlienColonies) && deposit.AlienColonies > 0) {', replace: '} else if (false) {', fails: ['hidden', 'save-alien'] },
   { name: 'an exhausted deposit taken as a candidate', file: U, find: '} else if (isNumber(deposit.Amount) && deposit.Amount <= 0) {', replace: '} else if (false) {', fails: ['hidden'] },

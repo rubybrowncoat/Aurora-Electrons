@@ -14,7 +14,7 @@ import { systemBodyName } from './aurora'
 import { NOTE_TARGETS, noteChoices, withBodies } from './economy-notes'
 import { LINK_TYPES, checkLink, failure, mayWrite, resolveLink, sharedHistory } from './history-milestones'
 import { MARKED_FOR_DELETION, WAYPOINT_NAMES } from './place-data'
-import { ofRule, registerRule, unavailable } from './provenance'
+import { failureWords, ofRule, registerRule, unavailable } from './provenance'
 
 export { scopeOf } from './history-milestones'
 export { withBodies }
@@ -81,8 +81,6 @@ const idOk = (id) => isText(id) || (typeof id === 'number' && Number.isFinite(id
 const copyOf = (value) => JSON.parse(JSON.stringify(value))
 
 const present = (value) => (value === null || value === undefined ? '' : String(value))
-
-const messageOf = (error) => (error && error.message ? error.message : String(error))
 
 const numberOrNull = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null)
 
@@ -183,7 +181,7 @@ export const loadStationObjects = async (database, { GameID, RaceID }) => {
     try {
       await work()
     } catch (error) {
-      failed[key] = messageOf(error)
+      failed[key] = failureWords(error)
     }
   }
 

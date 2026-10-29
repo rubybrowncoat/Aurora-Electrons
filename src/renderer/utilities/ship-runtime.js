@@ -470,7 +470,7 @@ export const loadShipRuntime = async (database, { GameID, RaceID, classIds = nul
     classes[ship.ShipClassID] = ship.class
   })
 
-  return deepFreeze({ status: 'ok', revision, formulaVersion, ships, classes, rejected, problems: gameTime === null ? ['FCT_Game has no GameTime in this save'] : [] })
+  return deepFreeze({ status: 'ok', revision, formulaVersion, ships, classes, rejected, problems: gameTime === null ? ['The save lacks the game time'] : [] })
 }
 
 // Whether a projection is of the scope now open: the same game, race and save copy (the freshness generation). A projection of an earlier scope is stale and must not be shown.

@@ -382,7 +382,7 @@ export const loadColonistSources = async (database, { GameID, RaceID }) => {
   const columns = await columnsOf(database, 'FCT_Population')
 
   if (!hasAll(columns, ['PopulationID', 'GameID', 'RaceID'])) {
-    return { rows: [], problems: ['FCT_Population has no PopulationID, GameID or RaceID in this save, so no colonist source field could be read'], read: false }
+    return { rows: [], problems: ['The save lacks the ID, game and race of the colonies, so no colonist source field could be read'], read: false }
   }
 
   const select = FIELDS.map((name) => (columns.has(name) ? `FCT_Population.${name} as ${name}` : `null as ${name}`)).join(', ')

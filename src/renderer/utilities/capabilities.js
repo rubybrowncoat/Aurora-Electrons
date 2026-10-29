@@ -4,7 +4,7 @@
 //
 // A report is 'supported' (every input it reads is there), 'degraded' (an optional input, a soft column group or a lookup row is not, and each is named) or 'unsupported' (an input it cannot do without is missing). A page holds back its content while any input it tracks fails, so an input is required unless the page really goes on without it. `preflight` only selects: from `pragma_table_xinfo` (so generated and hidden columns count) and the lookup tables, never writing to the save.
 import { READS } from './capability-reads'
-import { isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+import { fieldWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
 export const STATED_FORMULA_VERSION = '2.7.x'
 
@@ -338,7 +338,7 @@ export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
 
 // The words of a refusal, by the reason of `lineResult`: `notice` is the sentence the Unsupported save panel opens with, `status` the line the save status says.
 export const REFUSALS = Object.freeze({
-  'not-aurora': Object.freeze({ notice: 'The file has no FCT_Game table, so it is not an Aurora save.', status: 'refused: no FCT_Game table' }),
+  'not-aurora': Object.freeze({ notice: 'The file has no game table, so it is not an Aurora save.', status: 'refused: no game table' }),
   'pre-2.7': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora ${LINE_NAME} added is in it.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns of Aurora ${LINE_NAME})` }),
 })
 
@@ -622,9 +622,9 @@ export const preflight = async (database) => {
   return evaluate(schema, await readGateRows(database, schema))
 }
 
-// What a report's missing and degraded parts say, for a notice: { missing: [{ text, fields }], degraded: [{ text, fields, gate }] }. A missing part is what the report cannot do without, a degraded one what is left out of it, and `fields` what the save lacks (or, for a lookup row, how it differs).
+// What a report's missing and degraded parts say, for a notice: { missing: [{ text, fields }], degraded: [{ text, fields, gate }] }. A missing part is what the report cannot do without, a degraded one what is left out of it, and `fields` what the save lacks in words (or, for a lookup row, how it differs).
 export const describeReport = (report) => ({
-  unchecked: report.unchecked.map((entry) => ({ text: entry.label, fields: [entry.table], why: entry.why })),
-  missing: report.missing.map((entry) => ({ text: entry.label, fields: entry.fields })),
-  degraded: report.degraded.map((entry) => ({ text: entry.gate ? `${entry.label} does not read as expected` : entry.affects, fields: entry.fields, gate: Boolean(entry.gate), effect: entry.gate ? `Left out: ${entry.affects}.` : '' })),
+  unchecked: report.unchecked.map((entry) => ({ text: entry.label, fields: [fieldWords(entry.table)], why: entry.why })),
+  missing: report.missing.map((entry) => ({ text: entry.label, fields: entry.fields.map(fieldWords) })),
+  degraded: report.degraded.map((entry) => ({ text: entry.gate ? `${entry.label} does not read as expected` : entry.affects, fields: entry.gate ? entry.fields : entry.fields.map(fieldWords), gate: Boolean(entry.gate), effect: entry.gate ? `Left out: ${entry.affects}.` : '' })),
 })

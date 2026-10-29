@@ -1,4 +1,5 @@
 import { loadEmpires, loadSelection } from '../utilities/empires'
+import { failureWords } from '../utilities/provenance'
 
 // Every game in the save with its races (`loadEmpires`), for the rail's Empires entry and flyout and the Empires page. `error` says why the last read failed, null when it didn't; a failed read keeps the games read before it. `loaded` is set by a read that finished, so an empty list can tell "no games in the save" from "not read yet". `dropped` says what the latest read of a reloaded save removed from the selection ({ kind: 'game' | 'race', GameID, RaceID, name, at }), null when it removed nothing or the person has picked since.
 export const state = () => {
@@ -65,7 +66,7 @@ export const actions = {
     } catch (error) {
       if (read === latest && rootState.database === database) {
         console.error("Couldn't read the empire list", error)
-        commit('failed', error.message)
+        commit('failed', failureWords(error))
       }
     }
   },

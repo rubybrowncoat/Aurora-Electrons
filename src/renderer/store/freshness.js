@@ -1,5 +1,7 @@
 // How current the app's picture of the save is, from what actually happened rather than what was announced. The fields are kept apart on purpose: `file` is the last notification from the file watcher (it proves nothing was read), `refresh` is the latest attempt to read the new copy of the save and how it ended, `read` is the last probe that succeeded, with the game clocks it returned, and `inputs` is the same for each input of the open page. Wall-clock times (ms) are when the app did something, never the file's modification time and never the game's time.
 
+import { failureWords } from '../utilities/provenance'
+
 // The scoped probe: the game clocks, one small read of the table every page's game row comes from. It fails when the save can't be read (the game is writing it, the file is gone or malformed), so a success shows the new copy answers.
 export const PROBE_SQL = 'select GameID, StartYear, GameTime from FCT_Game'
 
@@ -136,7 +138,7 @@ export const actions = {
       commit('read', { generation, at: Date.now(), games })
     } catch (error) {
       if (generation === state.generation) {
-        commit('refreshFailed', { at: Date.now(), message: String((error && error.message) || error).split(/\r?\n/)[0] })
+        commit('refreshFailed', { at: Date.now(), message: failureWords(error) })
       }
     }
   },

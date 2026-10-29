@@ -754,7 +754,7 @@ const suite = (m) => {
     const { objects, failed } = await milestones.loadObjects(database, { GameID: 1, RaceID: 7 })
 
     assert.deepEqual(Object.keys(failed), ['fleet'])
-    assert.match(failed.fleet, /FCT_Fleet/)
+    assert.match(failed.fleet, /the save lacks the fleet data/)
     assert.equal(objects.fleet, undefined)
     assert.equal(objects.colony.size, 1)
     assert.equal(objects.event.size, 1)

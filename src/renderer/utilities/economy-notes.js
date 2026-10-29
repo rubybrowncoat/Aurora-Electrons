@@ -17,6 +17,7 @@
 
 import { systemBodyName } from './aurora'
 import { LINK_TYPES, checkLink, failure, mayWrite, resolveLink } from './history-milestones'
+import { failureWords } from './provenance'
 
 export { scopeOf } from './history-milestones'
 
@@ -50,8 +51,6 @@ const isText = (value) => typeof value === 'string' && value.trim() !== ''
 const copyOf = (value) => JSON.parse(JSON.stringify(value))
 
 const present = (value) => (value === null || value === undefined ? '' : String(value))
-
-const messageOf = (error) => (error && error.message ? error.message : String(error))
 
 const BODY_CLASSES = '1, 2, 3, 5'
 
@@ -133,7 +132,7 @@ export const loadNoteObjects = async (database, { GameID, RaceID }) => {
     try {
       await work()
     } catch (error) {
-      failed[key] = messageOf(error)
+      failed[key] = failureWords(error)
     }
   }
 

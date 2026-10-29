@@ -2,7 +2,7 @@
 
 import { loadJumpPoints } from './jump-graph'
 import { MINERALS } from './minerals'
-import { inputWords } from './provenance'
+import { failureWords, inputWords } from './provenance'
 import { JUMP_DRIVE_COLUMNS } from './transport'
 
 // The commander bonus the production of ground engineers rests on: Production.
@@ -171,7 +171,7 @@ export const loadBootstrapSources = async (database, { GameID, RaceID, blocked =
     try {
       return await read()
     } catch (error) {
-      problems.push({ source, text: `${SOURCE_NAMES[source]} could not be read (${String(error.message).split('\n')[0]})` })
+      problems.push({ source, text: `${SOURCE_NAMES[source]} could not be read (${failureWords(error)})` })
 
       return fallback
     }

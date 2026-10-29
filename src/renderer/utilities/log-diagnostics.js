@@ -6,7 +6,7 @@ import { EVENT_FIELDS, coverageOf, endOf, fingerprint, gapsOf, mergeCapture, ope
 import { EVENT_ICONS } from './event-icons'
 import { categoryOfType } from './event-triage'
 import { isKnownNumber } from './math'
-import { envelope, registerRule, unavailable } from './provenance'
+import { envelope, failureWords, registerRule, unavailable } from './provenance'
 
 const VERSIONS = ['2.7.x']
 
@@ -262,7 +262,7 @@ export const diagnose = (inputs, seconds) => {
     observed,
     types,
     observations,
-    failed: failed ? failed.message : null,
+    failed: failed ? failureWords(failed) : null,
     results: {
       events: eventsResult(coverage, reasons, { from, to, observed, verdict }),
       hidden: setResult(hidden, 'logDiagnostic.hidden', 'the event types the race hides', hidden ? [...hidden].sort((a, b) => a - b) : []),

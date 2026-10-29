@@ -6,6 +6,7 @@ import { branchLineage } from '../utilities/history-milestones'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { observedKinds, readOpenSave, saveObservationChoice } from '../utilities/observations'
 import { observationRows, readObservationRecord } from '../utilities/observation-view'
+import { fieldWords } from '../utilities/provenance'
 import { loadRecoveryObjects, observationSignature, PLACES, readRecovery, recoveryRows, recoveryTotals, registerRecoveryLedger, scopeOf, TYPE_KEYS } from '../utilities/recovery-ledger'
 
 // The read behind the recovery ledger alone, and the words that name it when it fails. The tracked key, the async-computed name and the label key of a read are one string. A page that mounts the ledger spreads `RECOVERY_LABELS` into its own labels and leaves `RECOVERY_INPUTS` out of the reads it waits on, so the page is ready, and its other panels show, whether the read is in flight or failed.
@@ -118,7 +119,7 @@ export default {
       const report = this.$store.getters['capabilities/report']('/map')
       const entry = report && report.degraded.find((degraded) => degraded.key === 'recoveryObservationRead')
 
-      return entry ? entry.fields : []
+      return entry ? entry.fields.map(fieldWords) : []
     },
 
     recoveryCanObserve() {

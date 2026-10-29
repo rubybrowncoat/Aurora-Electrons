@@ -10,6 +10,7 @@
 
 import { place } from './deep-links'
 import { checkLink, failure, mayWrite, resolveLink, scopeOf } from './history-milestones'
+import { failureWords } from './provenance'
 
 export { scopeOf }
 
@@ -79,8 +80,6 @@ const finite = (value) => typeof value === 'number' && Number.isFinite(value)
 const copyOf = (value) => JSON.parse(JSON.stringify(value))
 
 const present = (value) => (value === null || value === undefined ? '' : String(value).replace(/\|/g, '/'))
-
-const messageOf = (error) => (error && error.message ? error.message : String(error))
 
 const numberOrNull = (value) => (value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value))
 
@@ -172,7 +171,7 @@ export const loadRecoveryObjects = async (database, { GameID, RaceID }, options 
       objects[type] = new Map(withCopies(type, rows.map((source) => rowOf(type, source))).map((row) => [row.id, Object.freeze(row)]))
     } catch (error) {
       objects[type] = null
-      failed[type] = messageOf(error)
+      failed[type] = failureWords(error)
     }
   }))
 

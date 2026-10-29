@@ -791,7 +791,7 @@ const pureSuite = async (mods, into) => {
 
     return csvFile.type === 'text/csv' && markdownFile.type === 'text/markdown' && csvFile.text === csv && markdownFile.text === hierarchyMarkdown(groundModel, 'ground') && /naval/i.test(csvFile.fileName) && /ground/i.test(markdownFile.fileName) && csvFile.fileName.endsWith('.csv') && markdownFile.fileName.endsWith('.md') && numbersIn(csvFile.fileName).join() === '1,7' && csvFile.fileName !== hierarchyExport({ ...naval, GameID: 2 }, 'naval', 'csv').fileName && csvFile.fileName !== hierarchyExport({ ...naval, RaceID: 8 }, 'naval', 'csv').fileName && csvFile.fileName !== hierarchyExport(naval, 'naval', 'markdown').fileName
   })
-  await add('export-notice', 'a model that cannot be exported says what the save lacks, and one that can has nothing to say', () => hierarchyNotice(naval, 'naval') === null && hierarchyNotice(groundModel, 'ground') === null && String(hierarchyNotice({ supported: false, missing: ['FCT_Ship.ShippingLineID'], GameID: 1, RaceID: 7 }, 'naval')).includes('FCT_Ship.ShippingLineID') && String(hierarchyNotice({ supported: true, ...unread, holders: { read: false, missing: ['FCT_Commander.Prisoner'] } }, 'naval')).includes('FCT_Commander.Prisoner'))
+  await add('export-notice', 'a model that cannot be exported says what the save lacks, and one that can has nothing to say', () => hierarchyNotice(naval, 'naval') === null && hierarchyNotice(groundModel, 'ground') === null && hierarchyNotice({ supported: false, missing: ['FCT_Ship.ShippingLineID', 'FCT_Fleet'], GameID: 1, RaceID: 7 }, 'naval') === 'The save lacks the shipping line id of ship, the fleet data, so the naval command structure cannot be listed.' && hierarchyNotice({ supported: true, ...unread, holders: { read: false, missing: ['FCT_Commander.Prisoner'] } }, 'naval') === 'The save lacks the prisoner of commander, so the serving commanders are not listed.')
 
   await add('cell-quoting', 'a CSV cell holding a comma, quote, carriage return or line feed is quoted whole, an empty value is an empty cell and a number stays a number', () => {
     const values = ['plain', 'a,b', 'say "hi"', 'two\nlines', 'cr\rhere', '', null, undefined, 0, 12]
@@ -1435,7 +1435,7 @@ const pageSuite = async (variant, mods, into) => {
     const saved = await clickAll(vm)
     const enabled = buttons(vm).filter((node) => !attr(node, 'disabled'))
 
-    return structureTable(vm) === null && saved.length === 0 && enabled.length === 0 && lines.includes('FCT_Ship.ShippingLineID') && lines.includes('FCT_Fleet') && rosterIds(vm) !== null
+    return structureTable(vm) === null && saved.length === 0 && enabled.length === 0 && lines.includes('the shipping line id of ship') && lines.includes('the fleet data') && !/FCT_/.test(lines) && rosterIds(vm) !== null
   })
   await add('page-structure-unread', 'a save whose commanders cannot be read still lists and exports the structure, with its posts shown as not read, and the page names the missing column', async () => {
     const vm = withPeople({ navalTree: unread, groundTree: ground })
@@ -1446,7 +1446,7 @@ const pageSuite = async (variant, mods, into) => {
     const posts = items.filter((item) => item.Post !== '')
     const vacant = rowsOf(naval, 'naval').find((row) => row.Post !== '' && row['Holder ID'] === '').Vacancy
 
-    return sameRows(items, rowsOf(unread, 'naval')) && lines.includes('FCT_Commander.Prisoner') && saved.length === 2 && posts.length > 0 && posts.every((item) => item.Vacancy === posts[0].Vacancy) && posts[0].Vacancy !== vacant
+    return sameRows(items, rowsOf(unread, 'naval')) && lines.includes('the prisoner of commander') && !/FCT_/.test(lines) && saved.length === 2 && posts.length > 0 && posts.every((item) => item.Vacancy === posts[0].Vacancy) && posts[0].Vacancy !== vacant
   })
   await add('page-structure-failed-read', 'a structure read that failed lists nothing from an earlier model, offers no download and shows the message', async () => {
     const vm = withPeople({ navalTree: naval, groundTree: ground }, { ...loadedKeys, navalTree: 'boom' })
@@ -1768,7 +1768,9 @@ const MUTANTS = [
   ['the file name has the game twice', U('hierarchy-export'), '-g${model.GameID}-r${model.RaceID}', '-g${model.GameID}-r${model.GameID}', ['export-file']],
   ['the first child of an entry is skipped', U('hierarchy-export'), 'for (let index = entry.children.length - 1; index >= 0; index--) {', 'for (let index = entry.children.length - 1; index >= 1; index--) {', ['csv-rows', 'md-outline', 'ground-csv', 'page-structure-naval']],
   ['a ground formation lists no holder', U('hierarchy-export'), 'anchor: node.anchor, post: node.post, problems: node.problems', 'anchor: node.anchor, post: { state: \'none\', holders: [], unsettled: [] }, problems: node.problems', ['ground-csv', 'md-ground']],
-  ['a model that cannot be listed has no notice', U('hierarchy-export'), 'return `The save lacks ${model.missing.join(\', \')}, so the ${TREE_NOUNS[tree]} cannot be listed.`', 'return null', ['export-notice', 'page-structure-unsupported']],
+  ['a model that cannot be listed names the columns as stored', U('hierarchy-export'), 'return `The save lacks ${fieldList(model.missing)}, so the ${TREE_NOUNS[tree]} cannot be listed.`', 'return `The save lacks ${model.missing.join(\', \')}, so the ${TREE_NOUNS[tree]} cannot be listed.`', ['export-notice']],
+  ['a model that cannot be listed has no notice', U('hierarchy-export'), 'return `The save lacks ${fieldList(model.missing)}, so the ${TREE_NOUNS[tree]} cannot be listed.`', 'return null', ['export-notice', 'page-structure-unsupported']],
+  ['the serving commanders notice names the columns as stored', U('hierarchy-export'), 'The save lacks ${fieldList(model.holders.missing)}, so the serving', 'The save lacks ${model.holders.missing.join(\', \')}, so the serving', ['export-notice']],
   ['a minus sign is not guarded', U('csv-cell'), '/^[=+\\-@\\t\\r]/', '/^[=+@\\t\\r]/', ['csv-formula', 'cell-guard']],
   ['a line break does not quote a cell', U('csv-cell'), '/[",\\r\\n]/.test(text)', '/[",\\r]/.test(text)', ['csv-roundtrip', 'cell-quoting']],
   ['a quote is not doubled', U('csv-cell'), 'text.replace(/"/g, \'""\')', 'text', ['csv-roundtrip', 'cell-quoting']],

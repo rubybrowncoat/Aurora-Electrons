@@ -1136,7 +1136,7 @@ const suite = (m) => {
     const database = fakeSave(SAVE(), { failing: ['FCT_Population'] })
     const loaded = await notes.loadNoteObjects(database, { GameID: 1, RaceID: 7 })
 
-    assert.match(loaded.failed.colony, /FCT_Population/)
+    assert.match(loaded.failed.colony, /the save lacks the population data/)
     assert.equal(loaded.objects.colony, undefined)
     assert.equal(loaded.objects.fleet.size, 2)
     assert.equal(loaded.systems.length, 2)

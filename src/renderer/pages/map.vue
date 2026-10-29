@@ -329,7 +329,7 @@ import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
 import { jumpPointPlaces } from '../utilities/places'
-import { isAvailable, valueOrNull } from '../utilities/provenance'
+import { fieldList, isAvailable, valueOrNull } from '../utilities/provenance'
 import { OBSERVATION_PURPOSE, OBSERVATION_RULE } from '../utilities/recovery-ledger'
 import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
 import { ALL_TAGS } from '../utilities/world-tags'
@@ -1300,7 +1300,7 @@ export default {
         } else if (mark.value === 'discovered' && !isAvailable(this.gameStart)) {
           items.push({ kind: 'note', label: `${mark.text}: unknown, the game's start year is not read`, result: this.gameStart })
         } else if (mark.value === 'remote' && !this.remoteModel) {
-          items.push({ kind: 'note', label: this.groundFormations ? `${mark.text}: unknown, the save lacks ${this.groundFormations.missing.join(', ')}` : `${mark.text}: reading the ground formations` })
+          items.push({ kind: 'note', label: this.groundFormations ? `${mark.text}: unknown, the save lacks ${fieldList(this.groundFormations.missing)}` : `${mark.text}: reading the ground formations` })
         } else if (mark.place === 'glyph') {
           const names = Object.keys(this.glyphStyles).filter((name) => name === mark.value || name.startsWith(`${mark.value}-`))
           const shown = names.filter((name) => counts[name])

@@ -9,6 +9,7 @@
 import { mapGetters } from 'vuex'
 
 import { branchLineage } from '../utilities/history-milestones'
+import { failureWords } from '../utilities/provenance'
 import { ALL_TAGS, bodyIdsOf, clearTag, expectedOf, filterByTag, loadBodies, readTags, registerWorldTags, saveTag, scopeOf, tagChoices, tagOptions, tagSuggestions, tagsBySystem } from '../utilities/world-tags'
 
 // The reads of the tags (the bodies they link to) fail into `tagBodiesRead.error`, which the form and the list show, and the page goes on without them: capability preflight (scripts/lib/capability-scan.js) does not count them among the reads of the page that mixes this in.
@@ -254,7 +255,7 @@ export default {
         try {
           return Object.freeze({ bodies: await loadBodies(database, { GameID, RaceID, bodyIds, systemId }), error: null, database, GameID, RaceID, requested: new Set(bodyIds) })
         } catch (error) {
-          return Object.freeze({ bodies: null, error: error && error.message ? error.message : String(error), database, GameID, RaceID, requested: new Set(bodyIds) })
+          return Object.freeze({ bodies: null, error: failureWords(error), database, GameID, RaceID, requested: new Set(bodyIds) })
         }
       },
       default: null,
