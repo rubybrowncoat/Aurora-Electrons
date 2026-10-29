@@ -72,12 +72,8 @@
           <span v-if="item.km !== null" class="text-no-wrap">{{ item.distanceText }}<provenance-mark :result="item.distanceResult" /></span>
           <span v-else class="text--secondary text-no-wrap">—<provenance-mark :result="item.distanceResult" /></span>
         </template>
-        <template v-for="column in tonColumns" #[`item.${column}`]="{ item }">
-          <span v-if="item[column] !== null" :key="column" class="text-no-wrap">{{ count(item[column], column === 'accessibility' ? 2 : 0) }}<provenance-mark :result="item[`${column}Result`]" /></span>
-          <span v-else :key="column" class="text--secondary text-no-wrap">—<provenance-mark :result="item[`${column}Result`]" /></span>
-        </template>
-        <template v-for="column in dayColumns" #[`item.${column}`]="{ item }">
-          <span v-if="item[column] !== null" :key="column" class="text-no-wrap">{{ duration(item[column]) }}<provenance-mark :result="item[`${column}Result`]" /></span>
+        <template v-for="column in figureColumns" #[`item.${column}`]="{ item }">
+          <span v-if="item[column] !== null" :key="column" class="text-no-wrap">{{ figureText(column, item[column]) }}<provenance-mark :result="item[`${column}Result`]" /></span>
           <span v-else :key="column" class="text--secondary text-no-wrap">—<provenance-mark :result="item[`${column}Result`]" /></span>
         </template>
       </v-data-table>
@@ -116,6 +112,8 @@ const HEADERS = [
 
 const TON_COLUMNS = ['amount', 'accessibility', 'extraction', 'delivered']
 const DAY_COLUMNS = ['deployment', 'firstLoad', 'roundTrip', 'depletion', 'firstDelivery']
+// The figure cells come from one slot loop: Vue 2 keys a table's scoped slots by the text of the slot name, so a second loop with the same `item.${column}` would replace the first and leave its columns unformatted.
+const FIGURE_COLUMNS = [...TON_COLUMNS, ...DAY_COLUMNS]
 
 // Rows per page, with no page of every row: a mineral can have hundreds of surveyed deposits, and drawn at once their rows (some 40 elements each) make every later frame of the Mineral Outlook take seconds to composite, so a hover or a repaint holds the window that long.
 const PAGE_SIZES = [15, 30, 60]
@@ -170,7 +168,7 @@ export default {
     runway: { type: Object, default: null },
   },
   data() {
-    return { headers: HEADERS, tonColumns: TON_COLUMNS, dayColumns: DAY_COLUMNS, drives: DRIVES, pageSizes: PAGE_SIZES }
+    return { headers: HEADERS, figureColumns: FIGURE_COLUMNS, drives: DRIVES, pageSizes: PAGE_SIZES }
   },
   computed: {
     mineralName() {
@@ -276,6 +274,10 @@ export default {
   },
   methods: {
     sortNullLast,
+    // A figure cell's text: a span of days for the day columns, tonnes otherwise, accessibility to two places.
+    figureText(column, value) {
+      return DAY_COLUMNS.includes(column) ? this.duration(value) : this.count(value, column === 'accessibility' ? 2 : 0)
+    },
     // The distance of the flight out in words: how far and how many jumps, or why it is not known.
     distanceText(flight) {
       if (flight.state !== 'routed') {

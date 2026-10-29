@@ -90,6 +90,29 @@ const templateErrors = (source) => {
   return compiler.compileTemplate({ source: descriptor.template.content, filename: 'component.vue', id: 'component' }).errors.map(String)
 }
 
+// The scoped slots the component's template hands its data table, drawn on `vm` (an instance from instantiate): the template compiled as the build compiles it and run with Vue's own render helpers, each element a plain { tag, data, children } record, so a slot the compiler drops is missing here as it is in the window. The hoisted static trees run too, through the same helpers.
+const renderedSlots = (source, vm) => {
+  const Vue = require('vue')
+  const compiler = require('vue/compiler-sfc')
+  const parsed = compiler.parse({ source })
+  const { code } = compiler.compileTemplate({ source: (parsed.descriptor || parsed).template.content, filename: 'component.vue', id: 'component' })
+  const { render, staticRenderFns } = require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\n;({ render, staticRenderFns })`, {})
+  const tables = []
+  const element = (tag, data, children) => {
+    const record = Array.isArray(data) || typeof data !== 'object' ? { tag, data: {}, children: data } : { tag, data: data || {}, children }
+
+    if (tag === 'v-data-table') tables.push(record)
+
+    return record
+  }
+  const own = { _self: { _c: element }, _c: element, _staticTrees: [], $options: { staticRenderFns } }
+  const self = new Proxy({}, { get: (_target, key) => (key === '_renderProxy' ? self : key in own ? own[key] : typeof key === 'string' && key.startsWith('_') && typeof Vue.prototype[key] === 'function' ? Vue.prototype[key].bind(self) : vm[key]) })
+
+  render.call(self)
+
+  return tables.length === 1 ? tables[0].data.scopedSlots || {} : {}
+}
+
 const PRONOUNS = /\b(I|me|my|mine|you|your|we|our)\b/i
 
 // ---------- the world worked by hand ----------
@@ -635,7 +658,7 @@ const pure = (ctx) => {
     const cells = slots.filter((slot) => ['order', 'km'].includes(slot.column) || slot.column.includes('column'))
     const bare = cells.filter((slot) => (slot.body.match(/<span\b/g) || []).length !== (slot.body.match(/<provenance-mark\b/g) || []).length).map((slot) => slot.column)
 
-    return cells.length === 4 && !bare.length ? true : `${cells.length} cells; no mark in ${bare.join(', ')}`
+    return cells.length === 3 && !bare.length ? true : `${cells.length} cells; no mark in ${bare.join(', ')}`
   })
   add('panel-template: the table keys its rows, sorts the unknown last and has a column for each figure the rows hold', () => {
     const vm = mount({ supply: supplied() })
@@ -656,6 +679,31 @@ const pure = (ctx) => {
     const paged = table.includes(':items-per-page.sync="sitesTable.itemsPerPage"') && table.includes(':footer-props="{ itemsPerPageOptions: pageSizes }"') && !/disable-pagination|hide-default-footer/.test(table)
 
     return paged && sizes.length > 0 && sizes.every((size) => Number.isInteger(size) && size > 0 && size <= 60) && sizes.includes(vm.sitesTable.itemsPerPage) ? true : short([table, sizes, vm.sitesTable])
+  })
+  add('panel-template: each column of the table draws its own cell, a figure formatted with its mark: the cells drawn from the compiled template on a row of figures', () => {
+    const vm = mount({ supply: supplied() })
+    // A row with every figure known and a fractional accessibility, so the two places it is drawn to show.
+    const known = vm.items.find((item) => vm.figureColumns.every((column) => item[column] !== null)) || vm.items[0]
+    const row = { ...known, accessibility: 0.375 }
+    const slots = renderedSlots(componentText, vm)
+    const textOf = (nodes) => [].concat(nodes || []).map((node) => (node.text !== undefined ? node.text : textOf(node.children))).join('')
+    // The results the marks of a cell are bound to, one entry a mark.
+    const marksOf = (nodes) => [].concat(nodes || []).flatMap((node) => [...(node.tag === 'provenance-mark' ? [(node.data.attrs || {}).result] : []), ...marksOf(node.children)])
+    const days = ['deployment', 'firstLoad', 'roundTrip', 'depletion', 'firstDelivery']
+    const expected = (column) => (row[column] === null ? '—' : days.includes(column) ? vm.duration(row[column]) : vm.count(row[column], column === 'accessibility' ? 2 : 0))
+    const wrong = vm.headers.map((header) => header.value).filter((column) => {
+      const slot = slots[`item.${column}`]
+
+      if (!slot) return true
+      if (!vm.figureColumns.includes(column)) return false
+      const cell = slot({ item: row })
+      const marks = marksOf(cell)
+
+      return textOf(cell) !== expected(column) || marks.length !== 1 || marks[0] !== row[`${column}Result`]
+    })
+    const formatted = ['amount', 'firstLoad'].every((column) => row[column] !== null && expected(column) !== String(row[column]))
+
+    return !wrong.length && formatted ? true : `columns without their own formatted cell: ${wrong.join(', ')}; formatted ${formatted}`
   })
 
   return statements
@@ -1038,7 +1086,11 @@ const MUTATIONS = [
   { name: 'the carrier\'s drive ignored', file: U, find: 'drive: basis.drive, lagrange: basis.lagrange }', replace: 'drive: \'drive\', lagrange: basis.lagrange }', fails: ['transport'] },
   { name: 'the panel without its summary', file: V, find: 'data-summary="', replace: 'data-sum="', fails: ['panel-template'] },
   { name: 'the panel showing the shortlist while its reads are loading or failed', file: V, find: 'v-else-if="loading || failed"', replace: 'v-else-if="false"', fails: ['panel-template'] },
-  { name: 'a figure of the panel without its mark', file: V, find: '{{ duration(item[column]) }}<provenance-mark :result="item[`${column}Result`]" />', replace: '{{ duration(item[column]) }}', fails: ['panel-template'] },
+  { name: 'a figure of the panel without its mark', file: V, find: '{{ figureText(column, item[column]) }}<provenance-mark :result="item[`${column}Result`]" />', replace: '{{ figureText(column, item[column]) }}', fails: ['panel-template'] },
+  { name: 'a second figure loop under the same slot name, which replaces the first', file: V, find: '        </template>\n      </v-data-table>', replace: '        </template>\n        <template v-for="column in [\'deployment\']" #[`item.${column}`]="{ item }"><span :key="column">{{ item[column] }}</span></template>\n      </v-data-table>', fails: ['panel-template'] },
+  { name: 'the day columns drawn as tonnes', file: V, find: 'return DAY_COLUMNS.includes(column) ? this.duration(value) :', replace: 'return false ? this.duration(value) :', fails: ['panel-template'] },
+  { name: 'the accessibility drawn to whole numbers', file: V, find: 'this.count(value, column === \'accessibility\' ? 2 : 0)', replace: 'this.count(value, 0)', fails: ['panel-template'] },
+  { name: 'a figure cell marked with the distance\'s result', file: V, find: '{{ figureText(column, item[column]) }}<provenance-mark :result="item[`${column}Result`]" />', replace: '{{ figureText(column, item[column]) }}<provenance-mark :result="item.distanceResult" />', fails: ['panel-template'] },
   { name: 'the panel\'s carrier cargo never reaching the ranking', file: V, find: 'return { speed: this.speed, drive: this.drive, lagrange: this.lagrange, cargo: this.cargo }', replace: 'return { speed: this.speed, drive: this.drive, lagrange: this.lagrange, cargo: 100 }', fails: ['panel'] },
   { name: 'the panel\'s number of mines fixed', file: V, find: 'count: this.mines,', replace: 'count: 10,', fails: ['panel'] },
   { name: 'a ship class\'s unsettled drive keeping the previous carrier\'s', file: V, find: 'this.drive = driveOfClass(found)', replace: 'this.drive = driveOfClass(found) || this.drive', fails: ['panel'] },
