@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /*
-  The Telemagenta preset (src/renderer/utilities/appearance.js: `TELEMAGENTA`), checked without a browser.
+  The Browncoat's Bunk preset (src/renderer/utilities/appearance.js: `BROWNCOATS_BUNK`), checked without a browser. `--no-mutations` runs the checks alone.
 
   It proves: the preset is the owner's own light palette and nothing else (registered last, light, versioned, no `reference` and no credits entry, the other presets untouched); each colour sampled from the photograph of the room (docs/plans/backlog/evidence/FU-96.md) is used for the roles it is recorded against, in its own hue (cream page and raised cream cards, the ceiling's pink in the rail and the secondary colour, the wall's crimson in the accent, the shadow's brown in both inks); the primary is telemagenta, of the hue of RAL 4010, deepened from it until it is 4.5:1 as text on every cream surface, the selection, focus, hover and row washes are that colour, and the neutral section accent is a deeper telemagenta of its own (a section colour is never the focus colour); no severity and no chart slot is telemagenta, or the same as it under protanopia, deuteranopia or tritanopia, and the four severities stay apart from each other under all three; the inks Vuetify draws are Vuetify's own, which every preset without a reference keeps; the readability matrix passes in the three accent modes; the preset's file round trips; and the preset is previewed, kept and read back at start.
 
-  What a browser shows (the preset card, the pages) is probed separately; the run is recorded in docs/plans/backlog/evidence/FU-96.md. The full gate (the compiled stylesheet, the colour-vision simulation, the map menu) is scripts/check-contrast.js --preset telemagenta.
+  What a browser shows (the preset card, the pages) is probed separately; the run is recorded in docs/plans/backlog/evidence/FU-96.md. The full gate (the compiled stylesheet, the colour-vision simulation, the map menu) is scripts/check-contrast.js --preset browncoats-bunk.
 
-  Run: node scripts/check-telemagenta-preset.js
+  Run: node scripts/check-browncoats-bunk-preset.js
 */
 const fs = require('fs')
 const path = require('path')
@@ -182,7 +182,7 @@ const SAMPLES = {
 }
 
 // RAL 4010 Telemagenta, the colour the owner names, as the colour charts give it.
-const TELEMAGENTA = '#cf3476'
+const RAL_4010 = '#cf3476'
 
 // What each role takes from the photograph and the most its hue may lie from the sample's, in degrees.
 const MAPPED = [
@@ -202,7 +202,7 @@ const LEAST_DISTANCE = 12
 
 const SEVERITIES = ['action', 'attention', 'info', 'success']
 
-const telemagenta = (ctx) => ctx.appearance.resolveAppearance('telemagenta')
+const bunk = (ctx) => ctx.appearance.resolveAppearance('browncoats-bunk')
 
 // Every string of a value.
 const strings = (value) => (typeof value === 'string' ? [value] : value && typeof value === 'object' ? Object.values(value).flatMap(strings) : [])
@@ -222,13 +222,13 @@ const CHECKS = [
   ['the preset is the owner\'s own light palette and nothing more: registered after every other preset, light, versioned, with no reference and no credits entry, and the other presets keep their identity and version', async (ctx) => {
     const problems = []
     const ids = ctx.appearance.listAppearances().map(({ id }) => id)
-    const appearance = telemagenta(ctx)
+    const appearance = bunk(ctx)
 
-    expectEqual(ids, ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue', 'telemagenta'], 'the presets in order', problems)
-    expectEqual([appearance.id, appearance.name, appearance.mode, appearance.key], ['telemagenta', 'Telemagenta', 'light', 'telemagenta@1'], 'the identity', problems)
+    expectEqual(ids, ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue', 'browncoats-bunk'], 'the presets in order', problems)
+    expectEqual([appearance.id, appearance.name, appearance.mode, appearance.key], ['browncoats-bunk', "Browncoat's Bunk", 'light', 'browncoats-bunk@1'], 'the identity', problems)
     expectEqual(Number.isInteger(appearance.version) && appearance.version >= 1, true, 'the version is a positive integer', problems)
     expectEqual(appearance.reference, null, 'the preset adapts no community theme, so it carries no reference (as Light and Dark do not)', problems)
-    expectEqual(ctx.credits.CREDITS.filter((credit) => /telemagenta/i.test(JSON.stringify({ ...credit, notices: undefined }))).map(({ id }) => id), [], 'no credits entry names the preset', problems)
+    expectEqual(ctx.credits.CREDITS.filter((credit) => /telemagenta|browncoat/i.test(JSON.stringify({ ...credit, notices: undefined }))).map(({ id }) => id), [], 'no credits entry names the preset', problems)
     expectEqual(ctx.credits.CREDITS.map(({ id }) => id), ['roboto', 'mdi', 'solaris-theme', 'deepblue-theme', 't2d-theme', 'cristo-theme'], 'the credits entries are the ones before the preset', problems)
     expectEqual(ids.map((id) => ctx.appearance.resolveAppearance(id).key).slice(0, 7), ['light@5', 'dark@5', 'classic@2', 'solaris@2', 't2d@1', 'cristo@1', 'deepblue@1'], 'the other presets keep their versions', problems)
     expectEqual(ctx.appearance.resolveAppearance('light').inks.text, 'rgba(0, 0, 0, 0.87)', 'Light keeps Vuetify\'s text ink', problems)
@@ -238,7 +238,7 @@ const CHECKS = [
 
   ['the colours sampled from the photograph are on the record and each is used in its own hue for the roles it is recorded against: the cream page and cards, the ceiling pink, the wall\'s crimson, the shadow\'s brown', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
+    const appearance = bunk(ctx)
 
     Object.entries(SAMPLES).forEach(([name, { value, region }]) => {
       expectEqual([/^#[0-9a-f]{6}$/.test(value), region.length > 0], [true, true], `the sample ${name} is a recorded colour of a recorded region`, problems)
@@ -260,7 +260,7 @@ const CHECKS = [
 
   ['the base reads as cream and the cards as raised: a warm yellow-white page of low saturation, the cards lighter than the page by a step that shows, the rail neither the page nor a card, and the border a darker cream', async (ctx) => {
     const problems = []
-    const { surfaces } = telemagenta(ctx)
+    const { surfaces } = bunk(ctx)
 
     expectEqual([hueOf(surfaces.background) >= 35 && hueOf(surfaces.background) <= 55, saturationOf(surfaces.background) >= 0.06 && saturationOf(surfaces.background) <= 0.16], [true, true], `the page ${surfaces.background} is cream (hue ${hueOf(surfaces.background).toFixed(0)}, saturation ${saturationOf(surfaces.background).toFixed(2)})`, problems)
     expectEqual(luminanceOf(surfaces.background) >= 0.82 && luminanceOf(surfaces.background) <= 0.92, true, `the page is light but not white (${luminanceOf(surfaces.background).toFixed(2)})`, problems)
@@ -274,16 +274,16 @@ const CHECKS = [
 
   ['the primary is telemagenta: of the hue of RAL 4010, deepened from it until it is 4.5:1 as text on the page, the cards and the rail (RAL 4010 itself is not on the page or the rail), the selection, focus, hover, row washes and compared-row mark are that colour, and the neutral section accent is a deeper telemagenta of its own', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
+    const appearance = bunk(ctx)
     const { primary } = appearance.focus
 
-    expectEqual(hueGap(primary, TELEMAGENTA) <= 5, true, `the primary ${primary} is ${hueGap(primary, TELEMAGENTA).toFixed(1)} degrees of hue from RAL 4010 ${TELEMAGENTA}`, problems)
+    expectEqual(hueGap(primary, RAL_4010) <= 5, true, `the primary ${primary} is ${hueGap(primary, RAL_4010).toFixed(1)} degrees of hue from RAL 4010 ${RAL_4010}`, problems)
     expectEqual(saturationOf(primary) >= 0.7, true, `the primary is saturated (${saturationOf(primary).toFixed(2)})`, problems)
-    expectEqual(luminanceOf(primary) < luminanceOf(TELEMAGENTA), true, 'the primary is deeper than RAL 4010', problems)
+    expectEqual(luminanceOf(primary) < luminanceOf(RAL_4010), true, 'the primary is deeper than RAL 4010', problems)
     SURFACE_PATHS.forEach((dotted) => {
       const surface = at(appearance, dotted)
 
-      expectEqual(dotted === 'surfaces.card' || contrastOf(TELEMAGENTA, surface) < 4.5, true, `RAL 4010 on ${dotted} is under 4.5:1 (${contrastOf(TELEMAGENTA, surface).toFixed(2)}), the reason it is deepened`, problems)
+      expectEqual(dotted === 'surfaces.card' || contrastOf(RAL_4010, surface) < 4.5, true, `RAL 4010 on ${dotted} is under 4.5:1 (${contrastOf(RAL_4010, surface).toFixed(2)}), the reason it is deepened`, problems)
 
       if (contrastOf(primary, surface) < 4.5) {
         problems.push(`the primary on ${dotted} is ${contrastOf(primary, surface).toFixed(2)}:1, under 4.5:1`)
@@ -301,7 +301,7 @@ const CHECKS = [
 
   ['no severity and no chart slot is telemagenta, in colour or under protanopia, deuteranopia or tritanopia, and the four severities stay apart from each other under all three', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
+    const appearance = bunk(ctx)
     const { primary } = appearance.focus
     const others = [...SEVERITIES.map((level) => [`severity ${level}`, appearance.severity[level]]), ...appearance.charts.categorical.map((colour, index) => [`chart slot ${index + 1}`, colour]), ...appearance.sections.accents.map((colour, index) => [`section accent ${index + 1}`, colour])]
 
@@ -333,7 +333,7 @@ const CHECKS = [
 
   ['the inks Vuetify draws are Vuetify\'s own, as for every preset without a reference, and the body and muted inks are the warm brown, 4.5:1 or more on every surface, with the white on-colour ink 4.5:1 on the primary and the severities', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
+    const appearance = bunk(ctx)
     const light = ctx.appearance.resolveAppearance('light')
 
     ;['text', 'textMuted', 'onTooltip', 'onColor', 'onSnackbar'].forEach((token) => {
@@ -366,11 +366,11 @@ const CHECKS = [
 
     const light = JSON.parse(JSON.stringify(fresh.appearance.activeAppearance()))
 
-    fresh.appearance.previewPreset('telemagenta')
+    fresh.appearance.previewPreset('browncoats-bunk')
 
     const preview = JSON.parse(JSON.stringify(fresh.appearance.activeAppearance()))
 
-    expectEqual([light.id, preview.id], ['light', 'telemagenta'], 'the two previews', problems)
+    expectEqual([light.id, preview.id], ['light', 'browncoats-bunk'], 'the two previews', problems)
     ;[['the page', 'surfaces.background', 6], ['the cards', 'surfaces.card', 3], ['the rail and footer', 'surfaces.chrome', 6], ['the primary', 'focus.primary', 40], ['the body ink', 'inks.body', 6]].forEach(([label, dotted, least]) => {
       const distance = distanceOf(at(preview, dotted), at(light, dotted))
 
@@ -391,10 +391,10 @@ const CHECKS = [
 
   ['the preset is plain data, its wording and the exported file keep off the first and second person, and nothing but colour values is added: no image, font or notice file', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
-    const exported = JSON.stringify(ctx.appearance.exportAppearanceFile('telemagenta', 1000))
+    const appearance = bunk(ctx)
+    const exported = JSON.stringify(ctx.appearance.exportAppearanceFile('browncoats-bunk', 1000))
 
-    expectEqual(notData(ctx.appearance.PRESETS.telemagenta), [], 'the members of the preset that are not plain data', problems)
+    expectEqual(notData(ctx.appearance.PRESETS['browncoats-bunk']), [], 'the members of the preset that are not plain data', problems)
     ;[...strings(appearance.name), exported].forEach((text) => {
       const person = FIRST_OR_SECOND_PERSON.exec(text)
 
@@ -402,7 +402,7 @@ const CHECKS = [
         problems.push(`the word "${person[0]}" in ${short(text)}`)
       }
     })
-    expectEqual(fs.readdirSync(path.join(utilitiesDirectory, 'notices')).filter((name) => /telemagenta/i.test(name)), [], 'no notice file of its own', problems)
+    expectEqual(fs.readdirSync(path.join(utilitiesDirectory, 'notices')).filter((name) => /telemagenta|browncoat/i.test(name)), [], 'no notice file of its own', problems)
     expectEqual(fs.readdirSync(path.join(root, 'src', 'renderer', 'utilities')).filter((name) => /\.(png|jpe?g|gif|ttf|otf|woff2?)$/i.test(name)), [], 'no image or font among the utilities', problems)
 
     return verdict(problems)
@@ -410,7 +410,7 @@ const CHECKS = [
 
   ['the readability matrix passes in the on, restrained and off accent modes: every measurement of the contrast report, the nine accents and the neutral one as graphics (on the bare surfaces, on their own active and hover washes, on the icon plates over them, in a hovered table row and under the overlay of a list entry) and as text, the page\'s text on those washes, and the report has no blocking finding', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
+    const appearance = bunk(ctx)
     const baseline = ctx.appearance.resolveAppearance('light')
     const report = ctx.file.contrastReport(appearance, { baseline })
     const measured = ctx.contrast.measureAppearance(appearance, { baseline })
@@ -461,11 +461,12 @@ const CHECKS = [
 
   ['the file of the preset round trips without a reference: the roles are the same, the origin is the built-in preset at its version, the file carries no reference, and the draft passes the contrast gate', async (ctx) => {
     const problems = []
-    const appearance = telemagenta(ctx)
-    const exported = ctx.appearance.exportAppearanceFile('telemagenta', 1000)
+    const appearance = bunk(ctx)
+    const exported = ctx.appearance.exportAppearanceFile('browncoats-bunk', 1000)
 
-    expectEqual([exported.provenance.origin.kind, exported.provenance.origin.id, exported.provenance.origin.version, exported.mode, exported.base], ['built-in', 'telemagenta', appearance.version, 'light', 'telemagenta'], 'the origin', problems)
+    expectEqual([exported.provenance.origin.kind, exported.provenance.origin.id, exported.provenance.origin.version, exported.mode, exported.base], ['built-in', 'browncoats-bunk', appearance.version, 'light', 'browncoats-bunk'], 'the origin', problems)
     expectEqual(exported.provenance.reference, undefined, 'the file carries no reference', problems)
+    expectEqual([exported.name, ctx.file.appearanceFileName(exported.name)], ["Browncoat's Bunk", 'aurora-electrons-appearance-browncoats-bunk.json'], 'the exported file is named by the preset without a hyphen for the apostrophe', problems)
 
     const imported = ctx.appearance.importAppearanceFile(JSON.stringify(exported))
 
@@ -483,7 +484,7 @@ const CHECKS = [
           }
         })
       })
-      expectEqual([draft.file.defaults.length, draft.file.base.id], [0, 'telemagenta'], 'the draft fills nothing from a base and names the preset as its base', problems)
+      expectEqual([draft.file.defaults.length, draft.file.base.id], [0, 'browncoats-bunk'], 'the draft fills nothing from a base and names the preset as its base', problems)
       expectEqual(imported.entry.report.findings, [], 'the findings of the draft', problems)
     }
 
@@ -501,18 +502,18 @@ const CHECKS = [
 
       fresh.appearance.loadAppearance(config)
       fresh.appearance.applyAccents(config, mode)
-      fresh.appearance.previewPreset('telemagenta')
-      expectEqual([fresh.appearance.activeAppearance().id, fresh.appearance.isPreviewing(), fresh.appearance.accentMode(), config.data.appearance], ['telemagenta', true, mode, undefined], `${mode}: the preview`, problems)
+      fresh.appearance.previewPreset('browncoats-bunk')
+      expectEqual([fresh.appearance.activeAppearance().id, fresh.appearance.isPreviewing(), fresh.appearance.accentMode(), config.data.appearance], ['browncoats-bunk', true, mode, undefined], `${mode}: the preview`, problems)
 
       fresh.appearance.cancelPreview()
       expectEqual([fresh.appearance.activeAppearance().id, fresh.appearance.isPreviewing()], ['light', false], `${mode}: the cancelled preview`, problems)
-      expectEqual(fresh.appearance.applyPreset(config, 'telemagenta'), true, `${mode}: kept`, problems)
-      expectEqual([config.data.appearance, config.data.appearanceAccents, fresh.appearance.activeAppearance().key], ['telemagenta', mode, 'telemagenta@1'], `${mode}: the settings`, problems)
+      expectEqual(fresh.appearance.applyPreset(config, 'browncoats-bunk'), true, `${mode}: kept`, problems)
+      expectEqual([config.data.appearance, config.data.appearanceAccents, fresh.appearance.activeAppearance().key], ['browncoats-bunk', mode, 'browncoats-bunk@1'], `${mode}: the settings`, problems)
 
       const again = await ctx.reload()
 
       again.appearance.loadAppearance(fakeConfig(config.data))
-      expectEqual([again.appearance.activeAppearance().id, again.appearance.appliedPresetId(), again.appearance.accentMode()], ['telemagenta', 'telemagenta', mode], `${mode}: after a restart`, problems)
+      expectEqual([again.appearance.activeAppearance().id, again.appearance.appliedPresetId(), again.appearance.accentMode()], ['browncoats-bunk', 'browncoats-bunk', mode], `${mode}: after a restart`, problems)
       expectEqual(again.appearance.unsupportedPresetId(fakeConfig(config.data)), null, `${mode}: the stored id is supported`, problems)
     }
 
@@ -561,14 +562,14 @@ const MUTATIONS = [
   ['section accents that are no longer the chart slots', { file: APPEARANCE, from: sectionsOf('#a31f5c', ACCENTS), to: sectionsOf('#a31f5c', WITHOUT(7, '#b02b2a')) }],
   ['an active wash so strong that the accents do not read on it', { file: APPEARANCE, from: 'washes: { sectionSoft: 0.14, sectionTint: 0.08, statusSoft: 0.18 },\n}\n\n// Every preset by id', to: 'washes: { sectionSoft: 0.9, sectionTint: 0.08, statusSoft: 0.18 },\n}\n\n// Every preset by id' }],
   ['a planner tone that is under 4.5:1 as text on the page', { file: APPEARANCE, from: "mining: '#9f4e00'", to: "mining: '#d46b00'" }],
-  ['the mode set to dark', { file: APPEARANCE, from: "name: 'Telemagenta',\n  version: 1,\n  mode: 'light',", to: "name: 'Telemagenta',\n  version: 1,\n  mode: 'dark'," }],
-  ['a reference added to the preset', { file: APPEARANCE, from: "name: 'Telemagenta',\n  version: 1,\n  mode: 'light',", to: "name: 'Telemagenta',\n  version: 1,\n  mode: 'light',\n  reference: { title: 'x', summary: 'y' }," }],
-  ['the version of the preset lowered', { file: APPEARANCE, from: "id: 'telemagenta',\n  name: 'Telemagenta',\n  version: 1,", to: "id: 'telemagenta',\n  name: 'Telemagenta',\n  version: 0," }],
-  ['the name in the first person', { file: APPEARANCE, from: "name: 'Telemagenta',", to: "name: 'My Telemagenta'," }],
-  ['an undefined member in the preset', { file: APPEARANCE, from: "  id: 'telemagenta',\n  name: 'Telemagenta',", to: "  id: 'telemagenta',\n  unset: undefined,\n  name: 'Telemagenta'," }],
-  ['a preset that carries a function', { file: APPEARANCE, from: "  id: 'telemagenta',\n  name: 'Telemagenta',", to: "  id: 'telemagenta',\n  load: () => 0,\n  name: 'Telemagenta'," }],
-  ['the preset left out of the list', { file: APPEARANCE, from: 'export const listAppearances = () => Object.keys(PRESETS).map((id) => resolveAppearance(id))', to: "export const listAppearances = () => Object.keys(PRESETS).filter((id) => id !== 'telemagenta').map((id) => resolveAppearance(id))" }],
-  ['the preset listed before the others', { file: APPEARANCE, from: 'export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE, [TELEMAGENTA.id]: TELEMAGENTA }', to: 'export const PRESETS = { [TELEMAGENTA.id]: TELEMAGENTA, [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE }' }],
+  ['the mode set to dark', { file: APPEARANCE, from: 'name: "Browncoat\'s Bunk",\n  version: 1,\n  mode: \'light\',', to: 'name: "Browncoat\'s Bunk",\n  version: 1,\n  mode: \'dark\',' }],
+  ['a reference added to the preset', { file: APPEARANCE, from: 'name: "Browncoat\'s Bunk",\n  version: 1,\n  mode: \'light\',', to: 'name: "Browncoat\'s Bunk",\n  version: 1,\n  mode: \'light\',\n  reference: { title: \'x\', summary: \'y\' },' }],
+  ['the version of the preset lowered', { file: APPEARANCE, from: 'id: \'browncoats-bunk\',\n  name: "Browncoat\'s Bunk",\n  version: 1,', to: 'id: \'browncoats-bunk\',\n  name: "Browncoat\'s Bunk",\n  version: 0,' }],
+  ['the name in the first person', { file: APPEARANCE, from: 'name: "Browncoat\'s Bunk",', to: 'name: "My Browncoat\'s Bunk",' }],
+  ['an undefined member in the preset', { file: APPEARANCE, from: '  id: \'browncoats-bunk\',\n  name: "Browncoat\'s Bunk",', to: '  id: \'browncoats-bunk\',\n  unset: undefined,\n  name: "Browncoat\'s Bunk",' }],
+  ['a preset that carries a function', { file: APPEARANCE, from: '  id: \'browncoats-bunk\',\n  name: "Browncoat\'s Bunk",', to: '  id: \'browncoats-bunk\',\n  load: () => 0,\n  name: "Browncoat\'s Bunk",' }],
+  ['the preset left out of the list', { file: APPEARANCE, from: 'export const listAppearances = () => Object.keys(PRESETS).map((id) => resolveAppearance(id))', to: "export const listAppearances = () => Object.keys(PRESETS).filter((id) => id !== 'browncoats-bunk').map((id) => resolveAppearance(id))" }],
+  ['the preset listed before the others', { file: APPEARANCE, from: 'export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE, [BROWNCOATS_BUNK.id]: BROWNCOATS_BUNK }', to: 'export const PRESETS = { [BROWNCOATS_BUNK.id]: BROWNCOATS_BUNK, [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE }' }],
   ['the text of a chosen list entry measured under Vuetify\'s strongest overlay', { file: CONTRAST, from: "const opacity = overlay === 'hover' ? LIST_VEIL[appearance.mode] : veil", to: "const opacity = overlay === 'hover' ? LIST_VEIL[appearance.mode] : VUETIFY_LIST_STATES[appearance.mode].pressed" }],
 ]
 
@@ -630,6 +631,7 @@ const judgeApart = async (index) => {
 }
 
 const run = async () => {
+  const mutate = !process.argv.includes('--no-mutations')
   let failures = 0
   let checks = 0
   const tally = (ok) => {
@@ -640,20 +642,22 @@ const run = async () => {
     }
   }
 
-  console.log('Telemagenta preset')
+  console.log("Browncoat's Bunk preset")
 
-  const verdicts = inParallel([...FAULTS.keys()], judgeApart)
+  const verdicts = mutate ? inParallel([...FAULTS.keys()], judgeApart) : Promise.resolve([])
 
   for (const [name, result] of await runChecks()) {
     tally(result === true)
     console.log(`${result === true ? 'PASS' : 'FAIL'}  ${name}${result === true ? '' : `  [${typeof result === 'string' ? result : 'false'}]`}`)
   }
 
-  console.log('\nMutations: each must fail at least one check, and the checks it fails are listed by number')
+  if (mutate) {
+    console.log('\nMutations: each must fail at least one check, and the checks it fails are listed by number')
+  }
 
   const judged = await verdicts
 
-  for (const [index, [label]] of MUTATIONS.entries()) {
+  for (const [index, [label]] of mutate ? MUTATIONS.entries() : []) {
     const { failed, invalid, error } = judged[index]
 
     if (invalid !== undefined) {
@@ -668,7 +672,7 @@ const run = async () => {
     }
   }
 
-  for (const [index, [label]] of INVALID.entries()) {
+  for (const [index, [label]] of mutate ? INVALID.entries() : []) {
     const unparsable = judged[MUTATIONS.length + index]
 
     tally(unparsable.invalid !== undefined)

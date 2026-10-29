@@ -14,7 +14,7 @@ const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const NOW = Date.UTC(2026, 9, 13, 12, 0, 0)
-const IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue', 'telemagenta']
+const IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue', 'browncoats-bunk']
 
 let instance = 0
 
@@ -609,7 +609,13 @@ const CHECKS = [
       return `the file name ${name}`
     }
 
-    return ctx.file.appearanceFileName('../..\\x: y') !== 'aurora-electrons-appearance-x-y.json' || ctx.file.appearanceFileName('') !== 'aurora-electrons-appearance-custom.json' ? 'the file name of a name with path characters or none' : true
+    if (ctx.file.appearanceFileName('../..\\x: y') !== 'aurora-electrons-appearance-x-y.json' || ctx.file.appearanceFileName('') !== 'aurora-electrons-appearance-custom.json') {
+      return 'the file name of a name with path characters or none'
+    }
+
+    const preset = ctx.file.appearanceFileName(ctx.appearance.resolveAppearance('browncoats-bunk').name)
+
+    return preset === 'aurora-electrons-appearance-browncoats-bunk.json' && ctx.file.appearanceFileName('Browncoat\u2019s Bunk') === preset ? true : `the file name of the Browncoat's Bunk preset: ${preset}`
   }],
 ]
 
@@ -682,6 +688,7 @@ const MUTATIONS = [
   ['a cancelled preview keeping the draft', APPEARANCE, '  imported.draft = null\n  state.id = state.applied', '  state.id = state.applied'],
   ['a stored file that fails not reported', APPEARANCE, 'imported.problem = parsed && !parsed.ok ? { errors: parsed.errors, omitted: parsed.omitted } : null', 'imported.problem = null'],
   ['the kept file not read back at start', APPEARANCE, 'imported.custom = parsed && parsed.ok ? register(CUSTOM_ID, parsed) : null', 'imported.custom = null'],
+  ['an apostrophe of the name made a hyphen of the file name', FILE, ".toLowerCase().replace(/['\\u2019]/g, '').replace(/[^a-z0-9]+/g, '-')", ".toLowerCase().replace(/[^a-z0-9]+/g, '-')"],
 ]
 
 // A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.

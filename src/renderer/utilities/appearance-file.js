@@ -463,8 +463,8 @@ export const contrastReport = (appearance, { baseline = null } = {}) => {
   return { checked: labelled.length, findings, blocking }
 }
 
-// The file name an exported appearance is saved under; it names the app's own format and no game.
-export const appearanceFileName = (name) => `aurora-electrons-appearance-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'custom'}.json`
+// The file name an exported appearance is saved under; it names the app's own format and no game. An apostrophe is dropped, not made a hyphen, so "Browncoat's Bunk" is browncoats-bunk.
+export const appearanceFileName = (name) => `aurora-electrons-appearance-${String(name).toLowerCase().replace(/['\u2019]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'custom'}.json`
 
 // The file of a resolved appearance, a built-in preset or an imported one (`appearance.file`): every role it has, its metadata and its provenance. `now` is the time of the export and `typeface` the name of the typeface in force, which the file names unless the appearance was imported from a file that named one. Exporting a file that was imported gives the roles as they are in force, defaults included, and carries its base, description, author, font and reference; the origin and the time are the export's own. The result is a new object.
 export const buildAppearanceFile = (appearance, { now = Date.now(), typeface = familyOf(FALLBACK).name } = {}) => {

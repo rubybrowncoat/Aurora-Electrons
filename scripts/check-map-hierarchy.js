@@ -39,7 +39,7 @@ const FILES = {
   outlook: 'src/renderer/pages/mineral-outlook.vue',
 }
 
-const PRESET_IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue', 'telemagenta']
+const PRESET_IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue', 'browncoats-bunk']
 const LEVELS = ['restrained', 'emphasised']
 
 Vue.config.productionTip = false

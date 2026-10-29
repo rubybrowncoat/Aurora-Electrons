@@ -3,7 +3,7 @@ import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appe
 import { ACCENT_MODES, DEFAULT_ACCENT_MODE } from './appearance-contrast'
 import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 
-// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris, T2D, Cristo and DeepBlue are adaptations of a community reference (see `reference`), listed after them, and Telemagenta is a light palette of the owner's own, which has no reference and is listed last.
+// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris, T2D, Cristo and DeepBlue are adaptations of a community reference (see `reference`), listed after them, and Browncoat's Bunk is a light palette of the owner's own, which has no reference and is listed last.
 //
 // A preset holds:
 // - `id`, `name`, `version` (raise it when a preset's colours change), `mode` ('light' or 'dark': what Vuetify's own components and the scrollbars take as the base).
@@ -22,7 +22,7 @@ import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 //
 // Physical colours (stars and the star orbit lines drawn in their colour, planet terrain) depict the world, not a meaning, and stay out of presets.
 //
-// The categorical palette is measured by scripts/check-contrast.js against the surfaces of every preset (page, card, chrome): every slot is 3:1 or more as a colour, in the light preset too (its slots 1, 2, 3, 4 and 8, the three weak hues and the ninth, were darkened to get there, which is why the preset's version is 2), a marker or pattern never standing in for it, and under protanopia, deuteranopia and tritanopia (Machado et al., severity 1.0) neighbouring slots differ by a CIEDE2000 of 9.6 or more. Two slots that are not neighbours can still come close under a colour-vision deficiency (as low as 1.9), which is what SERIES_ENCODINGS is for. A preset that changes the categorical list or the surfaces has to pass the script again; severity, status, planner and contact colours are measured by it too (text 4.5:1, graphics 3:1), and so is `inks.onFill` on every colour a chip is filled with (4.5:1). The planner tones are measured as text and as fills, which is why version 3 moved them (lighter in Dark, darker in Light): one tone has to read as text on the surface and carry the fill's text.
+// The categorical palette is measured by scripts/check-contrast.js against the surfaces of every preset (page, card, chrome): every slot is 3:1 or more as a colour, in the light preset too (its slots 1, 2, 3, 4 and 8, the three weak hues and the ninth, were darkened to get there, which is why the preset's version is 2), a marker or pattern never standing in for it, and under protanopia, deuteranopia and tritanopia (Machado et al., severity 1.0) neighbouring slots differ by a CIEDE2000 of 8 or more, the threshold the script enforces. Two slots that are not neighbours can come close under a colour-vision deficiency, closer in some presets than in others, which the script reports and does not fail, and which SERIES_ENCODINGS (distinct markers, dashes and patterns) is for. A preset that changes the categorical list or the surfaces has to pass the script again; severity, status, planner and contact colours are measured by it too (text 4.5:1, graphics 3:1), and so is `inks.onFill` on every colour a chip is filled with (4.5:1). The planner tones are measured as text and as fills, which is why version 3 moved them (lighter in Dark, darker in Light): one tone has to read as text on the surface and carry the fill's text.
 //
 // An imported appearance file (utilities/appearance-file.js) is a resolved appearance of its own beside the presets, not a preset: `custom` is the one the settings keep (under CUSTOM_KEY, the validated document, which `loadAppearance` reads back through the same parser) and `custom-draft` the one a file just read is previewed as. `file` on a resolved appearance is null for a preset and, for an imported one, what the file said besides its colours: `description`, `author`, `base` (`{ id, explicit }`), `font`, `provenance` and `defaults` (the roles the base filled in). Reading a file changes nothing that is kept: the draft is only in memory, and `applyPreset` writes the document and the choice in one write, or neither.
 
@@ -337,10 +337,10 @@ const DARK = {
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
 
-// The owner's own light palette, taken from a photograph of a room: cream walls, a pinkish ceiling, white trim, a magenta-crimson accent wall and a brown shadowed corner. The page and the rail are cream (the cards a lighter cream), the selection, the focus colour and the neutral section accent are telemagenta, deepened from RAL 4010 until it is 4.5:1 as text on the cream, the ceiling pink is the secondary colour, the wall's crimson the accent and the shadow's brown the secondary ink, and the chart series keep clear of the magenta. No community theme stands behind it, so it has no `reference` and no credits entry; it is not a baseline either, so its page, rail, cards and `body` and `muted` inks are its own, while the inks Vuetify draws (`text`, `textMuted`, `onColor`, `onSnackbar`) stay Vuetify's own, which scripts/check-contrast.js holds every preset without a reference to. scripts/check-telemagenta-preset.js records the sampled colours and where each is used.
-const TELEMAGENTA = {
-  id: 'telemagenta',
-  name: 'Telemagenta',
+// The owner's own light palette, named Browncoat's Bunk and taken from a photograph of a room: cream walls, a pinkish ceiling, white trim, a magenta-crimson accent wall and a brown shadowed corner. The page and the rail are cream (the cards a lighter cream), the selection, the focus colour and the neutral section accent are telemagenta, deepened from RAL 4010 until it is 4.5:1 as text on the cream, the ceiling pink is the secondary colour, the wall's crimson the accent and the shadow's brown the secondary ink, and the chart series keep clear of the magenta. No community theme stands behind it, so it has no `reference` and no credits entry; it is not a baseline either, so its page, rail, cards and `body` and `muted` inks are its own, while the inks Vuetify draws (`text`, `textMuted`, `onColor`, `onSnackbar`) stay Vuetify's own, which scripts/check-contrast.js holds every preset without a reference to. scripts/check-browncoats-bunk-preset.js records the sampled colours and where each is used.
+const BROWNCOATS_BUNK = {
+  id: 'browncoats-bunk',
+  name: "Browncoat's Bunk",
   version: 1,
   mode: 'light',
   surfaces: { background: '#f6eedc', chrome: '#f3e9de', card: '#fffbf2', border: '#ddd0b8', track: 'rgba(60, 38, 22, .10)', trackSoft: 'rgba(60, 38, 22, .07)', rule: 'rgba(60, 38, 22, .14)' },
@@ -361,7 +361,7 @@ const TELEMAGENTA = {
 }
 
 // Every preset by id. A preset joins the app by being listed here.
-export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE, [TELEMAGENTA.id]: TELEMAGENTA }
+export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE, [BROWNCOATS_BUNK.id]: BROWNCOATS_BUNK }
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
