@@ -1485,6 +1485,22 @@ const evaluated = (expression, scope) => new Function('scope', `with (scope) { r
 
 const scopeOf = (vm) => new Proxy({}, { has: (_target, key) => typeof key === 'string' && key in vm, get: (_target, key) => (typeof key === 'symbol' ? undefined : vm[key]) })
 
+// What a node's click handler sends through the instance's `$emit` (which the instance was made to record into `sent`) when the component handles a click, whichever of Vue's handler forms the template wrote: a method path, a function expression, or statements.
+const emittedBy = (node, vm, sent) => {
+  const from = sent.length
+  const scope = scopeOf(vm)
+  const source = node.events.click.value.trim()
+  const callable = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\['[^']*'\]|\["[^"]*"\]|\[\d+\]|\[[A-Za-z_$][\w$]*\])*$/.test(source) || /^(?:function(?:\s+[\w$]+)?\s*\(|(?:[\w$]+|\([^)]*\))\s*=>)/.test(source)
+
+  const event = { type: 'click' }
+
+  if (callable) evaluated(source, scope)(event)
+  // eslint-disable-next-line no-new-func
+  else new Function('scope', '$event', 'with (scope) { ' + source + '\n}')(scope, event)
+
+  return sent.slice(from)
+}
+
 // The scoped slots of a data table by name, as the template wrote it: a slot used by two tables is listed twice.
 const slotsOf = (nodes, name) => nodes.filter((node) => node.tag === 'template' && typeof node.slotTarget === 'string' && node.slotTarget.replace(/[`'"]/g, '') === name)
 
@@ -1537,7 +1553,8 @@ check('strip-component', 'the strip says it is reading while the read is in flig
   const component = await w.component()
   const positions = rp.routePositions([BODY, BUSY, SEEN, FIXED], { facts: FACTS })
   const unread = rp.routePositions([BODY, BUSY], { facts: null })
-  const vmOf = (given, state) => instantiate(component, { $store: STORE, data: { positions: given, state } })
+  const sent = []
+  const vmOf = (given, state) => instantiate(component, { $store: STORE, emit: (...args) => sent.push(args), data: { positions: given, state } })
   const ready = vmOf(positions, { loading: false, failed: '', error: '' })
 
   assert.equal(ready.age.value, GAME_TIME - BODY_TIME, 'the age of the oldest saved position')
@@ -1562,7 +1579,11 @@ check('strip-component', 'the strip says it is reading while the read is in flig
 
   assert.ok(marks.some((mark) => attrOf(mark, 'rule') === 'route.position'), 'the positions carry their rule')
   assert.ok(marks.some((mark) => attrOf(mark, 'result') === 'age'), 'the age carries its result')
-  assert.ok(nodes.some((node) => node.tag === 'v-btn' && node.events && node.events.click), 'the failed read can be retried')
+  const alert = nodes.find((node) => node.tag === 'v-alert')
+  const retries = alert ? elementsOf(alert).filter((node) => node.tag === 'v-btn' && node.events && node.events.click && emittedBy(node, failed, sent).some((args) => args[0] === 'retry')) : []
+
+  assert.equal(retries.length, 1, 'the failed read can be retried: its alert has one button that emits retry')
+  assert.equal(Boolean(evaluated(alert.if, scopeOf(failed))) && !evaluated(alert.if, scopeOf(ready)), true, 'the alert with the retry shows for a failed read only')
   assert.ok(nodes.some((node) => attrOf(node, 'data-condition') !== undefined), 'each unknown condition is listed')
   assert.ok(rp.ageResult(positions).rule.id === 'route.positionAge')
 })
@@ -1579,13 +1600,10 @@ check('strip-collapse', 'a strip that has a choice to fold shows its groups unle
   const toggle = find('data-positions-toggle')
   const hidden = find('data-positions-hidden')
   const emitted = []
-  const vmOf = (collapsed) => instantiate(component, { $store: STORE, data: { positions, state: { loading: false, failed: '', error: '' }, collapsed } })
+  const sent = []
+  const vmOf = (collapsed) => instantiate(component, { $store: STORE, emit: (...args) => sent.push(args), data: { positions, state: { loading: false, failed: '', error: '' }, collapsed } })
   const shown = (node, vm) => node.if === undefined || Boolean(evaluated(node.if, scopeOf(vm)))
-  const clicked = (vm) => {
-    const scope = scopeOf(vm)
-
-    evaluated(toggle.events.click.value, new Proxy({}, { has: (_target, key) => key === '$emit' || key in scope, get: (_target, key) => (key === '$emit' ? (...args) => emitted.push(args) : scope[key]) }))
-  }
+  const clicked = (vm) => emitted.push(...emittedBy(toggle, vm, sent))
 
   assert.ok(list && toggle && hidden, 'the strip has its list of groups, its toggle and its count of the groups folded away')
   assert.ok(unknown > 0 && unknown < groups.length, 'the fixture has groups with unknowns and groups without')
@@ -2949,13 +2967,21 @@ const BENIGN = [
   { label: 'the timed test of a plan written as its negation', target: 'plan', at: /const flight = (?:timed \|\| !flightClock\(held, speed\) \? null : (flightOf\(\{ facts, adapters, speed \}\))|!timed && flightClock\(held, speed\) \? (flightOf\(\{ facts, adapters, speed \}\)) : null)/, to: (m) => `const flight = !timed && flightClock(held, speed) ? ${m[1] || m[2]} : null` },
   { label: 'the condition of a life pod reworded', target: 'position', at: new RegExp(`(\\n {2}'drift-unobserved': )${STRING}`), to: (m) => `${m[1]}'no motion of a life pod is recorded by the save'` },
   { label: 'the owner class test of a Lagrange point parenthesised with its conjuncts reordered', target: 'orbit', at: /isNumber\(body\.bodyClass\) && !POINT_OWNER_CLASSES\.includes\(body\.bodyClass\)/, to: () => '(!POINT_OWNER_CLASSES.includes(body.bodyClass)) && isNumber(body.bodyClass)' },
+  { label: 'the retry of the strip written with a trailing semicolon', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="${m[1]};"` },
+  { label: 'the retry of the strip written as an arrow function', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="() => ${m[1]}"` },
+  { label: 'the retry of the strip written with the click event forwarded', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="$event && ${m[1]}"` },
+  { label: 'the retry of the strip written as a named function', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="function retry () { ${m[1]} }"` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
+
+// The edits that rewrite what a planted fault anchors on are run alone, never composed with the faults or with the other edits.
+const COMBINED = BENIGN.filter((edit) => !edit.alone)
 
 const STANDALONE = new Set([
   'benign:0',
   'benign:4',
   'benign:9',
   'benign:15',
+  ...BENIGN.filter((edit) => edit.alone).map((edit) => edit.id),
 ])
 
 // Composed faults keep each reader under the rewrites too: utility and loader branches, page inputs, computed rows and summaries, and each independently bound template field.
@@ -3123,7 +3149,7 @@ const main = async () => {
 
     const stages = [
       ...BENIGN.filter((edit) => STANDALONE.has(edit.id) && keep(edit.id, edit.label)).map((edit) => [`benign edit kept: ${edit.label}`, async () => (await run(CHECKS, worldOf([edit]))).map(describeFailure)]),
-      ...(keep('benign:all', 'every benign edit applied') ? [['every benign edit applied: every check stays green', async () => (await run(CHECKS, worldOf(BENIGN))).map(describeFailure)]] : []),
+      ...(keep('benign:all', 'every benign edit applied') ? [['every benign edit applied: every check stays green', async () => (await run(CHECKS, worldOf(COMBINED))).map(describeFailure)]] : []),
     ]
     const benign = await inParallel(stages, async ([label, test]) => {
       const began = performance.now()
@@ -3154,7 +3180,7 @@ const main = async () => {
 
       return [
         ...(keep(`fault:${index}`, label) ? [[label, [planted], fails]] : []),
-        ...(COMPOSED.has(index) && keep(`composed:${index}`, `${label}, on the sources with every benign edit`) ? [[`${label}, on the sources with every benign edit`, [...BENIGN, planted], fails]] : []),
+        ...(COMPOSED.has(index) && keep(`composed:${index}`, `${label}, on the sources with every benign edit`) ? [[`${label}, on the sources with every benign edit`, [...COMBINED, planted], fails]] : []),
       ]
     })
     const outcomes = await inParallel(attempts, async ([label, edits, fails]) => {

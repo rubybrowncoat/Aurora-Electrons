@@ -103,7 +103,7 @@ const merged = (parts, key) => Object.assign({}, ...parts.map((part) => part[key
 // `boundary` says where the page's own code runs and where the harness's does: `subject(label, call)` runs a piece of the page (a computed value, a method, an async read, the data and hooks of the instance) and returns what it returns, and `harness(call)` runs a piece of the instance that is not the page (the store's getters and its dispatch). The default runs both as they are; a check that must tell a failure of the page from a failure of the harness gives its own.
 const DIRECT = { subject: (_label, call) => call(), harness: (call) => call() }
 
-const instantiate = (options, { $store, database = null, GameID = null, RaceID = null, data = {}, nested = false, boundary = DIRECT }) => {
+const instantiate = (options, { $store, database = null, GameID = null, RaceID = null, data = {}, nested = false, boundary = DIRECT, emit = () => {} }) => {
   const parts = flatten(options)
   const computed = merged(parts, 'computed')
   const methods = merged(parts, 'methods')
@@ -117,7 +117,7 @@ const instantiate = (options, { $store, database = null, GameID = null, RaceID =
     $store: store,
     $set: (target, key, value) => { target[key] = value; held.clear() },
     $nextTick: (callback) => callback && callback(),
-    $emit: () => {},
+    $emit: emit,
     runAsync: async (name) => {
       const { get } = asyncComputed[name]
 
