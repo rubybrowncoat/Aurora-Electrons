@@ -121,6 +121,18 @@ const wholeOf = (text) => {
 const figuresIn = (text, grouping = 'None') => text.split(/[\s();,]+/).map((word) => readFigure(word, grouping)).filter((value) => value !== null)
 // The identity of a row of an export: its kind and its id, read whole.
 const keyOfRow = (row) => `${row.Kind}:${wholeOf(String(row.ID))}`
+// The identity of a row as a pairing of a file's rows with the hand-worked entries reads it, outside any check: a row that lacks a cell of its identity (a line break the CSV left unquoted cuts a row in pieces) has an identity no entry has, so the pairing lists it as a problem and the checks that read the rows fail on it, instead of the suite stopping before them.
+const pairingIdentity = (identity) => (row) => {
+  try {
+    return identity(row)
+  } catch (error) {
+    if (!isMarked(error)) {
+      throw error
+    }
+
+    return `no identity: ${error.message}`
+  }
+}
 // The ids of a cell that lists several (the holders of a post), in the order of the cell, each read whole.
 const idsIn = (text) => text.split('; ').map(wholeOf)
 
@@ -567,7 +579,7 @@ const pureSuite = async (mods, into) => {
   const csv = hierarchyCsv(naval, 'naval')
   const table = tableOf(csv)
   // The rows of the file set against the entries of the hand-worked tree by the identity of each (its kind and its id, read whole): a row of an identity the tree lacks, a row doubled and an entry with no row are problems, never a row read in place of another.
-  const paired = pairedBy('the CSV of the naval tree', table.rows, NAVAL_ORDER, keyOfRow, (key) => key)
+  const paired = pairedBy('the CSV of the naval tree', table.rows, NAVAL_ORDER, pairingIdentity(keyOfRow), (key) => key)
   const byKey = Object.fromEntries(paired.pairs)
   const rowOf = (key) => needed(byKey[key], `row ${key}`)
   const unreadTable = tableOf(hierarchyCsv({ supported: true, ...unread }, 'naval'))
@@ -606,7 +618,7 @@ const pureSuite = async (mods, into) => {
 
   // The CSV of the ground formations, its rows set against the hand-worked formations by id.
   const groundTable = tableOf(hierarchyCsv(groundModel, 'ground'))
-  const groundPaired = pairedBy('the CSV of the ground formations', groundTable.rows, GROUND_TREE, (row) => wholeOf(row.ID), (entry) => entry.id)
+  const groundPaired = pairedBy('the CSV of the ground formations', groundTable.rows, GROUND_TREE, pairingIdentity((row) => wholeOf(row.ID)), (entry) => entry.id)
   const groundByIdentity = new Map(groundPaired.pairs.map(([entry, row]) => [entry.id, row]))
   const groundRow = (id) => needed(groundByIdentity.get(id), `ground row ${id}`)
 
