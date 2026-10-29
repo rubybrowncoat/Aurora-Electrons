@@ -3,7 +3,7 @@ import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appe
 import { ACCENT_MODES, DEFAULT_ACCENT_MODE } from './appearance-contrast'
 import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 
-// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris, T2D and Cristo are adaptations of a community reference (see `reference`), listed after them.
+// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris, T2D, Cristo and DeepBlue are adaptations of a community reference (see `reference`), listed after them, and Telemagenta is a light palette of the owner's own, which has no reference and is listed last.
 //
 // A preset holds:
 // - `id`, `name`, `version` (raise it when a preset's colours change), `mode` ('light' or 'dark': what Vuetify's own components and the scrollbars take as the base).
@@ -337,8 +337,31 @@ const DARK = {
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
 
+// The owner's own light palette, taken from a photograph of a room: cream walls, a pinkish ceiling, white trim, a magenta-crimson accent wall and a brown shadowed corner. The page and the rail are cream (the cards a lighter cream), the selection, the focus colour and the neutral section accent are telemagenta, deepened from RAL 4010 until it is 4.5:1 as text on the cream, the ceiling pink is the secondary colour, the wall's crimson the accent and the shadow's brown the secondary ink, and the chart series keep clear of the magenta. No community theme stands behind it, so it has no `reference` and no credits entry; it is not a baseline either, so its page, rail, cards and `body` and `muted` inks are its own, while the inks Vuetify draws (`text`, `textMuted`, `onColor`, `onSnackbar`) stay Vuetify's own, which scripts/check-contrast.js holds every preset without a reference to. scripts/check-telemagenta-preset.js records the sampled colours and where each is used.
+const TELEMAGENTA = {
+  id: 'telemagenta',
+  name: 'Telemagenta',
+  version: 1,
+  mode: 'light',
+  surfaces: { background: '#f6eedc', chrome: '#f3e9de', card: '#fffbf2', border: '#ddd0b8', track: 'rgba(60, 38, 22, .10)', trackSoft: 'rgba(60, 38, 22, .07)', rule: 'rgba(60, 38, 22, .14)' },
+  inks: { body: '#2a1a12', muted: '#6a5446', text: 'rgba(0, 0, 0, 0.87)', textMuted: 'rgba(0, 0, 0, 0.6)', onTooltip: '#ffffff', onFill: '#ffffff', onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' },
+  focus: { primary: '#b8286a', hover: 'rgba(184, 40, 106, .06)', secondary: '#dcc3b8', accent: '#8a0030' },
+  rows: { selected: 'rgba(184, 40, 106, .08)', differs: 'rgba(184, 40, 106, .08)', differsMark: '#b8286a', differsDot: 'rgba(184, 40, 106, .45)', stripe: 'rgba(184, 40, 106, .08)', stripeSoft: 'rgba(184, 40, 106, .04)' },
+  severity: { action: '#8f1111', attention: '#975300', info: '#0966b2', success: '#307133' },
+  status: { inactive: '#6f6254' },
+  plan: { mining: '#9f4e00', terraformFree: '#9c27b0', terraformPartial: '#3f51b5', terraformCheaper: '#506874', cheap: '#007167', moderate: '#026a9f', costly: '#8a5300', severe: '#b63811', insufficient: '#be2c00', rich: '#9f4e00', cmc: '#00695c', unsurveyed: '#915700', selected: '#bd2d2c' },
+  charts: {
+    axis: '#d9ccb4',
+    tooltip: 'rgba(60, 38, 22, 0.95)',
+    categorical: ['#2874cf', '#c64414', '#165a2d', '#9d6900', '#6b3f2a', '#008300', '#4a3aa7', '#bd2d2c', '#00808e'],
+  },
+  sections: { neutral: '#a31f5c', accents: ['#2874cf', '#c64414', '#165a2d', '#9d6900', '#6b3f2a', '#008300', '#4a3aa7', '#bd2d2c', '#00808e'] },
+  space: { background: '#000040', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
+  washes: { sectionSoft: 0.14, sectionTint: 0.08, statusSoft: 0.18 },
+}
+
 // Every preset by id. A preset joins the app by being listed here.
-export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE }
+export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE, [TELEMAGENTA.id]: TELEMAGENTA }
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
