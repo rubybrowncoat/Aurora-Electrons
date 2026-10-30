@@ -834,6 +834,8 @@ const vm0 = (item) => item.removableData && item.removableData.alreadyShort === 
 
 // The reads of the page that are tracked (their loadErrors entry is written when each settles), found by running each async read of the page and of its mixins against a database that fails: what the page declares, not what its text says.
 const asyncNamesOf = (options) => [...(options.mixins || []).flatMap(asyncNamesOf), ...Object.keys(options.asyncComputed || {})]
+// The tracked reads that belong to one panel, which the page does not wait for: the colonist read, and the mine bootstrap panel's reads (scripts/check-mine-bootstrap.js). The others are the page's own.
+const PANEL_READS = ['colonistSources', 'bootstrapSources', 'bootstrapVersion']
 const READS = new WeakMap()
 const readsOf = async (ctx) => {
   if (!READS.has(ctx)) {
@@ -891,7 +893,7 @@ const page = (ctx) => {
   })
   add('page: the panel sits inside the gate where every other read has loaded, whatever the state of its own read, after the Colonies panel and before the mine bootstrap', async () => {
     const tracked = await readsOf(ctx)
-    const core = Object.fromEntries(tracked.filter((key) => key !== 'colonistSources').map((key) => [key, null]))
+    const core = Object.fromEntries(tracked.filter((key) => !PANEL_READS.includes(key)).map((key) => [key, null]))
     const all = elementsOf(pageAst)
     const at = all.indexOf(mounted[0])
     const gates = []
@@ -912,7 +914,7 @@ const page = (ctx) => {
   add('page: the template compiles', () => { const errors = templateErrors(pageText); return errors.length ? short(errors) : true })
   add('page: the colonist read is a tracked read with its default, and every tracked read names itself when it fails', async () => {
     const tracked = await readsOf(ctx)
-    const core = tracked.filter((key) => key !== 'colonistSources')
+    const core = tracked.filter((key) => !PANEL_READS.includes(key))
     const read = pageOptions.asyncComputed.colonistSources
     const unnamed = core.filter((key) => liveMount({ loadErrors: { [key]: 'down' } }).failedInputsText === '')
     const optionalFailure = liveMount({ loadErrors: { colonistSources: 'down' } }).colonistState
@@ -993,7 +995,7 @@ const optional = (ctx) => {
   const { options, componentText, livePageOptions } = ctx
   const statements = []
   const add = (name, test) => statements.push([name, test])
-  const coreOf = async () => (await readsOf(ctx)).filter((key) => key !== 'colonistSources')
+  const coreOf = async () => (await readsOf(ctx)).filter((key) => !PANEL_READS.includes(key))
   const settledOf = async () => Object.fromEntries((await coreOf()).map((key) => [key, null]))
   const failing = { query: async () => { throw new Error('boom') } }
   const mountPage = async (data = {}, database = failing) => instantiate(livePageOptions, { $store: PAGE_STORE, database, GameID: GAME, RaceID: RACE, data: { loadErrors: await settledOf(), ...data } })

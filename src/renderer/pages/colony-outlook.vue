@@ -261,31 +261,36 @@
               <v-select :value="bootstrapBuilders.length ? (bootstrapBuilders.find((option) => option.colony.PopulationID === bootstrapBuilderId) || bootstrapBuilders[0]).colony.PopulationID : null" :items="bootstrapBuilderItems" item-text="text" item-value="value" label="Builder for the import" aria-label="Builder for the import" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapBuilderId = $event" />
             </v-col>
           </v-row>
-          <div v-if="bootstrapSources.problems.length" class="px-4 pb-2 caption text--secondary" data-bootstrap-problems>Not read: {{ bootstrapSources.problems.map((problem) => problem.text).join('; ') }}.</div>
-          <div v-if="!bootstrapTarget" class="px-4 py-3 caption text--secondary">Pick the colony that should gain mining capacity to compare the three routes.</div>
-          <div v-else-if="!bootstrapRoutes.length" class="px-4 py-3 caption text--secondary">The comparison needs a mine type the race can build and a position for the colony.</div>
-          <v-row v-else dense class="px-4 pb-2">
-            <v-col v-for="route in bootstrapRoutes" :key="route.id" cols="12" md="4">
-              <div class="route-card" :data-route="route.id">
-                <div class="d-flex align-center mb-1">
-                  <span class="font-weight-medium">{{ route.title }}</span>
-                  <v-chip small label class="ml-2" :color="routeColor(route.status)">{{ routeStatus[route.status] }}</v-chip>
+          <div v-if="bootstrapState.loading || bootstrapState.failed" class="px-4 py-2" data-bootstrap-state>
+            <load-state :failed="bootstrapState.failed" :error="bootstrapState.error" :loading="bootstrapState.loading" @retry="retryBootstrapSources" />
+          </div>
+          <template v-else>
+            <div v-if="bootstrapSources.problems.length" class="px-4 pb-2 caption text--secondary" data-bootstrap-problems>Not read: {{ bootstrapSources.problems.map((problem) => problem.text).join('; ') }}.<v-btn v-if="bootstrapRetryable" x-small text color="primary" class="ml-2" data-bootstrap-retry @click="retryBootstrapSources">Retry</v-btn></div>
+            <div v-if="!bootstrapTarget" class="px-4 py-3 caption text--secondary">Pick the colony that should gain mining capacity to compare the three routes.</div>
+            <div v-else-if="!bootstrapRoutes.length" class="px-4 py-3 caption text--secondary">The comparison needs a mine type the race can build and a position for the colony.</div>
+            <v-row v-else dense class="px-4 pb-2">
+              <v-col v-for="route in bootstrapRoutes" :key="route.id" cols="12" md="4">
+                <div class="route-card" :data-route="route.id">
+                  <div class="d-flex align-center mb-1">
+                    <span class="font-weight-medium">{{ route.title }}</span>
+                    <v-chip small label class="ml-2" :color="routeColor(route.status)">{{ routeStatus[route.status] }}</v-chip>
+                  </div>
+                  <table v-if="routeFigures(route).length" class="route-figures caption">
+                    <tr v-for="figure in routeFigures(route)" :key="figure.label">
+                      <td class="text--secondary">{{ figure.label }}</td>
+                      <td>{{ figure.text }}<provenance-mark v-if="figure.result" :result="figure.result" /></td>
+                    </tr>
+                  </table>
+                  <div v-if="route.worksNow.length" class="chart-title mt-2">Works now</div>
+                  <ul v-if="route.worksNow.length" class="route-list caption"><li v-for="line in route.worksNow" :key="line">{{ line }}</li></ul>
+                  <div v-if="route.limits.length" class="chart-title mt-2">Limits</div>
+                  <ul v-if="route.limits.length" class="route-list caption"><li v-for="line in route.limits" :key="line">{{ line }}</li></ul>
+                  <div v-if="route.missing.length" class="chart-title mt-2">Missing inputs</div>
+                  <ul v-if="route.missing.length" class="route-list caption text--secondary"><li v-for="line in route.missing" :key="line">{{ line }}</li></ul>
                 </div>
-                <table v-if="routeFigures(route).length" class="route-figures caption">
-                  <tr v-for="figure in routeFigures(route)" :key="figure.label">
-                    <td class="text--secondary">{{ figure.label }}</td>
-                    <td>{{ figure.text }}<provenance-mark v-if="figure.result" :result="figure.result" /></td>
-                  </tr>
-                </table>
-                <div v-if="route.worksNow.length" class="chart-title mt-2">Works now</div>
-                <ul v-if="route.worksNow.length" class="route-list caption"><li v-for="line in route.worksNow" :key="line">{{ line }}</li></ul>
-                <div v-if="route.limits.length" class="chart-title mt-2">Limits</div>
-                <ul v-if="route.limits.length" class="route-list caption"><li v-for="line in route.limits" :key="line">{{ line }}</li></ul>
-                <div v-if="route.missing.length" class="chart-title mt-2">Missing inputs</div>
-                <ul v-if="route.missing.length" class="route-list caption text--secondary"><li v-for="line in route.missing" :key="line">{{ line }}</li></ul>
-              </div>
-            </v-col>
-          </v-row>
+              </v-col>
+            </v-row>
+          </template>
           <div class="panel-foot caption text--secondary">
             Each route builds the same number of mines of one type and shows what works now, what limits it and what the save does not say. Import builds them at another colony of the race, with the build time of that colony's idle construction capacity, and carries them by freighter; the freight deficit is the tonnage beyond one lift of the class and the labour deficit is the workers the manned mines need beyond the colony's free workers. A freighter class crosses a jump point not stabilised on both sides only with jump drives that cover its size, else it takes a route over stabilised jump points when one exists, and otherwise needs a jump-capable tender. Local industry uses the colony's own idle construction capacity at its saved efficiency, so a colony short of workers builds slower. Ground-force assistance adds the construction rating of engineer formations at other colonies, weighted by their commanders' Production bonus, and a formation travels whole in one troop ship. It is unavailable where the save lacks the columns, and the figure is an upper bound because the assignment of engineers to fortification work is not saved. Mines already installed elsewhere, free freighters and troop ships, the move time of troops and mineral stock beyond the colony's own are not counted. A dash is a figure the save cannot support, and the mark beside it names what is missing.
           </div>
@@ -355,8 +360,10 @@ const INPUT_LABELS = {
   bootstrapVersion: 'the formula version',
   colonistSources: 'the colonist source fields',
 }
-// The read of the colonist panel alone: the rest of the page never waits for it, and a failure of it is shown on that panel.
-const OPTIONAL_INPUTS = ['colonistSources']
+// The reads of single panels: the rest of the page never waits for them, so a colony picked in the mine bootstrap panel never takes the page back to its loading state, and a failure of one is shown on its panel with the panel's own Retry.
+const COLONIST_INPUTS = ['colonistSources']
+const BOOTSTRAP_INPUTS = ['bootstrapSources', 'bootstrapVersion']
+const OPTIONAL_INPUTS = [...COLONIST_INPUTS, ...BOOTSTRAP_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
@@ -394,6 +401,8 @@ export default {
       linkTo,
       expanded: [],
       bootstrapColonyId: null,
+      // Whether a colony has been picked in the mine bootstrap panel: the first pick starts the panel's reads, which are the same for every colony.
+      bootstrapPicked: false,
       bootstrapTypeId: null,
       bootstrapQuantity: '10',
       bootstrapBuilderId: null,
@@ -405,7 +414,7 @@ export default {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
     ...mapState(['RaceNPR']),
 
-    // The reads behind the page's own panels that failed: the read of the colonist panel is its own (`colonistState`).
+    // The reads behind the page's own panels that failed: the reads of the colonist and mine bootstrap panels are their own (`colonistState`, `bootstrapState`).
     failedInputs() {
       return CORE_INPUTS.filter((key) => this.loadErrors[key])
     },
@@ -414,11 +423,18 @@ export default {
       return allLoaded(this.loadErrors, CORE_INPUTS)
     },
 
-    // The colonist panel's read: loading until it has settled, else the words naming it with its message. The panel shows no figures from a read that is in flight or failed.
+    // The colonist panel's read and the mine bootstrap panel's reads: loading until they have settled, else the words naming them with the message. A panel shows no figures from a read that is in flight or failed.
     colonistState() {
-      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+      return this.optionalState(COLONIST_INPUTS)
+    },
 
-      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    bootstrapState() {
+      return this.optionalState(BOOTSTRAP_INPUTS)
+    },
+
+    // Whether a source of the mine bootstrap reads failed to read (as against a column the save lacks): the sources settle with it named in their problems, so only a new read can bring it back.
+    bootstrapRetryable() {
+      return this.bootstrapSources.problems.some((problem) => problem.retry)
     },
 
     // Whether the workers needed count the queue and the shipyard upgrades as well as what stands today.
@@ -836,14 +852,32 @@ export default {
         this.bootstrapColonyId = row.PopulationID
       }
     },
+    // The first colony picked in the mine bootstrap panel starts its reads; a later pick reads nothing again.
+    bootstrapColonyId(id) {
+      if (id) {
+        this.bootstrapPicked = true
+      }
+    },
     RaceID() {
       this.focusId = null
     },
   },
   methods: {
+    // The words of the failed reads among `keys`, or the loading state until they have all settled.
+    optionalState(keys) {
+      const failed = keys.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, keys), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    },
+
     // Reads again the read of the colonist panel when it failed.
     retryColonistSources() {
-      OPTIONAL_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
+      COLONIST_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
+    },
+
+    // Reads again the reads of the mine bootstrap panel that failed, and the sources when one of them could not be read: the panel reads them once and a later pick does not read them again.
+    retryBootstrapSources() {
+      BOOTSTRAP_INPUTS.filter((key) => this.loadErrors[key] || (key === 'bootstrapSources' && this.bootstrapRetryable)).forEach((key) => this.$asyncComputed[key].update())
     },
 
     applyLink(query) {
@@ -1278,10 +1312,10 @@ export default {
       }),
       default: {},
     },
-    // Everything the mine bootstrap panel compares, read only once a colony is picked: the mine types, the colonies' places, shuttle service and stock, the projects that hold construction capacity, the freighters and troop ships, the ground formations with their commanders, the charted jump points and the cargo shuttle technology.
+    // Everything the mine bootstrap panel compares, read only once a colony is picked there and kept for the later picks: the mine types, the colonies' places, shuttle service and stock, the projects that hold construction capacity, the freighters and troop ships, the ground formations with their commanders, the charted jump points and the cargo shuttle technology.
     bootstrapSources: {
       get: tracked('bootstrapSources', async function () {
-        if (!this.bootstrapColonyId || !this.database || !this.GameID || !this.RaceID) {
+        if (!this.bootstrapPicked || !this.database || !this.GameID || !this.RaceID) {
           return NO_BOOTSTRAP_SOURCES
         }
 
@@ -1292,7 +1326,7 @@ export default {
     // The formula version the save's schema stands for, read with the mine bootstrap sources: null for a save without the formula columns.
     bootstrapVersion: {
       get: tracked('bootstrapVersion', async function () {
-        if (!this.bootstrapColonyId || !this.database) {
+        if (!this.bootstrapPicked || !this.database) {
           return null
         }
 

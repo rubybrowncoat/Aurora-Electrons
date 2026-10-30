@@ -6,7 +6,7 @@
 
   The utilities are run on synthetic colonies, freighters and ground formations worked by hand: what a number of mines costs, weighs and needs in workers; the local build of a colony that is fully staffed, understaffed (it cannot receive its full capacity), at an efficiency of 0, fully held by running projects, short of minerals or short of workers once the manned mines stand; the import of mines built at another colony and carried in (the tonnage, the lift of the class, the trips, the freight deficit and the labour deficit of manned and automated mines, no freighter, no route, no builder); and the engineers' route (the commander multiplier, the capacity modifier of a headquarters, the chain of parents at the same colony, the formations aboard ships, the engineers already at the colony) with its unavailable cases (a version the rules are not mapped for, a missing column, a null rating, size, headquarters capacity or commander bonus, a lookup the save does not confirm).
 
-  The reads run on a small in-memory database of their own: which installation types the race can build, the colonies' places, stock and cargo handling, the projects, the freighters and troop ships, and the formations with their commanders; the reads that meet a column the save lacks or a null value say unknown, never 0. The page is run as a pseudo instance on rows given as data, and its template is read as text.
+  The reads run on a small in-memory database of their own: which installation types the race can build, the colonies' places, stock and cargo handling, the projects, the freighters and troop ships, and the formations with their commanders; the reads that meet a column the save lacks or a null value say unknown, never 0. The page is run as a pseudo instance on rows given as data, with its real load state, and its template is read as text: a pick of a colony starts the panel's reads once, which leave the page shown and out of its loading state while the panel shows their progress or failure, and a source that failed to read inside the sources is offered for a retry that reads them again and recovers its rows, where a column the save lacks is not.
 
   The saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only; a save that is not there is skipped and counts as neither a pass nor a failure) give the real reads, which are compared with raw counts, the engineers' rating at each colony compared with the figure the Production page's modifiers hold, the routes of real colonies, and copies of the saves in memory (temporary tables over the read-only save) with a colony short of workers, a null rating, a null commander bonus, a dropped column and an unconfirmed commander bonus lookup.
 
@@ -1460,7 +1460,7 @@ const loaders = (ctx) => {
 
     return true
   })
-  add('loaders: a source that fails to read is named in the problems and left empty while the others stand', async () => {
+  add('loaders: a source that fails to read is named in the problems and left empty while the others stand; a read that failed is offered for a retry and a column the save lacks is not', async () => {
     const jumps = await data.loadBootstrapSources(await fixtureDatabase(['FCT_JumpPoint']), scope)
     const freight = await data.loadBootstrapSources(await fixtureDatabase(['FCT_ShipClass.CargoCapacity']), scope)
 
@@ -1472,6 +1472,7 @@ const loaders = (ctx) => {
     assert.equal(jumps.freighters.length, 1)
     assert.deepEqual(freight.problems.map((problem) => problem.source), ['freight'])
     assert.ok(freight.problems[0].text.includes('the cargo capacity of ship class'))
+    assert.deepEqual([...jumps.problems, ...freight.problems].map((problem) => problem.retry === true), [true, false])
     assert.deepEqual(freight.freighters, [])
     assert.equal(freight.types.length, 3)
 
@@ -1513,6 +1514,12 @@ const loaders = (ctx) => {
 
 // ---------- the page ----------
 
+// A colony picked in the panel, as Vue runs it: the colony is set and the page's watcher of it runs.
+const pickColony = (pageOptions, vm, id) => {
+  vm.bootstrapColonyId = id
+  pageOptions.watch.bootstrapColonyId.call(vm, id)
+}
+
 const pageStatements = (ctx) => {
   const { m, pageOptions, pageText } = ctx
   const { provenance } = m
@@ -1529,6 +1536,8 @@ const pageStatements = (ctx) => {
   const sources = (over = {}) => ({ types: [MINE, AUTO], colonies: [T, { ...B1.colony, stock: { 10: 5000 } }].map((colony) => ({ stock: { 10: 5000 }, ...colony })), projects: [], freighters: [FREIGHTER], troops: { lift: 16000, ships: 2, classes: [{ TroopCapacity: 8000, Ships: 2 }] }, ground: { gaps: [], formations: [f.form(1, { PopulationID: 5, rating: 10, commander: { bonus: 1.2 } })] }, jumpPoints: [], shuttleTechnology: 1, problems: [], ...over })
   const mount = (data = {}, database = null) => instantiate(pageOptions, { ...store, database, GameID: 1, RaceID: 1, data: { rows: rows(), bootstrapSources: sources(), bootstrapVersion: '2.7.x', bootstrapColonyId: 1, populationProductionModifiers: { 1: MODIFIERS }, ...data } })
   const stubDatabase = () => ({ queries: [], query(sql) { this.queries.push(sql); return Promise.resolve([[]]) } })
+  // Every read the page labels settled, as when the page is shown with no colony picked.
+  const settledInputs = () => Object.fromEntries([...(((pageText.match(/const INPUT_LABELS = \{([\s\S]*?)\n\}/) || [])[1] || '').matchAll(/^ {2}(\w+):/gm))].map((match) => [match[1], null]))
 
   add('page: nothing is read until a colony is picked, and the reads come with the pick', async () => {
     const before = stubDatabase()
@@ -1541,10 +1550,85 @@ const pageStatements = (ctx) => {
     assert.equal(idle.bootstrapVersion, null)
 
     const after = stubDatabase()
-    const picked = instantiate(pageOptions, { ...store, database: after, GameID: 1, RaceID: 1, data: { bootstrapColonyId: 1 } })
+    const picked = instantiate(pageOptions, { ...store, database: after, GameID: 1, RaceID: 1 })
 
+    pickColony(pageOptions, picked, 1)
     await picked.runAsync('bootstrapSources')
     assert.ok(after.queries.length > 0)
+
+    return true
+  })
+  add('page: a colony picked leaves the page shown and out of its loading state while the panel\'s reads are in flight; the panel shows their progress, then their failure, and its Retry reads again only its own reads: those that failed and the sources with a source that failed to read', async () => {
+    let refuse = null
+    const gate = new Promise((_resolve, reject) => { refuse = reject })
+    const vm = instantiate(pageOptions, { ...store, database: { query: () => gate }, GameID: 1, RaceID: 1, data: { loadErrors: settledInputs() } })
+
+    gate.catch(() => {})
+    pickColony(pageOptions, vm, 1)
+
+    const reads = ['bootstrapSources', 'bootstrapVersion'].map((name) => vm.runAsync(name).catch(() => {}))
+
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual([vm.ready, vm.failedInputs, vm.bootstrapState], [true, [], { loading: true, failed: '', error: '' }])
+    refuse(new Error('boom'))
+    await Promise.all(reads)
+    assert.deepEqual([vm.ready, vm.failedInputs, vm.bootstrapState.loading, vm.bootstrapState.error], [true, [], false, 'boom'])
+    assert.ok(vm.bootstrapState.failed.includes('the formula version'), vm.bootstrapState.failed)
+
+    const updates = []
+
+    assert.ok(vm.bootstrapSources.problems.length > 0 && vm.bootstrapSources.problems.every((problem) => problem.retry === true), 'the sources settle with their failed reads named for a retry')
+    assert.equal(vm.loadErrors.bootstrapSources, null)
+    vm.loadErrors = { ...vm.loadErrors, colonies: 'down', colonistSources: 'down' }
+    vm.$asyncComputed = Object.fromEntries(Object.keys(settledInputs()).map((key) => [key, { update: () => updates.push(key) }]))
+    vm.retryBootstrapSources()
+    assert.deepEqual(updates, ['bootstrapSources', 'bootstrapVersion'])
+
+    return true
+  })
+  add('page: a source that failed to read for a moment (a read that timed out) leaves the read settled with the source named and a Retry offered, and the panel\'s Retry reads the sources again and brings their data back; a column the save lacks offers no Retry', async () => {
+    const db = await fixtureDatabase()
+    let down = true
+    const vm = instantiate(pageOptions, { ...store, database: { query: (sql) => (down ? Promise.reject(new Error('the read timed out')) : db.query(sql)) }, GameID: 1, RaceID: 1, data: { loadErrors: settledInputs() } })
+    const reads = []
+
+    try {
+      vm.$asyncComputed = Object.fromEntries(['bootstrapSources', 'bootstrapVersion'].map((key) => [key, { update: () => reads.push(vm.runAsync(key).catch(() => {})) }]))
+      pickColony(pageOptions, vm, 1)
+      await vm.runAsync('bootstrapSources')
+      assert.deepEqual([vm.loadErrors.bootstrapSources, vm.bootstrapState.loading, vm.bootstrapState.failed, vm.bootstrapRetryable], [null, false, '', true])
+      assert.deepEqual([vm.bootstrapSources.types.length, vm.bootstrapSources.colonies.length], [0, 0])
+      down = false
+      vm.retryBootstrapSources()
+      await Promise.all(reads)
+      assert.equal(reads.length, 1)
+      assert.deepEqual(vm.bootstrapSources.problems, [])
+      assert.deepEqual([vm.bootstrapSources.types.length, vm.bootstrapSources.colonies.length, vm.bootstrapSources.freighters.length, vm.bootstrapRetryable], [3, 2, 1, false])
+    } finally {
+      db.close()
+    }
+
+    const lacking = mount({ bootstrapSources: sources({ problems: [{ source: 'freight', text: 'the save lacks the cargo capacity of ship class' }] }) })
+    const updates = []
+
+    lacking.$asyncComputed = { bootstrapSources: { update: () => updates.push('bootstrapSources') }, bootstrapVersion: { update: () => updates.push('bootstrapVersion') } }
+    lacking.retryBootstrapSources()
+    assert.deepEqual([lacking.bootstrapRetryable, updates], [false, []])
+
+    return true
+  })
+  add('page: the panel\'s reads are of no colony in particular, so a later pick reads nothing again: they never ask which colony is picked, and a second pick leaves them started', async () => {
+    const asked = new Set()
+    const vm = instantiate(pageOptions, { ...store, database: stubDatabase(), GameID: 1, RaceID: 1 })
+    const watched = new Proxy(vm, { get: (target, key) => { asked.add(key); return target[key] } })
+
+    pickColony(pageOptions, vm, 1)
+    await pageOptions.asyncComputed.bootstrapSources.get.call(watched)
+    await pageOptions.asyncComputed.bootstrapVersion.get.call(watched)
+    assert.ok(!asked.has('bootstrapColonyId'), [...asked].join())
+    pickColony(pageOptions, vm, 2)
+    pickColony(pageOptions, vm, null)
+    assert.equal(vm.bootstrapPicked, true)
 
     return true
   })
@@ -1676,7 +1760,17 @@ const pageStatements = (ctx) => {
   })
   add('template: the panel is not part of a persisted view: its selections are plain data', () => {
     assert.ok(!/key: 'colonyOutlookBootstrap/.test(pageText))
-    assert.deepEqual([pageOptions.data().bootstrapColonyId, pageOptions.data().bootstrapQuantity], [null, '10'])
+    assert.deepEqual([pageOptions.data().bootstrapColonyId, pageOptions.data().bootstrapQuantity, pageOptions.data().bootstrapPicked], [null, '10', false])
+
+    return true
+  })
+  add('template: in place of what it compares the panel shows its own load state while its reads are in flight or failed, with its own Retry, and the line naming the sources not read offers that Retry when one failed to read', () => {
+    const [, tag = '', rest = ''] = panel.match(/<div v-if="bootstrapState\.loading \|\| bootstrapState\.failed"[^>]*>\s*(<load-state [^>]*\/>)\s*<\/div>\s*<template v-else>([\s\S]*?)<\/template>\s*<div class="panel-foot/) || []
+    const problemsLine = (rest.match(/<div v-if="bootstrapSources\.problems\.length"[^>]*data-bootstrap-problems>[\s\S]*?<\/div>/) || [''])[0]
+
+    ;[':failed="bootstrapState.failed"', ':error="bootstrapState.error"', ':loading="bootstrapState.loading"', '@retry="retryBootstrapSources"'].forEach((text) => assert.ok(tag.includes(text), `${text} in ${tag}`))
+    ;['data-bootstrap-problems', 'Pick the colony', 'v-for="route in bootstrapRoutes"'].forEach((text) => assert.ok(rest.includes(text), text))
+    ;['v-if="bootstrapRetryable"', 'data-bootstrap-retry', '@click="retryBootstrapSources"'].forEach((text) => assert.ok(problemsLine.includes(text), `${text} in ${problemsLine}`))
 
     return true
   })
@@ -1879,7 +1973,7 @@ const saveStatements = async (ctx, save) => {
     return vm
   }
   const withTarget = async (vm, id, quantity = '10') => {
-    vm.bootstrapColonyId = id
+    pickColony(pageOptions, vm, id)
     vm.bootstrapQuantity = quantity
     await vm.runAsync('bootstrapSources')
     await vm.runAsync('bootstrapVersion')
@@ -2193,8 +2287,21 @@ const MUTATIONS = [
   { name: 'the troop lift taken as the largest class', file: D, find: 'classes.reduce((total, item) => total + item.TroopCapacity * item.Ships, 0)', replace: 'classes.reduce((total, item) => Math.max(total, item.TroopCapacity), 0)', fails: ['loaders'] },
   { name: 'a race with no shuttle technology given one', file: D, find: 'row && row.CargoShuttleLoadModifier > 0 ? row.CargoShuttleLoadModifier : null', replace: 'row ? row.CargoShuttleLoadModifier : null', fails: ['loaders'] },
   { name: 'a ground read of a save without a troop column given a lift', file: D, find: 'if (!shipClass.has(\'TroopCapacity\')) {', replace: 'if (false) {', fails: ['loaders'] },
-  { name: 'every read made before a colony is picked', file: P, find: 'if (!this.bootstrapColonyId || !this.database || !this.GameID || !this.RaceID) {\n          return NO_BOOTSTRAP_SOURCES', replace: 'if (!this.database || !this.GameID || !this.RaceID) {\n          return NO_BOOTSTRAP_SOURCES', fails: ['page'] },
-  { name: 'the formula version read before a colony is picked', file: P, find: 'if (!this.bootstrapColonyId || !this.database) {\n          return null', replace: 'if (!this.database) {\n          return null', fails: ['page'] },
+  { name: 'every read made before a colony is picked', file: P, find: 'if (!this.bootstrapPicked || !this.database || !this.GameID || !this.RaceID) {\n          return NO_BOOTSTRAP_SOURCES', replace: 'if (!this.database || !this.GameID || !this.RaceID) {\n          return NO_BOOTSTRAP_SOURCES', fails: ['page'] },
+  { name: 'the formula version read before a colony is picked', file: P, find: 'if (!this.bootstrapPicked || !this.database) {\n          return null', replace: 'if (!this.database) {\n          return null', fails: ['page'] },
+  { name: 'the reads made again for every colony picked', file: P, find: 'if (!this.bootstrapPicked || !this.database || !this.GameID || !this.RaceID) {', replace: 'if (!this.bootstrapColonyId || !this.database || !this.GameID || !this.RaceID) {', fails: ['page'] },
+  { name: 'the formula version read again for every colony picked', file: P, find: 'if (!this.bootstrapPicked || !this.database) {', replace: 'if (!this.bootstrapColonyId || !this.database) {', fails: ['page'] },
+  { name: 'a pick that starts no read', file: P, find: '      if (id) {\n        this.bootstrapPicked = true\n      }', replace: '      if (id) {\n        this.bootstrapPicked = false\n      }', fails: ['page'] },
+  { name: 'the page waiting on the panel\'s reads as on its own', file: P, find: 'const OPTIONAL_INPUTS = [...COLONIST_INPUTS, ...BOOTSTRAP_INPUTS]', replace: 'const OPTIONAL_INPUTS = [...COLONIST_INPUTS]', fails: ['page'] },
+  { name: 'the panel\'s reads in flight not shown as loading', file: P, find: 'loading: failed.length === 0 && !allLoaded(this.loadErrors, keys)', replace: 'loading: false', fails: ['page'] },
+  { name: 'the panel\'s Retry reading again every optional read', file: P, find: 'BOOTSTRAP_INPUTS.filter((key) =>', replace: 'OPTIONAL_INPUTS.filter((key) =>', fails: ['page'] },
+  { name: 'the panel\'s Retry leaving the sources with a source that failed to read as they are', file: P, find: ' || (key === \'bootstrapSources\' && this.bootstrapRetryable)', replace: '', fails: ['page'] },
+  { name: 'a column the save lacks offered for a retry', file: P, find: 'return this.bootstrapSources.problems.some((problem) => problem.retry)', replace: 'return this.bootstrapSources.problems.length > 0', fails: ['page'] },
+  { name: 'a source that failed to read not offered for a retry', file: D, find: 'problems.push({ source, retry: true, text:', replace: 'problems.push({ source, text:', fails: ['loaders', 'page'] },
+  { name: 'the line of the sources not read without its Retry', file: P, find: '<v-btn v-if="bootstrapRetryable" x-small text color="primary" class="ml-2" data-bootstrap-retry @click="retryBootstrapSources">Retry</v-btn>', replace: '', fails: ['template'] },
+  { name: 'the panel\'s progress not shown', file: P, find: ':error="bootstrapState.error" :loading="bootstrapState.loading"', replace: ':error="bootstrapState.error"', fails: ['template'] },
+  { name: 'the routes shown from reads in flight', file: P, find: '          <template v-else>\n            <div v-if="bootstrapSources.problems.length"', replace: '          <template>\n            <div v-if="bootstrapSources.problems.length"', fails: ['template'] },
+  { name: 'the panel without its own Retry', file: P, find: ' @retry="retryBootstrapSources" />', replace: ' />', fails: ['template'] },
   { name: 'the full capacity not given', file: P, find: 'const full = fullStaffModifiers(mapped || modifiers, target.Efficiency)', replace: 'const full = null', fails: ['page'] },
   { name: 'the builders\' own projects ignored', file: P, find: 'rate: idleConstruction(this.mappedConstruction(row), this.bootstrapUsage[`${row.PopulationID}-construction`])', replace: 'rate: this.mappedConstruction(row)', fails: ['page'] },
   { name: 'the colony\'s workers not passed', file: P, find: 'const workers = { now: target.workersNow, later: target.workersLater, cost: valueOrNull(target.r.cost) }', replace: 'const workers = { now: null, later: null, cost: valueOrNull(target.r.cost) }', fails: ['page'] },
@@ -2340,7 +2447,7 @@ const contextOf = async (sources, page = true, mutant = null) => {
   if (page) {
     const pageSources = { 'pages/colony-outlook': sources[P], ...Object.fromEntries(Object.entries(utilitySources).map(([name, text]) => [`utilities/${name}`, text])) }
 
-    ctx.pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+    ctx.pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
   }
 
   return ctx

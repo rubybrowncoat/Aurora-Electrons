@@ -164,14 +164,14 @@ export const NO_BOOTSTRAP_SOURCES = Object.freeze({ types: [], colonies: [], pro
 // The reads a route rests on, by source: what a failed read of the source leaves unknown.
 const SOURCE_NAMES = { types: 'the mine types', colonies: 'the colonies\' places and stock', projects: 'the running projects', freight: 'the freighter and troop ship classes', ground: 'the ground formations', jumps: 'the charted jump points', handling: 'the cargo shuttle technology' }
 
-// Everything the comparison reads, in one pass: { types, colonies, projects, freighters, troops, ground, jumpPoints, shuttleTechnology, problems }. `blocked` is the set of commander bonus IDs the save's lookup does not confirm. Each source is read on its own: a read that fails (a save of another shape) leaves its own part empty and is named in `problems` ([{ source, text }]) while the other sources stay, so a route that does not rest on it still stands.
+// Everything the comparison reads, in one pass: { types, colonies, projects, freighters, troops, ground, jumpPoints, shuttleTechnology, problems }. `blocked` is the set of commander bonus IDs the save's lookup does not confirm. Each source is read on its own: a read that fails (a save of another shape, a read that timed out) leaves its own part empty and is named in `problems` ([{ source, retry, text }]) while the other sources stay, so a route that does not rest on it still stands. `retry` marks a read that failed, which a later read may make, as against a column the save lacks.
 export const loadBootstrapSources = async (database, { GameID, RaceID, blocked = new Set() }) => {
   const problems = []
   const attempt = async (source, read, fallback) => {
     try {
       return await read()
     } catch (error) {
-      problems.push({ source, text: `${SOURCE_NAMES[source]} could not be read (${failureWords(error)})` })
+      problems.push({ source, retry: true, text: `${SOURCE_NAMES[source]} could not be read (${failureWords(error)})` })
 
       return fallback
     }
