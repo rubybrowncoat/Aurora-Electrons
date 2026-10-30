@@ -88,6 +88,7 @@
                           </template>
                           <template v-else>
                             <span :class="cellTone(row, column)" :data-cell="column.key">{{ cellText(row, column) }}</span><provenance-mark v-if="cellResult(row, column)" :result="cellResult(row, column)" />
+                            <div v-if="cellSub(row, column)" class="caption text--secondary" :data-cell-sub="column.key">{{ cellSub(row, column) }}</div>
                           </template>
                         </td>
                         <td class="row-actions">
@@ -1092,6 +1093,13 @@ export default {
       const cell = row.cells[column.key]
 
       return cell !== null && typeof cell === 'object' && cell.result ? cell.result : null
+    },
+
+    // The smaller line under a cell's figure, when the cell has one.
+    cellSub(row, column) {
+      const cell = row.cells[column.key]
+
+      return cell !== null && typeof cell === 'object' && cell.sub ? String(cell.sub) : ''
     },
   },
   asyncComputed: {

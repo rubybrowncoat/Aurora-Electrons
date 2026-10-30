@@ -25,13 +25,19 @@ const SHIP_LINE = '(FCT_Ship.ShippingLineID = 0)'
 
 const LINE_INPUTS = { ShippingLineID: 'whether the ship belongs to a shipping line' }
 
-// Two figures in one cell, `left` and `right` joined by `join`, each with its unit and the pair closed by `close`: a dash for one that is not known, with the unavailable result naming it.
-const pairCell = (ctx, { left, right, join, leftName, rightName, leftDecimals = 0, rightDecimals = 0, leftUnit = '', rightUnit = '', close = '' }) => {
+// Two figures in one cell, `left` and `right` joined by `join`, each with its unit: a dash for one that is not known, with the unavailable result naming it. With `stack` the right figure is the cell's `sub` instead, a smaller line under the left one, and `join` is unused.
+const pairCell = (ctx, { left, right, join, stack = false, leftName, rightName, leftDecimals = 0, rightDecimals = 0, leftUnit = '', rightUnit = '' }) => {
   const part = (value, decimals, unit) => (isKnownNumber(value) ? `${ctx.count(value, decimals)}${unit}` : ctx.count(value, decimals))
-  const text = `${part(left, leftDecimals, leftUnit)}${join}${part(right, rightDecimals, rightUnit)}${close}`
   const names = [...(isKnownNumber(left) ? [] : [leftName]), ...(isKnownNumber(right) ? [] : [rightName])]
+  const unknown = names.length ? { result: ctx.unknown(names) } : {}
 
-  return names.length ? { text, result: ctx.unknown(names) } : text
+  if (stack) {
+    return { text: part(left, leftDecimals, leftUnit), sub: part(right, rightDecimals, rightUnit), ...unknown }
+  }
+
+  const text = `${part(left, leftDecimals, leftUnit)}${join}${part(right, rightDecimals, rightUnit)}`
+
+  return names.length ? { text, ...unknown } : text
 }
 
 // The colonies where a fleet can take on replacement crew: the race's own with more than a million people, the fleet's own system first and then the largest. Up to three are named.
@@ -598,7 +604,7 @@ export const checks = checksOf([
           id: `class:${shipClass.ShipClassID}`,
           cells: {
             class: classText(shipClass),
-            quarters: pairCell(ctx, { left: isKnownNumber(shipClass.ClassEfficiency) ? shipClass.ClassEfficiency * 100 : null, right: isKnownNumber(shipClass.RaceEfficiency) ? shipClass.RaceEfficiency * 100 : null, join: ' (', leftUnit: '%', rightUnit: '% possible', close: ')', leftName: CLASS_EFFICIENCY, rightName: RACE_EFFICIENCY }),
+            quarters: pairCell(ctx, { left: isKnownNumber(shipClass.ClassEfficiency) ? shipClass.ClassEfficiency * 100 : null, right: isKnownNumber(shipClass.RaceEfficiency) ? shipClass.RaceEfficiency * 100 : null, stack: true, leftUnit: '%', rightUnit: '% possible', leftName: CLASS_EFFICIENCY, rightName: RACE_EFFICIENCY }),
             ships: ctx.count(shipClass.Ships),
           },
           caption: shipClass.Locked ? 'Locked' : undefined,

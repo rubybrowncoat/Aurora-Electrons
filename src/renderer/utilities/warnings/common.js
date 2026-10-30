@@ -166,7 +166,7 @@ export const normalizeRows = (rows, check) => {
   return rows.map((row) => {
     const times = seen.get(row.id) || 0
     const cells = Object.fromEntries(check.columns.map((column) => [column.key, isMissing(row.cells[column.key]) ? { text: UNKNOWN_TEXT, result: unavailable({ rule: check.provenance, missing: [`the stored value behind the ${column.text} column`], units: 'rows' }) } : row.cells[column.key]]))
-    const texts = Object.values(cells).map((cell) => (cell !== null && typeof cell === 'object' ? cell.text : cell))
+    const texts = Object.values(cells).flatMap((cell) => (cell !== null && typeof cell === 'object' ? [cell.text, cell.sub] : [cell]))
 
     seen.set(row.id, times + 1)
 

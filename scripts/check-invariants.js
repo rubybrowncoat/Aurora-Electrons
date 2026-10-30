@@ -2012,6 +2012,24 @@ const defineCases = (modules) => {
     assert.equal(rows[1].cells.size.result.status, 'unavailable')
   })
 
+  invariant('warnings', 'the outdated crew quarters check shows the efficiency the race could design with as a smaller line under the class\'s own, names a figure that is not stored, and the search reads both lines', async () => {
+    const shipClass = (extra) => ({ ShipClassID: 1, ClassName: 'Wolf', Obsolete: 0, ClassShippingLineID: 0, OtherRaceClassID: 0, Crew: 100, ClassEfficiency: 0.3, RaceEfficiency: 0.1, Locked: 0, Verdict: 1, Ships: 4, ...extra })
+    const rows = await readCheck('outdated-crew-quarters', [shipClass(), shipClass({ ShipClassID: 2, ClassName: 'Mule', RaceEfficiency: null })])
+    const [stored, unstored] = rows
+
+    assert.deepEqual(rows.map((row) => row.id), ['class:1', 'class:2'])
+    assert.equal(stored.cells.quarters.text, '30%')
+    assert.equal(stored.cells.quarters.sub, '10% possible')
+    assert.equal(stored.cells.quarters.result, undefined)
+    assert.equal(unstored.cells.quarters.text, '30%')
+    assert.equal(unstored.cells.quarters.sub, '—')
+    assert.equal(unstored.cells.quarters.result.status, 'unavailable')
+
+    const [searchable] = warningsCommon.normalizeRows(rows, warnings.checkByKey['outdated-crew-quarters'])
+
+    assert.ok(searchable.text.includes('30%') && searchable.text.includes('10% possible'))
+  })
+
   invariant('warnings', 'an ancient construct with no known colony of 10 million is not evaluated while a population or its state is missing, and one that is known to be dormant or short of people warns', async () => {
     const construct = (AncientConstructID, Active, PopulationID, Population) => ({ AncientConstructID, Active, ResearchBonus: 1.25, FieldName: 'Sensors', SystemBodyID: AncientConstructID, PlanetNumber: 1, OrbitNumber: 0, BodyClass: 1, SystemBodyName: `Body ${AncientConstructID}`, Component: 1, SystemName: 'Sol', PopulationID, Population })
     const rows = await readCheck('known-unexploited-constructs', (sql) => (sql.includes('FCT_AncientConstruct') ? [construct(1, 1, 11, null), construct(2, null, 12, 25), construct(3, 0, null, null), construct(4, 1, 13, 25), construct(5, 1, 14, 5)] : []))
