@@ -1,7 +1,7 @@
 /*
   Checks how the Hauling page groups the fleets that run the same repeating route, and how it covers and audits them (src/renderer/utilities/route-signatures.js, route-queues.js, route-audit.js, route-desires.js, the components of components/hauling and the page itself), against queues and databases worked out by hand here.
 
-  Run: CHECK_JOBS=1 bun scripts/check-route-signatures.js [--no-mutations] [--detail] [--variants=<key>[,<key>...]] [--only=<text>|<text>] [--resume]
+  Run: CHECK_JOBS=1 bun scripts/check-route-signatures.js [--no-mutations] [--solo] [--detail] [--variants=<key>[,<key>...]] [--only=<text>|<text>] [--resume]
 
   The statements cover the acceptance of AE-090-02:
   - a saved queue is the live queue, so one cycle is saved at every rotation (and a queue holding a block twice is the block): every rotation and every repeat of one cycle gives one route, whose fleets are listed once;
@@ -16,6 +16,8 @@
 
   Every planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names by a wrong value of its own, never because a call threw (scripts/lib/fault-credit.js); each benign rewrite (a v-on longhand, an explicit prop and event in place of v-model, a qualifier moved from the front of a label to the back, an element of another kind, parts of a line in another order, a parenthesised condition and the like) must leave every check green. Prints `N of N checks passed`; a failed check, a fault that no named check catches and a rewrite that changes a verdict each set exit code 1. The suite runs through scripts/lib/suite-runner.js: the head of the pure parts, the head of the panel of the routes and the head of the desired routes (`page`, `page-desires`), and each fault and rewrite in a worker, the page ones on a page server and a browser started once for them (Playwright's Chromium).
 
+  The faults of the page whose checks differ are planted together: a fault names a `group`, the faults of a group sit in different bindings of one screen (each fails checks no other member of its group fails, as `declaredGroup` and `judgedGroup` hold), the page is opened once over all of them, and each member is credited by its own checks. The rewrites of the page are grouped by the flow they are read through, one variant each, and must leave every check green together. `--solo` runs each member of a group on its own (the group's key and the member's index), which is how a collateral failure or an uncredited member is attributed. The faults in the calculation of the page's sources are not browser faults: they run in-process (the mutants above). A fault that makes many checks fail, one that keeps the rows from being drawn at all and the one of the refresh flow stay variants of their own.
+
   No statement matches source text or prose: an expected value is a fixture's own, a SQL answer or a figure of the page above the panel.
 */
 const fs = require('fs')
@@ -24,9 +26,9 @@ const path = require('path')
 const { Database } = require('bun:sqlite')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
-const { patched } = require('./lib/mutant-source')
-const { runSuite } = require('./lib/suite-runner')
-const { assert, runChecks, caughtBy, subjectModule, harnessStore, boundary } = require('./lib/fault-credit')
+const { patched, patchedGroup, plantedPatch, plantedGroup } = require('./lib/mutant-source')
+const { runSuite, declaredGroup } = require('./lib/suite-runner')
+const { assert, runChecks, caughtBy, judgedGroup, subjectModule, harnessStore, boundary } = require('./lib/fault-credit')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
@@ -1218,6 +1220,10 @@ const MUTATIONS = [
   { name: 'the match of a template is the match of the last of them', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.some((record) => record.route.pacingKey === matched[matched.length - 1].pacingKey)', fails: ['names'] },
   { name: 'the match of a template needs every fleet at its pacing', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.every((record) => record.route.pacingKey === matched[0].pacingKey)', fails: ['names'] },
   { name: 'the History page\'s backup leaves the adapters, the desired routes among them, unregistered', file: H, find: '        adapters.registerScenarioAdapters(records.registerAdapter)\n', to: '', fails: ['backup'] },
+  { name: 'the groups list every fleet apart', file: S, find: 'const group = byId.get(record.route.id) ||', to: 'const group = byId.get(`${record.route.id}${record.FleetID}`) ||', fails: ['groups'] },
+  { name: 'the capacity of a group counts its fleets twice', file: S, find: 'minerals: total.minerals + member.year.minerals, installations: total.installations + member.year.installations,', to: 'minerals: total.minerals + 2 * member.year.minerals, installations: total.installations + 2 * member.year.installations,', fails: ['groups'] },
+  { name: 'a closed queue is a fleet of a route when it holds more than three orders', file: S, find: "const shape = cycling ? (!queue.length ? 'empty' : problem ? 'untraceable' : 'route') :", to: "const shape = (cycling || queue.length > 3) ? (!queue.length ? 'empty' : problem ? 'untraceable' : 'route') :", fails: ['shapes'] },
+  { name: 'the duplicate flag is told of every group', file: S, find: "...(group.duplicate ? [{ key: 'duplicate'", to: "...(true ? [{ key: 'duplicate'", fails: ['flags'] },
 ]
 
 // Rewrites that say the same thing: each must leave every statement green. `family` names the kind of rewrite.
@@ -1245,16 +1251,18 @@ const read = (file) => fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
 
 const sourcesOf = () => Object.fromEntries(Object.entries(FILES).map(([key, file]) => [key, read(file)]))
 
-// The text to find and its replacement for a fault or a rewrite: the literal `find`, once.
-const applied = (sources, edit) => {
+// The text to find and its replacement for a fault or a rewrite: the literal `find`, once. A fault is planted by `planted`, which a run without mutations refuses.
+const edited = (make) => (sources, edit) => {
   const count = sources[edit.file].split(edit.find).length - 1
 
   if (count !== 1) {
     throw new Error(`The anchor of "${edit.name}" matches ${count} times, not once`)
   }
 
-  return { ...sources, [edit.file]: patched(path.basename(FILES[edit.file]), sources[edit.file], edit.find, edit.to) }
+  return { ...sources, [edit.file]: make(path.basename(FILES[edit.file]), sources[edit.file], edit.find, edit.to) }
 }
+const applied = edited(patched)
+const planted = edited(plantedPatch)
 
 // The History page is loaded once for each text of it and of the utilities it reaches, so the faults that change neither reuse the copy of the head.
 const historyPages = new Map()
@@ -1411,13 +1419,19 @@ const TREE = { groups: '[data-route-groups]', table: '[data-route-table]' }
 
 const pageLoading = require('./page-loading')
 
-// Waits, each frame, until a condition of the page holds that the operation the check started makes true, and says whether it did within the bound: the verdict is the check's, a fault that keeps it from holding is judged by the values read afterwards, never by this wait timing out.
-const EFFECT_WAIT = 10000
+// Waits, each frame, until a condition of the page holds that the operation the check started makes true, and says whether it did within the bound: the verdict is the check's, a fault that keeps it from holding is judged by the values read afterwards, never by this wait timing out. Once one such wait has ended unfinished (`effectBound`), the flow reads what the page draws under the shorter DEGRADED_WAIT: a page that did not finish one operation is read as it stands, and a flow that waited the whole bound for each of its five stages took a minute for one fault.
+const EFFECT_WAIT = 4000
+const DEGRADED_WAIT = 1500
+const effectBound = { ms: EFFECT_WAIT }
 
 const effectDone = (page, step, what, expression) => {
   step(`waiting for ${what}`)
 
-  return page.waitForFunction(expression, null, { timeout: EFFECT_WAIT, polling: 'raf' }).then(() => true, () => false)
+  return page.waitForFunction(expression, null, { timeout: effectBound.ms, polling: 'raf' }).then(() => true, () => {
+    effectBound.ms = DEGRADED_WAIT
+
+    return false
+  })
 }
 
 // Waits until the reads of the page are done (none of its asynchronous reads is updating and no progress bar works: scripts/page-loading.js), which is the completion of what its arrival started.
@@ -1983,7 +1997,11 @@ const keep = async (page, step, what) => {
   step(`keeping ${what}`)
   await page.locator('[data-desire-save]').click({ timeout: FORM_WAIT })
 
-  const closed = await page.waitForFunction(() => !document.querySelector('[data-desire-form]'), null, { timeout: EFFECT_WAIT, polling: 'raf' }).then(() => true, () => false)
+  const closed = await page.waitForFunction(() => !document.querySelector('[data-desire-form]'), null, { timeout: effectBound.ms, polling: 'raf' }).then(() => true, () => {
+    effectBound.ms = DEGRADED_WAIT
+
+    return false
+  })
   const written = await effectDone(page, step, `${what} to be kept`, keptExpression({ named: what, drawn: false }))
 
   return closed && written
@@ -2008,6 +2026,7 @@ const openDesires = async (browser, url, world, labels, refresh = false) => {
   const { observe } = require('./lib/browser-observe')
 
   return observe(browser, async ({ page, step }) => {
+    effectBound.ms = EFFECT_WAIT
     // The reads of the stored orders wait here while `holding.on` is set, until the check lets them go; only the refresh flow intercepts the database calls.
     const holding = { on: false, routes: [], arrived: null, resolve: null }
     await arrive(page, step, url)
@@ -2171,8 +2190,10 @@ const withoutKeys = (record) => ({ name: record.name, cargo: record.cargo, yearl
 
 const byName = (list) => [...list].sort((a, b) => a.name.localeCompare(b.name))
 
-// One row of the panel against the coverage and the record it is owed, field by field, every figure read whole and signed.
-const assertRow = ({ row, want, world, table, labels, grouping, unavailable = false }) => {
+const ROW_PARTS = ['name', 'colonies', 'cargo', 'coverage', 'delivered', 'delivered-unit', 'demand', 'demand-unit', 'demand-none', 'demand-set', 'gap', 'gap-unit']
+
+// One row of the panel against the coverage and the record it is owed, field by field (or the one `part` of it), every figure read whole and signed.
+const assertRow = ({ row, want, world, table, labels, grouping, unavailable = false, part = null }) => {
   const { readFigure } = require('./lib/browser-observe')
   const expected = unavailable ? { state: 'unknown', capacity: null, gap: null, error: 0 } : oracleOf(want, world, table)
   const unit = labels.CARGO_UNITS[want.cargo]
@@ -2188,45 +2209,77 @@ const assertRow = ({ row, want, world, table, labels, grouping, unavailable = fa
 
     return value
   }
+  const parts = {
+    name: () => {
+      assert.equal(once(row.name, 'the name'), want.name, `the name drawn for "${want.name}"`)
+      assert.deepEqual(row.note, [], `no note is drawn for "${want.name}"`)
+    },
+    colonies: () => {
+      assert.equal(once(row.from, 'the first colony'), world.colonyText[world.colonies[want.route].from], `the first colony of "${want.name}"`)
+      assert.equal(once(row.to, 'the second colony'), world.colonyText[world.colonies[want.route].to], `the second colony of "${want.name}"`)
+    },
+    cargo: () => assert.equal(once(row.cargo, 'the cargo'), labels.CARGO_KINDS[want.cargo], `the cargo of "${want.name}"`),
+    coverage: () => {
+      const state = keyOfText(labels.COVERAGE, once(row.state, 'the coverage'), `the coverage drawn for "${want.name}"`)
 
-  assert.equal(once(row.name, 'the name'), want.name, `the name drawn for "${want.name}"`)
-  assert.equal(once(row.from, 'the first colony'), world.colonyText[world.colonies[want.route].from], `the first colony of "${want.name}"`)
-  assert.equal(once(row.to, 'the second colony'), world.colonyText[world.colonies[want.route].to], `the second colony of "${want.name}"`)
-  assert.equal(once(row.cargo, 'the cargo'), labels.CARGO_KINDS[want.cargo], `the cargo of "${want.name}"`)
-  assert.deepEqual(row.note, [], `no note is drawn for "${want.name}"`)
+      assert.equal(state, expected.state, `the coverage of "${want.name}": the fleets of the table above give ${expected.state}`)
+      assert.equal(once(row.stateKey, 'the coverage key'), expected.state, `the coverage identity of "${want.name}"`)
+    },
+    delivered: () => {
+      if (expected.capacity === null) {
+        assert.deepEqual([row.delivered, row.deliveredUnit], [[], []], `no delivered freight and no unit of it is drawn for "${want.name}"`)
+        assert.ok(once(row.capacity, 'the capacity').startsWith('—'), `the capacity of "${want.name}" is the dash: ${row.capacity[0]}`)
+      } else {
+        const delivered = figureOf(once(row.delivered, 'the delivered freight'), 'the delivered freight')
 
-  const state = keyOfText(labels.COVERAGE, once(row.state, 'the coverage'), `the coverage drawn for "${want.name}"`)
+        assert.ok(Math.abs(delivered - expected.capacity.tonnes) <= expected.error + 1, `the freight delivered for "${want.name}" is ${delivered}, the fleets of the table above move ${expected.capacity.tonnes} (within ${expected.error})`)
+      }
+    },
+    'delivered-unit': () => {
+      if (expected.capacity !== null) {
+        assert.equal(once(row.deliveredUnit, 'the unit of the delivered freight'), unit, `the freight delivered for "${want.name}" is told in the unit of its cargo`)
+      }
+    },
+    demand: () => {
+      if (want.yearly === null) {
+        assert.deepEqual([row.demand, row.demandUnit], [[], []], `no demand figure and no unit of one is drawn for "${want.name}": it is kept without one`)
+      } else {
+        assert.equal(figureOf(once(row.demand, 'the demand'), 'the demand'), want.yearly, `the demand drawn for "${want.name}"`)
+      }
+    },
+    'demand-unit': () => {
+      if (want.yearly !== null) {
+        assert.equal(once(row.demandUnit, 'the unit of the demand'), unit, `the demand of "${want.name}" is told in the unit of its cargo`)
+      }
+    },
+    'demand-none': () => {
+      if (want.yearly === null) {
+        assert.equal(once(row.demandNone, 'the line that says no demand is set'), labels.DESIRE_DEMAND_NONE, `the record kept without demand says so: "${want.name}"`)
+      }
+    },
+    'demand-set': () => {
+      if (want.yearly !== null) {
+        assert.deepEqual(row.demandNone, [], `no line that says no demand is set is drawn beside the demand of "${want.name}"`)
+      }
+    },
+    gap: () => {
+      if (expected.gap === null) {
+        assert.deepEqual([row.gap, row.gapUnit], [[], []], `no shortfall and no unit of one is drawn for "${want.name}": a fleet that may deliver it is not known to`)
+      } else {
+        const gap = figureOf(once(row.gap, 'the shortfall'), 'the shortfall')
 
-  assert.equal(state, expected.state, `the coverage of "${want.name}": the fleets of the table above give ${expected.state}`)
-  assert.equal(once(row.stateKey, 'the coverage key'), expected.state, `the coverage identity of "${want.name}"`)
-
-  if (expected.capacity === null) {
-    assert.deepEqual([row.delivered, row.deliveredUnit], [[], []], `no delivered freight is drawn for "${want.name}", nor its unit`)
-    assert.ok(once(row.capacity, 'the capacity').startsWith('—'), `the capacity of "${want.name}" is the dash: ${row.capacity[0]}`)
-  } else {
-    const delivered = figureOf(once(row.delivered, 'the delivered freight'), 'the delivered freight')
-
-    assert.ok(Math.abs(delivered - expected.capacity.tonnes) <= expected.error + 1, `the freight delivered for "${want.name}" is ${delivered}, the fleets of the table above move ${expected.capacity.tonnes} (within ${expected.error})`)
-    assert.equal(once(row.deliveredUnit, 'the unit of the delivered freight'), unit, `the freight delivered for "${want.name}" is told in the unit of its cargo`)
+        assert.ok(Math.abs(gap - expected.gap) <= expected.error + 1, `the shortfall drawn for "${want.name}" is ${gap}, the demand less the freight of the table above is ${expected.gap} (within ${expected.error})`)
+      }
+    },
+    'gap-unit': () => {
+      if (expected.gap !== null) {
+        assert.equal(once(row.gapUnit, 'the unit of the shortfall'), unit, `the shortfall of "${want.name}" is told in the unit of its cargo`)
+      }
+    },
   }
 
-  if (want.yearly === null) {
-    assert.deepEqual([row.demand, row.demandUnit], [[], []], `no demand figure is drawn for "${want.name}", nor its unit: it is kept without one`)
-    assert.equal(once(row.demandNone, 'the line that says no demand is set'), labels.DESIRE_DEMAND_NONE, `the record kept without demand says so: "${want.name}"`)
-  } else {
-    assert.equal(figureOf(once(row.demand, 'the demand'), 'the demand'), want.yearly, `the demand drawn for "${want.name}"`)
-    assert.equal(once(row.demandUnit, 'the unit of the demand'), unit, `the demand of "${want.name}" is told in the unit of its cargo`)
-    assert.deepEqual(row.demandNone, [], `no line that says no demand is set is drawn beside the demand of "${want.name}"`)
-  }
-
-  if (expected.gap === null) {
-    assert.deepEqual([row.gap, row.gapUnit], [[], []], `no shortfall is drawn for "${want.name}", nor its unit: a fleet that may deliver it is not known to`)
-  } else {
-    const gap = figureOf(once(row.gap, 'the shortfall'), 'the shortfall')
-
-    assert.ok(Math.abs(gap - expected.gap) <= expected.error + 1, `the shortfall drawn for "${want.name}" is ${gap}, the demand less the freight of the table above is ${expected.gap} (within ${expected.error})`)
-    assert.equal(once(row.gapUnit, 'the unit of the shortfall'), unit, `the shortfall of "${want.name}" is told in the unit of its cargo`)
-  }
+  assert.ok(row, `the route "${want.name}" is drawn`)
+  ;(part ? [part] : ROW_PARTS).forEach((id) => parts[id]())
 }
 
 const countOf = (stage, what) => {
@@ -2237,12 +2290,17 @@ const countOf = (stage, what) => {
 
 const asEdited = (want) => (want.name === WANTED[0].name ? { ...want, ...EDITED } : want)
 
-const rowsAreRight = (stage, seen, world, labels, list, what) => {
+// The panel once an operation is done, ready with no form open, without a message and drawing the routes it is owed in the order of their names: the rows themselves are judged binding by binding.
+const stageIsRight = (stage, list, what) => {
   assert.equal(stage.completed, true, `the panel draws exactly the routes that are kept once the operation is done (${what})`)
   assert.deepEqual([stage.waiting, stage.errors, stage.newButton, stage.form], [0, 0, 1, 0], `the panel is ready with no form open (${what})`)
   assert.deepEqual(stage.messages, [], `no message is drawn (${what})`)
-  assert.equal(countOf(stage, what), list.length, `the number of routes counted (${what})`)
   assert.deepEqual(stage.rows.map((row) => row.name[0]), byName(list).map((want) => want.name), `the routes drawn, in the order of their names (${what})`)
+}
+
+const rowsAreRight = (stage, seen, world, labels, list, what) => {
+  stageIsRight(stage, list, what)
+  assert.equal(countOf(stage, what), list.length, `the number of routes counted (${what})`)
   list.forEach((want) => assertRow({ row: rowsOf(stage, want.name)[0], want, world, table: seen.table, labels, grouping: seen.grouping }))
 }
 
@@ -2251,12 +2309,11 @@ addDesire('desire-panel', 'the panel of the desired routes is ready for a save w
 
   assert.deepEqual([stage.waiting, stage.errors, stage.newButton, stage.form], [0, 0, 1, 0], 'the panel is ready with no form open')
   assert.deepEqual(stage.rows, [], 'no route is drawn')
-  assert.equal(countOf(stage, 'none kept'), 0, 'the number of routes counted')
   assert.ok(typeof stage.countText === 'string' && !stage.countText.includes('\n') && !/\d[^\W\d_]|[^\W\d_]\d/.test(stage.countText), `the number of routes is set apart from its word, on one line: ${JSON.stringify(stage.countText)}`)
   assert.deepEqual([stage.stored.records, stage.stored.tombstones], [[], []], 'nothing is kept')
 })
 
-addDesire('desire-created', 'each desired route made in the form closes it, is drawn with its colonies, cargo, coverage and capacity worked from the fleets of the table above, and is kept as the record the form made', ({ seen, world, labels }) => {
+addDesire('desire-created', 'each desired route made in the form closes it, is drawn once with its colonies, cargo, coverage and capacity worked from the fleets of the table above, and is kept as a record of its identity', ({ seen, world }) => {
   const stage = seen.stages.created
 
   assert.ok(stage, `the routes were made in the form: ${seen.aborted}`)
@@ -2265,13 +2322,12 @@ addDesire('desire-created', 'each desired route made in the form closes it, is d
   assert.equal(world.colonistOrders, 0, 'no fleet of the world loads colonists: nothing serves the route of settlers')
   assert.equal(flowOf(seen.table, world, 'K', 'minerals').capable, false, 'the fleet whose cargo never settles has no figure in the table above')
   assert.equal(flowOf(seen.table, world, 'E', 'minerals').capable && world.expected[WORLD.E].undetermined, true, 'the fleet of the conditional order has a figure and an outcome the save cannot tell')
-  rowsAreRight(stage, seen, world, labels, WANTED, 'the kept routes')
-  assert.deepEqual(stage.stored.records.map(withoutKeys), byName(WANTED.map((want) => keptOf(want, world))), 'the records kept: name, cargo, yearly demand, note and the colonies of each')
+  stageIsRight(stage, WANTED, 'the kept routes')
   assert.deepEqual(stage.rows.map((row) => row.key).sort(), stage.stored.records.map((record) => record.uuid).sort(), 'each route drawn is the record of its identity')
   assert.equal(new Set(stage.stored.records.map((record) => record.uuid)).size, WANTED.length, 'no identity is kept twice')
 })
 
-addDesire('desire-edited', 'a desired route changed in the form keeps its identity and colonies, takes the new name and demand with a new revision, and leaves the others as they were', ({ seen, world, labels }) => {
+addDesire('desire-edited', 'a desired route changed in the form keeps its identity and colonies, takes the new name and demand with a new revision, and leaves the others as they were', ({ seen }) => {
   assert.ok(seen.stages.created && seen.stages.edited, `the route was changed in the form: ${seen.aborted}`)
 
   const before = seen.stages.created
@@ -2279,7 +2335,7 @@ addDesire('desire-edited', 'a desired route changed in the form keeps its identi
   const list = WANTED.map(asEdited)
 
   assert.equal(seen.changed, true, 'the form closes once the change is kept')
-  rowsAreRight(after, seen, world, labels, list, 'after the change')
+  stageIsRight(after, list, 'after the change')
 
   const first = before.stored.records.find((record) => record.name === WANTED[0].name)
   const changed = after.stored.records.find((record) => record.name === EDITED.name)
@@ -2288,7 +2344,6 @@ addDesire('desire-edited', 'a desired route changed in the form keeps its identi
   assert.equal(changed.uuid, first.uuid, 'the change is made to the record, not to a new one')
   assert.ok(changed.revision > first.revision, `the revision of the record rises: ${first.revision} to ${changed.revision}`)
   assert.deepEqual(rowsOf(after, EDITED.name)[0].key, first.uuid, 'the route drawn is the record changed')
-  assert.deepEqual(after.stored.records.map(withoutKeys), byName(list.map((want) => keptOf(want, world))), 'the records kept after the change')
   assert.deepEqual(after.stored.records.filter((record) => record.uuid !== first.uuid), before.stored.records.filter((record) => record.uuid !== first.uuid), 'the other records are as they were, revision and all')
 })
 
@@ -2299,7 +2354,7 @@ addDesire('desire-reloaded', 'the desired routes are drawn again after the page 
   assert.deepEqual(seen.stages.reloaded.stored, seen.stages.edited.stored, 'what is kept is what was kept')
 })
 
-addDesire('desire-deleted', 'a desired route deleted is gone from the panel and the records and its identity is never used again, and it is gone after a reload', ({ seen, world, labels }) => {
+addDesire('desire-deleted', 'a desired route deleted is gone from the panel and its identity is never used again, and it is gone after a reload', ({ seen }) => {
   assert.ok(seen.stages.reloaded && seen.stages.deleted && seen.stages.reloadedAfterDelete, `the route was deleted in the panel: ${seen.aborted}`)
 
   const list = WANTED.map(asEdited).filter((want) => want.name !== REMOVED)
@@ -2308,8 +2363,7 @@ addDesire('desire-deleted', 'a desired route deleted is gone from the panel and 
   assert.ok(gone, 'the route to delete is kept before it')
 
   for (const [stage, what] of [[seen.stages.deleted, 'after the deletion'], [seen.stages.reloadedAfterDelete, 'after the deletion and a reload']]) {
-    rowsAreRight(stage, seen, world, labels, list, what)
-    assert.deepEqual(stage.stored.records.map(withoutKeys), byName(list.map((want) => keptOf(want, world))), `the records kept ${what}`)
+    stageIsRight(stage, list, what)
     assert.deepEqual(stage.stored.tombstones, [gone.uuid], `the identity of the deleted route is kept as deleted ${what}`)
   }
 
@@ -2322,6 +2376,54 @@ addDesire('desire-columns', 'asking to delete a desired route leaves every colum
   assert.ok(columns && columns.resting.length >= 4, `the columns were measured before and while asking: ${seen.aborted}`)
   assert.deepEqual(columns.asking, columns.resting, 'the left edges of the headers of the table')
 })
+
+// The routes each stage of the flow is owed, the stages that were reached: the routes made, as changed, and without the one deleted, drawn at once and after a reload.
+const stagesOwed = (seen) => {
+  const kept = WANTED.map(asEdited).filter((want) => want.name !== REMOVED)
+
+  return [[seen.stages.created, WANTED, 'once the routes are made'], [seen.stages.edited, WANTED.map(asEdited), 'after the change'], [seen.stages.deleted, kept, 'after the deletion'], [seen.stages.reloadedAfterDelete, kept, 'after the deletion and a reload']].filter(([stage]) => stage)
+}
+
+// A check of one binding of the rows (or of the records) of every stage the flow reached: a fault that shows in one binding fails only its check, so faults of different bindings can be planted together.
+const addBinding = (id, name, judge) => addDesire(id, name, ({ seen, world, labels }) => {
+  assert.ok(seen.stages.created, `the routes were made in the form: ${seen.aborted}`)
+
+  for (const [stage, list, what] of stagesOwed(seen)) {
+    try {
+      judge({ stage, list, world, labels, seen })
+    } catch (error) {
+      error.message = `${what}: ${error.message}`
+
+      throw error
+    }
+  }
+})
+const addPart = (part, name) => addBinding(`desire-${part}`, name, ({ stage, list, world, labels, seen }) => list.forEach((want) => {
+  const row = rowsOf(stage, want.name)[0]
+
+  if (row) {
+    assertRow({ row, want, world, table: seen.table, labels, grouping: seen.grouping, part })
+  }
+}))
+
+addPart('name', 'each desired route is drawn under its name and with no note')
+addPart('colonies', 'each desired route is drawn from its first colony to its second')
+addPart('cargo', 'each desired route is drawn with the name of its cargo')
+addPart('coverage', 'each desired route is told covered, paused, unknown or uncovered as the fleets of the table above give it, by its words and by its identity')
+addPart('delivered', 'the freight delivered to a desired route is the sum of its fleets in the table above, or none and the dash in the capacity when nothing serves it')
+addPart('delivered-unit', 'the freight delivered to a desired route is told in the unit of its cargo, or with no unit when none is drawn')
+addPart('demand', 'the demand of a desired route is drawn whole, or not at all when it is kept without one')
+addPart('demand-unit', 'the demand of a desired route is told in the unit of its cargo, or with no unit when none is drawn')
+addPart('demand-none', 'a desired route kept without demand says that none is set')
+addPart('demand-set', 'a desired route kept with a demand draws no line that says none is set')
+addPart('gap', 'the shortfall of a desired route is the demand less the freight delivered, or not drawn while a fleet that may deliver it is not known to')
+addPart('gap-unit', 'the shortfall of a desired route is told in the unit of its cargo, or with no unit when none is drawn')
+addDesire('desire-count', 'the number of routes counted is the number of routes kept: none in the panel of a save with none, and the routes drawn in every stage', ({ seen }) => {
+  assert.ok(seen.stages.created, `the routes were made in the form: ${seen.aborted}`)
+  assert.equal(countOf(seen.stages.empty, 'none kept'), 0, 'the number of routes counted for a save with none')
+  stagesOwed(seen).forEach(([stage, list, what]) => assert.equal(countOf(stage, what), list.length, `the number of routes counted (${what})`))
+})
+addBinding('desire-stored', 'the records kept are the routes made, changed and deleted: name, cargo, yearly demand, note and the colonies of each', ({ stage, list, world }) => assert.deepEqual(stage.stored.records.map(withoutKeys), byName(list.map((want) => keptOf(want, world))), 'the records kept: name, cargo, yearly demand, note and the colonies of each'))
 
 addRefresh('desire-refreshed', 'while the saved orders are read again the desired routes stay as records and draw no coverage from the orders of the read before, and the coverage is back once they are read', ({ seen, world, labels }) => {
   assert.ok(seen.stages.created && seen.stages.refreshing && seen.stages.refreshed, `the save was renewed with the read of the saved orders held back: ${seen.aborted}`)
@@ -2339,59 +2441,52 @@ addRefresh('desire-refreshed', 'while the saved orders are read again the desire
 
 // A page fault or rewrite is read through the groups of the panel of the routes (`open`) or through the flow of the desired routes (`openDesires`): a fault reads the desired routes when every check it names is one of theirs, a rewrite says where it reads.
 const BROWSER_MUTATIONS = [
-  { name: 'the groups list every fleet apart', file: S, find: 'const group = byId.get(record.route.id) ||', to: 'const group = byId.get(`${record.route.id}${record.FleetID}`) ||', fails: ['screen-groups', 'screen-capacity', 'screen-flags'] },
-  { name: 'the capacity of a group counts its fleets twice', file: S, find: 'minerals: total.minerals + member.year.minerals, installations: total.installations + member.year.installations,', to: 'minerals: total.minerals + 2 * member.year.minerals, installations: total.installations + 2 * member.year.installations,', fails: ['screen-capacity'] },
-  { name: 'the capacity of a group counts the fleets whose conditional outcome is not known', file: S, find: 'capacity: sumOf(settled), potential: sumOf(capable)', to: 'capacity: sumOf(capable), potential: sumOf(capable)', fails: ['screen-capacity'] },
-  { name: 'the fleets left out of a capacity are not told', file: G, find: '<div v-if="item.leftOut" class="caption text--secondary" data-route-capacity-note>', to: '<div v-if="false" class="caption text--secondary" data-route-capacity-note>', fails: ['screen-capacity'] },
-  { name: 'a group of fleets whose conditional outcome is not known is not known', file: S, find: "capable.length ? 'conditional' :", to: "capable.length ? 'unknown' :", fails: ['screen-state'] },
-  { name: 'a closed queue is a fleet of a route', file: S, find: "const shape = cycling ? (!queue.length ? 'empty' : problem ? 'untraceable' : 'route') :", to: "const shape = (cycling || queue.length > 3) ? (!queue.length ? 'empty' : problem ? 'untraceable' : 'route') :", fails: ['screen-groups', 'screen-closed'] },
-  { name: 'the duplicate flag is drawn for every group', file: S, find: "...(group.duplicate ? [{ key: 'duplicate'", to: "...(true ? [{ key: 'duplicate'", fails: ['screen-flags'] },
-  { name: 'a flag is drawn as its key', file: G, find: ':data-route-flag="flag.key">{{ flag.text }}</v-chip>', to: ':data-route-flag="flag.key">{{ flag.key }}</v-chip>', fails: ['screen-flags'] },
-  { name: 'a related route is drawn with its relation key', file: G, find: '<span data-route-relation-label>{{ relationText(related.relation) }}</span>', to: '<span data-route-relation-label>{{ related.relation }}</span>', fails: ['screen-flags'] },
-  { name: 'a conditional order whose outcome is not known is told armed', file: G, find: 'return CONDITION_STATUSES[record.conditional.status]', to: 'return CONDITION_STATUSES.armed', fails: ['screen-flags'] },
-  { name: 'the flagged-only switch drops the groups that are not served and show no flag', file: G, find: 'row.flags.length > 0 || row.status !== \'capable\'', to: 'row.flags.length > 0', fails: ['screen-filter'] },
-  { name: 'the flagged-only switch keeps every group', file: G, find: 'this.flaggedOnly ? this.rows.filter((row) => row.flags.length > 0 || row.status !== \'capable\') : this.rows', to: 'this.rows', fails: ['screen-filter'] },
-  { name: 'a stored order is drawn with its number as its id', file: G, find: '(order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span><span v-if="!member.record.orders.length">none</span>', to: '(order <span data-route-order-id>{{ order.MoveOrder }}</span>)</span><span v-if="!member.record.orders.length">none</span>', fails: ['screen-links'] },
-  { name: 'the fleets of a group are drawn without the first of their stored orders', file: G, find: 'v-for="(order, index) in member.record.orders"', to: 'v-for="(order, index) in member.record.orders.slice(1)"', fails: ['screen-links'] },
-  { name: 'the status of a group is drawn in the words of another', file: G, find: 'statusText: GROUP_STATUSES[group.status],', to: "statusText: GROUP_STATUSES[group.status === 'capable' ? 'paused' : group.status],", fails: ['screen-state'] },
-  { name: 'the name source of a route is drawn as the fleet whatever it is', file: G, find: 'return NAME_SOURCES[name.source]', to: 'return NAME_SOURCES.fleet', fails: ['screen-names'] },
-  { name: 'the match of a template is always told as a match of content', file: G, find: 'return name.exact ? MATCHES.exact : MATCHES.pacing', to: 'return MATCHES.exact', fails: ['screen-names'] },
-  { name: 'the match of a template is the match of the last of them', file: S, find: 'group.fleets.some((record) => record.route.pacingKey === matched[0].pacingKey)', to: 'group.fleets.some((record) => record.route.pacingKey === matched[matched.length - 1].pacingKey)', fails: ['screen-names'] },
-  { name: 'the closed queues are drawn in the words of a route', file: G, find: 'return SHAPES[record.shape]', to: 'return SHAPES.route', fails: ['screen-closed'] },
-  { name: 'the closed queues are drawn without the first of their stored orders', file: G, find: 'v-for="(order, index) in record.orders" :key="order.MoveOrderID" :data-route-order="order.MoveOrderID">{{ index ? \', \' : \'\' }}#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span></div>\n        </div>\n        <div v-if="!audit.closed.length"', to: 'v-for="(order, index) in record.orders.slice(1)" :key="order.MoveOrderID" :data-route-order="order.MoveOrderID">{{ index ? \', \' : \'\' }}#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span></div>\n        </div>\n        <div v-if="!audit.closed.length"', fails: ['screen-closed'] },
-  { name: 'the broken queues are drawn without the first of their stored orders', file: G, find: '<div v-if="record.orders.length" class="caption text--secondary" data-route-orders>Stored orders: <span v-for="(order, index) in record.orders"', to: '<div v-if="record.orders.length" class="caption text--secondary" data-route-orders>Stored orders: <span v-for="(order, index) in record.orders.slice(1)"', fails: ['screen-closed'] },
-  { name: 'the other templates of a route are not named', file: G, find: 'v-for="(other, index) in item.name.others" :key="other" data-route-other', to: 'v-for="(other, index) in item.name.others.slice(1)" :key="other" data-route-other', fails: ['screen-names'] },
-  { name: 'a fleet of a group is drawn under the name of the first fleet', file: G, find: 'data-route-fleet-name>{{ member.record.FleetName }}', to: 'data-route-fleet-name>{{ item.members[0].record.FleetName }}', fails: ['screen-links'] },
-  { name: 'a closed queue is drawn under the name of the first closed queue', file: G, find: 'data-route-fleet-name>{{ record.FleetName }}</span>\n          <span class="text--secondary"> · <span data-route-shape>{{ shapeText(record) }}</span> · {{ flowsOf(record) }}', to: 'data-route-fleet-name>{{ audit.closed[0].FleetName }}</span>\n          <span class="text--secondary"> · <span data-route-shape>{{ shapeText(record) }}</span> · {{ flowsOf(record) }}', fails: ['screen-closed'] },
+  { name: 'the fleets left out of a capacity are not told', file: G, find: '<div v-if="item.leftOut" class="caption text--secondary" data-route-capacity-note>', to: '<div v-if="false" class="caption text--secondary" data-route-capacity-note>', group: 'groups-a', fails: ['screen-capacity'] },
+  { name: 'a flag is drawn as its key', file: G, find: ':data-route-flag="flag.key">{{ flag.text }}</v-chip>', to: ':data-route-flag="flag.key">{{ flag.key }}</v-chip>', group: 'groups-a', fails: ['screen-flags'] },
+  { name: 'a related route is drawn with its relation key', file: G, find: '<span data-route-relation-label>{{ relationText(related.relation) }}</span>', to: '<span data-route-relation-label>{{ related.relation }}</span>', group: 'groups-b', fails: ['screen-flags'] },
+  { name: 'a conditional order whose outcome is not known is told armed', file: G, find: 'return CONDITION_STATUSES[record.conditional.status]', to: 'return CONDITION_STATUSES.armed', group: 'groups-c', fails: ['screen-flags'] },
+  { name: 'the flagged-only switch drops the groups that are not served and show no flag', file: G, find: 'row.flags.length > 0 || row.status !== \'capable\'', to: 'row.flags.length > 0', group: 'groups-a', fails: ['screen-filter'] },
+  { name: 'the flagged-only switch keeps every group', file: G, find: 'this.flaggedOnly ? this.rows.filter((row) => row.flags.length > 0 || row.status !== \'capable\') : this.rows', to: 'this.rows', group: 'groups-b', fails: ['screen-filter'] },
+  { name: 'a stored order is drawn with its number as its id', file: G, find: '(order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span><span v-if="!member.record.orders.length">none</span>', to: '(order <span data-route-order-id>{{ order.MoveOrder }}</span>)</span><span v-if="!member.record.orders.length">none</span>', group: 'groups-a', fails: ['screen-links'] },
+  { name: 'the fleets of a group are drawn without the first of their stored orders', file: G, find: 'v-for="(order, index) in member.record.orders"', to: 'v-for="(order, index) in member.record.orders.slice(1)"', group: 'groups-b', fails: ['screen-links'] },
+  { name: 'the status of a group is drawn in the words of another', file: G, find: 'statusText: GROUP_STATUSES[group.status],', to: "statusText: GROUP_STATUSES[group.status === 'capable' ? 'paused' : group.status],", group: 'groups-a', fails: ['screen-state'] },
+  { name: 'the name source of a route is drawn as the fleet whatever it is', file: G, find: 'return NAME_SOURCES[name.source]', to: 'return NAME_SOURCES.fleet', group: 'groups-a', fails: ['screen-names'] },
+  { name: 'the match of a template is always told as a match of content', file: G, find: 'return name.exact ? MATCHES.exact : MATCHES.pacing', to: 'return MATCHES.exact', group: 'groups-b', fails: ['screen-names'] },
+  { name: 'the closed queues are drawn in the words of a route', file: G, find: 'return SHAPES[record.shape]', to: 'return SHAPES.route', group: 'groups-a', fails: ['screen-closed'] },
+  { name: 'the closed queues are drawn without the first of their stored orders', file: G, find: 'v-for="(order, index) in record.orders" :key="order.MoveOrderID" :data-route-order="order.MoveOrderID">{{ index ? \', \' : \'\' }}#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span></div>\n        </div>\n        <div v-if="!audit.closed.length"', to: 'v-for="(order, index) in record.orders.slice(1)" :key="order.MoveOrderID" :data-route-order="order.MoveOrderID">{{ index ? \', \' : \'\' }}#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span></div>\n        </div>\n        <div v-if="!audit.closed.length"', group: 'groups-b', fails: ['screen-closed'] },
+  { name: 'the broken queues are drawn without the first of their stored orders', file: G, find: '<div v-if="record.orders.length" class="caption text--secondary" data-route-orders>Stored orders: <span v-for="(order, index) in record.orders"', to: '<div v-if="record.orders.length" class="caption text--secondary" data-route-orders>Stored orders: <span v-for="(order, index) in record.orders.slice(1)"', group: 'groups-c', fails: ['screen-closed'] },
+  { name: 'the other templates of a route are not named', file: G, find: 'v-for="(other, index) in item.name.others" :key="other" data-route-other', to: 'v-for="(other, index) in item.name.others.slice(1)" :key="other" data-route-other', group: 'groups-c', fails: ['screen-names'] },
+  { name: 'a fleet of a group is drawn under the name of the first fleet', file: G, find: 'data-route-fleet-name>{{ member.record.FleetName }}', to: 'data-route-fleet-name>{{ item.members[0].record.FleetName }}', group: 'groups-c', fails: ['screen-links'] },
+  { name: 'a closed queue is drawn under the name of the first closed queue', file: G, find: 'data-route-fleet-name>{{ record.FleetName }}</span>\n          <span class="text--secondary"> · <span data-route-shape>{{ shapeText(record) }}</span> · {{ flowsOf(record) }}', to: 'data-route-fleet-name>{{ audit.closed[0].FleetName }}</span>\n          <span class="text--secondary"> · <span data-route-shape>{{ shapeText(record) }}</span> · {{ flowsOf(record) }}', group: 'groups-d', fails: ['screen-closed'] },
   { name: 'the panel is drawn transparent', file: G, find: 'elevation="1" data-route-groups>', to: 'elevation="1" data-route-groups style="opacity: 0">', fails: ['screen-groups', 'screen-capacity', 'screen-flags', 'screen-links', 'screen-names', 'screen-closed', 'screen-state', 'screen-filter'] },
-  { name: 'the handling of a cycle that never settles is drawn', file: 'page', find: '<handling-breakdown v-if="item.cargo.settled" :rows', to: '<handling-breakdown v-if="true" :rows', fails: ['screen-unsettled'] },
-  { name: 'the note that a cycle never settles is not drawn', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>', to: '<div v-else-if="false" class="caption text--secondary mt-2" data-cargo-unsettled>', fails: ['screen-unsettled'] },
-  { name: 'the note that a cycle never settles is drawn in other words', file: 'page', find: 'data-cargo-unsettled>{{ cargoUnsettled }}</div>', to: 'data-cargo-unsettled>{{ cargoUnsettled.toUpperCase() }}</div>', fails: ['screen-unsettled'] },
-  { name: 'the desired routes the panel keeps are not read again', file: 'page', find: '@changed="desiresChanged"', to: '@changed="() => {}"', fails: ['desire-created', 'desire-edited', 'desire-deleted'] },
-  { name: 'the coverage of a desired route is always told covered', file: 'desireView', find: 'data-desire-state-text>{{ coverageText(item.cover.state) }}', to: "data-desire-state-text>{{ coverageText('covered') }}", fails: ['desire-created'] },
-  { name: 'a route nothing serves is drawn with a freight delivered', file: 'desireView', find: '<div v-if="item.cover.capacity !== null"><span data-desire-delivered>', to: '<div v-if="item.cover.capacity !== null || item.cover.state === \'uncovered\'"><span data-desire-delivered>', fails: ['desire-created'] },
-  { name: 'the shortfall is drawn as the demand', file: 'desireView', find: '<span data-desire-gap>{{ number(item.cover.gap) }}</span>', to: '<span data-desire-gap>{{ number(item.entry.yearly) }}</span>', fails: ['desire-created'] },
-  { name: 'the cargo of a desired route is drawn as minerals', file: 'desireView', find: 'data-desire-cargo-text>{{ cargoText(item.entry.cargo) }}', to: "data-desire-cargo-text>{{ cargoText('minerals') }}", fails: ['desire-created'] },
-  { name: 'the colonies of a desired route are drawn the other way round', file: 'desireView', find: '<span data-desire-from-text>{{ endText(item.entry.from) }}</span> → <span data-desire-to-text>{{ endText(item.entry.to) }}</span>', to: '<span data-desire-from-text>{{ endText(item.entry.to) }}</span> → <span data-desire-to-text>{{ endText(item.entry.from) }}</span>', fails: ['desire-created'] },
-  { name: 'the count of the desired routes is one over', file: 'desireView', find: '<span data-desire-count-number>{{ rows.length }}</span>', to: '<span data-desire-count-number>{{ rows.length + 1 }}</span>', fails: ['desire-panel', 'desire-created'] },
-  { name: 'a desired route is kept with no demand', file: 'desireView', find: 'yearly: Number.isNaN(yearly) ? draft.yearly : yearly,', to: 'yearly: null,', fails: ['desire-created'] },
-  { name: 'a desired route is kept with its colonies the other way round', file: 'desireView', find: 'from: draft.fromPick ? { row: draft.fromPick.row } : undefined, to: draft.toPick ? { row: draft.toPick.row } : undefined,', to: 'from: draft.toPick ? { row: draft.toPick.row } : undefined, to: draft.fromPick ? { row: draft.fromPick.row } : undefined,', fails: ['desire-created'] },
-  { name: 'a desired route changed is kept as another record', file: 'desireView', find: 'entry: entry ? { ...entry, revision: draft.revision } : null,', to: 'entry: null,', fails: ['desire-edited'] },
-  { name: 'a desired route deleted is not deleted', file: 'desireView', find: 'const result = await deleteDesire(this.repository, this.scope, entry)', to: 'const result = { ok: true }', fails: ['desire-deleted'] },
-  { name: 'the first desired route is deleted for any', file: 'desireView', find: '@click="remove(item.entry)"', to: '@click="remove(rows[0].entry)"', fails: ['desire-deleted'] },
-  { name: 'the panel of the desired routes is hidden', file: 'desireView', find: 'elevation="1" data-route-desires>', to: 'elevation="1" v-show="false" data-route-desires>', fails: ['desire-panel'] },
-  { name: 'the panel of the desired routes sits in a hidden ancestor', file: 'page', find: '<route-desires :state="desireState" :read="desireRead" :covers="routeAudit.desires" :repository="desireRepository" :repository-error="desireRepositoryError" :scope="desireScope" :context="desireContext" :choices="desireChoices" :separator="separator" @retry="retryDesires" @changed="desiresChanged" />', to: '<div style="display: none"><route-desires :state="desireState" :read="desireRead" :covers="routeAudit.desires" :repository="desireRepository" :repository-error="desireRepositoryError" :scope="desireScope" :context="desireContext" :choices="desireChoices" :separator="separator" @retry="retryDesires" @changed="desiresChanged" /></div>', fails: ['desire-panel'] },
-  { name: 'the actions of a desired route are put in a slot the table does not have', file: 'desireView', find: '<template #[`item.actions`]="{ item }">', to: '<template #[`item.rowActions`]="{ item }">', fails: ['desire-edited'] },
-  { name: 'the desired routes kept are not read when the page opens', file: 'desireMixin', find: 'return this.desireRecords && this.desireRecords.desires ? this.desireRecords.desires.readDesires(', to: 'return this.desireRecords && this.desireRecords.desires && this.desireRevision ? this.desireRecords.desires.readDesires(', fails: ['desire-reloaded'] },
+  { name: 'the handling of a cycle that never settles is drawn', file: 'page', find: '<handling-breakdown v-if="item.cargo.settled" :rows', to: '<handling-breakdown v-if="true" :rows', group: 'groups-a', fails: ['screen-unsettled'] },
+  { name: 'the note that a cycle never settles is not drawn', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>', to: '<div v-else-if="false" class="caption text--secondary mt-2" data-cargo-unsettled>', group: 'groups-b', fails: ['screen-unsettled'] },
+  { name: 'the note that a cycle never settles is drawn in other words', file: 'page', find: 'data-cargo-unsettled>{{ cargoUnsettled }}</div>', to: 'data-cargo-unsettled>{{ cargoUnsettled.toUpperCase() }}</div>', group: 'groups-c', fails: ['screen-unsettled'] },
+  { name: 'the desired routes the panel keeps are not read again', file: 'page', find: '@changed="desiresChanged"', to: '@changed="() => {}"', fails: ['desire-created', 'desire-edited', 'desire-reloaded', 'desire-deleted', 'desire-count'] },
+  { name: 'the coverage of a desired route is always told covered', file: 'desireView', find: 'data-desire-state-text>{{ coverageText(item.cover.state) }}', to: "data-desire-state-text>{{ coverageText('covered') }}", group: 'desires-4', fails: ['desire-coverage'] },
+  { name: 'a route nothing serves is drawn with a freight delivered', file: 'desireView', find: '<div v-if="item.cover.capacity !== null"><span data-desire-delivered>', to: '<div v-if="item.cover.capacity !== null || item.cover.state === \'uncovered\'"><span data-desire-delivered>', group: 'desires-4', fails: ['desire-delivered'] },
+  { name: 'the shortfall is drawn as the demand', file: 'desireView', find: '<span data-desire-gap>{{ number(item.cover.gap) }}</span>', to: '<span data-desire-gap>{{ number(item.entry.yearly) }}</span>', group: 'desires-3', fails: ['desire-gap'] },
+  { name: 'the cargo of a desired route is drawn as minerals', file: 'desireView', find: 'data-desire-cargo-text>{{ cargoText(item.entry.cargo) }}', to: "data-desire-cargo-text>{{ cargoText('minerals') }}", group: 'desires-2', fails: ['desire-cargo'] },
+  { name: 'the colonies of a desired route are drawn the other way round', file: 'desireView', find: '<span data-desire-from-text>{{ endText(item.entry.from) }}</span> → <span data-desire-to-text>{{ endText(item.entry.to) }}</span>', to: '<span data-desire-from-text>{{ endText(item.entry.to) }}</span> → <span data-desire-to-text>{{ endText(item.entry.from) }}</span>', group: 'desires-4', fails: ['desire-colonies'] },
+  { name: 'the count of the desired routes is one over', file: 'desireView', find: '<span data-desire-count-number>{{ rows.length }}</span>', to: '<span data-desire-count-number>{{ rows.length + 1 }}</span>', group: 'desires-4', fails: ['desire-count'] },
+  { name: 'a desired route is kept with no demand', file: 'desireView', find: 'yearly: Number.isNaN(yearly) ? draft.yearly : yearly,', to: 'yearly: null,', group: 'desires-2', fails: ['desire-demand', 'desire-demand-unit', 'desire-demand-set', 'desire-gap', 'desire-gap-unit', 'desire-stored'] },
+  { name: 'a desired route is kept with its colonies the other way round', file: 'desireView', find: 'from: draft.fromPick ? { row: draft.fromPick.row } : undefined, to: draft.toPick ? { row: draft.toPick.row } : undefined,', to: 'from: draft.toPick ? { row: draft.toPick.row } : undefined, to: draft.fromPick ? { row: draft.fromPick.row } : undefined,', group: 'desires-1', fails: ['desire-colonies', 'desire-coverage', 'desire-delivered', 'desire-delivered-unit', 'desire-gap', 'desire-stored'] },
+  { name: 'a desired route changed is kept as another record', file: 'desireView', find: 'entry: entry ? { ...entry, revision: draft.revision } : null,', to: 'entry: null,', group: 'desires-4', fails: ['desire-edited', 'desire-deleted', 'desire-stored'] },
+  { name: 'a desired route deleted is not deleted', file: 'desireView', find: 'const result = await deleteDesire(this.repository, this.scope, entry)', to: 'const result = { ok: true }', group: 'desires-3', fails: ['desire-deleted', 'desire-count', 'desire-stored'] },
+  { name: 'the first desired route is deleted for any', file: 'desireView', find: '@click="remove(item.entry)"', to: '@click="remove(rows[0].entry)"', group: 'desires-5', fails: ['desire-deleted', 'desire-stored'] },
+  { name: 'the panel of the desired routes is hidden', file: 'desireView', find: 'elevation="1" data-route-desires>', to: 'elevation="1" v-show="false" data-route-desires>', fails: ['desire-panel', 'desire-created', 'desire-edited', 'desire-reloaded', 'desire-deleted', 'desire-columns', 'desire-name', 'desire-colonies', 'desire-cargo', 'desire-coverage', 'desire-delivered', 'desire-delivered-unit', 'desire-demand', 'desire-demand-unit', 'desire-demand-none', 'desire-demand-set', 'desire-gap', 'desire-gap-unit', 'desire-count', 'desire-stored'] },
+  { name: 'the panel of the desired routes sits in a hidden ancestor', file: 'page', find: '<route-desires :state="desireState" :read="desireRead" :covers="routeAudit.desires" :repository="desireRepository" :repository-error="desireRepositoryError" :scope="desireScope" :context="desireContext" :choices="desireChoices" :separator="separator" @retry="retryDesires" @changed="desiresChanged" />', to: '<div style="display: none"><route-desires :state="desireState" :read="desireRead" :covers="routeAudit.desires" :repository="desireRepository" :repository-error="desireRepositoryError" :scope="desireScope" :context="desireContext" :choices="desireChoices" :separator="separator" @retry="retryDesires" @changed="desiresChanged" /></div>', fails: ['desire-panel', 'desire-created', 'desire-edited', 'desire-reloaded', 'desire-deleted', 'desire-columns', 'desire-name', 'desire-colonies', 'desire-cargo', 'desire-coverage', 'desire-delivered', 'desire-delivered-unit', 'desire-demand', 'desire-demand-unit', 'desire-demand-none', 'desire-demand-set', 'desire-gap', 'desire-gap-unit', 'desire-count', 'desire-stored'] },
+  { name: 'the actions of a desired route are put in a slot the table does not have', file: 'desireView', find: '<template #[`item.actions`]="{ item }">', to: '<template #[`item.rowActions`]="{ item }">', group: 'desires-1', fails: ['desire-edited', 'desire-reloaded', 'desire-deleted', 'desire-columns'] },
+  { name: 'the desired routes kept are not read when the page opens', file: 'desireMixin', find: 'return this.desireRecords && this.desireRecords.desires ? this.desireRecords.desires.readDesires(', to: 'return this.desireRecords && this.desireRecords.desires && this.desireRevision ? this.desireRecords.desires.readDesires(', group: 'desires-2', fails: ['desire-reloaded', 'desire-deleted', 'desire-columns'] },
   { name: 'the desired routes are covered from the saved orders of the read before', file: 'page', find: 'queues: this.loadErrors.routeQueues === null ? this.routeQueues : null,', to: 'queues: this.routeQueues,', fails: ['desire-refreshed'] },
-  { name: 'the freight delivered by a desired route is told in the unit of colonists', file: 'desireView', find: '<span data-desire-delivered-unit>{{ unit(item.entry.cargo) }}</span>', to: "<span data-desire-delivered-unit>{{ unit('colonists') }}</span>", fails: ['desire-created'] },
-  { name: 'the demand of a desired route is told in tonnes whatever its cargo', file: 'desireView', find: '<span data-desire-demand-unit>{{ unit(item.entry.cargo) }}</span>', to: "<span data-desire-demand-unit>{{ unit('minerals') }}</span>", fails: ['desire-created'] },
-  { name: 'the unit of the shortfall of a desired route is hidden', file: 'desireView', find: '<span data-desire-gap-unit>', to: '<span v-show="false" data-desire-gap-unit>', fails: ['desire-created'] },
-  { name: 'a desired route kept without demand does not say so', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div v-if="false" class="caption text--secondary" data-desire-demand-none>', fails: ['desire-created'] },
-  { name: 'a desired route kept with a demand says that none is set', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div class="caption text--secondary" data-desire-demand-none>', fails: ['desire-created'] },
-  { name: 'the conditional status of a fleet is hidden', file: G, find: '<span data-route-conditional-status>', to: '<span v-show="false" data-route-conditional-status>', fails: ['screen-flags'] },
-  { name: 'the number of the desired routes is glued to its word', file: 'desireView', find: "data-desire-count><span><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</span></v-chip>", to: "data-desire-count><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</v-chip>", fails: ['desire-panel'] },
-  { name: 'the confirmation of a deletion is drawn only while it is asked', file: 'desireView', find: '<div :class="{ \'route-desires__delete-state--off\': deleting !== item.entry.uuid }">', to: '<div v-if="deleting === item.entry.uuid">', fails: ['desire-columns'] },
+  { name: 'the freight delivered by a desired route is told in the unit of colonists', file: 'desireView', find: '<span data-desire-delivered-unit>{{ unit(item.entry.cargo) }}</span>', to: "<span data-desire-delivered-unit>{{ unit('colonists') }}</span>", group: 'desires-3', fails: ['desire-delivered-unit'] },
+  { name: 'the demand of a desired route is told in tonnes whatever its cargo', file: 'desireView', find: '<span data-desire-demand-unit>{{ unit(item.entry.cargo) }}</span>', to: "<span data-desire-demand-unit>{{ unit('minerals') }}</span>", group: 'desires-1', fails: ['desire-demand-unit'] },
+  { name: 'the unit of the shortfall of a desired route is hidden', file: 'desireView', find: '<span data-desire-gap-unit>', to: '<span v-show="false" data-desire-gap-unit>', group: 'desires-3', fails: ['desire-gap-unit'] },
+  { name: 'a desired route kept without demand does not say so', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div v-if="false" class="caption text--secondary" data-desire-demand-none>', group: 'desires-1', fails: ['desire-demand-none'] },
+  { name: 'a desired route kept with a demand says that none is set', file: 'desireView', find: '<div v-else class="caption text--secondary" data-desire-demand-none>', to: '<div class="caption text--secondary" data-desire-demand-none>', group: 'desires-3', fails: ['desire-demand-set'] },
+  { name: 'the conditional status of a fleet is hidden', file: G, find: '<span data-route-conditional-status>', to: '<span v-show="false" data-route-conditional-status>', group: 'groups-d', fails: ['screen-flags'] },
+  { name: 'the number of the desired routes is glued to its word', file: 'desireView', find: "data-desire-count><span><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</span></v-chip>", to: "data-desire-count><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</v-chip>", group: 'desires-1', fails: ['desire-panel'] },
+  { name: 'the confirmation of a deletion is drawn only while it is asked', file: 'desireView', find: '<div :class="{ \'route-desires__delete-state--off\': deleting !== item.entry.uuid }">', to: '<div v-if="deleting === item.entry.uuid">', group: 'desires-5', fails: ['desire-columns'] },
 ]
 
 const BROWSER_BENIGN = [
@@ -2409,7 +2504,28 @@ const BROWSER_BENIGN = [
   { name: 'the conditional status of a fleet told after the names of its conditions', family: 'qualifier moved', reads: 'groups', file: G, find: '<span data-route-conditional-status>{{ conditionStatusText(member.record) }}</span><template v-if="member.record.conditional.rows.length">: <span data-route-conditional-names>{{ conditionNames(member.record) }}</span></template>', to: '<template v-if="member.record.conditional.rows.length"><span data-route-conditional-names>{{ conditionNames(member.record) }}</span>: </template><span data-route-conditional-status>{{ conditionStatusText(member.record) }}</span>' },
 ]
 
-const readsOfFault = (mutation) => (mutation.fails.every((id) => id === 'desire-refreshed') ? 'refresh' : mutation.fails.every((id) => id.startsWith('desire-')) ? 'desires' : 'groups')
+const readsOfFault = (mutation) => mutation.reads || (mutation.fails.every((id) => id === 'desire-refreshed') ? 'refresh' : mutation.fails.every((id) => id.startsWith('desire-')) ? 'desires' : 'groups')
+
+// The faults of the page that name a `group`, by group, each member as the runner is handed it (its place in the list is its key), and the rewrites of the page by the flow they are read through: a group is planted together, the page is opened once over it, and each member is credited by its own checks (a check two faults of the group make fail is no check of a group).
+const pageFaultGroups = () => {
+  const groups = new Map()
+
+  BROWSER_MUTATIONS.forEach((mutation, index) => {
+    if (mutation.group) {
+      groups.set(mutation.group, [...(groups.get(mutation.group) || []), { ...mutation, key: String(index) }])
+    }
+  })
+
+  return groups
+}
+
+const pageBenignGroups = () => {
+  const groups = new Map()
+
+  BROWSER_BENIGN.forEach((edit, index) => groups.set(edit.reads, [...(groups.get(edit.reads) || []), { ...edit, key: String(index), fails: [] }]))
+
+  return groups
+}
 
 // ---- The variants ----------------------------------------------------------------------------------------------------------
 
@@ -2439,6 +2555,22 @@ const runHead = async () => {
     }
   })
   check('mutations: every anchor of a fault and a rewrite is found once', lost.length === 0, lost.join('; '))
+
+  const unplaced = []
+
+  ;[...pageFaultGroups(), ...pageBenignGroups()].forEach(([group, members]) => {
+    try {
+      declaredGroup(group, members)
+      patchedGroup(sourcesOf(), members, pageLabel)
+
+      if (new Set(members.map(readsOfFault)).size !== 1) {
+        throw new Error(`the members of the group ${group} are not read through one flow`)
+      }
+    } catch (error) {
+      unplaced.push(error.message)
+    }
+  })
+  check('mutations: the members of each group of the page are declared, planted without overlap and read through one flow', unplaced.length === 0, unplaced.join('; '))
 }
 
 const runMutant = async (index) => {
@@ -2551,35 +2683,39 @@ const runPage = async (reads) => {
   check(`no page error and no console error was raised (${reads})`, seen.unexpected.length === 0, seen.unexpected.join('; '))
 }
 
+const pageLabel = (key) => path.basename(FILES[key])
+
 const runPageFault = async (index) => {
   const mutation = BROWSER_MUTATIONS[index]
   const reads = readsOfFault(mutation)
-  const failed = failedOf(await judgePage(reads, await pageSeen(reads, applied(PAGE.sources, mutation), `the fault "${mutation.name}"`)))
+  const failed = failedOf(await judgePage(reads, await pageSeen(reads, planted(PAGE.sources, mutation), `the fault "${mutation.name}"`)))
   const credited = failed.filter((result) => mutation.fails.includes(result.id) && result.kind === 'assertion')
 
   check(`mutation caught: ${mutation.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, mutation.fails, { name: mutation.name }), failed.map((result) => `${result.id}: ${result.kind}: ${String(result.detail).split('\n')[0]}`).join('; '))
 }
 
-const runPageBenign = async (index) => {
-  const edit = BROWSER_BENIGN[index]
-  const failed = failedOf(await judgePage(edit.reads, await pageSeen(edit.reads, applied(PAGE.sources, edit), `the rewrite "${edit.name}"`)))
+// The faults of a group planted together in the sources, the page opened once over them, and each member credited by its own checks alone (`judgedGroup`): a check no member names that fails stops the run as a defect of the harness in the group. `--solo` hands one member.
+const runPageGroup = async (group, members) => {
+  const reads = readsOfFault(members[0])
+  const results = await judgePage(reads, await pageSeen(reads, plantedGroup(PAGE.sources, members, pageLabel), members.length === 1 ? `the fault "${members[0].name}"` : `the faults of the group ${group}`))
 
-  check(`benign rewrite (${edit.family}): ${edit.name}: no check fails`, failed.length === 0, detail(failed))
-}
+  for (const { member, caught, failed } of judgedGroup(results, members, { what: `the faults of the group ${group}`, alone: members.length === 1 })) {
+    const credited = failed.filter((result) => result.kind === 'assertion')
 
-const runPageBenignTogether = async () => {
-  const sources = BROWSER_BENIGN.reduce((current, edit) => applied(current, edit), PAGE.sources)
-  const failed = []
-
-  for (const reads of ['groups', 'desires']) {
-    failed.push(...failedOf(await judgePage(reads, await pageSeen(reads, sources, 'every benign rewrite'))))
+    check(`mutation caught: ${member.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caught, `expected a value of ${member.fails.join(', ')}; ${failed.length ? detail(failed) : 'every check it names held'}`)
   }
-
-  check('benign rewrites of the page together: no check fails', failed.length === 0, detail(failed))
 }
 
-// The deadlines, in seconds, to be set from the times measured (`--detail` says each variant's): a page variant waits at most TIMEOUT (120 s) for each step.
-const DEADLINES = { head: 240, memory: 120, page: 420, setup: 900 }
+const runPageBenignGroup = async (reads, members) => {
+  const failed = failedOf(await judgePage(reads, await pageSeen(reads, patchedGroup(PAGE.sources, members, pageLabel), `the rewrites of the group ${reads}`)))
+
+  for (const edit of members) {
+    check(`benign rewrite (${edit.family}): ${edit.name}: no check fails`, failed.length === 0, `together with the other rewrites of its group (--solo says which of them it is): ${detail(failed)}`)
+  }
+}
+
+// The deadlines, in seconds, to be set from the times measured (`--detail` says each variant's): a page variant waits at most TIMEOUT (120 s) for each step, so its deadline keeps a minute beyond that (the slowest page variant measured 26.4 s).
+const DEADLINES = { head: 240, memory: 120, page: 180, setup: 900 }
 const MEMORY_HEADING = '\nPlanted faults and benign rewrites of the sources'
 const PAGE_HEADING = '\nPlanted faults and benign rewrites of the page and the desired routes'
 
@@ -2592,9 +2728,9 @@ const variantsOf = () => [
     ...MUTATIONS.map((mutation, index) => ({ key: `mutant:${index}`, name: `planted fault: ${mutation.name}`, heading: MEMORY_HEADING, pool: 'memory', deadline: DEADLINES.memory, run: () => runMutant(index) })),
     ...BENIGN.map((edit, index) => ({ key: `benign:${index}`, name: `benign rewrite: ${edit.name}`, heading: MEMORY_HEADING, pool: 'memory', deadline: DEADLINES.memory, run: () => runBenign(index) })),
     { key: 'benign:together', name: 'every benign rewrite of the sources together', heading: MEMORY_HEADING, pool: 'memory', deadline: DEADLINES.memory, run: runBenignTogether },
-    ...BROWSER_MUTATIONS.map((mutation, index) => ({ key: `page-fault:${index}`, name: `planted fault of the page: ${mutation.name}`, heading: PAGE_HEADING, pool: 'page', deadline: DEADLINES.page, run: () => runPageFault(index) })),
-    ...BROWSER_BENIGN.map((edit, index) => ({ key: `page-benign:${index}`, name: `benign rewrite of the page: ${edit.name}`, heading: PAGE_HEADING, pool: 'page', deadline: DEADLINES.page, run: () => runPageBenign(index) })),
-    { key: 'page-benign:together', name: 'every benign rewrite of the page together', heading: PAGE_HEADING, pool: 'page', deadline: DEADLINES.page * 2, run: runPageBenignTogether },
+    ...BROWSER_MUTATIONS.flatMap((mutation, index) => (mutation.group ? [] : [{ key: `page-fault:${index}`, name: `planted fault of the page: ${mutation.name}`, heading: PAGE_HEADING, pool: 'page', deadline: DEADLINES.page, run: () => runPageFault(index) }])),
+    ...[...pageFaultGroups()].map(([group, members]) => ({ key: `page-group:${group}`, name: `planted faults of the page together (${group})`, heading: PAGE_HEADING, pool: 'page', deadline: DEADLINES.page, members, run: (handed) => runPageGroup(group, handed) })),
+    ...[...pageBenignGroups()].map(([reads, members]) => ({ key: `page-benign:${reads}`, name: `benign rewrites of the page read through ${reads} together`, heading: PAGE_HEADING, pool: 'page', deadline: DEADLINES.page, members, run: (handed) => runPageBenignGroup(reads, handed) })),
   ] : []),
 ]
 

@@ -9,11 +9,13 @@
   - `runChecks` runs a list of checks and gives { id, name, ok, kind, threw, detail } for each: `kind` is null for a pass, 'assertion' for a verdict or the failure of an adapter and 'error' for any other exception; `threw` is true when that failure is a call of the code under test that threw. `judged` throws a HarnessError for any 'error' and gives the failed results otherwise; `caughtBy` and `caughtAll` say whether the checks named for a fault failed by assertion.
   - A fault is never credited by a crash of the code under test. When the checks `caughtBy` or `caughtAll` would credit a fault with failed only because a call of the code under test threw, the fault crashes the subject instead of changing a value a check reads: that is a HarnessError that names the fault and the throw, and it stops the run, unless the fault declares that a throw is how it is caught (`{ throws: true }`). Results not made by `runChecks` carry no `threw` and are judged as assertions.
   - An observation of scripts/lib/browser-observe.js that carries a failure of the observation itself (the context did not open or close, the work threw) is `unobserved` even when a value is there: what the page showed cannot be trusted, and nothing is credited with it. An error the page raised that the check did not name stays behaviour, judged by the checks.
+  - A group of faults planted together and observed once (scripts/lib/suite-runner.js, a variant with `members`) is judged by `judgedGroup(results, members, { what })`: each member `{ name, fails, throws }` is credited by `caughtBy` over its own `fails` alone, so only its own named check failing by a value credits it (a throw is the HarnessError of `caughtBy`); the members name disjoint checks (a declaration that does not is a HarnessError); every named check must be among the results; and every check that no member names must hold, so that a member that breaks the screen for another member's binding, or beyond its own, is a HarnessError naming the check and its failure, and cannot hide behind the group. It gives `[{ member, caught, failed }]`, `failed` being the failed results of the member's own checks. A group of rewrites (members with `fails: []`) is credited with nothing and every check must hold. Planting the faults of a group is `plantedGroup` of scripts/lib/mutant-source.js, whose members touch different files or different anchors.
 
   Checked by scripts/check-fault-credit.js.
 */
 const rawAssert = require('./bounded-assert')
 const { HarnessError } = require('./browser-observe')
+const { declaredGroup } = require('./suite-runner')
 
 const MARK = Symbol('the failure of a check')
 const THREW = Symbol('a call of the code under test that threw')
@@ -200,6 +202,32 @@ const judged = (results, what = 'a fault or a rewrite') => {
   return results.filter((result) => !result.ok)
 }
 
+// The failed results of the observation of a group of faults planted together (`members`: { name, fails, throws }), and the verdict on each member: { member, caught, failed }. A HarnessError, which stops the run and is a defect of the harness in that group, for a declaration the runner would refuse, a check a member names that was not run, any result of kind 'error', and any check that no member names that failed (named, with its failure, as the collateral of the group), and, through `caughtBy`, for a member credited only by a throw. A member whose own checks all hold is `caught: false`: the fault was not seen. `alone` is for the run of one member by `--solo`, which the rule of at least two members does not bind.
+const judgedGroup = (results, members, { what = 'the group of faults', alone = false } = {}) => {
+  try {
+    declaredGroup(what, members, alone)
+  } catch (error) {
+    throw new HarnessError(error.message)
+  }
+
+  const failed = judged(results, what)
+  const named = new Set(members.flatMap((member) => member.fails))
+  const run = new Set(results.map((result) => result.id))
+  const missing = [...named].filter((id) => !run.has(id))
+
+  if (missing.length) {
+    throw new HarnessError(`${what} names checks that were not run: ${missing.join(', ')}`)
+  }
+
+  const collateral = failed.filter((result) => !named.has(result.id))
+
+  if (collateral.length) {
+    throw new HarnessError(`${what} made a check fail that no member names: ${collateral.map((result) => `${result.id}: ${result.detail}`).join('; ')}`)
+  }
+
+  return members.map((member) => ({ member, caught: caughtBy(failed, member.fails, { name: member.name, throws: member.throws }), failed: failed.filter((result) => member.fails.includes(result.id)) }))
+}
+
 // A fault whose credit rests on calls of the code under test that threw (`thrown`, the failed results of them) crashed the subject rather than changed a value a check reads: a HarnessError naming the fault and the throws, unless the fault declares that a throw is how it is caught.
 const creditedByThrow = (thrown, { name = 'a fault', throws = false }) => {
   if (!throws) {
@@ -236,4 +264,4 @@ const infrastructureFailure = (seen) => seen.error !== null && seen.error !== `t
 // An observation with no screen to judge: the work gave no value, or the observation failed in itself even where a value is there.
 const unobserved = (seen) => seen.value === null || infrastructureFailure(seen)
 
-module.exports = { MARK, marked, isMarked, isSubjectThrow, failure, assert, readAll, through, harnessOwn, harnessStore, boundary, subjectModule, kindOf, runChecks, judged, caughtBy, caughtAll, notCaught, infrastructureFailure, unobserved }
+module.exports = { MARK, marked, isMarked, isSubjectThrow, failure, assert, readAll, through, harnessOwn, harnessStore, boundary, subjectModule, kindOf, runChecks, judged, judgedGroup, caughtBy, caughtAll, notCaught, infrastructureFailure, unobserved }

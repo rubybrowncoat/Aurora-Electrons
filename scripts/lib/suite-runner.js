@@ -7,6 +7,8 @@
   process.exit(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 
   - variants: [{ key, name, run, heading, pool, head, deadline }], in the order they print. `key` names the variant on the command line and in the record (no comma), `name` is what the run says of it, `run()` runs it in this process and reports its checks through the suite's own counters. `heading` is printed above the first of a stretch of variants that share it. Variants of one `pool` share worker processes (a page server and a browser started once for them, the modules they load); a variant with no pool runs in a process of its own. A `head` is run even when `--only` leaves it out. `deadline` is in seconds (the `deadline` of runSuite when it has none).
+  - a group: a variant with `members` ([{ key, name, fails }], at least two) and a `run(members)` that plants the faults of all its members together and observes the screen once, as `{ key, name, run, members, heading, pool, deadline }`. It is one variant, with the stable key it was given, whose name holds the name of every member (so `--only` finds a group by the text of a member's name); `run` is handed all its members. `fails` is the ids of the checks that member is credited by (disjoint from every other member's, or the declaration is refused as a defect of the harness: `declaredGroup`); a group of rewrites has members with `fails: []` and no check may fail for any of them. Members that touch the same file touch different anchors, which the code that plants them tells (scripts/lib/mutant-source.js `plantedGroup`). Judging what was observed is scripts/lib/fault-credit.js `judgedGroup`: each member is credited only by its own checks, and a check that no member names must hold.
+  - `--solo` plants each member alone instead: the group's variant is replaced by one variant for each member, with the key `<group key>/<member key>`, the group's heading, pool and deadline, run with `run([member])`, so that what a group credits is proved against what each member earns alone (the record and the arguments of a run differ with the flag, so a run is only resumed with it again).
   - counts(): { checks, failures, extra }: the suite's counters as they stand (`extra` holds any other figures it adds up, by name).
   - prepare(queue): run in each worker before its first variant, with the variants it is to run, each the variant the suite defined (a key `--variants` gives again is handed as the variant of its key): it starts what they need (the page server, warmed, and the browser) and makes what more than one of them reads (the page as it is, a case read in a child). It has the `setup` deadline (seconds), apart from any variant's, which must cover the bounds of what it waits for. Work a variant would do only when it comes first in its worker belongs here: any variant can come first (in a fresh worker, a worker that replaced one that ended, a resumed run, a list `--variants` gives), and its deadline is set for its own work.
   - afterEach(variant): run after each variant in its worker, with the variant the suite defined: it puts back what the variant changed and throws when a trace of it is left (`reset` of scripts/lib/page-server.js). A throw fails that variant and ends the worker, so the next variant starts in a fresh one.
@@ -23,6 +25,7 @@
   --resume                    continue the run recorded with the same arguments
   --only=<text>[|<text>...]   the heads and the variants whose names hold one of the texts
   --variants=<key>[,<key>...] exactly these variants, in this order, in one worker (`head` and the others by their keys); a key given again runs again, as the variant `<key>#<n>` of its n-th run
+  --solo                      each member of a group in a variant of its own
   --worker=<key>[,<key>...]   the runner's own: a worker
 */
 const fs = require('fs')
@@ -43,7 +46,7 @@ const firstLine = (error) => String(error && error.message ? error.message : err
 
 // The runner's own arguments taken out of `argv`, and the rest, which the script reads as its own and every worker is given again.
 const runnerArgs = (argv = process.argv.slice(2)) => {
-  const parsed = { resume: false, only: null, variants: null, worker: null, rest: [] }
+  const parsed = { resume: false, only: null, variants: null, solo: false, worker: null, rest: [] }
 
   for (const argument of argv) {
     if (argument === '--resume') {
@@ -52,6 +55,8 @@ const runnerArgs = (argv = process.argv.slice(2)) => {
       parsed.only = argument.slice('--only='.length).split('|').filter(Boolean)
     } else if (argument.startsWith('--variants=')) {
       parsed.variants = argument.slice('--variants='.length).split(',').filter(Boolean)
+    } else if (argument === '--solo') {
+      parsed.solo = true
     } else if (argument.startsWith('--worker=')) {
       parsed.worker = argument.slice('--worker='.length).split(',').filter(Boolean)
     } else {
@@ -538,13 +543,93 @@ const supervise = async ({ script, byKey, selected, args, ordered, resume, setup
   return totals
 }
 
-// The list with the control added, checked for keys and names that repeat.
-const listOf = (variants, control, deadline) => {
-  const list = variants.map((variant) => ({ ...variant, deadline: variant.deadline || deadline }))
+// The rules of the declaration of a group (`members` of a variant), each a RunnerError, a defect of the harness that stops the run before anything starts: at least two members (one when `alone`, the run of a member by `--solo`, whose suite judges it as it judges the group), each with a key (no comma, space, slash or hash), a name and the ids of its checks in `fails`, no key or name twice, the members all faults or all rewrites (`fails: []`), and no check named by two members, since a check that fails for two members says nothing of either.
+const MEMBER_KEY = /^[^,\s#/]+$/
+
+const declaredGroup = (label, members, alone = false) => {
+  if (!Array.isArray(members) || members.length < (alone ? 1 : 2)) {
+    throw new RunnerError(`the group ${label} has fewer than two members: a fault planted alone is a variant of its own`)
+  }
+
+  const owners = new Map()
+
+  members.forEach((member, at) => {
+    const who = `member ${at + 1} of the group ${label}`
+
+    if (!member || typeof member.key !== 'string' || !MEMBER_KEY.test(member.key)) {
+      throw new RunnerError(`${who} has no key, or one with a comma, a space, a slash or a hash`)
+    }
+
+    if (typeof member.name !== 'string' || !member.name) {
+      throw new RunnerError(`${who} (${member.key}) has no name`)
+    }
+
+    if (!Array.isArray(member.fails) || member.fails.some((id) => typeof id !== 'string' || !id)) {
+      throw new RunnerError(`${who} (${member.key}) does not list the ids of its checks in \`fails\``)
+    }
+
+    const twin = members.slice(0, at).find((other) => other.key === member.key || other.name === member.name)
+
+    if (twin) {
+      throw new RunnerError(`the group ${label} has two members with the same ${twin.key === member.key ? 'key' : 'name'}: ${twin.key === member.key ? member.key : member.name}`)
+    }
+  })
+
+  if (members.some(({ fails }) => !fails.length) && members.some(({ fails }) => fails.length)) {
+    throw new RunnerError(`the group ${label} has members that name checks and members that name none: a group is all faults or all rewrites`)
+  }
+
+  for (const member of members) {
+    for (const id of member.fails) {
+      if (owners.has(id) && owners.get(id) !== member) {
+        throw new RunnerError(`the group ${label} has members that name the check ${id}: "${owners.get(id).name}" and "${member.name}"; a check named by two members says nothing of either, so they cannot be planted together`)
+      }
+
+      owners.set(id, member)
+    }
+  }
+}
+
+// The variants with each group (a variant with `members`) declared and replaced by what it runs as: one variant that runs all its members, or with `solo` one variant for each member, run alone. `first` is the key of the first of those, by the key of the group, for a control that names a group.
+const expandedGroups = (variants, solo) => {
+  const first = new Map()
+  const twice = variants.map(({ key }) => key).filter((key, at, all) => all.indexOf(key) !== at)
+
+  if (twice.length) {
+    throw new RunnerError(`variants repeat a key or a name, or have a key with a comma or a space: ${twice.join(', ')}`)
+  }
+
+  const list = variants.flatMap(({ members, ...variant }) => {
+    if (!members) {
+      return [variant]
+    }
+
+    declaredGroup(variant.key, members)
+
+    if (typeof variant.run !== 'function') {
+      throw new RunnerError(`the group ${variant.key} has no run`)
+    }
+
+    if (!solo) {
+      return [{ ...variant, name: `${variant.name}: ${members.map((member) => member.name).join('; ')}`, run: () => variant.run(members) }]
+    }
+
+    first.set(variant.key, `${variant.key}/${members[0].key}`)
+
+    return members.map((member) => ({ ...variant, key: `${variant.key}/${member.key}`, name: `${variant.name}, alone: ${member.name}`, run: () => variant.run([member]) }))
+  })
+
+  return { list, first }
+}
+
+// The list with the groups expanded and the control added, checked for keys and names that repeat.
+const listOf = (variants, control, deadline, solo = false) => {
+  const { list: expanded, first } = expandedGroups(variants, solo)
+  const list = expanded.map((variant) => ({ ...variant, deadline: variant.deadline || deadline }))
   const byKey = new Map(list.map((variant) => [variant.key, variant]))
 
   if (control) {
-    const fault = byKey.get(control.fault)
+    const fault = byKey.get(control.fault) || byKey.get(first.get(control.fault))
     const head = byKey.get(control.head)
 
     if (!fault || !head) {
@@ -581,7 +666,7 @@ const runOf = (byKey, key) => {
 
 const runSuite = async ({ script, variants, counts, prepare = async () => {}, afterEach = async () => {}, close = async () => {}, control = null, inputs = [], deadline = 300, setup = 900, between = 900, argv = process.argv.slice(2) }) => {
   const parsed = runnerArgs(argv)
-  const { list, byKey } = listOf(variants, control, deadline)
+  const { list, byKey } = listOf(variants, control, deadline, parsed.solo)
 
   if (parsed.worker) {
     inWorker = true
@@ -611,9 +696,9 @@ const runSuite = async ({ script, variants, counts, prepare = async () => {}, af
   }
 
   const selected = parsed.variants ? numbered(parsed.variants).map((key) => runOf(byKey, key)) : parsed.only ? list.filter((variant) => variant.head || parsed.only.some((text) => variant.name.includes(text))) : list
-  const args = [...parsed.rest, ...(parsed.only ? [`--only=${parsed.only.join('|')}`] : []), ...(parsed.variants ? [`--variants=${parsed.variants.join(',')}`] : [])]
+  const args = [...parsed.rest, ...(parsed.only ? [`--only=${parsed.only.join('|')}`] : []), ...(parsed.variants ? [`--variants=${parsed.variants.join(',')}`] : []), ...(parsed.solo ? ['--solo'] : [])]
 
-  return supervise({ script, byKey: new Map([...byKey, ...selected.map((variant) => [variant.key, variant])]), selected, args, ordered: Boolean(parsed.variants), resume: parsed.resume, setup, between, workerArgs: parsed.rest, inputs })
+  return supervise({ script, byKey: new Map([...byKey, ...selected.map((variant) => [variant.key, variant])]), selected, args, ordered: Boolean(parsed.variants), resume: parsed.resume, setup, between, workerArgs: [...parsed.rest, ...(parsed.solo ? ['--solo'] : [])], inputs })
 }
 
-module.exports = { runSuite, runnerArgs, step, treeHash, RunnerError, CONTROL_KEY }
+module.exports = { runSuite, runnerArgs, step, treeHash, declaredGroup, RunnerError, CONTROL_KEY }

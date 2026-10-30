@@ -1,4 +1,4 @@
-// A suite for scripts/check-suite-runner.js, run from a copy of the layout: variants that pass, fail, hang, spin, crash, throw and end late, a control over a state the reset after each variant puts back, and sets for resuming a run, for workers that keep dying, for a worker whose reset and close fail, for variants that say their steps and stall and for a setup that waits for a child. `--set=<name>` picks the set (`all`, `control`, `late`, `closing`, `resume`, `deaths`, `steps`, `prepared`). FAKE_LEAKY leaves the state planted after a variant, FAKE_SETUP_FAIL fails the setup of every worker, FAKE_RESET_FAIL=<key> fails the reset after that variant, FAKE_CLOSE_SLOW=<key> makes the close of the worker whose queue starts with that variant take 10 s, FAKE_CLOSE_FAIL fails every close after 2 s, FAKE_BETWEEN=<seconds> sets the `between` deadline (15 s, as the setup's, when not given), FAKE_EXTRA adds a variant to the set `resume`, FAKE_CHILD=<ms> is how long the child of the set `prepared` waits, FAKE_LIMIT=<ms> is its limit and FAKE_LAZY has the first variant of a worker of that set wait for the child instead of its setup. The suite reads saves/input.db (its inputs). Each variant notes its key and the process it runs in, as it starts, in ledger.txt at the root of the layout. The setup and the reset read the variants they are handed by the keys the suite gave them, as a suite's setup reads what to start from them, and fail on any other key. `--sleep=<ms>` runs the fixture as that child: it waits that long, says so and ends.
+// A suite for scripts/check-suite-runner.js, run from a copy of the layout: variants that pass, fail, hang, spin, crash, throw and end late, a control over a state the reset after each variant puts back, and sets for resuming a run, for workers that keep dying, for a worker whose reset and close fail, for variants that say their steps and stall, for a setup that waits for a child, for a group of faults planted together (`groups`, `groups-control`) and for groups the runner refuses (`declared`). `--set=<name>` picks the set (`all`, `control`, `late`, `closing`, `resume`, `deaths`, `steps`, `prepared`, `groups`, `groups-control`, `declared`). FAKE_GROUP_HANG=<key> makes the run that holds that member of the group hang, FAKE_GROUP picks the declaration the set `declared` refuses. FAKE_LEAKY leaves the state planted after a variant, FAKE_SETUP_FAIL fails the setup of every worker, FAKE_RESET_FAIL=<key> fails the reset after that variant, FAKE_CLOSE_SLOW=<key> makes the close of the worker whose queue starts with that variant take 10 s, FAKE_CLOSE_FAIL fails every close after 2 s, FAKE_BETWEEN=<seconds> sets the `between` deadline (15 s, as the setup's, when not given), FAKE_EXTRA adds a variant to the set `resume`, FAKE_CHILD=<ms> is how long the child of the set `prepared` waits, FAKE_LIMIT=<ms> is its limit and FAKE_LAZY has the first variant of a worker of that set wait for the child instead of its setup. The suite reads saves/input.db (its inputs). Each variant notes its key and the process it runs in, as it starts, in ledger.txt at the root of the layout. The setup and the reset read the variants they are handed by the keys the suite gave them, as a suite's setup reads what to start from them, and fail on any other key. `--sleep=<ms>` runs the fixture as that child: it waits that long, says so and ends.
 const fs = require('fs')
 const path = require('path')
 const { runSuite, runnerArgs, step, CONTROL_KEY } = require('./suite-runner')
@@ -55,6 +55,34 @@ const prepared = (key) => variant(key, async () => {
   }
 })
 
+const MEMBERS = () => ['a', 'b', 'c'].map((key) => ({ key, name: `member ${key}`, fails: [`check-${key}`] }))
+const group = (key, members = MEMBERS()) => ({
+  key,
+  name: `group ${key}`,
+  pool: 'suite',
+  deadline: 3,
+  members,
+  run: async (handed) => {
+    fs.appendFileSync(LEDGER, `${key}:${handed.map((member) => member.key).join('+')} ${process.pid}\n`)
+
+    if (handed.some((member) => member.key === process.env.FAKE_GROUP_HANG)) {
+      await never()
+    }
+
+    handed.forEach((member) => check(member.key, true))
+  },
+})
+const BAD = {
+  overlap: [{ key: 'a', name: 'member a', fails: ['shared'] }, { key: 'b', name: 'member b', fails: ['shared', 'other'] }],
+  lone: [{ key: 'a', name: 'member a', fails: ['check-a'] }],
+  'twin-key': [{ key: 'a', name: 'member a', fails: ['check-a'] }, { key: 'a', name: 'member b', fails: ['check-b'] }],
+  'twin-name': [{ key: 'a', name: 'member a', fails: ['check-a'] }, { key: 'b', name: 'member a', fails: ['check-b'] }],
+  mixed: [{ key: 'a', name: 'member a', fails: ['check-a'] }, { key: 'b', name: 'member b', fails: [] }],
+  slash: [{ key: 'a/b', name: 'member a', fails: ['check-a'] }, { key: 'b', name: 'member b', fails: ['check-b'] }],
+  nameless: [{ key: 'a', name: 'member a', fails: ['check-a'] }, { key: 'b', fails: ['check-b'] }],
+  unlisted: [{ key: 'a', name: 'member a', fails: ['check-a'] }, { key: 'b', name: 'member b' }],
+}
+
 const SETS = {
   all: () => [
     head(),
@@ -90,9 +118,14 @@ const SETS = {
     variant('closed', async () => { step('reading the page'); check('closed', true) }),
   ],
   prepared: () => [prepared('p1'), prepared('p2'), prepared('p3')],
+  // A group of three faults, planted together by one run of its own (the ledger notes the members it was handed, `g:a+b+c` or `g:b` alone), whose members pass a check of their own: FAKE_GROUP_HANG=<key> makes the run that holds that member hang.
+  groups: () => [head(), group('g')],
+  'groups-control': () => [head(), group('g')],
+  // A declaration the runner refuses, by FAKE_GROUP.
+  declared: () => (process.env.FAKE_GROUP === 'twin-group' ? [group('bad', [{ key: 'a', name: 'member a', fails: ['check-a'] }, { key: 'b', name: 'member b', fails: ['check-b'] }]), group('bad', [{ key: 'c', name: 'member c', fails: ['check-c'] }, { key: 'd', name: 'member d', fails: ['check-d'] }])] : [group('bad', BAD[process.env.FAKE_GROUP])]),
 }
 const VARIANTS = SETS[set]()
-const KNOWN = new Set([...VARIANTS.map(({ key }) => key), CONTROL_KEY])
+const KNOWN = new Set([CONTROL_KEY, ...VARIANTS.flatMap(({ key, members = [] }) => [key, ...members.map((member) => `${key}/${member.key}`)])])
 const known = (target, what) => {
   if (!KNOWN.has(target.key)) {
     throw new Error(`${what} was handed a variant the suite does not have: ${target.key}`)
@@ -150,7 +183,7 @@ const main = async () => {
         throw new Error('a close planted to fail')
       }
     },
-    control: ['all', 'control'].includes(set) ? { fault: 'fault', head: 'head' } : null,
+    control: ['all', 'control'].includes(set) ? { fault: 'fault', head: 'head' } : set === 'groups-control' ? { fault: 'g', head: 'head' } : null,
     deadline: 3,
     setup: 15,
     between: Number(process.env.FAKE_BETWEEN) || 15,

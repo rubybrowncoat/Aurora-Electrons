@@ -58,6 +58,52 @@ const plantedPatch = (file, text, from, to) => {
   return patched(file, text, from, to)
 }
 
+// The sources with a group of edits made together: `members` is [{ name, file, find, to }], `file` the key of the text in `texts` (`label(file)` is the file name the source is parsed as, the key itself when not given). Each `find` occurs exactly once in the text as it is, no two members of one file replace overlapping text (so one never changes the anchor of another, and the order they are made in is of no matter), and every changed source still parses. Members of different files never meet. `texts` is returned with the changed sources replaced.
+const patchedGroup = (texts, members, label = (file) => file) => {
+  const edits = new Map()
+
+  for (const member of members) {
+    const text = texts[member.file]
+
+    if (typeof text !== 'string') {
+      throw new TypeError(`The member "${member.name}" of the group names ${member.file}, which is no source of the group`)
+    }
+
+    const count = text.split(member.find).length - 1
+
+    if (count !== 1) {
+      throw new Error(`The anchor of the member "${member.name}" of the group does not apply exactly once in ${label(member.file)} (${count} matches): ${member.find}`)
+    }
+
+    const start = text.indexOf(member.find)
+    const end = start + member.find.length
+    const taken = edits.get(member.file) || []
+    const meets = taken.find((other) => start < other.end && other.start < end)
+
+    if (meets) {
+      throw new Error(`The members "${meets.name}" and "${member.name}" of the group touch the same text of ${label(member.file)}: members of one file need different anchors`)
+    }
+
+    edits.set(member.file, [...taken, { start, end, to: member.to, name: member.name }])
+  }
+
+  const result = { ...texts }
+
+  for (const [file, list] of edits) {
+    result[file] = [...list].sort((a, b) => b.start - a.start).reduce((text, edit) => `${text.slice(0, edit.start)}${edit.to}${text.slice(edit.end)}`, texts[file])
+    assertParses(label(file), result[file])
+  }
+
+  return result
+}
+
+// `patchedGroup` for a group of faults: it throws in a quick run, as `plantedPatch` does.
+const plantedGroup = (texts, members, label) => {
+  refusePlanting(members.map((member) => member.name).join('; '))
+
+  return patchedGroup(texts, members, label)
+}
+
 // A temporary copy of `directory` with `from` replaced by `to` in `file`, made only when the fault is valid, so an invalid one leaves nothing behind. A fault, so it throws in a quick run as `plantedPatch` does.
 const plantedCopy = (directory, prefix, file, from, to) => {
   refusePlanting(`${file}: ${from}`)
@@ -71,4 +117,4 @@ const plantedCopy = (directory, prefix, file, from, to) => {
   return copy
 }
 
-module.exports = { assertParses, patched, plantedPatch, plantedCopy }
+module.exports = { assertParses, patched, patchedGroup, plantedPatch, plantedGroup, plantedCopy }

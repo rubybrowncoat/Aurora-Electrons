@@ -217,7 +217,7 @@ const FAULTS = [
   ['refusePlanting does not name what was planted', [[NO_MUTATIONS, dollars(': #{what}. A script'), '. A script']], 'library'],
   ['plantedPatch does not refuse a planting', [[MUTANT_SOURCE, dollars('refusePlanting(`#{file}: #{from}`)\n\n  return patched'), 'return patched']], 'library'],
   ['patched refuses in a quick run', [[MUTANT_SOURCE, 'const patched = (file, text, from, to) => {\n', dollars('const patched = (file, text, from, to) => {\n  refusePlanting(`#{file}: #{from}`)\n')]], 'library'],
-  ['plantedPatch does not plant', [[MUTANT_SOURCE, 'return patched(file, text, from, to)\n}\n\n// A temporary', 'return text\n}\n\n// A temporary']], 'library'],
+  ['plantedPatch does not plant', [[MUTANT_SOURCE, 'return patched(file, text, from, to)\n}\n\n// The sources with a group', 'return text\n}\n\n// The sources with a group']], 'library'],
   ['plantedCopy does not refuse a planting', [[MUTANT_SOURCE, dollars('refusePlanting(`#{file}: #{from}`)\n\n  const result'), 'const result']], 'library'],
   ['check-all sets no variable', [['check-all.js', "...(quick ? { CHECK_NO_MUTATIONS: '1' } : {})", '...{}']], 'all'],
   ['check-all sets the variable in a full run too', [['check-all.js', "...(quick ? { CHECK_NO_MUTATIONS: '1' } : {})", "CHECK_NO_MUTATIONS: '1'"]], 'all'],

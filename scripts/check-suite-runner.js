@@ -18,7 +18,8 @@
   - `steps`: variants that say their steps (`step` of the runner, and `observe` of browser-observe for the steps of its work) and stall: a deadline names the last step its variant said, its own or its observation's, the step of the observation still open when another beside it has ended, and none for a variant that said none after a setup that said one, nor for a close (10 s, ended at 4 s) after a variant that said one; no step reaches the output, nor one said outside a worker;
   - `repeated`: `--variants` that names a key again runs it again, each run a variant of its own (`pass#2`) counted once, in one worker, whose setup and reset are handed the variant the suite defined; resumed with only the last repeat left (its line of the record torn), the run runs that repeat alone, on a setup handed the variant of its key;
   - `prepared`: a setup that waits for a child (4.5 s, under the limit of 8 s that check-pool's `startChild` puts on it), longer than a variant's deadline (3 s) and within the setup's (15 s), as the setup of scripts/check-specialist-deployments.js waits for the cases it reads in children: a variant that comes first in a fresh worker (`--variants`) or in a resumed run passes, the same wait in the first variant instead fails it by name, and a child past its limit is ended and said to be;
-  - `racing`: in a layout whose copy of check-pool waits 4 s before it ends a process, the setup's child, with a limit of 2 s, ends well at 3 s while it is being ended: it reads as a child that did not finish, never as one that succeeded.
+  - `racing`: in a layout whose copy of check-pool waits 4 s before it ends a process, the setup's child, with a limit of 2 s, ends well at 3 s while it is being ended: it reads as a child that did not finish, never as one that succeeded;
+  - `grouped`: a group of faults planted together (a variant with `members`) runs once, handed all its members, under the key of the group, and is resumed by that key; `solo`: with `--solo` each member runs alone as a variant of its own (`group/member`), handed only itself, the record of such a run is a run of its own, and `--variants=group/member` runs one; `selected`: `--only` matches the names of the members, whole or with `--solo`; `groupControl`: a control that names a group runs it, also with `--solo`; `groupHang`: a group that hangs fails by name, and with `--solo` only the member that hangs; `declared`: a group the runner refuses (too few members, a key that cannot be told apart, no name, no list of checks, a key or a name twice, faults and rewrites together, one check named by two members) stops the run before anything starts.
   Each planted fault rewrites one line of the copy of the runner (or of browser-observe or check-pool) and must make a named check fail; each benign rewrite must make none of the checks of the scenarios it touches fail.
 
   Prints `N of N checks passed`; any failed check sets exit code 1.
@@ -121,6 +122,7 @@ const RESUME = ['--set=resume', '--resume']
 const REPEAT = ['--set=all', '--variants=pass,fail,pass,pass']
 const CLOSING = { FAKE_RESET_FAIL: 'x1', FAKE_CLOSE_SLOW: 'x1', FAKE_BETWEEN: '4' }
 const PREPARED = ['--set=prepared']
+const GROUPED = ['--set=groups']
 // The setup's child: 4.5 s, past a variant's deadline (3 s) and within its limit (8 s) and the setup's deadline (15 s).
 const CHILD = { FAKE_CHILD: '4500' }
 
@@ -209,6 +211,48 @@ const SCENARIOS = {
     return { whole, resumed, resumedLedger, first, lazy, limited }
   },
   racing: (layout) => runIn(layout, [...PREPARED, '--variants=p1'], { env: { FAKE_CHILD: '3000', FAKE_LIMIT: '2000' } }),
+  grouped: async (layout) => {
+    const run = await runIn(layout, GROUPED)
+    const record = recordOf(layout)
+    const ledger = ledgerOf(layout)
+
+    tear(layout)
+
+    const resumed = await runIn(layout, [...GROUPED, '--resume'])
+
+    return { ...run, record, ledger, resumed, resumedLedger: ledgerOf(layout).slice(ledger.length) }
+  },
+  solo: async (layout) => {
+    const run = await runIn(layout, [...GROUPED, '--solo'])
+    const record = recordOf(layout)
+    const ledger = ledgerOf(layout)
+    const grouped = await runIn(layout, [...GROUPED, '--resume'])
+    const one = await runIn(layout, [...GROUPED, '--solo', '--variants=g/b'])
+
+    return { run, record, ledger, grouped, one, oneLedger: ledgerOf(layout).slice(ledger.length) }
+  },
+  selected: async (layout) => {
+    const grouped = await runIn(layout, [...GROUPED, '--only=member b']).then((run) => ({ ...run, ledger: ledgerOf(layout) }))
+    const solo = await runIn(layout, [...GROUPED, '--only=member b', '--solo']).then((run) => ({ ...run, ledger: ledgerOf(layout).slice(grouped.ledger.length) }))
+    const named = await runIn(layout, [...GROUPED, '--variants=g']).then((run) => ({ ...run, ledger: ledgerOf(layout).slice(grouped.ledger.length + solo.ledger.length) }))
+
+    return { grouped, solo, named }
+  },
+  groupControl: async (layout) => ({ grouped: await runIn(layout, ['--set=groups-control']), solo: await runIn(layout, ['--set=groups-control', '--solo']) }),
+  groupHang: async (layout) => ({ grouped: await runIn(layout, GROUPED, { env: { FAKE_GROUP_HANG: 'b' } }), solo: await runIn(layout, [...GROUPED, '--solo'], { env: { FAKE_GROUP_HANG: 'b' } }) }),
+  declared: async (layout) => {
+    const runs = {}
+
+    for (const what of ['overlap', 'lone', 'twin-key', 'twin-name', 'mixed', 'slash', 'nameless', 'unlisted', 'twin-group']) {
+      runs[what] = await runIn(layout, ['--set=declared'], { env: { FAKE_GROUP: what } })
+      runs[what].started = ledgerOf(layout).length
+    }
+
+    runs['twin-group-solo'] = await runIn(layout, ['--set=declared', '--solo'], { env: { FAKE_GROUP: 'twin-group' } })
+    runs['twin-group-solo'].started = ledgerOf(layout).length
+
+    return runs
+  },
 }
 
 const observe = async (sources, needs) => {
@@ -455,9 +499,72 @@ const CHECKS = [
     assert.ok(/^FAIL {2}p1$/m.test(racing.stdout), 'p1 failed as a check')
     assert.ok(/^ {2}the child did not finish in 2 s \(it had said that it slept\)$/m.test(racing.stdout), racing.stdout.trim().split('\n').slice(-3).join(' | '))
   }],
+  ['group-run', ['grouped'], 'a group runs once with all its members, as one variant under the key of the group: its members print their checks in order and the totals count each once', ({ grouped }) => {
+    ran(grouped, 'the run of a group')
+    assert.deepStrictEqual(printed(grouped.stdout), ['head', 'a', 'b', 'c'])
+    assert.equal(totalsOf(grouped.stdout), '4 of 4')
+    assert.deepStrictEqual(harnessOf(grouped.stdout), [])
+    assert.deepStrictEqual(Object.keys(grouped.record).sort(), ['g', 'head'])
+    assert.deepStrictEqual(grouped.ledger.map(([key]) => key), ['head', 'g:a+b+c'], 'the group ran once, handed all its members')
+    assert.equal(grouped.code, 0)
+  }],
+  ['group-resume', ['grouped'], 'a group is resumed by its key: a run whose last line is cut runs the group again, with all its members, and nothing else', ({ grouped }) => {
+    ran(grouped.resumed, 'the resumed run')
+    assert.ok(/resumed: 1 of 2 variants done/.test(grouped.resumed.stdout), grouped.resumed.stdout.split('\n')[0])
+    assert.deepStrictEqual(grouped.resumedLedger.map(([key]) => key), ['g:a+b+c'])
+    assert.equal(totalsOf(grouped.resumed.stdout), '4 of 4')
+  }],
+  ['solo-run', ['solo'], '--solo runs each member of a group alone, as a variant of its own under the key `group/member`, each handed only itself, in the worker the workers of the run are given it', ({ solo }) => {
+    ran(solo.run, 'the run with --solo')
+    assert.deepStrictEqual(Object.keys(solo.record).sort(), ['g/a', 'g/b', 'g/c', 'head'])
+    assert.deepStrictEqual(solo.ledger.map(([key]) => key), ['head', 'g:a', 'g:b', 'g:c'])
+    assert.equal(totalsOf(solo.run.stdout), '4 of 4')
+    assert.deepStrictEqual(harnessOf(solo.run.stdout), [])
+  }],
+  ['solo-resume', ['solo'], 'a run with --solo is a run of its own: the record of a grouped run with the same arguments is not there to resume, and the one run alone with --variants is its own', ({ solo }) => {
+    ran(solo.grouped, 'the grouped run after it')
+    assert.ok(refusalOf(solo.grouped).includes('there is no record of a run with these arguments'), refusalOf(solo.grouped) || solo.grouped.stderr.split('\n')[0])
+    assert.notEqual(solo.grouped.code, 0)
+  }],
+  ['solo-one', ['solo'], '--solo with --variants=group/member runs that member alone', ({ solo }) => {
+    ran(solo.one, 'the run of one member')
+    assert.deepStrictEqual(solo.oneLedger.map(([key]) => key), ['g:b'])
+    assert.equal(totalsOf(solo.one.stdout), '1 of 1')
+  }],
+  ['group-only', ['selected'], '--only matches the names of the members of a group: it runs the group, handed all its members, and with --solo only the member the text names, beside the head', ({ selected }) => {
+    ran(selected.grouped, 'the run of the group by --only')
+    assert.deepStrictEqual(selected.grouped.ledger.map(([key]) => key), ['head', 'g:a+b+c'])
+    ran(selected.solo, 'the run of one member by --only')
+    assert.deepStrictEqual(selected.solo.ledger.map(([key]) => key), ['head', 'g:b'])
+    ran(selected.named, 'the run of the group by its key')
+    assert.deepStrictEqual(selected.named.ledger.map(([key]) => key), ['g:a+b+c'])
+  }],
+  ['group-control', ['groupControl'], 'a control that names a group runs it, whole or, with --solo, by the first of its members, and then the head: it passes', ({ groupControl }) => {
+    for (const [what, run] of [['the control of a group', groupControl.grouped], ['the control of a group run with --solo', groupControl.solo]]) {
+      ran(run, what)
+      assert.ok(/^PASS {2}control: .*the fault caught, then the head 1 of 1/m.test(run.stdout), `${what} passed: ${run.stdout.split('\n').find((line) => line.includes('control')) || run.stderr.split('\n')[0]}`)
+    }
+  }],
+  ['group-hang', ['groupHang'], 'a group that hangs fails by name as a defect of the harness, and with --solo only the member run alone that hangs', ({ groupHang }) => {
+    ran(groupHang.grouped, 'the run of the group that hangs')
+    harnessIs(groupHang.grouped, 'g: the variant g did not finish in 3 s')
+    ran(groupHang.solo, 'the run of members alone, one of which hangs')
+    assert.deepStrictEqual(harnessOf(groupHang.solo.stdout), ['g/b: the variant g/b did not finish in 3 s'])
+    assert.ok(/^PASS {2}a$/m.test(groupHang.solo.stdout) && /^PASS {2}c$/m.test(groupHang.solo.stdout), 'the members beside it passed')
+  }],
+  ['group-declared', ['declared'], 'a group the runner refuses stops the run before anything starts, by the rule it breaks: too few members, a key that cannot be told apart, no name, no list of checks, a key or a name twice, faults and rewrites together, one check named by two members', ({ declared }) => {
+    const says = { overlap: 'the check shared', lone: 'fewer than two members', 'twin-key': 'the same key: a', 'twin-name': 'the same name: member a', mixed: 'all faults or all rewrites', slash: 'a comma, a space, a slash or a hash', nameless: '(b) has no name', unlisted: 'does not list the ids', 'twin-group': 'or a space: bad', 'twin-group-solo': 'or a space: bad' }
+
+    for (const [what, text] of Object.entries(says)) {
+      assert.ok(declared[what] && !declared[what].error && declared[what].timedOut === false, `the run of ${what} did not end`)
+      assert.equal(declared[what].code, 2, `${what}: the status of the run`)
+      assert.ok(declared[what].stderr.includes(text), `${what}: no "${text}" in ${declared[what].stderr.split('\n').find((line) => line.includes('group')) || declared[what].stderr.split('\n')[0]}`)
+      assert.equal(declared[what].started, 0, `${what}: a variant started`)
+    }
+  }],
 ]
 
-const EVERY = ['all', 'leaky', 'control', 'late', 'closing', 'interrupted', 'tornClose', 'deaths', 'setup', 'setupClose', 'resume', 'steps', 'repeated', 'prepared', 'racing']
+const EVERY = ['all', 'leaky', 'control', 'late', 'closing', 'interrupted', 'tornClose', 'deaths', 'setup', 'setupClose', 'resume', 'steps', 'repeated', 'prepared', 'racing', 'grouped', 'solo', 'selected', 'groupControl', 'groupHang', 'declared']
 
 /* eslint-disable no-template-curly-in-string */
 // [name, from, to, scenarios to run, the check ids one of which must fail, the file rewritten (the runner when not given)]
@@ -501,6 +608,23 @@ const MUTANTS = [
   ['a child past its limit is never ended', 'const timer = limit ? setTimeout(', 'const timer = false ? setTimeout(', ['prepared'], ['child-limit'], POOL],
   ['a child ended at its limit is not said to be', '    timedOut = true\n', '', ['prepared'], ['child-limit'], POOL],
   ['a child that ends as it is ended at its limit keeps its own status', 'code: timedOut ? null : code', 'code', ['racing'], ['child-race'], POOL],
+  ['a group runs a part of its members', 'run: () => variant.run(members) }]', 'run: () => variant.run([members[0]]) }]', ['grouped'], ['group-run']],
+  ['a group is run under the name of the group alone', "name: `${variant.name}: ${members.map((member) => member.name).join('; ')}`", 'name: variant.name', ['selected'], ['group-only']],
+  ['--solo does not split the groups', 'listOf(variants, control, deadline, parsed.solo)', 'listOf(variants, control, deadline, false)', ['solo'], ['solo-run']],
+  ['--solo does not reach the workers', 'workerArgs: [...parsed.rest, ...(parsed.solo ? [\'--solo\'] : [])]', 'workerArgs: parsed.rest', ['solo'], ['solo-run']],
+  ['--solo is no part of the arguments of the record', "...(parsed.variants ? [`--variants=${parsed.variants.join(',')}`] : []), ...(parsed.solo ? ['--solo'] : [])]", "...(parsed.variants ? [`--variants=${parsed.variants.join(',')}`] : [])]", ['solo'], ['solo-resume']],
+  ['a member run alone is handed the whole group', 'run: () => variant.run([member]) }))', 'run: () => variant.run(members) }))', ['solo'], ['solo-run']],
+  ['the members run alone share one name', 'name: `${variant.name}, alone: ${member.name}`', 'name: variant.name', ['solo'], ['solo-run']],
+  ['the control names a group that --solo split and finds none', 'byKey.get(control.fault) || byKey.get(first.get(control.fault))', 'byKey.get(control.fault)', ['groupControl'], ['group-control']],
+  ['a group of one member is declared', 'members.length < (alone ? 1 : 2)', 'false', ['declared'], ['group-declared']],
+  ['groups of one key are accepted before they are expanded', 'variants.map(({ key }) => key).filter((key, at, all) => all.indexOf(key) !== at)', '[]', ['declared'], ['group-declared']],
+  ['a member without a key, or with a key that cannot be told apart, is declared', "typeof member.key !== 'string' || !MEMBER_KEY.test(member.key)", "typeof member.key !== 'string'", ['declared'], ['group-declared']],
+  ['a member without a name is declared', "typeof member.name !== 'string' || !member.name", 'false', ['declared'], ['group-declared']],
+  ['a member that lists no checks is declared', '!Array.isArray(member.fails) || member.fails.some(', 'member.fails.some(', ['declared'], ['group-declared']],
+  ['two members with one key are declared', 'other.key === member.key || other.name === member.name', 'other.name === member.name', ['declared'], ['group-declared']],
+  ['two members with one name are declared', 'other.key === member.key || other.name === member.name', 'other.key === member.key', ['declared'], ['group-declared']],
+  ['faults and rewrites in one group are declared', 'if (members.some(({ fails }) => !fails.length) && members.some(({ fails }) => fails.length)) {', 'if (false) {', ['declared'], ['group-declared']],
+  ['two members that name one check are declared', 'if (owners.has(id) && owners.get(id) !== member) {', 'if (false) {', ['declared'], ['group-declared']],
 ]
 
 // Rewrites of the runner that change nothing a run does: each must leave every check of the scenarios it touches passing. [name, from, to, scenarios to run]
