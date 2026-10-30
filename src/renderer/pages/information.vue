@@ -267,24 +267,28 @@
             <v-text-field v-if="CivilianShippingLinesActive" v-model="ordersSearch" label="Search" placeholder="Colony or installation" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
           <div v-if="!CivilianShippingLinesActive" class="panel-body">Civilian shipping lines are off in this game, so no colony requests installations and no shipping line ships carry them.</div>
-          <v-data-table v-else :headers="orderHeaders" :items="workVisible" item-key="key" group-by="InstallationName" :search="ordersSearch" :custom-filter="filterOrder" :sort-by.sync="ordersTable.sortBy" :sort-desc.sync="ordersTable.sortDesc" :items-per-page.sync="ordersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="workRows.length ? 'No work orders match the filters.' : 'No colony has asked for or offered an installation.'">
-            <template #[`group.header`]="{ group, items, headers, isOpen, toggle }">
-              <td :colspan="headers.length">
-                <v-btn icon small :aria-label="isOpen ? `Collapse ${group}` : `Expand ${group}`" @click="toggle"><v-icon small>{{ isOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
-                <span class="font-weight-medium">{{ group }}</span>
-                <span class="caption text--secondary ml-2">{{ groupSummary(items) }}</span>
-              </td>
+          <v-data-table v-else :headers="orderHeaders" :items="workVisible" item-key="key" group-by="InstallationName" :search="ordersSearch" :custom-filter="filterOrder" :sort-by.sync="ordersTable.sortBy" :sort-desc.sync="ordersTable.sortDesc" :mobile-breakpoint="0" disable-pagination hide-default-footer :no-data-text="workRows.length ? 'No work orders match the filters.' : 'No colony has asked for or offered an installation.'">
+            <template #group="{ group, items, headers }">
+              <tr :key="`${group}:head`" class="v-row-group__header" :data-order-group="group">
+                <td>
+                  <v-btn icon small :disabled="searching" :aria-label="orderGroupOpen(group) ? `Collapse ${group}` : `Expand ${group}`" data-order-toggle @click="toggleOrderGroup(group)"><v-icon small>{{ orderGroupOpen(group) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
+                  <span class="font-weight-medium">{{ group }}</span>
+                  <span class="caption text--secondary ml-2">{{ count(items.length) }} {{ items.length === 1 ? 'colony' : 'colonies' }}</span>
+                </td>
+                <td v-for="header in headers.slice(1)" :key="header.value" class="text-end font-weight-medium" :data-order-total="header.value">{{ amount(groupTotal(items, header.value)) }}</td>
+              </tr>
+              <template v-if="orderGroupOpen(group)">
+                <tr v-for="item in items" :key="item.key" :data-order-row="item.key">
+                  <td>
+                    <div class="py-2">
+                      <div>{{ item.colonyName }}</div>
+                      <div class="caption text--secondary">{{ item.systemName }}</div>
+                    </div>
+                  </td>
+                  <td v-for="header in headers.slice(1)" :key="header.value" class="text-end"><span :class="{ 'text--secondary': !item[header.value] }">{{ amount(item[header.value]) }}</span></td>
+                </tr>
+              </template>
             </template>
-            <template #[`item.colonyName`]="{ item }">
-              <div class="py-2">
-                <div>{{ item.colonyName }}</div>
-                <div class="caption text--secondary">{{ item.systemName }}</div>
-              </div>
-            </template>
-            <template #[`item.supply`]="{ item }"><span :class="{ 'text--secondary': !item.supply }">{{ amount(item.supply) }}</span></template>
-            <template #[`item.demand`]="{ item }"><span :class="{ 'text--secondary': !item.demand }">{{ amount(item.demand) }}</span></template>
-            <template #[`item.out`]="{ item }"><span :class="{ 'text--secondary': !item.out }">{{ amount(item.out) }}</span></template>
-            <template #[`item.in`]="{ item }"><span :class="{ 'text--secondary': !item.in }">{{ amount(item.in) }}</span></template>
           </v-data-table>
           <div v-if="CivilianShippingLinesActive" class="panel-foot caption text--secondary">Use it to see what civilian shipping lines are carrying. A colony offers an installation as Supply and asks for one as Demand. When a shipping line ship sets off with a load, the game takes it from both the supplier's Supply and the buyer's Demand, so what is En route, out of a colony or toward it, is no longer counted in either. Shipping lines skip colonies marked military restricted. {{ idleNote }}</div>
         </v-card>
@@ -418,7 +422,7 @@ export default {
       ordersSearch: { key: 'transportOrdersSearch', default: '', scope: 'race' },
       classesTable: tableView('transportClassesTable', { sortBy: ['tonsYear'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       fleetsTable: tableView('transportFleetsTable', { sortBy: ['tonsYear'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
-      ordersTable: tableView('transportOrdersTable', { sortBy: ['demand'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      ordersTable: tableView('transportOrdersTable', { sortBy: ['demand'], sortDesc: [true] }),
     }),
   ],
   data() {
@@ -427,6 +431,7 @@ export default {
       fleetsExpanded: [],
       fuelReserveRead: null,
       optionList: OPTIONS,
+      openOrderGroups: [],
       pageSizes: PAGE_SIZES,
       STATUS,
       SECONDS_PER_DAY,
@@ -927,6 +932,11 @@ export default {
       return this.workVisible.reduce((totals, row) => ({ supply: totals.supply + row.supply, demand: totals.demand + row.demand, out: totals.out + row.out }), { supply: 0, demand: 0, out: 0 })
     },
 
+    // A search with text lists the orders it matches, so every group holding one is open then.
+    searching() {
+      return Boolean(this.ordersSearch)
+    },
+
     idleNote() {
       const hidden = this.workRows.length - this.workVisible.length
 
@@ -1360,10 +1370,17 @@ export default {
       return Number.isFinite(value) ? this.count(value, Number.isInteger(value) ? 0 : 1) : '—'
     },
 
-    groupSummary(items) {
-      const total = (field) => items.reduce((sum, item) => sum + item[field], 0)
+    // What the orders of a group add up to in one column.
+    groupTotal(items, field) {
+      return items.reduce((sum, item) => sum + item[field], 0)
+    },
 
-      return `Supply ${this.amount(total('supply'))} · Demand ${this.amount(total('demand'))} · En route ${this.amount(total('out'))}`
+    orderGroupOpen(group) {
+      return this.searching || this.openOrderGroups.includes(group)
+    },
+
+    toggleOrderGroup(group) {
+      this.openOrderGroups = this.openOrderGroups.includes(group) ? this.openOrderGroups.filter((name) => name !== group) : [...this.openOrderGroups, group]
     },
 
     amountText(value) {

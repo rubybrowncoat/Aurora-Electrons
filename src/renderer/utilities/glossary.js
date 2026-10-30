@@ -251,7 +251,7 @@ const PAGE_HELP = Object.freeze({
       'Transport options chooses stabilised jump points only, the use of Lagrange points, whether idle work orders count and whether a run takes only what it needs; Avoid keeps the route out of dangerous, alien or no-auto-route systems.',
       'Fleets on this run times each class as if it sailed alone, with its round trip, trips a year and the tonnes or colonists carried; expand a row for the loading and unloading, and the link beside the title opens the run in the Route Finder.',
       'Fleets sailing together times a whole fleet at the speed of its slowest ship, with the fuel it burns and the refuelling at colonies and tankers on the way; expand a fleet for its round trip, fuel ledger and profile.',
-      'Civilian work orders lists what the colonies offer and ask for of each installation and how much is on its way, grouped by installation under Search.',
+      'Civilian work orders lists what the colonies offer and ask for of each installation and how much is on its way, grouped by installation: each group is closed behind its totals until opened, and a search opens the groups it matches.',
       'A class that cannot load at an end of the run is marked with the reason, a fleet whose crew the save lacks has no round trip, and a bonus the save cannot settle counts as 1, so a time errs long.',
       'Loading takes 20 s per ton and 10 s per colonist, shortened by the cargo shuttle bays, the shuttle technology and the Logistics bonuses of the commander, administration and governor; a class timed alone must fit the run in one tank with no refuelling time counted, shipping-line ships excepted, while a fleet sailing together is timed with its refuelling.',
     ],
