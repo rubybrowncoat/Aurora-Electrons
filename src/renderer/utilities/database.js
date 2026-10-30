@@ -92,7 +92,9 @@ const guardQueries = (sequelize) => {
     }
     const timer = setTimeout(() => {
       interrupt(false)
-      reject(new Error(`The save took longer than ${QUERY_TIMEOUT_MS / 1000} s to answer and the read was stopped: ${String(sql).replace(/\s+/g, ' ').slice(0, 120)}`))
+      // The statement names tables and columns, which a notice must not show: it goes to the console.
+      console.error('The save took too long to answer a read', String(sql).replace(/\s+/g, ' ').slice(0, 120))
+      reject(new Error(`The save took longer than ${QUERY_TIMEOUT_MS / 1000} s to answer and the read was stopped`))
       finish()
     }, QUERY_TIMEOUT_MS)
 

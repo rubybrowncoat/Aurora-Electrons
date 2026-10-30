@@ -206,9 +206,15 @@ const DATABASE_FORMS = [
   [/^FOREIGN KEY constraint failed$/, () => 'a link to another row of the save fails'],
   [/^datatype mismatch$/, () => 'a value is of the wrong type for the save'],
   [/^database is locked$/, () => 'the save is locked by another program'],
+  [/^database table is locked$/, () => 'a table of the save is locked by a read that has not ended'],
   [/^attempt to write a readonly database$/, () => 'the save is read-only'],
   [/^unable to open database file$/, () => 'the save file cannot be opened'],
   [/^database disk image is malformed$/, () => 'the save file is damaged'],
+  [/^database or disk is full$/, () => 'the save or its disk is full'],
+  [/^disk I\/O error$/, () => 'the save file could not be read or written because of a disk error'],
+  [/^out of memory$/, () => 'the app ran out of memory for the read'],
+  [/^interrupted$/, () => 'the read was stopped'],
+  [/^file is not a database$/, () => 'the file is not a database'],
 ]
 
 // What a database error of a form not listed above says: a fixed sentence with nothing of the message in it, since such a message can name a column or a table in any way. The message goes to the console, once.

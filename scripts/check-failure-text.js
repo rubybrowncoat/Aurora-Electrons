@@ -119,6 +119,7 @@ const FILES = {
   'components/log/ArchivePanel': 'components/log/ArchivePanel.vue',
   'utilities/provenance': 'utilities/provenance.js',
   'web-error': '../../scripts/web/shims/web-error.js',
+  'utilities/database': 'utilities/database.js',
   'web-middleware': '../../scripts/web/database-middleware.js',
 }
 
@@ -284,6 +285,96 @@ const statementsOf = async (sources) => {
     }
 
     return problems.length ? problems.join('; ') : true
+  })
+
+  // A save that is full or locked: SQLite says so without a name, and the map's save shows it in words.
+  add('map-save-full', 'the map: positions that cannot be saved because the disk is full or a table is locked say so', async () => {
+    const options = (await get('pages/map')).default
+    const logged = console.error
+    const cases = [['SQLITE_FULL', 'database or disk is full', 'the save or its disk is full'], ['SQLITE_LOCKED', 'database table is locked', 'a table of the save is locked by a read that has not ended']]
+
+    console.error = () => {}
+
+    try {
+      for (const [code, message, words] of cases) {
+        const shown = []
+        const failure = Object.assign(new Error(`${code}: ${message}`), { code })
+        const database = { transaction: (work) => work(null), query: () => Promise.reject(failure) }
+        const vm = instantiate(options, { $store: { getters: {}, state: {} }, database, GameID: 1, RaceID: 1, data: { movedIds: [7], graphPositions: () => ({ 7: { x: 5, y: 5 } }), activateSnackbar: (snack) => shown.push(snack), saveDialog: true, systems: [] } })
+
+        await vm.savePositions()
+
+        if (shown.length !== 1 || shown[0].text !== `Couldn't save the positions: ${words}`) {
+          return `${code} shows ${JSON.stringify(shown)}`
+        }
+      }
+    } finally {
+      console.error = logged
+    }
+
+    return true
+  })
+
+  // A read that the save does not answer in time: the notice carries no statement, which names tables and columns; the statement goes to the console.
+  add('timeout', 'a read that the save does not answer in time is stopped without naming its statement, on the page and over the web', async () => {
+    const Module = require('module')
+    const { resetDatabase } = await loadModule('utilities/database', { stubs: { ...STUBS, ...MAP_STUBS, sequelize: `import { createRequire } from 'module'; const sequelize = createRequire(${JSON.stringify(`${root}/`)})('sequelize'); export const Model = sequelize.Model; export const Sequelize = sequelize.Sequelize; export default sequelize` }, sources: { 'utilities/database': sources['utilities/database'] } })
+    const { tracked } = await get('utilities/load-tracking')
+    const { failureWords } = await get('utilities/provenance')
+    const { webError } = await loadModule('web-error', { directory: path.join(root, 'scripts', 'web', 'shims'), sources: { 'web-error': sources['web-error'] } })
+    const middleware = new Module(path.join(root, 'scripts', 'web', 'database-middleware.js'), module)
+    const file = path.join(require('os').tmpdir(), `ae-timeout-${process.pid}-${Date.now()}.db`)
+    const made = new Database(file)
+
+    made.exec('create table FCT_System (SystemID integer)')
+    made.close()
+    middleware.filename = middleware.id
+    middleware.paths = Module._nodeModulePaths(path.dirname(middleware.filename))
+    middleware._compile(sources['web-middleware'], middleware.filename)
+
+    const timers = []
+    const { setTimeout: realTimeout } = globalThis
+    const logged = console.error
+    const log = console.log
+    const kept = []
+    let database
+
+    console.log = () => {}
+    console.error = (...said) => kept.push(said.join(' '))
+    globalThis.setTimeout = (callback, delay, ...rest) => (delay === 60000 ? timers.push(callback) : realTimeout(callback, delay, ...rest))
+
+    try {
+      database = resetDatabase(file)
+
+      const host = { loadErrors: {}, $set: (target, key, value) => { target[key] = value } }
+      const pending = tracked('systems', () => database.query('select FCT_System.SystemID from FCT_System')).call(host).catch((error) => error)
+
+      timers[0]()
+
+      const error = await pending
+      const over = failureWords(webError('/query', JSON.parse(JSON.stringify(middleware.exports.errorBody(error)))))
+      const said = [host.loadErrors.systems, over].map(inWords).find((result) => result !== true)
+
+      if (/FCT_|select/i.test(`${host.loadErrors.systems} ${over}`)) {
+        return `the notice says "${host.loadErrors.systems}" and over the web "${over}"`
+      }
+
+      if (!/took longer than 60 s/.test(String(host.loadErrors.systems))) {
+        return `the notice says "${host.loadErrors.systems}"`
+      }
+
+      if (!kept.some((text) => /select FCT_System.SystemID from FCT_System/.test(text))) {
+        return 'the statement is not on the console'
+      }
+
+      return said === undefined ? true : said
+    } finally {
+      globalThis.setTimeout = realTimeout
+      console.error = logged
+      console.log = log
+      await database.close().catch(() => {})
+      fs.rmSync(file, { force: true })
+    }
   })
 
   add('empires', 'the empire list that cannot be read says so in words', async () => {
@@ -542,7 +633,12 @@ const MUTATIONS = [
   { name: 'the web mode sends no code of the error', file: 'web-middleware', find: '...(code === undefined ? {} : { code })', replace: '...{}', fails: ['web-transport'] },
   { name: 'the web mode throws a new error without the code', file: 'web-error', find: 'if (body && body.code !== undefined && body.code !== null) {', replace: 'if (false) {', fails: ['web-transport'] },
   { name: 'a database error whose schema is damaged keeps the words of its inner message', file: 'utilities/provenance', find: 'const form = DATABASE_FORMS.find(([pattern]) => pattern.test(text))', replace: 'const form = DATABASE_FORMS.find(([pattern]) => pattern.test(text.replace(/^.* - /, "")))', fails: ['tracked', 'stations-picker'] },
+  { name: 'a disk that is full is the unknown error of the database', file: 'utilities/provenance', find: "  [/^database or disk is full$/, () => 'the save or its disk is full'],\n", replace: '', fails: ['map-save-full'] },
+  { name: 'a table that is locked is the unknown error of the database', file: 'utilities/provenance', find: "  [/^database table is locked$/, () => 'a table of the save is locked by a read that has not ended'],\n", replace: '', fails: ['map-save-full'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the notice of a read that took too long carries its statement', file: 'utilities/database', find: 'and the read was stopped`))', replace: 'and the read was stopped: ${String(sql)}`))', fails: ['timeout'] },
   { name: 'a file error that Sequelize wraps is worded as a database error', file: 'utilities/provenance', find: 'if (codesOf(error).some((code) => !/^SQLITE/.test(code))) {', replace: 'if (false) {', fails: ['wrapped-file'] },
+  // eslint-disable-next-line no-template-curly-in-string
   { name: 'a database error of a form the app does not know keeps its message', file: 'utilities/provenance', find: 'return UNKNOWN_DATABASE_ERROR', replace: 'return text', fails: ['tracked', 'map-save', 'stations-picker'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the map reports a failed save of positions as the database worded it', file: 'pages/map', find: 'text: `Couldn\'t save the positions: ${failureWords(error)}`', replace: 'text: `Couldn\'t save the positions: ${error.message}`', fails: ['map-save'] },

@@ -95,7 +95,7 @@ const databaseOf = (file, { log = null, fail = false, failEvents = false } = {})
     }
 
     if (fail || (failEvents && (RACE_LOG_STATEMENT.test(sql) || WINDOW_STATEMENT.test(sql)))) {
-      throw new Error('disk I/O error')
+      throw new Error('the log could not be read')
     }
 
     const key = `${file}|${sql}`
@@ -2144,7 +2144,7 @@ check('rfailed', 'a failed read of the log is not a failed pass: the empire\'s f
   assert.deepEqual(Object.keys(r.failed.events.races), [String(FALRYX_RACE)])
   assert.equal(failed.failures.length, 1, 'one failure entry')
   assert.equal(failed.failures[0].t, r.failed.t)
-  assert.equal(failed.failures[0].reason, 'disk I/O error')
+  assert.equal(failed.failures[0].reason, 'the log could not be read')
   assert.ok(Number.isFinite(failed.failures[0].at))
   assert.deepEqual(failed.increments, [])
   assert.deepEqual(failed.spans, [])

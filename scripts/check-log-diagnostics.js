@@ -87,7 +87,7 @@ const databaseOf = ({ ledger, rows, hidden = [], listed = WATCHED_TYPES, failLog
 
     if (/^select FCT_GameLog\.IncrementID, /.test(sql)) {
       if (failLog) {
-        throw new Error('disk I/O error')
+        throw new Error('the log could not be read')
       }
 
       const race = Number(/RaceID = (\d+)/.exec(sql)[1])
@@ -442,7 +442,7 @@ unit('verdict-unavailable', 'an empty log, and a failed read with no archive, ar
   assert.equal(empty.window.to, T(111))
   assert.equal(failed.verdict, 'unavailable')
   assert.equal(failed.results.events.status, 'unavailable')
-  assert.ok(failed.failed.includes('disk I/O error'))
+  assert.ok(failed.failed.includes('the log could not be read'))
   assert.deepEqual(failed.observations, [])
 })
 
@@ -455,7 +455,7 @@ unit('failed-with-archive', 'a failed read with an archive leaves the archive\'s
   assert.ok(diagnosis.reasons.includes('after'))
   assert.equal(diagnosis.verdict, 'found')
   assert.ok(diagnosis.observations.some((observation) => observation.message === 'archived combat'))
-  assert.ok(diagnosis.failed.includes('disk I/O error'))
+  assert.ok(diagnosis.failed.includes('the log could not be read'))
 })
 
 unit('no-window', 'no game time and no read place no window', async ({ d }) => {

@@ -147,7 +147,7 @@ const databaseOf = (file, { log = null, failFormations = false, recordedNpr = nu
     }
 
     if (failFormations && /FCT_GroundUnitFormation/.test(sql)) {
-      throw new Error('disk I/O error')
+      throw new Error('the formation read failed')
     }
 
     const rows = (await rowsOf(file, sql)).map((row) => (recordedNpr !== null && /from FCT_Race$/.test(sql) && Number(row.RaceID) === Number(recordedNpr) ? { ...row, SpecialNPRID: 0 } : asNpr !== null && /from FCT_Race$/.test(sql) && Number(row.RaceID) === Number(asNpr) ? { ...row, NPR: 1, SpecialNPRID: special ? 1 : 0 } : row))
@@ -654,7 +654,7 @@ const moddedChecks = (m) => {
     }),
     entry('modded: the empire file of the later pass holds both snapshots', (s) => same(s.laterBranch.races[MODDED.RaceID].snapshots.length, 2)),
     entry('modded: the save read again after a later one changes nothing in the record and adds no write', (s) => same({ same: equal(s.older.file, s.later), writes: s.older.writes, branches: Object.keys(s.older.registry.branches) }, { same: true, writes: 2, branches: ['b1'] })),
-    entry('modded: a failed read is noted and the empire snapshot is still written, with no capture and no object', (s) => same({ run: [s.failed.run.recorded, s.failed.run.failed.length, s.failed.run.superseded], snapshots: s.failed.branch.races[MODDED.RaceID].snapshots.length, captures: kindOf(s.failed.file, MODDED.RaceID).captures, objects: kindOf(s.failed.file, MODDED.RaceID).objects, failures: (kindOf(s.failed.file, MODDED.RaceID).failures || []).map(({ t, reason }) => [t, reason]) }, { run: [1, 0, false], snapshots: 1, captures: [], objects: {}, failures: [[s.t, 'disk I/O error']] })),
+    entry('modded: a failed read is noted and the empire snapshot is still written, with no capture and no object', (s) => same({ run: [s.failed.run.recorded, s.failed.run.failed.length, s.failed.run.superseded], snapshots: s.failed.branch.races[MODDED.RaceID].snapshots.length, captures: kindOf(s.failed.file, MODDED.RaceID).captures, objects: kindOf(s.failed.file, MODDED.RaceID).objects, failures: (kindOf(s.failed.file, MODDED.RaceID).failures || []).map(({ t, reason }) => [t, reason]) }, { run: [1, 0, false], snapshots: 1, captures: [], objects: {}, failures: [[s.t, 'the formation read failed']] })),
     entry('modded: the capture after a failed one is recorded and the failure stays noted', (s) => same({ captures: kindOf(s.filled, MODDED.RaceID).captures.length, count: ids(kindOf(s.filled, MODDED.RaceID)).length, failures: kindOf(s.filled, MODDED.RaceID).failures.length }, { captures: 1, count: s.oracle.size, failures: 1 })),
     entry('modded: a failed read over a recorded capture changes no object and no capture', (s) => same(plain(kindOf(s.erased.after, MODDED.RaceID)), plain(kindOf(s.erased.before, MODDED.RaceID)))),
     entry('modded: the choice withdrawn reads no more and writes no more, and keeps what was recorded', (s) => same({ statements: s.off.statements, writes: s.off.writes, kept: equal(s.off.file, s.later) }, { statements: 0, writes: 0, kept: true })),
