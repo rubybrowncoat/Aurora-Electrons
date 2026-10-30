@@ -5,10 +5,11 @@
 //
 // `seen` is the record of scripts/lib/browser-observe.js `observe`: its `value` is { logistics, hauling, actions, cells } for the parts asked for, `cells` keyed by the fixture's name, and the page errors, the console errors (those Vue catches included) and the failed requests are in it. No error is named in advance, so a page that raises one has an observation that says so.
 const pageLoading = require('../page-loading')
-const { observe, installScreen } = require('./browser-observe')
+const { observe, installScreen, settled } = require('./browser-observe')
 
 // Every step of an observation (opening the app, picking the game and the race, the wait for the save of the race, each settling, each click and wait for a page) is bounded by TIMEOUT, below the deadline the runner gives a variant that reads the screen (DEADLINES in scripts/check-resource-ledger.js), so a step that does not end fails by its own timeout and is named by the step it was at. The page server is warmed before the first observation (`warm` of scripts/lib/page-server.js), so no step meets a cold start.
 const TIMEOUT = 120000
+// How long a panel that stays loading is waited for.
 const LOADING_LIMIT = 45000
 const NAMES = { game: 'Aurelian Empire', race: 'Aurelian Empire' }
 // A control is pressed when it is on screen and enabled once the panel's own work is done (no write of the panel in progress); one that is not is not pressed, at once, and that is what is observed. Only the wait for that work and the click itself are bounded, by TIMEOUT, and either running out is a failure of the observation, never a control that was not pressed.
@@ -65,45 +66,11 @@ const defineHandle = () => {
 }
 
 const boot = async (page, url, step) => {
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !request.url().endsWith('/stat')
-  let inFlight = 0
-  let last = Date.now()
-
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight++
-      last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight--
-      last = Date.now()
-    }
-  })
-  page.on('requestfailed', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight--
-      last = Date.now()
-    }
-  })
-
-  // The page is settled when no database call is out and none has been made for a second, and its loading has ended or has had this long to end: a panel that waits on a prop it was never given stays loading for good (and the page goes on reading), which is what the page then shows and what the checks read.
+  // The page is settled when the reads it has out are answered and no round of its own work starts another (`settled` of scripts/lib/browser-observe.js), and its loading has ended or has had LOADING_LIMIT to end: a panel that waits on a prop it was never given stays loading for good (and the page goes on reading), which is what the page then shows and what the checks read.
   const settle = async () => {
-    const began = Date.now()
-    const loading = async () => Date.now() - began < LOADING_LIMIT && await page.evaluate(pageLoading)
-
-    // `inFlight` and `last` are changed by the request listeners above, not in this loop.
-    // eslint-disable-next-line no-unmodified-loop-condition
-    while (inFlight > 0 || Date.now() - last < 1000 || await loading()) {
-      if (Date.now() - began > TIMEOUT) {
-        throw new Error(`the page did not settle: ${inFlight} database calls in flight`)
-      }
-
-      await page.waitForTimeout(200)
-    }
-
-    await page.evaluate(async () => { await window.$app.$nextTick() })
+    await settled(page, { limit: TIMEOUT })
+    await page.waitForFunction(`!(${pageLoading})()`, null, { timeout: LOADING_LIMIT }).catch(() => {})
+    await settled(page, { limit: TIMEOUT })
   }
   const go = async (route) => {
     step(`opening ${route}`)
@@ -128,7 +95,7 @@ const boot = async (page, url, step) => {
   step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: TIMEOUT })
   step('waiting for the app to settle')
-  await settle()
+  await settled(page, { limit: TIMEOUT })
   await installScreen(page)
   await page.evaluate(defineHandle)
 
@@ -144,7 +111,6 @@ const logisticsPart = async ({ page, settle, go, step }) => {
   for (const view of [...views].reverse()) {
     step(`showing the view ${view} of Logistics`)
     await page.locator(`.v-btn-toggle .v-btn[value="${view}"]`).first().click({ timeout: TIMEOUT })
-    await page.waitForTimeout(300)
     await settle()
     byView[view] = { shown: await page.evaluate(() => window.$app.$route.matched[0].instances.default.view), panels: await page.evaluate(panelsOfPage) }
   }
@@ -152,8 +118,8 @@ const logisticsPart = async ({ page, settle, go, step }) => {
   return { views, byView }
 }
 
-// The Hauling page: the panels, and the Fill reserves switch clicked twice.
-const haulingPart = async ({ page, settle, go }) => {
+// The Hauling page: the panels, and where `flipping` the Fill reserves switch clicked twice (each click has the page work out its plan again, which takes seconds).
+const haulingPart = async ({ page, settle, go }, flipping) => {
   await go('/hauling')
 
   const panels = await page.evaluate(panelsOfPage)
@@ -164,16 +130,15 @@ const haulingPart = async ({ page, settle, go }) => {
   const visible = switchCount === 1 && (await switches.count()) === 1 ? await switches.first().evaluate((element) => window.__screen.visible(element)) : false
   const flips = [await read()]
 
-  if (visible) {
+  if (visible && flipping) {
     for (let time = 0; time < 2; time++) {
       await switches.first().locator('.v-input--selection-controls__input').click({ timeout: TIMEOUT })
-      await page.waitForTimeout(200)
       await settle()
       flips.push(await read())
     }
   }
 
-  return { panels, switchCount, switchVisible: visible, flips }
+  return { panels, switchCount, switchVisible: visible, ...(flipping ? { flips } : {}) }
 }
 
 // The buttons of the panel on the Hauling page, pressed by a click in the browser in the states that show them. `press` is false for a control that is not on screen or not enabled; `shown` counts the controls on screen.
@@ -191,7 +156,7 @@ const actionsPart = async ({ page, settle, go, step }) => {
 
     await page.locator(selector).first().click({ timeout: TIMEOUT })
     await page.evaluate(async () => { await window.$app.$nextTick() })
-    await page.waitForTimeout(150)
+    await settle()
 
     return true
   }
@@ -382,7 +347,8 @@ const mountFixture = async (spec) => {
     await vm.$nextTick()
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 150))
+  // The render that the records written start: a task and two frames, as the wait for the page to settle counts a round of the page's own work.
+  await new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 
   return { ready, problems, separator: spec.setting || getters.config.get('selectedSeparator', 'Tick'), statusWords: { ...vm.statusWords }, timingWords: { ...vm.timingWords }, minimumWords: JSON.parse(JSON.stringify(vm.minimumWords || {})), listed: vm.items.length }
 }
@@ -501,7 +467,7 @@ const observeScreen = (browser, url, parts) => observe(browser, async ({ page, s
 
   if (parts.hauling) {
     step('reading the Hauling page')
-    seen.hauling = await haulingPart(session)
+    seen.hauling = await haulingPart(session, Boolean(parts.flips))
   }
 
   if (parts.logistics) {

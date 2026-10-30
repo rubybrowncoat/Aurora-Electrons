@@ -18,7 +18,7 @@ const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
 const { fuelFillTruth } = require('./lib/fuel-service-oracle')
 const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
-const { observe, validate, HarnessError, installScreen, readFigure, rounded } = require('./lib/browser-observe')
+const { observe, validate, HarnessError, settled, installScreen, readFigure, rounded } = require('./lib/browser-observe')
 const pageLoading = require('./page-loading')
 const { loadUtilities } = require('./lib/utilities')
 
@@ -632,6 +632,12 @@ const motionChecks = {
       assert.deepEqual([flightOf(known) !== 'Not known', tripFuelOf(known).every(([perTrip, share]) => Number.isFinite(perTrip) && Number.isFinite(share))], [true, true], 'known hours: the flying time and the fuel of each ship are figures')
     }
 
+    // The fill target of the switch reaches the ledgers: with the hours known, the run takes the litres it needs with the switch on and a full tank with it off.
+    const receivedOf = (run) => run.ledger.stops.map((stop) => stop.receivedTotal)
+    const takingNeeded = motion({ moving: 1, systems: 1, required: true })
+
+    assert.deepEqual([receivedOf(takingNeeded).length, receivedOf(takingNeeded)[0] < receivedOf(fast)[0], receivedOf(takingNeeded).some((litres, index) => litres !== receivedOf(fast)[index])], [receivedOf(fast).length, true, true], `the fill target the run needs reaches the ledgers: the first stop gives less than a full tank and the stops differ from those of the full tank (${receivedOf(takingNeeded)} against ${receivedOf(fast)})`)
+
     // Hours not known: nothing that rests on the flown distances.
     assert.deepEqual([unknown.stage.moved, unknown.stage.clockUnknown, unknown.row.status], [true, true, 'unknown'], 'hours not known beside moving endpoints: the flown distances are not known and the verdict is not')
     assert.equal(unknown.ledger.legs.filter((leg) => Number.isFinite(leg.km)).length, 0, 'hours not known: no leg has a length')
@@ -1207,6 +1213,7 @@ const PURE_FAULTS = [
   { name: 'the flown distances not known beside moving endpoints whatever the hours', module: 'page', change: swap('clockUnknown: (moved || capped) && !timingKnown(ledger)', 'clockUnknown: moved || capped'), fails: ['motion'] },
   { name: 'the flown distances not known beside hours that are not, though the endpoints are held', module: 'page', change: swap('clockUnknown: (moved || capped) && !timingKnown(ledger)', 'clockUnknown: !timingKnown(ledger)'), fails: ['motion'] },
   { name: 'the next stop that serves looked for with no recipient in mind', change: swap('other === entry ? 1 : 0', '0'), fails: ['required'] },
+  { name: 'the switch of the fill target is not passed to the ledgers', module: 'page', change: swap('target: this.fillRequired ? \'required\' : \'full\'', 'target: \'full\''), fails: ['motion'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -1425,13 +1432,13 @@ const tankerStatements = (fleetId, classId, surplus) => [
   `update FCT_Ship set FleetID = ${fleetId}, ShipClassID = ${classId}, Fuel = ${TANKERS.blockedFuel} where ShipID = ${TANKERS.blocked}`,
 ]
 
-// A copy of the save for each variant in a folder of its own: the destination's stock set, and in `tankers` the stationary fleet.
-const plantWorld = async () => {
+// A copy of the save for each of `variants` in a folder of its own: the destination's stock set, and in `tankers` the stationary fleet.
+const plantWorld = async (variants = VARIANTS) => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-refuel-legs-'))
   const files = {}
   const figures = {}
 
-  for (const variant of VARIANTS) {
+  for (const variant of variants) {
     const file = path.join(folder, `${variant}.db`)
 
     fs.copyFileSync(path.join(root, FALRYX), file)
@@ -1514,7 +1521,7 @@ const truthOf = async (world) => {
   const variants = {}
   const shipSql = (where) => `select s.ShipID as id, s.ShipName as name, s.Fuel as fuel, s.RefuelPriority as priority, c.RefuelPriority as classPriority, c.FuelCapacity as capacity, c.Size as size, c.MinimumFuel as minimum, c.RefuellingRate as rate from FCT_Ship s inner join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where ${where}`
 
-  for (const variant of VARIANTS) {
+  for (const variant of Object.keys(world.files)) {
     const raw = await openAt(world.files[variant])
 
     try {
@@ -1636,36 +1643,8 @@ const readNotes = () => {
   return [...document.querySelectorAll('[data-fleet-panel] [data-fuel-note]')].map((note) => ({ input: note.getAttribute('data-fuel-input'), on: visible(note), text: visibleText(note), retry: Boolean(note.querySelector('button')) }))
 }
 
-// The page as a worker opens it: the game and the race picked, the run pushed, and the reads that follow finished. Gives the wait for the next change to settle.
+// The page as a worker opens it: the game and the race picked, the run pushed, and the reads that follow finished.
 const openPage = async (page, url, step) => {
-  const state = { inFlight: 0, last: Date.now() }
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
-
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
-    }
-  })
-
-  const settle = async (quiet = 1500) => {
-    const started = Date.now()
-
-    while (state.inFlight > 0 || Date.now() - state.last < quiet || await page.evaluate(pageLoading)) {
-      if (Date.now() - started > TIMEOUT) {
-        throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-      }
-
-      await page.waitForTimeout(250)
-    }
-  }
-
   step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
   await installScreen(page)
@@ -1682,13 +1661,13 @@ const openPage = async (page, url, step) => {
 
   step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
-  await settle()
+  await settled(page, { limit: TIMEOUT })
   step(`opening ${ROUTE}`)
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), ROUTE)
   await page.waitForFunction(pageLoading.arrived, ROUTE, { timeout: TIMEOUT })
   await page.waitForFunction(() => document.querySelector('[data-fleet-panel] [data-fleet-id]') !== null, null, { timeout: STAGE_TIMEOUT }).catch(() => {})
   step('waiting for the page to settle')
-  await settle()
+  await settled(page, { limit: TIMEOUT, loading: pageLoading })
   await page.evaluate(() => {
     window.__fleetVm = () => {
       let vm = document.querySelector('[data-fleet-panel]').__vue__
@@ -1701,16 +1680,11 @@ const openPage = async (page, url, step) => {
     }
   })
   await page.waitForFunction(() => Boolean(window.__fleetVm().fuelReserveRead && window.__fleetVm().fuelReserveRead.ready), null, { timeout: STAGE_TIMEOUT }).catch(() => {})
-  await settle()
-
-  return settle
+  await settled(page, { limit: TIMEOUT, loading: pageLoading })
 }
 
 // The wait after a step: the screen has drawn what the step changed and the reads that follow it are in.
-const settleAfter = async (page, settle) => {
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-  await settle(600)
-}
+const settleAfter = (page) => settled(page, { limit: TIMEOUT, loading: pageLoading })
 
 // The row of a fleet opened as a player does it: the table's expanded list emptied, then the fleet's name clicked.
 const expandRow = async (page, id) => {
@@ -1739,13 +1713,13 @@ const readView = async (page, ids) => {
   return { table: await page.evaluate(readTable), details }
 }
 
-const pickFleets = async (page, settle, ids) => {
+const pickFleets = async (page, ids) => {
   await page.evaluate((list) => window.__fleetVm().setFleets(list), ids)
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The option "Take only what the run needs" set as a player does it, from the menu of the options.
-const setRequired = async (page, settle, on) => {
+const setRequired = async (page, on) => {
   if ((await page.evaluate(() => window.__fleetVm().fillRequired)) === on) {
     return
   }
@@ -1754,14 +1728,14 @@ const setRequired = async (page, settle, on) => {
   await page.getByText('Take only what the run needs', { exact: true }).click({ timeout: TIMEOUT })
   await page.keyboard.press('Escape')
   await page.waitForFunction((want) => window.__fleetVm().fillRequired === want, on, { timeout: STAGE_TIMEOUT })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The table sorted by a header as a player does it: the header clicked, the rows read once the header says the sort is on.
-const sortBy = async (page, settle, label, state) => {
+const sortBy = async (page, label, state) => {
   await page.locator('[data-fleet-panel] thead th').filter({ hasText: new RegExp(`^\\s*${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}\\s*$`) }).first().click({ timeout: TIMEOUT })
   await page.waitForFunction((args) => [...document.querySelectorAll('[data-fleet-panel] thead th')].some((head) => head.innerText.trim() === args.label && head.getAttribute('aria-sort') === args.state), { label, state }, { timeout: STAGE_TIMEOUT })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 
   return { label, state, table: await page.evaluate(readTable) }
 }
@@ -1769,18 +1743,18 @@ const sortBy = async (page, settle, label, state) => {
 const SORTS = [['Trips / yr', 'ascending'], ['Status', 'ascending'], ['Fleet', 'ascending'], ['Fleet', 'descending'], ['Draw', 'ascending'], ['Draw', 'descending']]
 
 // The reads of the reserve records made to fail, as the reader's own record of failed reads says it.
-const readerFailure = async (page, settle) => {
+const readerFailure = async (page) => {
   await page.evaluate(() => {
     const find = (node) => (node.$options.name === 'FuelReserveReader' ? node : node.$children.map(find).find(Boolean))
     const reader = find(window.__fleetVm())
 
     reader.loadErrors = { ...reader.loadErrors, reserveObjects: 'planted failure' }
   })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The planted failures of the tracked reads taken away, so that a stage starts clear of the one before it whether or not that stage's Retry did its work.
-const liftPlanted = async (page, settle) => {
+const liftPlanted = async (page) => {
   await page.evaluate(() => {
     const find = (node) => (node.$options.name === 'FuelReserveReader' ? node : node.$children.map(find).find(Boolean))
     const vm = window.__fleetVm()
@@ -1789,32 +1763,32 @@ const liftPlanted = async (page, settle) => {
     reader.loadErrors = { ...reader.loadErrors, reserveObjects: null }
     vm.$set(vm.loadErrors, 'fuelSites', null)
   })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The read of the refuelling sites made to fail, as the page's own record of failed reads says it.
-const sitesFailure = async (page, settle) => {
+const sitesFailure = async (page) => {
   await page.evaluate(() => {
     const vm = window.__fleetVm()
 
     vm.$set(vm.loadErrors, 'fuelSites', 'planted failure')
   })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The records of the reserves made not to open, as the reader's own record of its repository says it.
-const repositoryFailure = async (page, settle) => {
+const repositoryFailure = async (page) => {
   await page.evaluate(() => {
     const find = (node) => (node.$options.name === 'FuelReserveReader' ? node : node.$children.map(find).find(Boolean))
     const reader = find(window.__fleetVm())
 
     reader.reserveRecords = Object.freeze({ repository: null, error: 'planted failure' })
   })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The reader's repository made to refuse its records (the refusal the repository raises for a store it cannot read), for as long as `window.__refusal.on` holds: the cause of the failure, which `recordsAllowed` lifts.
-const recordsRefused = async (page, settle) => {
+const recordsRefused = async (page) => {
   await page.evaluate(() => {
     const find = (node) => (node.$options.name === 'FuelReserveReader' ? node : node.$children.map(find).find(Boolean))
     const reader = find(window.__fleetVm())
@@ -1835,7 +1809,7 @@ const recordsRefused = async (page, settle) => {
       error: null,
     })
   })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The cause of the refusal lifted; the page reads nothing again until the player presses Retry.
@@ -1845,16 +1819,15 @@ const recordsAllowed = async (page) => {
   })
 }
 
-// The Retry of the note of an input pressed as a player does it (nothing is pressed where the note carries none), then the wait until the note is gone, or for as long as the stage may take.
-const retryNote = async (page, settle, input) => {
+// The Retry of the note of an input pressed as a player does it (nothing is pressed where the note carries none), then the wait for the reads it starts to be answered and the screen to have drawn them: whether the note is gone is what the read after it observes.
+const retryNote = async (page, input) => {
   const button = page.locator(`[data-fleet-panel] [data-fuel-input="${input}"] button`)
 
   if (await button.count()) {
     await button.first().click({ timeout: TIMEOUT })
-    await page.waitForFunction((key) => !document.querySelector(`[data-fleet-panel] [data-fuel-input="${key}"]`), input, { timeout: STAGE_TIMEOUT }).catch(() => {})
   }
 
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The table of the view and the notes on the panel.
@@ -1868,7 +1841,7 @@ const observeSession = async (variant, wanted) => {
   await ENV.server.useSave(file)
 
   const seen = await observe(ENV.chrome, async ({ page, step }) => {
-    const settle = await openPage(page, ENV.server.url, step)
+    await openPage(page, ENV.server.url, step)
     const out = {}
 
     if (wanted.includes(variant)) {
@@ -1881,54 +1854,54 @@ const observeSession = async (variant, wanted) => {
 
       for (const [label, state] of SORTS) {
         step(`sorting by ${label}, ${state}`)
-        out.sorts.push(await sortBy(page, settle, label, state))
+        out.sorts.push(await sortBy(page, label, state))
       }
     }
 
     if (wanted.includes('unread')) {
       step('reading the fleets while the reserve records are not read')
-      await readerFailure(page, settle)
+      await readerFailure(page)
       out.unread = { ...(await readView(page, ALL_IDS)), notes: await page.evaluate(readNotes) }
       step('trying the reserve records again')
-      await retryNote(page, settle, 'reserves')
+      await retryNote(page, 'reserves')
       out.retried = await readTableAndNotes(page)
-      await liftPlanted(page, settle)
+      await liftPlanted(page)
       step('reading the fleets while the refuelling sites are not read')
-      await sitesFailure(page, settle)
+      await sitesFailure(page)
       out.sitesUnread = await readTableAndNotes(page)
       step('trying the refuelling sites again')
-      await retryNote(page, settle, 'sites')
+      await retryNote(page, 'sites')
       out.sitesRetried = await readTableAndNotes(page)
-      await liftPlanted(page, settle)
+      await liftPlanted(page)
       step('reading the fleets while the reserve records are refused')
-      await recordsRefused(page, settle)
+      await recordsRefused(page)
       out.refusedUnread = await readTableAndNotes(page)
       step('lifting the refusal and trying the reserve records again')
       await recordsAllowed(page)
-      await retryNote(page, settle, 'reserves')
+      await retryNote(page, 'reserves')
       out.refusedRetried = await readTableAndNotes(page)
       step('reading the fleets while the reserve records cannot be opened')
-      await repositoryFailure(page, settle)
+      await repositoryFailure(page)
       out.repoUnread = await readTableAndNotes(page)
       step('trying the reserve records again')
-      await retryNote(page, settle, 'reserves')
+      await retryNote(page, 'reserves')
       out.repoRetried = await readTableAndNotes(page)
     }
 
     if (wanted.includes('picks')) {
       step('picking the fleets, then the other way round')
-      await pickFleets(page, settle, [FLEET.Zulu.id, FLEET.Yankee.id])
+      await pickFleets(page, [FLEET.Zulu.id, FLEET.Yankee.id])
       out.picks = { ab: await readView(page, [FLEET.Zulu.id, FLEET.Yankee.id]) }
-      await pickFleets(page, settle, [FLEET.Yankee.id, FLEET.Zulu.id])
+      await pickFleets(page, [FLEET.Yankee.id, FLEET.Zulu.id])
       out.picks.ba = await readView(page, [FLEET.Zulu.id, FLEET.Yankee.id])
     }
 
     if (wanted.includes('required')) {
       step('taking only what the run needs, then the full tanks again')
-      await pickFleets(page, settle, [FLEET.Zulu.id, FLEET.Yankee.id])
-      await setRequired(page, settle, true)
+      await pickFleets(page, [FLEET.Zulu.id, FLEET.Yankee.id])
+      await setRequired(page, true)
       out.required = { on: await readView(page, [FLEET.Zulu.id, FLEET.Yankee.id]) }
-      await setRequired(page, settle, false)
+      await setRequired(page, false)
       out.required.off = await readView(page, [FLEET.Zulu.id, FLEET.Yankee.id])
     }
 
@@ -1938,12 +1911,15 @@ const observeSession = async (variant, wanted) => {
   return { seen, orders: [before, await ordersIn(file)] }
 }
 
+// The variants whose sessions read any of `keys`.
+const sessionsOf = (keys) => VARIANTS.filter((name) => SESSION_KEYS[name].some((key) => keys.includes(key)))
+
 // The page read for `keys`: the sessions of the variants those keys need, merged. `{ value, unexpected }`, or `{ failed }` with the record of the session that did not get through.
 const observeKeys = async (keys, label) => {
   const value = { orders: {} }
   const unexpected = []
 
-  for (const variant of VARIANTS.filter((name) => SESSION_KEYS[name].some((key) => keys.includes(key)))) {
+  for (const variant of sessionsOf(keys)) {
     const { seen, orders } = await observeSession(variant, SESSION_KEYS[variant].filter((key) => keys.includes(key)))
 
     validate(seen, `${label} (${variant})`)
@@ -2382,15 +2358,16 @@ const verdict = (problems) => (problems.length === 0 ? true : short(problems.sli
 
 // ---------- the checks of the page ----------
 
-const ALL_KEYS = ['full', 'half', 'short', 'zero', 'tankers', 'sorts', 'unread', 'picks', 'required']
 const STATUS_KEYS = ['full', 'half', 'zero']
 
+// The sessions a check reads: `needs` for the head, and `least` where a planted fault or a rewrite is judged by the check in fewer (a check judges the variants it is given).
 const PAGE_CHECKS = [
   {
     id: 'status',
     name: 'the verdict of each fleet per variant (a full stock, a stock of one and a half fleets, none), and the note of a fleet that runs dry names the leg, the ship that needs most and why the destination does not serve',
     needs: STATUS_KEYS,
-    test: (o, t) => verdict(STATUS_KEYS.flatMap((key) => {
+    least: ['half'],
+    test: (o, t) => verdict(STATUS_KEYS.filter((key) => o[key]).flatMap((key) => {
       const plans = plansOf(t.truth, key)
 
       if (plans.map((plan) => plan.status).join() !== VERDICTS[key].join()) {
@@ -2404,13 +2381,15 @@ const PAGE_CHECKS = [
     id: 'cycle',
     name: 'the refuelling at the destination in the round trip equals the hours of the fill (a colony and a tanker fleet, which only a lower bound is given for), and the total and the trips a year include it',
     needs: ['half', 'tankers'],
-    test: (o, t) => verdict(['half', 'tankers'].flatMap((key) => cycleProblems(o[key], plansOf(t.truth, key), t.words))),
+    least: ['half'],
+    test: (o, t) => verdict(['half', 'tankers'].filter((key) => o[key]).flatMap((key) => cycleProblems(o[key], plansOf(t.truth, key), t.words))),
   },
   {
     id: 'ledger',
     name: 'each ship\'s litres at every leg and fill, what the return of the fleet and of each ship is, the sources at both stops with what they held, what the fleets ahead took, what the fleet received and what is left, the limiting ship',
     needs: ['short', 'half'],
-    test: (o, t) => verdict(['short', 'half'].flatMap((key) => ledgerProblems(o[key], plansOf(t.truth, key), t.truth.variants[key], t.words))),
+    least: ['half'],
+    test: (o, t) => verdict(['short', 'half'].filter((key) => o[key]).flatMap((key) => ledgerProblems(o[key], plansOf(t.truth, key), t.truth.variants[key], t.words))),
   },
   {
     id: 'tankers',
@@ -2521,13 +2500,13 @@ const PAGE_CHECKS = [
   {
     id: 'orders',
     name: 'the orders of the planted copy are as many after every variant as before (a guard, not credited)',
-    needs: ALL_KEYS,
+    needs: [],
     test: (o) => verdict(Object.entries(o.orders).filter(([, counts]) => counts[0] !== counts[1]).map(([variant, counts]) => [variant, ...counts])),
   },
   {
     id: 'no-errors',
     name: 'the page raises no error',
-    needs: ALL_KEYS,
+    needs: [],
     test: (o) => verdict(o.unexpected.slice(0, 3)),
   },
 ]
@@ -2555,7 +2534,6 @@ const PAGE_FAULTS = [
   { name: 'the fleets picked are drawn in the order of their IDs', change: swap('[fleetId, index]', '[fleetId, fleetId]'), fails: ['draw'] },
   { name: 'the draw position is the place of the row in the table', change: (text) => swap('item.draw`]="{ item }">', 'item.draw`]="{ item, index }">')(swap('{{ item.draw }} of {{ item.drawOf }}', '{{ index + 1 }} of {{ item.drawOf }}')(text)), fails: ['draw', 'sort-stable'] },
   { name: 'the draw order follows the sort of the table', change: swap('drawOrderOf(this.fleetGroups.filter((fleet) => !chosen.size || chosen.has(fleet.FleetID)), this.chosenFleetIds).map(', 'drawOrderOf(this.fleetGroups.filter((fleet) => !chosen.size || chosen.has(fleet.FleetID)), this.chosenFleetIds)[[].concat(this.fleetsTable.sortDesc)[0] ? \'reverse\' : \'slice\']().map('), fails: ['sort-stable'] },
-  { name: 'the switch of the fill target is not passed to the ledgers', change: swap('target: this.fillRequired ? \'required\' : \'full\'', 'target: \'full\''), fails: ['fill-target'] },
   { name: 'the refuelling sites are used while their read is failed', change: swap('sites: this.loadErrors.fuelSites === null ? this.fuelSites || null : null', 'sites: this.fuelSites || null'), fails: ['unread'] },
   { name: 'the note of a failed read of the reserve records is not drawn', change: swap('if (reserves && reserves.failed) {', 'if (false && reserves && reserves.failed) {'), fails: ['unread'] },
   { name: 'the Retry of the refuelling sites reads another input', change: swap('this.$asyncComputed.fuelSites.update()', 'this.$asyncComputed.fleetShips.update()'), fails: ['unread'] },
@@ -2572,19 +2550,18 @@ const PAGE_FAULTS = [
   { name: 'the share of the limiting ship drawn with a digit before it, a figure that contains the right one', change: swap('with ${this.count(limiting.share * 100)}%`', 'with 1${this.count(limiting.share * 100)}%`'), fails: ['ledger'] },
   { name: 'the return share of a row drawn with a digit before it', change: swap('returns with {{ count(item.returnShare * 100) }}%', 'returns with 1{{ count(item.returnShare * 100) }}%'), fails: ['ledger'] },
   { name: 'the trips a year of the round trip drawn in exponent form', change: swap("{ key: 'year', label: 'Round trips a year', text: known ? this.count(trip.trips, 1) : 'Not known' }", "{ key: 'year', label: 'Round trips a year', text: known ? trip.trips.toExponential(2) : 'Not known' }"), fails: ['cycle'] },
+  { name: 'the foot says the option is on whatever its state', change: swap('return this.fillRequired ? \'Each ship takes only', 'return true ? \'Each ship takes only'), fails: ['fill-target'] },
   { name: 'the litres of a note drawn with a digit before them', change: swap('litres: (value) => `${this.count(value)} L`, hours:', 'litres: (value) => `1${this.count(value)} L`, hours:'), fails: ['status'] },
   { name: 'a source that can serve headed with the words of one that cannot', change: swap('verdict: allowed ? SERVICE_VERDICTS.allowed :', 'verdict: allowed ? SERVICE_VERDICTS.blocked :'), fails: ['ledger'] },
   { name: 'a source that cannot serve headed with the words of one that can', change: swap('`${SERVICE_VERDICTS[part.permission]}: ${reason}`', '`${SERVICE_VERDICTS.allowed}: ${reason}`'), fails: ['ledger'] },
 ]
 
+// A rewrite is judged by the checks that read the part of the page it changes (`checks`, and the guards), in the fewest sessions they allow.
 const PAGE_BENIGN = [
-  { name: 'the verdict "can run" written as a negated test', change: swap('const works = status === \'ok\'\n      const timed = runs', 'const works = !(status !== \'ok\')\n      const timed = runs') },
-  { name: 'the dry mark of a leg worded another way', change: swap('`runs dry, short by ${litres(leg.shortfall)}`', '`out of fuel, ${litres(leg.shortfall)} needed`') },
-  { name: 'the lower bound of a fill written after the hours', change: swap(HOURS_OF_PART, "`${this.span(part.hours * 3600)}${part.bound === 'at-least' ? ` ${SERVICE_BOUNDS['at-least'].after}` : ''}`") },
-  { name: 'the lower-bound wording of the module\'s word table changed, which the check reads from the module as served', file: LEDGER_FILE, table: true, change: swap("before: 'at least'", "before: 'no fewer than'") },
-  { name: 'the wait and the round trip drawn as a range whatever their ends', change: swap('(low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)', '`${this.span(low)} to ${this.span(high)}`') },
-  { name: 'the share of the limiting ship written with words after it', change: swap('`arrives at ${limiting.stop} with ${this.count(limiting.share * 100)}%`', '`arrives at ${limiting.stop} holding ${this.count(limiting.share * 100)}% of its tank`') },
-  { name: 'the words of the verdict of a source changed in the module\'s table, which the check reads from the module as served', file: LEDGER_FILE, table: true, change: swap("allowed: 'Can serve'", "allowed: 'May serve'") },
+  { name: 'the verdict "can run" written as a negated test', checks: ['tankers', 'orders', 'no-errors'], change: swap('const works = status === \'ok\'\n      const timed = runs', 'const works = !(status !== \'ok\')\n      const timed = runs') },
+  { name: 'the dry mark of a leg worded another way', checks: ['ledger', 'orders', 'no-errors'], change: swap('`runs dry, short by ${litres(leg.shortfall)}`', '`out of fuel, ${litres(leg.shortfall)} needed`') },
+  { name: 'the lower bound of a fill written after the hours', checks: ['tankers', 'orders', 'no-errors'], change: swap(HOURS_OF_PART, "`${this.span(part.hours * 3600)}${part.bound === 'at-least' ? ` ${SERVICE_BOUNDS['at-least'].after}` : ''}`") },
+  { name: 'the lower-bound wording of the module\'s word table changed, which the check reads from the module as served', checks: ['tankers', 'orders', 'no-errors'], file: LEDGER_FILE, table: true, change: swap("before: 'at least'", "before: 'no fewer than'") },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -2607,17 +2584,17 @@ const wordsFor = async (variant) => {
   return wordsOf(loaded[MODULE])
 }
 
-// A worker's setup for the page: the planted copies, what each should read, the ledger's own tables of words, one page server over the first copy, warmed, and one Chromium.
-const setUp = async () => {
+// A worker's setup for the page: the planted copies of the variants `sessions`, what each should read, the ledger's own tables of words, one page server over the first copy, warmed, and one Chromium.
+const setUp = async (sessions) => {
   const { startPageServer } = require('./lib/page-server')
-  const world = await plantWorld()
+  const world = await plantWorld(sessions)
 
   cleanups.push(async () => fs.rmSync(world.folder, { recursive: true, force: true }))
 
   const loaded = await loadUtilities([MODULE])
   const env = { world, truth: await truthOf(world), words: wordsOf(loaded[MODULE]), original: fs.readFileSync(path.join(root, PAGE), 'utf8') }
 
-  env.server = await startPageServer({ save: world.files.half })
+  env.server = await startPageServer({ save: world.files[sessions[0]] })
   cleanups.push(() => env.server.stop())
   env.chrome = await require('playwright').chromium.launch()
   cleanups.push(() => env.chrome.close())
@@ -2647,7 +2624,7 @@ const view = async (variant, keys, label) => {
 }
 
 // The results of the checks over the record of an observation: { id, name, ok, kind, threw, detail }. A record with no screen to judge stops the run for a fault or a rewrite, and fails every check of the head naming where it stopped.
-const pageResults = async (seen, { strict, ids = null, label, env = ENV }) => {
+const pageResults = async (seen, { strict, ids = null, keys, label, env = ENV }) => {
   const chosen = PAGE_CHECKS.filter(({ id }) => !ids || ids.includes(id))
 
   if (seen.failed) {
@@ -2656,6 +2633,12 @@ const pageResults = async (seen, { strict, ids = null, label, env = ENV }) => {
     }
 
     return chosen.map(({ id, name }) => ({ id, name, ok: false, kind: 'unobserved', threw: false, detail: String(seen.failed.error) }))
+  }
+
+  const absent = keys.filter((key) => !(key in seen.value))
+
+  if (absent.length) {
+    throw new HarnessError(`${label} was read without ${absent.join(', ')}, which its checks judge`)
   }
 
   const o = { ...seen.value, unexpected: seen.unexpected }
@@ -2670,25 +2653,27 @@ const pageResults = async (seen, { strict, ids = null, label, env = ENV }) => {
   return await runChecks(chosen.map(({ id, name, test }) => ({ id, name, run: judge(test) })))
 }
 
-const neededBy = (ids) => [...new Set(PAGE_CHECKS.filter(({ id }) => !ids || ids.includes(id)).flatMap(({ needs }) => needs))]
+// The keys the checks `ids` (all for null) read: for the head all they need, for a planted fault or a rewrite (`least`) the fewest their judgement holds in.
+const neededBy = (ids, { least = false } = {}) => [...new Set(PAGE_CHECKS.filter(({ id }) => !ids || ids.includes(id)).flatMap((check) => (least && check.least) || check.needs))]
 
-const pageHead = async () => {
-  const results = await pageResults(await view(null, neededBy(null), 'the page'), { strict: false, label: 'the page' })
+// The page as it is, read for the checks `ids` (all for null) in the sessions they need, and judged by them.
+const pageHeadOf = (ids, label) => async () => {
+  const results = await pageResults(await view(null, neededBy(ids), label), { strict: false, ids, keys: neededBy(ids), label })
 
-  judged(results, 'the page')
+  judged(results, label)
   results.forEach((result) => report(result.name, result.ok, result.detail))
 }
 
 const pageFault = (fault) => async () => {
-  const results = await pageResults(await view(fault, neededBy(fault.fails), `the page with "${fault.name}"`), { strict: true, ids: fault.fails, label: `the page with the fault "${fault.name}"` })
+  const results = await pageResults(await view(fault, neededBy(fault.fails, { least: true }), `the page with "${fault.name}"`), { strict: true, ids: fault.fails, keys: neededBy(fault.fails, { least: true }), label: `the page with the fault "${fault.name}"` })
 
   judged(results, fault.name)
   reportFault(fault, results)
 }
 
-// A rewrite must pass every check.
+// A rewrite must pass the checks that read the part of the page it changes (`checks`).
 const pageRewrite = (rewrite) => async () => {
-  const results = await pageResults(await view(rewrite, neededBy(null), `the page rewritten as "${rewrite.name}"`), { strict: true, label: `the page rewritten as "${rewrite.name}"`, env: { ...ENV, words: await wordsFor(rewrite) } })
+  const results = await pageResults(await view(rewrite, neededBy(rewrite.checks, { least: true }), `the page rewritten as "${rewrite.name}"`), { strict: true, ids: rewrite.checks, keys: neededBy(rewrite.checks, { least: true }), label: `the page rewritten as "${rewrite.name}"`, env: { ...ENV, words: await wordsFor(rewrite) } })
 
   judged(results, rewrite.name)
   reportRewrite(rewrite, results)
@@ -2757,7 +2742,8 @@ const rewriteOf = (rewrite) => async () => {
 
 // The deadlines, in seconds: a pure variant loads the modules and runs the cases, a real variant also reads a save, a page variant reads one session for each variant it needs (the head reads all five), and the setup plants the copies, starts and warms the page server.
 const DEADLINES = { pure: 120, real: 300, page: 360, pageHead: 900, setup: 900 + 180 }
-// The page fault that is read in one session alone, which the control of the warm page server runs.
+// The page fault that is read in one session alone, and the checks that head reads in that session alone: the control of the warm page server runs the one and then the other.
+const WARM_CHECKS = ['tankers', 'orders', 'no-errors']
 const CONTROL_FAULT = 'a tanker that cannot serve is drawn as giving'
 
 const variantsOf = (mutating) => [
@@ -2765,9 +2751,10 @@ const variantsOf = (mutating) => [
   ...(mutating ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
   ...(mutating ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
   { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: headOf(REAL_CHECKS, 'the saves') },
-  { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', deadline: DEADLINES.pageHead, run: pageHead },
-  ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `page-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.page, run: pageFault(fault) })) : []),
-  ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
+  { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', needs: VARIANTS, deadline: DEADLINES.pageHead, run: pageHeadOf(null, 'the page') },
+  ...(mutating ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
+  ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `page-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', needs: sessionsOf(neededBy(fault.fails, { least: true })), deadline: DEADLINES.page, run: pageFault(fault) })) : []),
+  ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', needs: sessionsOf(neededBy(rewrite.checks, { least: true })), deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
 ]
 
 const main = async () => {
@@ -2778,12 +2765,15 @@ const main = async () => {
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
-      if (queue.some((variant) => variant.pool === 'suite')) {
-        ENV = await setUp()
+      const needed = queue.flatMap((variant) => (variant.control ? [...variant.control.fault.needs, ...variant.control.head.needs] : variant.needs || []))
+
+      if (needed.length) {
+        ENV = await setUp(VARIANTS.filter((name) => needed.includes(name)))
       }
     },
-    afterEach: async () => {
-      if (ENV && ENV.server) {
+    // A variant of the modules alone never touched the server: nothing to put back.
+    afterEach: async (variant) => {
+      if (ENV && ENV.server && !/^(pure|real)/.test(variant.key)) {
         await ENV.server.reset()
       }
     },
@@ -2798,7 +2788,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page', heading: '\nthe control of the warm page server' } : null,
+    control: mutating ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page-warm', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 

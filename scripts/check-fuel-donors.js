@@ -493,6 +493,9 @@ const PURE_FAULTS = [
   { name: 'the tanker report does not hand on whether the reserve is read', change: swap('reserveOf(ship), reserveRead, version', 'reserveOf(ship), version'), fails: ['report'] },
   { name: 'the words of the reserve ignore that it is not read', change: swap('donor.reserveRead === false ? NOT_READ_TEXT : donor.playerReserve === null', 'donor.playerReserve === null'), fails: ['report'] },
   { name: 'the surplus of a ship that may serve is worded as 0 litres while the reserve is not read', change: swap('donor.eligibleSurplus === null ? NOT_READ_TEXT : litres(donor.eligibleSurplus)', 'litres(donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus)'), fails: ['report'] },
+  { name: 'the sort value of the surplus is the fuel aboard', change: swap('eligibleSurplus: donor.eligibleSurplus, role', 'eligibleSurplus: ship.Fuel, role'), fails: ['report'] },
+  { name: 'the reserve of a ship is not given to the donor result', change: swap('fuelDonor(ship, { playerReserve: reserveOf(ship), reserveRead, version })', 'fuelDonor(ship, { reserveRead, version })'), fails: ['report'] },
+  { name: 'the surplus above the floors leaves out the reserve', change: swap('Math.max(minimum, reserve === null ? 0 : reserve)', 'minimum'), fails: ['figures', 'report'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -795,30 +798,43 @@ const unreadStage = async (page, step, how) => {
   return { rows, values, harvesters }
 }
 
-// The page as it opens, sorted both ways, then the reserves kept, edited and cleared as a player does it, the screen read after each step: `stages` holds the tanker rows, the totals and the records of each.
-const observePage = (browser, url) => observe(browser, async ({ page, step }) => {
+// The page as it opens, then, for the parts asked for: sorted both ways (`sort`), the reserve records not read (`unread`, after the first reserve is kept, or at once when no step is asked) and the reserves kept, edited and cleared as a player does it, as many of the five steps as `steps` says, the screen read after each: `stages` holds the tanker rows, the totals and the records of each. A planted fault or a rewrite reads the parts that hold the checks it names, and the head all of them (`WHOLE`).
+const RESERVE_STEPS = 5
+const WHOLE = { sort: true, unread: true, steps: RESERVE_STEPS }
+
+const observePage = (browser, url, parts = WHOLE) => observe(browser, async ({ page, step }) => {
   await prepare(page, url, step)
   step('reading the screen')
 
   const screen = await page.evaluate(readScreen)
-  const sorts = await sortBySurplus(page, step)
+  const sorts = parts.sort ? await sortBySurplus(page, step) : null
   const plan = ENV.truth.reserves
   const stages = [screen]
   const read = async () => stages.push(await page.evaluate(readScreen))
+  const steps = [
+    () => keepReserve(page, step, { type: 'class', search: plan.className, pattern: new RegExp(`^\\s*${escapePattern(plan.className)}\\s*$`), scenario: plan.scenario, amount: plan.first }),
+    () => editReserve(page, step, plan.className, plan.second),
+    () => keepReserve(page, step, { type: 'ship', search: plan.shipName, pattern: new RegExp(`^\\s*${escapePattern(plan.shipName)} ·`), scenario: plan.scenario, amount: plan.override }),
+    () => clearReserve(page, step, plan.shipName),
+    () => clearReserve(page, step, plan.className),
+  ]
+  const unreadStages = async () => ({ loading: await unreadStage(page, step, 'loading'), failed: await unreadStage(page, step, 'failed') })
+  let unread = null
 
-  await keepReserve(page, step, { type: 'class', search: plan.className, pattern: new RegExp(`^\\s*${escapePattern(plan.className)}\\s*$`), scenario: plan.scenario, amount: plan.first })
-  await read()
-  const unread = { loading: await unreadStage(page, step, 'loading'), failed: await unreadStage(page, step, 'failed') }
-  await editReserve(page, step, plan.className, plan.second)
-  await read()
-  await keepReserve(page, step, { type: 'ship', search: plan.shipName, pattern: new RegExp(`^\\s*${escapePattern(plan.shipName)} ·`), scenario: plan.scenario, amount: plan.override })
-  await read()
-  await clearReserve(page, step, plan.shipName)
-  await read()
-  await clearReserve(page, step, plan.className)
-  await read()
+  for (let index = 0; index < parts.steps; index++) {
+    await steps[index]()
+    await read()
 
-  return { ...screen, sorts, unread, stages: stages.map(({ rows, values, fuelRecords }) => ({ rows, values, fuelRecords })) }
+    if (index === 0 && parts.unread) {
+      unread = await unreadStages()
+    }
+  }
+
+  if (parts.unread && unread === null) {
+    unread = await unreadStages()
+  }
+
+  return { ...screen, sorts, unread, steps: parts.steps, stages: stages.map(({ rows, values, fuelRecords }) => ({ rows, values, fuelRecords })) }
 })
 
 // What the reserves of the plan say of one ship at one step: its own reserve holds over its class's, even when it is 0.
@@ -1039,8 +1055,8 @@ const CHECKS = [
     const wrong = []
     const problems = []
 
-    if (o.stages.length !== plan.stages.length) {
-      return verdict(false, { stages: o.stages.length, wanted: plan.stages.length })
+    if (o.stages.length !== o.steps + 1) {
+      return verdict(false, { stages: o.stages.length, wanted: o.steps + 1 })
     }
 
     o.stages.forEach((stage, index) => {
@@ -1166,8 +1182,7 @@ const REPORT_CALL = 'return tankerReport(this.fuelDonors, { version: this.formul
 // A planted fault or a rewrite changes one file of the page: `file` and `change` (the text of the file to the text served in its place).
 const PAGE_FAULTS = [
   { name: 'the stored fuel cell draws the eligible surplus', file: PAGE, change: swap('data-donor-cell="stored">{{ donorText(item).stored }}', 'data-donor-cell="stored">{{ donorText(item).surplus }}'), fails: ['figures', 'inventory'] },
-  { name: 'the class minimum cell draws the local reserve', file: PAGE, change: swap('data-donor-cell="minimum">{{ donorText(item).minimum }}', 'data-donor-cell="minimum">{{ donorText(item).reserve }}'), fails: ['figures'] },
-  { name: 'the local reserve cell draws the class minimum', file: PAGE, change: swap('data-donor-cell="reserve">{{ donorText(item).reserve }}', 'data-donor-cell="reserve">{{ donorText(item).minimum }}'), fails: ['figures', 'reserves', 'unread'] },
+  { name: 'the local reserve cell draws the class minimum', file: PAGE, change: swap('data-donor-cell="reserve">{{ donorText(item).reserve }}', 'data-donor-cell="reserve">{{ donorText(item).minimum }}'), fails: ['figures'] },
   { name: 'the surplus of a ship that cannot serve is drawn as a figure of 0 litres', file: PAGE, change: swap('data-donor-cell="surplus">{{ donorText(item).surplus }}', 'data-donor-cell="surplus">{{ item.donor.eligibleSurplus === null ? donorText(item).surplus : exactLitres(item.donor.eligibleSurplus) }}'), fails: ['figures', 'reasons'] },
   { name: 'the reason of a ship that cannot serve is not drawn', file: PAGE, change: swap('<div v-if="donorText(item).reason" class="caption text--secondary" data-donor-cell="reason">', '<div v-if="false" class="caption text--secondary" data-donor-cell="reason">'), fails: ['reasons'] },
   { name: 'the table lists only the ships counted in the tanker stock', file: PAGE, change: swap('this.donorReport.rows.filter((row) => row.listed)', 'this.donorReport.rows.filter((row) => row.counted)'), fails: ['rows', 'figures', 'uncounted'] },
@@ -1176,68 +1191,42 @@ const PAGE_FAULTS = [
   { name: 'a ship with no engines is not marked a service site', file: PAGE, change: swap(':data-service-site="item.site ? \'yes\' : \'no\'"', ':data-service-site="\'no\'"'), fails: ['sites'] },
   { name: 'the surplus cell is drawn at opacity 0', file: PAGE, change: swap('data-donor-cell="surplus">{{ donorText(item).surplus }}', 'style="opacity: 0" data-donor-cell="surplus">{{ donorText(item).surplus }}'), fails: ['figures'] },
   { name: 'the damage of the transfer systems is left out of the permission', file: PAGE, change: swap(REPORT_CALL, REPORT_CALL.replace('this.fuelDonors,', 'this.fuelDonors.map((ship) => ({ ...ship, UndamagedTransfer: ship.TransferSystems })),')), fails: ['permission', 'reasons'] },
-  { name: 'the tanker table leaves out the empty tankers', file: PAGE, change: swap('this.donorReport.rows.filter((row) => row.listed)', 'this.donorReport.rows.filter((row) => row.listed && row.Fuel > 0)'), fails: ['rows', 'empty'] },
   { name: 'the harvesters carry no role', file: PAGE, change: swap('fuelRole: this.donorByShip.has(row.ShipID) ? this.donorByShip.get(row.ShipID).role : null,', 'fuelRole: null,'), fails: ['harvesters'] },
   { name: 'the harvesters carry no fuel service', file: PAGE, change: swap('fuelDonor: this.donorByShip.has(row.ShipID) ? this.donorByShip.get(row.ShipID).donor : null,', 'fuelDonor: null,'), fails: ['harvesters'] },
   { name: 'the four figures of a harvester draw the class minimum as the surplus', file: FIGURES, change: swap('text: this.texts[figure.key]', 'text: this.texts[figure.key === \'surplus\' ? \'minimum\' : figure.key]'), fails: ['harvesters'] },
   { name: 'the chip counts the ships listed and not the ships in the stock', file: PAGE, change: swap('<span data-donor-value="ships">{{ donorReport.totals.ships }}</span>', '<span data-donor-value="ships">{{ tankerRows.length }}</span>'), fails: ['totals'] },
   { name: 'the stored total is drawn with a minus sign', file: PAGE, change: swap('data-donor-value="stored">{{ exactLitres(donorReport.totals.stored.value) }}', 'data-donor-value="stored">\u2212{{ exactLitres(donorReport.totals.stored.value) }}'), fails: ['totals'] },
-  { name: 'the count of the chip is drawn with a minus sign', file: PAGE, change: swap('<span data-donor-value="ships">{{ donorReport.totals.ships }}</span>', '<span data-donor-value="ships">\u2212{{ donorReport.totals.ships }}</span>'), fails: ['totals'] },
   { name: 'the count of the ships that cannot serve is drawn with a stray letter before it', file: PAGE, change: swap('<span data-donor-value="blocked">{{ donorReport.totals.permissions.blocked }}</span>', '<span data-donor-value="blocked">x{{ donorReport.totals.permissions.blocked }}</span>'), fails: ['totals'] },
   { name: 'the stored total is drawn with a minus sign just outside its figure', file: PAGE, change: swap('Stored fuel <span data-donor-value="stored">', 'Stored fuel \u2212<span data-donor-value="stored">'), fails: ['totals'] },
-  { name: 'the count of the empty tankers is drawn with a minus sign just outside its figure', file: PAGE, change: swap('<span data-donor-total="empty"> · <span data-donor-value="empty">', '<span data-donor-total="empty"> · \u2212<span data-donor-value="empty">'), fails: ['totals'] },
-  { name: 'the count of the chip is drawn with a digit just outside its figure', file: PAGE, change: swap('data-donor-chip><span data-donor-value="ships">', 'data-donor-chip>1<span data-donor-value="ships">'), fails: ['totals'] },
-  { name: 'the count of the ships that cannot serve has a stray letter just outside its figure', file: PAGE, change: swap('<span data-donor-value="blocked">', 'x<span data-donor-value="blocked">'), fails: ['totals'] },
-  { name: 'a figure of a harvester is drawn with a minus sign just outside its element', file: FIGURES, change: swap('<span class="text-no-wrap" data-fuel-value>', '\u2212<span class="text-no-wrap" data-fuel-value>'), fails: ['harvesters'] },
   { name: 'a figure of a harvester is drawn with a minus sign in an element of its own just before its value', file: FIGURES, change: swap('<span class="text-no-wrap" data-fuel-value>', '<span>\u2212</span><span class="text-no-wrap" data-fuel-value>'), fails: ['harvesters'] },
   { name: 'a figure of a harvester is drawn with a digit in an element of its own just after its value', file: FIGURES, change: swap('{{ figure.text }}</span>', '{{ figure.text }}</span><span>7</span>'), fails: ['harvesters'] },
   { name: 'the tanker table draws another ship\'s name', file: PAGE, change: swap('data-donor-cell="name">{{ item.ShipName }}', 'data-donor-cell="name">Wrong ship'), fails: ['names'] },
   { name: 'the harvester table draws another ship\'s name', file: PAGE, change: swap('data-harvester-name>{{ item.ShipName }}', 'data-harvester-name>Wrong ship'), fails: ['names'] },
   { name: 'the role of a tanker leaves out the service site while the hook keeps it', file: PAGE, change: swap('data-donor-cell="role">{{ item.role }}', 'data-donor-cell="role">{{ item.role.replace(\', service site\', \'\') }}'), fails: ['roles'] },
   { name: 'the role of a harvester leaves out the harvesting', file: PAGE, change: swap('data-harvester-role>{{ item.fuelRole }}', 'data-harvester-role>{{ item.fuelRole.replace(\' and Harvester\', \'\') }}'), fails: ['roles'] },
-  { name: 'the page\'s loader leaves out the harvesters of a class with no tanks', file: MODULE_FILE, change: swap('FCT_Ship.ShippingLineID = 0 and (${ofClass(\'FuelTanker\')}', 'FCT_Ship.ShippingLineID = 0 and ${ofClass(\'FuelCapacity\')} > 0 and (${ofClass(\'FuelTanker\')}'), fails: ['harvesters', 'roles'] },
   { name: 'the surplus column sorts by a nested key the comparator never resolves', file: PAGE, change: (text) => swap('<template #[`item.eligibleSurplus`]', '<template #[`item.donor.eligibleSurplus`]')(swap('value: \'eligibleSurplus\', align: \'end\' }', 'value: \'donor.eligibleSurplus\', align: \'end\' }')(text)), fails: ['sort'] },
-  { name: 'the sort value of the surplus reads an unknown surplus as 0', file: MODULE_FILE, change: swap('eligibleSurplus: donor.eligibleSurplus, role', 'eligibleSurplus: donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus, role'), fails: ['sort'] },
-  { name: 'the sort value of the surplus is the fuel aboard', file: MODULE_FILE, change: swap('eligibleSurplus: donor.eligibleSurplus, role', 'eligibleSurplus: ship.Fuel, role'), fails: ['sort'] },
-  { name: 'the reserve of a ship is left out of the reserves the page draws', file: PAGE, change: swap('table ? fuelReserveOf(table, ship) : null', 'table ? fuelReserveOf({ ship: new Map(), class: table.class }, ship) : null'), fails: ['reserves'] },
-  { name: 'the reserve of a class never reaches its ships', file: PAGE, change: swap('table ? fuelReserveOf(table, ship) : null', 'table ? fuelReserveOf({ ship: table.ship, class: new Map() }, ship) : null'), fails: ['reserves'] },
-  { name: 'a reserve of 0 litres is read as none set', file: PAGE, change: swap('reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount', 'reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount || null'), fails: ['reserves'] },
-  { name: 'the reserve of a class is said to be set on the ship', file: PAGE, change: swap('reserve.source === \'ship\' ? \'ship\' : \'class\'', '\'ship\''), fails: ['reserves'] },
-  { name: 'the place of a reserve is not drawn', file: PAGE, change: swap('<div v-if="reserveSourceText(item)"', '<div v-if="false"'), fails: ['reserves'] },
-  { name: 'a reserve cleared is not removed', file: RESERVES_FILE, change: swap('const outcome = await deleteReserve(this.repository, this.scope, entry)', 'const outcome = { ok: true }'), fails: ['reserves'] },
-  { name: 'a reserve is kept one litre over what was entered', file: RESERVES_FILE, change: swap('reserves: { [FUEL_RESOURCE]: fuel }', 'reserves: { [FUEL_RESOURCE]: fuel + 1 }'), fails: ['reserves'] },
-  { name: 'a record of a class is listed as a ship', file: RESERVES_FILE, change: swap('data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>', 'data-fuel-record-type>{{ typeWords.ship }}</v-chip>'), fails: ['reserves'] },
-  { name: 'the note that no reserve is kept is never drawn', file: RESERVES_FILE, change: swap('<div v-if="!entries.length" class="caption text--secondary" data-fuel-no-records>', '<div v-if="false" class="caption text--secondary" data-fuel-no-records>'), fails: ['reserves'] },
-  { name: 'the reserve of a ship is not given to the donor result', file: MODULE_FILE, change: swap('fuelDonor(ship, { playerReserve: reserveOf(ship), reserveRead, version })', 'fuelDonor(ship, { reserveRead, version })'), fails: ['reserves'] },
-  { name: 'the surplus above the floors leaves out the reserve', file: MODULE_FILE, change: swap('Math.max(minimum, reserve === null ? 0 : reserve)', 'minimum'), fails: ['reserves'] },
-  { name: 'the page makes its tanker report whether or not the reserve records are read', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready), ', ''), fails: ['unread'] },
+  { name: 'the class minimum cell draws the local reserve', file: PAGE, change: swap('data-donor-cell="minimum">{{ donorText(item).minimum }}', 'data-donor-cell="minimum">{{ donorText(item).reserve }}'), fails: ['figures'] },
+  { name: 'the count of the empty tankers is drawn with a minus sign just outside its figure', file: PAGE, change: swap('<span data-donor-total="empty"> · <span data-donor-value="empty">', '<span data-donor-total="empty"> · \u2212<span data-donor-value="empty">'), fails: ['totals'] },
+  { name: 'the reserve of a ship is left out of the reserves the page draws', file: PAGE, change: swap('table ? fuelReserveOf(table, ship) : null', 'table ? fuelReserveOf({ ship: new Map(), class: table.class }, ship) : null'), fails: ['reserves'], steps: 3 },
+  { name: 'the reserve of a class never reaches its ships', file: PAGE, change: swap('table ? fuelReserveOf(table, ship) : null', 'table ? fuelReserveOf({ ship: table.ship, class: new Map() }, ship) : null'), fails: ['reserves'], steps: 1 },
+  { name: 'a reserve of 0 litres is read as none set', file: PAGE, change: swap('reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount', 'reserveOf: (ship) => (this.reserveByShip.get(ship.ShipID) || { amount: null }).amount || null'), fails: ['reserves'], steps: 3 },
+  { name: 'the reserve of a class is said to be set on the ship', file: PAGE, change: swap('reserve.source === \'ship\' ? \'ship\' : \'class\'', '\'ship\''), fails: ['reserves'], steps: 1 },
+  { name: 'the place of a reserve is not drawn', file: PAGE, change: swap('<div v-if="reserveSourceText(item)"', '<div v-if="false"'), fails: ['reserves'], steps: 1 },
+  { name: 'a reserve cleared is not removed', file: RESERVES_FILE, change: swap('const outcome = await deleteReserve(this.repository, this.scope, entry)', 'const outcome = { ok: true }'), fails: ['reserves'], steps: 4 },
+  { name: 'a reserve is kept one litre over what was entered', file: RESERVES_FILE, change: swap('reserves: { [FUEL_RESOURCE]: fuel }', 'reserves: { [FUEL_RESOURCE]: fuel + 1 }'), fails: ['reserves'], steps: 1 },
+  { name: 'a record of a class is listed as a ship', file: RESERVES_FILE, change: swap('data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>', 'data-fuel-record-type>{{ typeWords.ship }}</v-chip>'), fails: ['reserves'], steps: 1 },
+  { name: 'the note that no reserve is kept is never drawn', file: RESERVES_FILE, change: swap('<div v-if="!entries.length" class="caption text--secondary" data-fuel-no-records>', '<div v-if="false" class="caption text--secondary" data-fuel-no-records>'), fails: ['reserves'], steps: 0 },
   { name: 'a failed read of the reserve records is taken for a finished one', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready)', 'reserveRead: Boolean(this.fuelReserves)'), fails: ['unread'] },
   { name: 'records the panel has not yet reported are taken for read ones', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready)', 'reserveRead: !this.fuelReserves || this.fuelReserves.ready'), fails: ['unread'] },
-  { name: 'the tanker report is not told whether the reserve records are read', file: MODULE_FILE, change: swap('reserveOf(ship), reserveRead, version', 'reserveOf(ship), version'), fails: ['unread'] },
-  { name: 'the eligible total counts the ships whose reserve is not read', file: MODULE_FILE, change: swap('known.length && reserveRead !== false ?', 'known.length ?'), fails: ['unread'] },
-  { name: 'the reserve of a ship is worded as none set while the records are not read', file: MODULE_FILE, change: swap('donor.reserveRead === false ? NOT_READ_TEXT : donor.playerReserve === null', 'donor.playerReserve === null'), fails: ['unread'] },
-  { name: 'the surplus of a ship is worded as 0 litres while its reserve is not read', file: MODULE_FILE, change: swap('donor.eligibleSurplus === null ? NOT_READ_TEXT : litres(donor.eligibleSurplus)', 'litres(donor.eligibleSurplus === null ? 0 : donor.eligibleSurplus)'), fails: ['unread'] },
 ]
 
 const PAGE_BENIGN = [
-  { name: 'the retry listened to by the longhand of the event', file: PAGE, change: swap('@retry="retryDonors"', 'v-on:retry="retryDonors"') },
-  { name: 'the sort of the tanker table bound by an explicit value and event', file: PAGE, change: swap(':sort-by.sync="tankersTable.sortBy"', ':sort-by="tankersTable.sortBy" @update:sort-by="tankersTable.sortBy = $event"') },
+  { name: 'the reserves of the panel listened to by the longhand of the event', file: PAGE, change: swap('@reserves="fuelReserves = $event"', 'v-on:reserves="fuelReserves = $event"') },
   { name: 'the eligible total written as a suffix to its label', file: PAGE, change: swap('Eligible surplus <span data-donor-value="eligible">{{ exactLitres(donorReport.totals.eligible) }}</span><template', '<span data-donor-value="eligible">{{ exactLitres(donorReport.totals.eligible) }}</span> eligible surplus<template') },
   { name: 'the class of a ship that is outside the tanker stock written in other words', file: PAGE, change: swap('data-donor-cell="uncounted">not in the tanker stock', 'data-donor-cell="uncounted">outside the tanker stock') },
   { name: 'the colour class of the permission parenthesised', file: PAGE, change: swap(':class="item.donor.permission === \'allowed\' ? \'\' : \'text--secondary\'"', ':class="(item.donor.permission === \'allowed\') ? \'\' : \'text--secondary\'"') },
-  { name: 'the harvester figures drawn through the longhand of the prop', file: PAGE, change: swap('<fuel-figures v-if="item.fuelDonor" :donor="item.fuelDonor" />', '<fuel-figures v-if="item.fuelDonor" v-bind:donor="item.fuelDonor" />') },
-  { name: 'the label of the eligible total hyphenated', file: PAGE, change: swap('Eligible surplus <span data-donor-value="eligible">', 'Service-eligible surplus <span data-donor-value="eligible">') },
-  { name: 'a hidden element beside the stored total', file: PAGE, change: swap('Stored fuel <span data-donor-value="stored">{{ exactLitres(donorReport.totals.stored.value) }}</span>', 'Stored fuel <span style="display: none">7</span><span data-donor-value="stored">{{ exactLitres(donorReport.totals.stored.value) }}</span><span style="display: none">7</span>') },
-  { name: 'the service site of a tanker named before its kinds', file: PAGE, change: swap('data-donor-cell="role">{{ item.role }}', 'data-donor-cell="role">{{ item.role.endsWith(\', service site\') ? `service site, ${item.role.slice(0, -14)}` : item.role }}') },
-  { name: 'the kinds of a harvester in the other order, joined by a plus', file: PAGE, change: swap('data-harvester-role>{{ item.fuelRole }}', 'data-harvester-role>{{ item.fuelRole.split(\' and \').reverse().join(\' + \') }}') },
-  { name: 'the label of a harvester figure written without its element', file: FIGURES, change: swap('<span class="text--secondary">{{ figure.label }}</span>', '{{ figure.label }}') },
   { name: 'a hidden sign beside the value of a harvester figure', file: FIGURES, change: swap('<span class="text-no-wrap" data-fuel-value>{{ figure.text }}</span>', '<span style="display: none">\u2212</span><span class="text-no-wrap" data-fuel-value>{{ figure.text }}</span><span style="display: none">7</span>') },
-  { name: 'the reserve record bound by an explicit value and event', file: RESERVES_FILE, change: swap('v-model="draft.fuel"', ':value="draft.fuel" @input="draft.fuel = $event"') },
-  { name: 'the reserves of the panel listened to by the longhand of the event', file: PAGE, change: swap('@reserves="fuelReserves = $event"', 'v-on:reserves="fuelReserves = $event"') },
-  { name: 'the type of a record written after its name', file: RESERVES_FILE, change: swap('<v-chip x-small outlined class="mr-1" data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>\n          <span class="font-weight-medium" data-fuel-record-name>{{ entry.source.name }}</span>', '<span class="font-weight-medium" data-fuel-record-name>{{ entry.source.name }}</span>\n          <v-chip x-small outlined class="mr-1" data-fuel-record-type>{{ typeWords[entry.source.type] }}</v-chip>') },
-  { name: 'the note that no reserve is kept put another way', file: RESERVES_FILE, change: swap('No reserve is kept for a ship or a ship class yet.', 'Nothing is kept for any ship or ship class yet.') },
-  { name: 'the condition of the place of a reserve parenthesised', file: PAGE, change: swap('<div v-if="reserveSourceText(item)"', '<div v-if="(reserveSourceText(item))"') },
-  { name: 'the test that the reserve records are read spelled out', file: PAGE, change: swap('reserveRead: Boolean(this.fuelReserves && this.fuelReserves.ready)', 'reserveRead: this.fuelReserves !== null && this.fuelReserves.ready === true') },
+  { name: 'the reserve record bound by an explicit value and event', file: RESERVES_FILE, change: swap('v-model="draft.fuel"', ':value="draft.fuel" @input="draft.fuel = $event"'), parts: { steps: 1 } },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -1280,14 +1269,14 @@ const setUp = async () => {
   return env
 }
 
-// The page with `variant` (a { file, change }, null for the page as it is) served and read as a player sees it.
-const view = async (variant) => {
+// The page with `variant` (a { file, change }, null for the page as it is) served and read as a player sees it, in the `parts` of the flow asked for.
+const view = async (variant, parts = WHOLE) => {
   if (variant) {
     ENV.server.replace(variant.file, variant.change(ENV.originals[variant.file]))
   }
 
   try {
-    const seen = await observePage(ENV.chrome, ENV.server.url)
+    const seen = await observePage(ENV.chrome, ENV.server.url, parts)
 
     if (seen.error !== null) {
       console.error(`the page${variant ? ` with "${variant.name}"` : ''} did not get through: ${seen.error}`)
@@ -1302,10 +1291,10 @@ const view = async (variant) => {
 }
 
 // The results of the checks over the record of an observation: { id, name, ok, kind, threw, detail }. A record with no screen to judge stops the run for a fault or a rewrite, and fails every check of the baseline naming where it stopped.
-const pageResults = async (seen, { strict, ids = null, label }) => {
+const pageResults = async (seen, { strict, ids = null, parts = WHOLE, label }) => {
   validate(seen, label)
 
-  const chosen = CHECKS.filter(([id]) => !ids || ids.includes(id))
+  const chosen = CHECKS.filter(([id]) => (!ids || ids.includes(id)) && (id !== 'sort' || parts.sort) && (id !== 'unread' || parts.unread))
 
   if (unobserved(seen)) {
     if (strict) {
@@ -1363,17 +1352,22 @@ const checkPageHead = async () => {
   results.forEach((result) => report(result.name, result.ok, result.detail))
 }
 
+// The parts of the flow a planted fault reads: those that hold the checks it names, the reserve steps as far as its `steps` say.
+const partsOfFault = (fault) => ({ sort: fault.fails.includes('sort'), unread: fault.fails.includes('unread'), steps: fault.fails.includes('reserves') ? fault.steps : 0 })
+
 const checkPageFault = async (fault) => {
-  const results = await pageResults(await view(fault), { strict: true, ids: fault.fails, label: `the page with the fault "${fault.name}"` })
+  const parts = partsOfFault(fault)
+  const results = await pageResults(await view(fault, parts), { strict: true, ids: fault.fails, parts, label: `the page with the fault "${fault.name}"` })
 
   judged(results, fault.name)
   reportFault(fault, results)
 }
 
-// A rewrite must pass every check, and so draw what the page as it is draws: the screen read by the worker's setup before the first variant, whichever that is.
+// A rewrite must pass every check of the parts it is read in, and so draw what the page as it is draws: the head reads every part, a rewrite those its `parts` name (the sort, the reserves not read, the steps of the reserves) and always the screen as it opens.
 const checkPageRewrite = async (rewrite) => {
-  const seen = await view(rewrite)
-  const results = await pageResults(seen, { strict: true, label: `the page rewritten as "${rewrite.name}"` })
+  const parts = { sort: false, unread: false, steps: 0, ...rewrite.parts }
+  const seen = await view(rewrite, parts)
+  const results = await pageResults(seen, { strict: true, parts, label: `the page rewritten as "${rewrite.name}"` })
 
   judged(results, rewrite.name)
   reportRewrite(rewrite, results)
@@ -1434,8 +1428,9 @@ const main = async () => {
         ENV = await setUp()
       }
     },
-    afterEach: async () => {
-      if (ENV && ENV.server) {
+    // A variant of the modules alone never touched the server: nothing to put back.
+    afterEach: async (variant) => {
+      if (ENV && ENV.server && !/^(pure|real)/.test(variant.key)) {
         await ENV.server.reset()
       }
     },

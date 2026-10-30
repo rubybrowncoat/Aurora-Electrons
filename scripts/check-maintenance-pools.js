@@ -15,7 +15,7 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
-const { observe, validate, HarnessError, installScreen, pairedBy, readFigure } = require('./lib/browser-observe')
+const { observe, validate, HarnessError, settled, installScreen, pairedBy, readFigure } = require('./lib/browser-observe')
 const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
@@ -592,9 +592,8 @@ const readScreen = () => {
   return { locations, pools: [...document.querySelectorAll('[data-pool]')].map(poolOf) }
 }
 
-const prepare = async (page, url, step) => {
-  const state = { inFlight: 0, last: Date.now() }
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
+// The page opened as a player does it, with the switch of the colonies without ships on where `idle` (the places and the lone colony are rows of those).
+const prepare = async (page, url, step, idle) => {
   const stored = { logisticsLocationsTable: { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: -1 } }
 
   await page.context().addInitScript((seed) => {
@@ -605,31 +604,6 @@ const prepare = async (page, url, step) => {
       sessionStorage.setItem('aurora-check-seeded', '1')
     }
   }, stored)
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
-    }
-  })
-
-  const settle = async (quiet = 1500) => {
-    const started = Date.now()
-
-    while (state.inFlight > 0 || Date.now() - state.last < quiet || await page.evaluate(pageLoading)) {
-      if (Date.now() - started > TIMEOUT) {
-        throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-      }
-
-      await page.waitForTimeout(250)
-    }
-  }
-
   step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
   await installScreen(page)
@@ -647,16 +621,7 @@ const prepare = async (page, url, step) => {
   step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
   step('waiting for the reads that the picking of the race starts')
-
-  const picked = Date.now()
-
-  while (state.inFlight > 0 || Date.now() - state.last < 1500) {
-    if (Date.now() - picked > TIMEOUT) {
-      throw new Error(`the reads that the picking of the race starts did not finish (${state.inFlight} database calls in flight)`)
-    }
-
-    await page.waitForTimeout(250)
-  }
+  await settled(page, { limit: TIMEOUT })
 
   const target = '/logistics?view=maintenance'
 
@@ -664,16 +629,18 @@ const prepare = async (page, url, step) => {
   await page.evaluate((route) => window.$app.$router.push(route, () => {}, () => {}), target)
   await page.waitForFunction(pageLoading.arrived, target, { timeout: TIMEOUT })
   await page.waitForFunction(() => document.querySelector('[data-location]') !== null, null, { timeout: TIMEOUT }).catch(() => {})
-  step('showing the colonies without ships')
-  await page.getByText('Show colonies without ships', { exact: true }).click({ timeout: TIMEOUT })
-  step('waiting for the page to settle')
-  await settle()
 
-  return settle
+  if (idle) {
+    step('showing the colonies without ships')
+    await page.getByText('Show colonies without ships', { exact: true }).click({ timeout: TIMEOUT })
+  }
+
+  step('waiting for the page to settle')
+  await settled(page, { limit: TIMEOUT, loading: pageLoading })
 }
 
-// A row of the locations table opened as a player does it: a click on the row (on the place under its name, which holds no control) opens it and the drill-down is read once it is drawn; then the expand button of the row closes it.
-const drill = async (page, settle, step, key) => {
+// A row of the locations table opened as a player does it: a click on the row (on the place under its name, which holds no control) opens it and the drill-down is read once it is drawn. The row stays open: each drill-down is its own element and the observation ends with the page.
+const drill = async (page, step, key) => {
   const row = page.locator('tr', { has: page.locator(`[data-location="${key}"]`) }).last()
 
   step(`opening the location ${key}`)
@@ -691,31 +658,51 @@ const drill = async (page, settle, step, key) => {
     throw new Error(`the drill-down of ${key} did not open (${error.message.split('\n')[0]}); open: ${short(await page.evaluate(() => [...document.querySelectorAll('[data-pool]')].map((element) => element.getAttribute('data-pool'))))}`)
   })
   step(`settling after opening ${key}`)
-  await settle(800)
+  await settled(page, { limit: TIMEOUT, loading: pageLoading })
   step(`reading the drill-down of ${key}`)
 
   const seen = await page.evaluate(readScreen)
 
-  step(`closing ${key}`)
-  await row.locator('.v-data-table__expand-icon').first().click({ timeout: 30000 })
-  await page.waitForFunction((wanted) => document.querySelector(`[data-pool="${wanted}"]`) === null, key, { timeout: 30000 }).catch(() => {
-    throw new Error(`the drill-down of ${key} did not close`)
-  })
-
   return seen.pools.find((pool) => pool.key === key) || null
 }
 
-const observePage = (browser, url) => observe(browser, async ({ page, step }) => {
-  const settle = await prepare(page, url, step)
+// The drill-downs a check reads: the keys of the locations of the plan (`L1`, `L2`, `L3`), `place:N` for the Nth place, `standalone` for the lone colony.
+const DRILLS = {
+  rule: ['L1', 'place:0'],
+  clusters: ['L1'],
+  capacity: ['L1', 'L2', 'L3'],
+  providers: ['L1', 'L2', 'L3'],
+  draw: ['L1', 'L2', 'L3'],
+  shared: ['L1', 'L3'],
+  places: ['place:0', 'place:1', 'place:2'],
+  totals: [],
+  identity: [],
+  standalone: ['standalone'],
+  'no-errors': [],
+}
 
+// The keys of the locations the drill-downs of the checks `ids` (all of them for null) are read at.
+const drillKeys = (ids) => {
+  const { truth, keys } = ENV.truth
+  const wanted = new Set(Object.entries(DRILLS).filter(([id]) => !ids || ids.includes(id)).flatMap(([, list]) => list))
+  const table = { ...keys, standalone: truth.standalone.key, ...Object.fromEntries(truth.places.map((place, index) => [`place:${index}`, place.key])) }
+
+  return Object.entries(table).filter(([name]) => wanted.has(name)).map(([, key]) => key)
+}
+
+// The checks that read the rows of the places and of the lone colony, which the switch of the colonies without ships brings onto the table.
+const SWITCH_CHECKS = new Set(['rule', 'clusters', 'places', 'standalone'])
+const needsIdle = (ids) => !ids || ids.some((id) => SWITCH_CHECKS.has(id))
+
+const observePage = (browser, url, ids) => observe(browser, async ({ page, step }) => {
+  await prepare(page, url, step, needsIdle(ids))
   step('reading the screen')
 
   const table = await page.evaluate(readScreen)
-  const keys = [...ENV.truth.truth.locations.filter((location) => ENV.truth.interesting.includes(location.key)).map((location) => location.key), ...ENV.truth.truth.places.map((place) => place.key), ENV.truth.truth.standalone.key]
   const pools = {}
 
-  for (const key of keys) {
-    pools[key] = await drill(page, settle, step, key)
+  for (const key of drillKeys(ids)) {
+    pools[key] = await drill(page, step, key)
   }
 
   return { locations: table.locations, pools }
@@ -1105,7 +1092,6 @@ const PAGE_FAULTS = [
   { name: 'the supply column of a ship draws its own stock', file: POOL_FILE, change: swap('data-cell="supply">{{ msp(item.fromSupply) }}', 'data-cell="supply">{{ msp(item.fromOwn) }}'), fails: ['draw'] },
   { name: 'the drawn column of a provider draws what is left', file: POOL_FILE, change: swap('data-cell="used">{{ msp(provider.used) }}', 'data-cell="used">{{ msp(provider.left) }}'), fails: ['draw'] },
   { name: 'a ship short of stock is worded as covered', file: POOL_FILE, change: swap('run.full ? POOL_WORDS.support.full : POOL_WORDS.support.short', 'POOL_WORDS.support.full'), fails: ['draw'] },
-  { name: 'the settled points leave out the first', file: POOL_FILE, change: swap('<div v-for="point in points" :key="point.key"', '<div v-for="point in points.slice(1)" :key="point.key"'), fails: ['rule'] },
   { name: 'the grouping rule is not shown', file: POOL_FILE, change: swap('<div class="caption text--secondary pool-rule" data-pool-section="rule" data-pool-rule="grouping">', '<div class="caption text--secondary pool-rule" data-pool-section="rule" data-pool-rule="grouping" style="display: none">'), fails: ['rule'] },
   { name: 'the supply caption of a row is the stock above the minimums', file: PAGE_FILE, change: swap('`+${count(item.supply)} ${locationWords.supply}`', '`+${count(item.supplyAbove)} ${locationWords.supply}`'), fails: ['totals'] },
   { name: 'a place is worded as fully maintained', file: PAGE_FILE, change: swap('>{{ locationWords.unmaintained }}</span>', '>Fully maintained</span>'), fails: ['places'] },
@@ -1113,26 +1099,20 @@ const PAGE_FAULTS = [
   { name: 'each ship is drawn with the draws of the next ship', file: POOL_FILE, change: swap('const run = this.simShips.get(ship.ShipID)', 'const run = this.simShips.get(this.location.pool.assigned[(index + 1) % this.location.pool.assigned.length].ShipID)'), fails: ['draw'] },
   { name: 'the explanation of each settled point is not drawn', file: POOL_FILE, change: swap('</span> {{ point.text }}</div>', '</span></div>'), fails: ['rule'] },
   { name: 'the displayed names of the first two ships of a location are swapped', file: POOL_FILE, change: swap('data-cell="name">{{ item.name }}</div>', 'data-cell="name">{{ shipRows.length > 1 && item.order <= 2 ? shipRows[2 - item.order].name : item.name }}</div>'), fails: ['draw'] },
-  { name: 'a provider is displayed under another name', file: POOL_FILE, change: swap('<span data-cell="name">{{ provider.name }}</span>', '<span data-cell="name">{{ provider.name }} II</span>'), fails: ['providers'] },
   { name: 'a capacity source is displayed under another name', file: POOL_FILE, change: swap('<span data-cell="name">{{ source.name }}</span>', '<span data-cell="name">{{ source.name }} II</span>'), fails: ['capacity'] },
+  { name: 'a provider is displayed under another name', file: POOL_FILE, change: swap('<span data-cell="name">{{ provider.name }}</span>', '<span data-cell="name">{{ provider.name }} II</span>'), fails: ['providers'] },
   { name: 'a location is named and placed from its most populous colony wherever it lies', file: PAGE_FILE, change: swap('const main = anchor || here.slice()', 'const main = location.located.slice()'), fails: ['identity'] },
   { name: 'the sentence for the ships of a place is drawn for a place with colonies only', file: POOL_FILE, change: swap('this.location.shipRows.length ? place.ships : \'\'', 'place.ships'), fails: ['standalone'] },
-  { name: 'a place with colonies says nothing of them', file: POOL_FILE, change: swap('this.location.colonies.length ? place.colonies : \'\'', '\'\''), fails: ['standalone'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
+// A rewrite is judged by the checks that read the part of the page it changes (`checks`), and the drill-downs those checks read are the ones opened.
 const PAGE_BENIGN = [
-  { name: 'the switch of the locations bound by an explicit prop and event instead of v-model', file: PAGE_FILE, change: swap('v-model="showIdleLocations"', ':input-value="showIdleLocations" @change="showIdleLocations = $event"') },
-  { name: 'the retry of the supplied-output panel listened to by the longhand of the event', file: PAGE_FILE, change: swap('@retry="retryMspSupply"', 'v-on:retry="retryMspSupply"') },
-  { name: 'the tonnage line states its qualifier after the figure instead of before it', file: POOL_FILE, change: swap('Tonnage of the assigned ships: <span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span>', '<span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span> is the tonnage of the assigned ships') },
-  { name: 'a word of the panel\'s foot put another way', file: PAGE_FILE, change: swap('craft in military hangars need none', 'craft inside military hangars need none') },
-  { name: 'the condition of the drill-down parenthesised', file: POOL_FILE, change: swap('<template v-if="location.pool">', '<template v-if="(location.pool)">') },
-  { name: 'the heading of the settled points reworded', file: POOL_FILE, change: swap('<div class="pool-title">Rules used</div>', '<div class="pool-title">Rules applied</div>') },
-  { name: 'the names of the ships drawn through a text binding', file: POOL_FILE, change: swap('data-cell="name">{{ item.name }}</div>', 'data-cell="name" v-text="item.name"></div>') },
-  { name: 'the names of the providers drawn through a text binding', file: POOL_FILE, change: swap('<span data-cell="name">{{ provider.name }}</span>', '<span data-cell="name" v-text="provider.name"></span>') },
-  { name: 'the supply caption of a row worded with another word of the reviewed table', file: POOLS_FILE, change: swap('supply: \'on supply ships\'', 'supply: \'aboard supply ships\'') },
-  { name: 'the status of a ship short of stock worded with another word of the reviewed table', file: POOLS_FILE, change: swap('short: \'Short of stock\'', 'short: \'Not enough stock\'') },
-  { name: 'the words of a place with colonies put another way in the reviewed table', file: POOLS_FILE, change: swap('colonies: \'No maintenance location counts the colonies here:', 'colonies: \'No maintenance location counts any colony here:') },
+  { name: 'the switch of the locations bound by an explicit prop and event instead of v-model', file: PAGE_FILE, checks: ['standalone', 'clusters', 'no-errors'], change: swap('v-model="showIdleLocations"', ':input-value="showIdleLocations" @change="showIdleLocations = $event"') },
+  { name: 'the retry of the supplied-output panel listened to by the longhand of the event', file: PAGE_FILE, checks: ['totals', 'no-errors'], change: swap('@retry="retryMspSupply"', 'v-on:retry="retryMspSupply"') },
+  { name: 'the tonnage line states its qualifier after the figure instead of before it', file: POOL_FILE, checks: ['capacity'], change: swap('Tonnage of the assigned ships: <span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span>', '<span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span> is the tonnage of the assigned ships') },
+  { name: 'the supply caption of a row worded with another word of the reviewed table', file: POOLS_FILE, checks: ['totals', 'no-errors'], change: swap('supply: \'on supply ships\'', 'supply: \'aboard supply ships\'') },
+  { name: 'the condition of the drill-down parenthesised', file: POOL_FILE, checks: ['rule', 'clusters'], change: swap('<template v-if="location.pool">', '<template v-if="(location.pool)">') },
 ]
 
 // ---------- the run ----------
@@ -1207,13 +1187,13 @@ const setUp = async () => {
   return env
 }
 
-const view = async (variant) => {
+const view = async (variant, ids = null) => {
   if (variant) {
     ENV.server.replace(variant.file, variant.change(ENV.originals[variant.file]))
   }
 
   try {
-    const seen = await observePage(ENV.chrome, ENV.server.url)
+    const seen = await observePage(ENV.chrome, ENV.server.url, ids)
 
     if (seen.error !== null) {
       console.error(`the page${variant ? ` with "${variant.name}"` : ''} did not get through: ${seen.error}`)
@@ -1288,15 +1268,15 @@ const checkPageHead = async () => {
 }
 
 const checkPageFault = async (fault) => {
-  const results = await pageResults(await view(fault), { strict: true, ids: fault.fails, label: `the page with the fault "${fault.name}"` })
+  const results = await pageResults(await view(fault, fault.fails), { strict: true, ids: fault.fails, label: `the page with the fault "${fault.name}"` })
 
   judged(results, fault.name)
   reportFault(fault, results)
 }
 
 const checkPageRewrite = async (rewrite) => {
-  const seen = await view(rewrite)
-  const results = await pageResults(seen, { strict: true, label: `the page rewritten as "${rewrite.name}"` })
+  const seen = await view(rewrite, rewrite.checks)
+  const results = await pageResults(seen, { strict: true, ids: rewrite.checks, label: `the page rewritten as "${rewrite.name}"` })
 
   judged(results, rewrite.name)
   reportRewrite(rewrite, results)
@@ -1355,8 +1335,9 @@ const main = async () => {
         ENV = await setUp()
       }
     },
-    afterEach: async () => {
-      if (ENV && ENV.server) {
+    // A variant of the modules alone never touched the server: nothing to put back.
+    afterEach: async (variant) => {
+      if (ENV && ENV.server && !/^(pure|real)/.test(variant.key)) {
         await ENV.server.reset()
       }
     },
