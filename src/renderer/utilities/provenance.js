@@ -190,32 +190,64 @@ const namedList = (names) => names.split(', ').map(named).join(', ')
 
 // The messages SQLite gives, with what each names: a read or a write that the save cannot take.
 const DATABASE_FORMS = [
-  [/no such (?:column|table): (\S+)/g, (_found, name) => `the save lacks ${named(name)}`],
-  [/ambiguous column name: (\S+)/g, (_found, name) => `the read names ${named(name)} ambiguously`],
-  [/table (\S+) has no column named (\S+)/g, (_found, table, column) => `the save lacks ${inputWords(table, column)}`],
-  [/NOT NULL constraint failed: ([^\s,]+(?:, [^\s,]+)*)/g, (_found, names) => `the save requires ${namedList(names)}`],
-  [/UNIQUE constraint failed: ([^\s,]+(?:, [^\s,]+)*)/g, (_found, names) => `the save already holds a row with ${namedList(names)}`],
-  [/foreign key mismatch - "([^"]*)" referencing "([^"]*)"/g, (_found, child, parent) => `the link of ${named(child)} to ${named(parent)} does not match`],
-  [/no such function: (\S+)/g, () => 'the read uses a function the save lacks'],
-  [/table (\S+) already exists/g, (_found, name) => `the save already holds ${named(name)}`],
-  [/cannot (?:UPDATE|INSERT into) generated column "([^"]*)"/g, (_found, name) => `the save does not allow writing ${named(name)}`],
-  [/cannot modify (\S+) because it is a view/g, (_found, name) => `the save does not allow writing ${named(name)}`],
-  [/cannot store \w+ value in \w+ column (\S+)/g, (_found, name) => `the save does not take that value for ${named(name)}`],
-  [/CHECK constraint failed: .*/g, () => 'a value breaks a rule of the save'],
-  [/near "[^"]*": syntax error/g, () => 'the read is malformed'],
+  [/^no such (?:column|table): (\S+)(?: - should this be a string literal in single-quotes\?)?$/, (_found, name) => `the save lacks ${named(name)}`],
+  [/^ambiguous column name: (\S+)$/, (_found, name) => `the read names ${named(name)} ambiguously`],
+  [/^table (\S+) has no column named (\S+)$/, (_found, table, column) => `the save lacks ${inputWords(table, column)}`],
+  [/^NOT NULL constraint failed: ([^\s,]+(?:, [^\s,]+)*)$/, (_found, names) => `the save requires ${namedList(names)}`],
+  [/^UNIQUE constraint failed: ([^\s,]+(?:, [^\s,]+)*)$/, (_found, names) => `the save already holds a row with ${namedList(names)}`],
+  [/^foreign key mismatch - "([^"]*)" referencing "([^"]*)"$/, (_found, child, parent) => `the link of ${named(child)} to ${named(parent)} does not match`],
+  [/^no such function: (\S+)$/, () => 'the read uses a function the save lacks'],
+  [/^table (\S+) already exists$/, (_found, name) => `the save already holds ${named(name)}`],
+  [/^cannot (?:UPDATE|INSERT into) generated column "([^"]*)"$/, (_found, name) => `the save does not allow writing ${named(name)}`],
+  [/^cannot modify (\S+) because it is a view$/, (_found, name) => `the save does not allow writing ${named(name)}`],
+  [/^cannot store \w+ value in \w+ column (\S+)$/, (_found, name) => `the save does not take that value for ${named(name)}`],
+  [/^CHECK constraint failed: .*$/, () => 'a value breaks a rule of the save'],
+  [/^near "[^"]*": syntax error$/, () => 'the read is malformed'],
+  [/^FOREIGN KEY constraint failed$/, () => 'a link to another row of the save fails'],
+  [/^datatype mismatch$/, () => 'a value is of the wrong type for the save'],
+  [/^database is locked$/, () => 'the save is locked by another program'],
+  [/^attempt to write a readonly database$/, () => 'the save is read-only'],
+  [/^unable to open database file$/, () => 'the save file cannot be opened'],
+  [/^database disk image is malformed$/, () => 'the save file is damaged'],
 ]
 
-// Whether an error comes from the database: SQLite's own code on it or on the error it wraps, a Sequelize error, or the text of one kept before (`SQLITE_ERROR: …`).
-const fromDatabase = (error, text) => /^SQLITE_[A-Z_]+: /.test(text) || Boolean(error && typeof error === 'object' && (/^SQLITE/.test(error.code || '') || /^Sequelize/.test(error.name || '') || /^SQLITE/.test((error.parent && error.parent.code) || '')))
+// What a database error of a form not listed above says: a fixed sentence with nothing of the message in it, since such a message can name a column or a table in any way. The message goes to the console, once.
+const UNKNOWN_DATABASE_ERROR = 'the save gave an error the app does not recognise'
+const logged = new Set()
 
-// What a failed read or write says on screen: the first line of the error. A database message has its SQLite code dropped and the table or column it names put in words (`no such column: FCT_Ship.CurrentCrew` reads as the save lacking the current crew of ship); a message of a form not listed above has its table names and quoted names put in words too, but only when the error comes from the database. Any other text, a file path with a table's name in it among them, stays as it is.
+// The codes an error carries, its own and those of the error it wraps (Sequelize keeps the cause as `parent` and `original`).
+const codesOf = (error) => (error && typeof error === 'object' ? [error.code, error.parent && error.parent.code, error.original && error.original.code].filter((code) => (typeof code === 'string' && code) || typeof code === 'number').map(String) : [])
+
+// Whether an error comes from the database: SQLite's own code on it or on the error it wraps, a Sequelize error, or the text of one kept before (`SQLITE_ERROR: …`).
+const fromDatabase = (error, text) => /^SQLITE_[A-Z_]+: /.test(text) || codesOf(error).some((code) => /^SQLITE/.test(code)) || Boolean(error && typeof error === 'object' && /^Sequelize/.test(error.name || ''))
+
+// What a failed read or write says on screen: the first line of the error. An error whose cause has a code that is not SQLite's (a file that cannot be opened, wrapped or not) is shown as it is. A database message of a listed form has its SQLite code dropped and the table or column it names put in words (`no such column: FCT_Ship.CurrentCrew` reads as the save lacking the current crew of ship). A database error of any other form is a fixed sentence, and its message goes to the console. Any other text stays as it is.
 export const failureWords = (error) => {
   const raw = String(error && error.message !== undefined ? error.message : error).split('\n')[0]
-  const database = fromDatabase(error, raw)
-  const text = raw.replace(/^SQLITE_[A-Z_]+: /, '')
-  const worded = DATABASE_FORMS.reduce((rest, [form, words]) => rest.replace(form, words), text)
 
-  return database ? worded.replace(/\b(?:FCT|DIM|VIR)_\w+(?:\.\w+)?/g, named).replace(/"([A-Za-z]\w*)"/g, (_found, name) => named(name)) : worded
+  if (codesOf(error).some((code) => !/^SQLITE/.test(code))) {
+    return raw
+  }
+
+  // The web mode puts where the call went before the message (scripts/web/shims/web-error.js); a reason kept from there has it too.
+  const stated = raw.replace(/^\[web\] \S+: /, '')
+  const text = stated.replace(/^SQLITE_[A-Z_]+: /, '')
+  const form = DATABASE_FORMS.find(([pattern]) => pattern.test(text))
+
+  if (form) {
+    return text.replace(form[0], form[1])
+  }
+
+  if (fromDatabase(error, stated)) {
+    if (!logged.has(raw)) {
+      logged.add(raw)
+      console.error('A database error the app does not word', error)
+    }
+
+    return UNKNOWN_DATABASE_ERROR
+  }
+
+  return raw
 }
 
 // The assumption of a figure whose rule cannot be matched to the save: a save normally states the game rules it was played under, but a damaged one can lack the columns that tell.

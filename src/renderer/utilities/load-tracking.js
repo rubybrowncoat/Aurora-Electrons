@@ -34,7 +34,7 @@ export const tracked = (key, get) => function () {
 
     return value
   }, (error) => {
-    settle(failureWords((error && error.message) || String(error)))
+    settle(failureWords(error))
 
     throw error
   })

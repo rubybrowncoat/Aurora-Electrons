@@ -4,6 +4,7 @@
 import { DatabaseRetired } from '../../../src/renderer/utilities/retired'
 
 import { databaseRequest } from './database-request'
+import { webError } from './web-error'
 
 const modelStubs = new WeakSet()
 
@@ -62,7 +63,7 @@ const request = async (route, payload) => {
       throw new DatabaseExpired()
     }
 
-    throw new Error(`[web] ${route}: ${body && body.error}`)
+    throw webError(route, body)
   }
 
   return body

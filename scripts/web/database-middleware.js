@@ -361,8 +361,16 @@ const handleDatabase = async (req, res) => {
       console.error('[web] database error', error)
     }
 
-    send(res, error.status || 500, { error: error.message, ...error.extra })
+    send(res, error.status || 500, errorBody(error))
   }
+}
+
+// What a failed call answers with: the message, and the code and the Sequelize name of the error, which the page needs to tell an error of the database from one of a file (src/renderer/utilities/provenance.js `failureWords`). The code is the first one that is not SQLite's among the error's own and its causes' (`parent`, `original`), else the first there is.
+const errorBody = (error) => {
+  const codes = [error.code, error.parent && error.parent.code, error.original && error.original.code].filter((code) => (typeof code === 'string' && code) || typeof code === 'number')
+  const code = codes.find((candidate) => !/^SQLITE/.test(String(candidate))) ?? codes[0]
+
+  return { error: error.message, ...(code === undefined ? {} : { code }), ...(typeof error.name === 'string' && error.name.startsWith('Sequelize') ? { name: error.name } : {}), ...error.extra }
 }
 
 // The handler for /__aurora-db. `load` imports src/renderer/utilities/database.js: web.js has Vite load it, which resolves its imports the way the renderer build does.
@@ -372,4 +380,4 @@ const databaseHandler = (load) => {
   return handleDatabase
 }
 
-module.exports = { TOKEN, TOKEN_HEADER, guardHost, databaseHandler }
+module.exports = { TOKEN, TOKEN_HEADER, guardHost, databaseHandler, errorBody }

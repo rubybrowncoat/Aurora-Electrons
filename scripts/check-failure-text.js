@@ -39,6 +39,33 @@ const check = (name, result) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  [${typeof result === 'string' ? result : 'false'}]`}`)
 }
 
+// The error of a save whose schema is damaged: the text of a table is changed in the file, so that SQLite reads `malformed database schema (FCT_Broken) - near "TABLX": syntax error` when it opens the table.
+const brokenSchemaError = () => {
+  const file = path.join(require('os').tmpdir(), `ae-broken-${process.pid}-${Date.now()}.db`)
+  const made = new Database(file)
+
+  made.exec('create table FCT_Broken (a integer)')
+  made.close()
+
+  const bytes = fs.readFileSync(file)
+
+  bytes.write('TABLX', bytes.indexOf('CREATE TABLE FCT_Broken') + 7)
+  fs.writeFileSync(file, bytes)
+
+  const database = new Database(file)
+
+  try {
+    database.query('select * from FCT_Broken').all()
+  } catch (error) {
+    return error
+  } finally {
+    database.close()
+    fs.rmSync(file, { force: true })
+  }
+
+  throw new Error('The damaged save did not fail')
+}
+
 // The errors of SQLite as the database gives them: a missing column and an ambiguous one, and a missing table.
 const sqliteErrors = () => {
   const database = new Database(':memory:')
@@ -52,9 +79,11 @@ const sqliteErrors = () => {
     throw new Error(`The read did not fail: ${sql}`)
   }
 
-  database.exec('create table FCT_Ship (ShipID integer, RaceID integer); create table FCT_Fleet (FleetID integer, RaceID integer);')
+  const broken = brokenSchemaError()
 
-  const errors = { column: attempt('select FCT_Ship.CurrentCrew from FCT_Ship'), table: attempt('select 1 from FCT_Colony'), ambiguous: attempt('select RaceID from FCT_Ship join FCT_Fleet') }
+  database.exec('create table FCT_Ship (ShipID integer, RaceID integer); create table FCT_Fleet (FleetID integer, RaceID integer); create table Other (Id integer); create trigger Rule before update on Other begin select * from FCT_Ship join Other using (RaceID); end; create view Joined as select * from FCT_Ship join Other using (RaceID);')
+
+  const errors = { column: attempt('select FCT_Ship.CurrentCrew from FCT_Ship'), table: attempt('select 1 from FCT_Colony'), ambiguous: attempt('select RaceID from FCT_Ship join FCT_Fleet'), trigger: attempt('update Other set Id = 1'), joined: attempt('select * from Joined'), broken }
 
   database.close()
 
@@ -88,6 +117,9 @@ const FILES = {
   'components/fleets/FleetStations': 'components/fleets/FleetStations.vue',
   'components/page/UnsupportedSave': 'components/page/UnsupportedSave.vue',
   'components/log/ArchivePanel': 'components/log/ArchivePanel.vue',
+  'utilities/provenance': 'utilities/provenance.js',
+  'web-error': '../../scripts/web/shims/web-error.js',
+  'web-middleware': '../../scripts/web/database-middleware.js',
 }
 
 const textsOf = () => Object.fromEntries(Object.entries(FILES).map(([name, file]) => [name, fs.readFileSync(path.join(RENDERER, file), 'utf8')]))
@@ -170,6 +202,89 @@ const statementsOf = async (sources) => {
       return problems.length ? [...new Set(problems)].join('; ') : true
     })
   }
+
+  add('wrapped-file', 'a file error that Sequelize wraps is shown as it is, by the empire list and by a tracked read', async () => {
+    const { actions } = await get('store/empires')
+    const { tracked } = await get('utilities/load-tracking')
+    const { ConnectionError, DatabaseError } = require('sequelize')
+    const text = "EACCES: permission denied, open 'P:/Saves/FCT_Fleet.db'"
+    const file = Object.assign(new Error(text), { code: 'EACCES' })
+    const problems = []
+    const logged = console.error
+
+    console.error = () => {}
+
+    try {
+      for (const [kind, error] of [['a connection error', new ConnectionError(file)], ['a database error', new DatabaseError(file)]]) {
+        const committed = []
+
+        await actions.load({ commit: (...args) => committed.push(args), dispatch: async () => true, state: { games: [] }, rootState: { database: failing(error) }, rootGetters: { config: { get: () => false } } })
+
+        const host = { loadErrors: {}, $set: (target, key, value) => { target[key] = value } }
+
+        await tracked('read', () => Promise.reject(error)).call(host).catch(() => {})
+
+        if (!committed.length || committed[0][1] !== text) {
+          problems.push(`${kind}: the list says "${committed.length ? committed[0][1] : 'nothing'}"`)
+        }
+
+        if (host.loadErrors.read !== text) {
+          problems.push(`${kind}: the read says "${host.loadErrors.read}"`)
+        }
+      }
+    } finally {
+      console.error = logged
+    }
+
+    return problems.length ? problems.join('; ') : true
+  })
+
+  // The web mode carries an error over HTTP: the middleware answers with a body (`errorBody`) and the page's shim throws a new error from it (`webError`).
+  add('web-transport', 'the web mode words a database error and keeps a file error, as the app does', async () => {
+    const Module = require('module')
+    const middleware = new Module(path.join(root, 'scripts', 'web', 'database-middleware.js'), module)
+
+    middleware.filename = middleware.id
+    middleware.paths = Module._nodeModulePaths(path.dirname(middleware.filename))
+    middleware._compile(sources['web-middleware'], middleware.filename)
+
+    const { webError } = await loadModule('web-error', { directory: path.join(root, 'scripts', 'web', 'shims'), sources: { 'web-error': sources['web-error'] } })
+    const { failureWords } = await get('utilities/provenance')
+    const { ConnectionError } = require('sequelize')
+    const problems = []
+    const logged = console.error
+    const over = (error) => webError('/query', JSON.parse(JSON.stringify(middleware.exports.errorBody(error))))
+    const file = Object.assign(new Error("EACCES: permission denied, open 'P:/Saves/FCT_Fleet.db'"), { code: 'EACCES' })
+
+    console.error = () => {}
+
+    try {
+      for (const [kind, error] of each) {
+        const said = inWords(failureWords(over(error)))
+
+        if (said !== true) {
+          problems.push(`${kind}: ${said}`)
+        }
+      }
+
+      const sent = failureWords(over(new ConnectionError(file)))
+
+      if (sent !== `[web] /query: ${file.message}`) {
+        problems.push(`a file error says "${sent}"`)
+      }
+
+      const stored = failureWords('[web] /query: SQLITE_ERROR: cannot join using column RaceID - column not present in both tables')
+      const said = inWords(stored)
+
+      if (said !== true) {
+        problems.push(`a reason kept from before: ${said}`)
+      }
+    } finally {
+      console.error = logged
+    }
+
+    return problems.length ? problems.join('; ') : true
+  })
 
   add('empires', 'the empire list that cannot be read says so in words', async () => {
     const { actions } = await get('store/empires')
@@ -339,6 +454,7 @@ const statementsOf = async (sources) => {
       ['two columns that must differ', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer, Ycor integer, unique (Xcor, Ycor)); insert into FCT_RaceSysSurvey values (1, 1, 2, 500, 500); insert into FCT_RaceSysSurvey values (1, 1, 7, 5, 5);'],
       ['a column the save computes', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer generated always as (1) virtual, Ycor integer); insert into FCT_RaceSysSurvey (GameID, RaceID, SystemID, Ycor) values (1, 1, 7, 5);'],
       ['a survey that is a view', 'create table Base (GameID integer, RaceID integer, SystemID integer, Xcor integer, Ycor integer); create view FCT_RaceSysSurvey as select * from Base;'],
+      ['a trigger that joins on a column', 'create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer, Ycor integer); create table Other (Id integer); insert into FCT_RaceSysSurvey values (1, 1, 7, 5, 5); create trigger Rule before update on FCT_RaceSysSurvey begin select * from FCT_RaceSysSurvey join Other using (RaceID); end;'],
       ['a link that does not match', 'create table FCT_System (SystemID integer, Name text); create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer, Xcor integer references FCT_System (SystemID), Ycor integer); insert into FCT_RaceSysSurvey values (1, 1, 7, null, 5); pragma foreign_keys = on;'],
     ]
 
@@ -407,7 +523,7 @@ const statementsOf = async (sources) => {
 }
 
 const MUTATIONS = [
-  { name: 'a tracked read keeps the message of the database', file: 'utilities/load-tracking', find: 'settle(failureWords((error && error.message) || String(error)))', replace: 'settle((error && error.message) || String(error))', fails: ['tracked'] },
+  { name: 'a tracked read keeps the message of the database', file: 'utilities/load-tracking', find: 'settle(failureWords(error))', replace: 'settle((error && error.message) || String(error))', fails: ['tracked'] },
   { name: 'the notes keep the message of the database', file: 'utilities/economy-notes', find: 'failed[key] = failureWords(error)', replace: 'failed[key] = error.message', fails: ['notes'] },
   { name: 'the fleet stations keep the message of the database', file: 'utilities/fleet-stations', find: 'failed[key] = failureWords(error)', replace: 'failed[key] = error.message', fails: ['stations'] },
   { name: 'the recovery ledger keeps the message of the database', file: 'utilities/recovery-ledger', find: 'failed[type] = failureWords(error)', replace: 'failed[type] = error.message', fails: ['recovery'] },
@@ -422,6 +538,12 @@ const MUTATIONS = [
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the observation note keeps the message of the database', file: 'pages/survey-progress', find: '(${failureWords(this.observationRead.failed)})', replace: '(${this.observationRead.failed.message})', fails: ['observation-note'] },
   { name: 'the Game Log diagnostic keeps the message of the database', file: 'utilities/log-diagnostics', find: 'failed: failed ? failureWords(failed) : null,', replace: 'failed: failed ? failed.message : null,', fails: ['log-diagnostic'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the web mode sends no code of the error', file: 'web-middleware', find: '...(code === undefined ? {} : { code })', replace: '...{}', fails: ['web-transport'] },
+  { name: 'the web mode throws a new error without the code', file: 'web-error', find: 'if (body && body.code !== undefined && body.code !== null) {', replace: 'if (false) {', fails: ['web-transport'] },
+  { name: 'a database error whose schema is damaged keeps the words of its inner message', file: 'utilities/provenance', find: 'const form = DATABASE_FORMS.find(([pattern]) => pattern.test(text))', replace: 'const form = DATABASE_FORMS.find(([pattern]) => pattern.test(text.replace(/^.* - /, "")))', fails: ['tracked', 'stations-picker'] },
+  { name: 'a file error that Sequelize wraps is worded as a database error', file: 'utilities/provenance', find: 'if (codesOf(error).some((code) => !/^SQLITE/.test(code))) {', replace: 'if (false) {', fails: ['wrapped-file'] },
+  { name: 'a database error of a form the app does not know keeps its message', file: 'utilities/provenance', find: 'return UNKNOWN_DATABASE_ERROR', replace: 'return text', fails: ['tracked', 'map-save', 'stations-picker'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the map reports a failed save of positions as the database worded it', file: 'pages/map', find: 'text: `Couldn\'t save the positions: ${failureWords(error)}`', replace: 'text: `Couldn\'t save the positions: ${error.message}`', fails: ['map-save'] },
   { name: 'the archive lists a stored failure as the database worded it', file: 'components/log/ArchivePanel', find: 'reason: failureWords(failure.reason) }', replace: 'reason: failure.reason }', fails: ['archive-failures'] },
