@@ -116,24 +116,27 @@
                   <th>Author</th>
                   <th>Source</th>
                   <th>License</th>
-                  <th>Changes</th>
-                  <th>Notices</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="credit in credits" :key="credit.id" :data-credit="credit.id">
                   <td>
                     <div class="font-weight-medium">{{ credit.name }}</div>
-                    <div class="caption text--secondary">{{ credit.kind }} · {{ credit.covers }}</div>
-                    <div class="caption"><span class="font-weight-medium">{{ credit.reuse.kind }}.</span> {{ credit.reuse.detail }}</div>
+                    <div class="caption text--secondary">{{ credit.covers }}</div>
                   </td>
                   <td>{{ credit.author }}</td>
                   <td class="text-no-wrap"><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
                   <td><external-link :href="credit.license.href">{{ credit.license.label }}</external-link></td>
-                  <td>{{ credit.modifications }}</td>
-                  <td class="text-no-wrap">
-                    <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
-                    <div v-if="credit.compatibility" class="caption text-wrap mt-2" data-credit-compatibility><span class="font-weight-medium">{{ credit.compatibility.title }}: {{ credit.compatibility.status }}.</span> {{ credit.compatibility.text }}</div>
+                  <td>
+                    <details>
+                      <summary>Details and notices</summary>
+                      <div class="caption text--secondary">{{ credit.kind }}</div>
+                      <div class="caption"><span class="font-weight-medium">{{ credit.reuse.kind }}.</span> {{ credit.reuse.detail }}</div>
+                      <div class="caption">{{ credit.modifications }}</div>
+                      <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
+                      <div v-if="credit.compatibility" class="caption text-wrap mt-2" data-credit-compatibility><span class="font-weight-medium">{{ credit.compatibility.title }}: {{ credit.compatibility.status }}.</span> {{ credit.compatibility.text }}</div>
+                    </details>
                   </td>
                 </tr>
               </tbody>
