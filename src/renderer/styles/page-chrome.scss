@@ -88,6 +88,16 @@
   }
 }
 
+// Tiles that share one line while each keeps 180 px at the text size in force (StatTiles' `fit`), and wrap into even columns below that. The grid places the columns, so their breakpoint widths (`col-12 col-sm-6 col-lg-3`) give way.
+.stat-tiles--fit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(180px * var(--ae-font-scale)), 1fr));
+
+  > * {
+    max-width: none;
+  }
+}
+
 .panel {
   margin-top: 20px;
 }

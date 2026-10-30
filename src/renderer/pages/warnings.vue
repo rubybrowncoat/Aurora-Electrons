@@ -36,7 +36,7 @@
       <div v-if="snoozeProblem" class="caption error--text mb-2">Snoozes are not available: {{ snoozeProblem }}</div>
       <div v-else-if="snoozes.dropped" class="caption text--secondary mb-2">{{ count(snoozes.dropped) }} stored {{ snoozes.dropped === 1 ? 'snooze is' : 'snoozes are' }} not valid and {{ snoozes.dropped === 1 ? 'is' : 'are' }} ignored.</div>
 
-      <stat-tiles dense class="my-2" :tiles="tiles" @select="(tile) => selectSeverity(tile.key)" />
+      <stat-tiles dense fit class="my-2" :tiles="tiles" @select="(tile) => selectSeverity(tile.key)" />
 
       <v-row v-if="panels.length">
         <v-col v-for="(stack, stackIndex) in columns" :key="stackIndex" cols="12" xl="6" class="panel-column">
