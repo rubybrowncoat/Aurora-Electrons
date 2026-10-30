@@ -188,11 +188,21 @@ tr.v-data-table__selected > td:last-child:not(:first-child) {
   pointer-events: none;
 }
 
-// The tags and pills (`small` and `x-small` chips) hold a word or two in a table cell or a head, so they take less side padding than Vuetify gives a chip (12 px), for every page at once: a page does not set its own. The text is never cut: a chip grows with it.
+// The tags and pills (`small` and `x-small` chips) hold a word or two in a table cell or a head, so they take less side padding than Vuetify gives a chip (12 px), for every page at once: a page does not set its own. The text is never cut: a chip grows with it. A left icon or avatar pulls 6 px into the padding, so its margin is cut by the padding taken away and it keeps the 6 px from the edge a Vuetify chip gives it.
 .v-application .v-chip.v-size--small {
   padding: 0 8px;
+
+  .v-icon--left,
+  .v-avatar--left {
+    margin-left: -2px;
+  }
 }
 
 .v-application .v-chip.v-size--x-small {
   padding: 0 6px;
+
+  .v-icon--left,
+  .v-avatar--left {
+    margin-left: 0;
+  }
 }
