@@ -36,7 +36,7 @@
 
       <archive-panel v-if="archiveChoice && canArchive && archive" class="mb-3" :status="archive.status" :reason="archive.reason || ''" :record="archiveRecord" :cap="eventCap" :start-year="Number(StartYear)" :source="archiveListed ? 'archive' : 'save'" @source="(value) => listSource = value" />
 
-      <diagnostic-panel class="mb-3" :diagnosis="diagnosis" :pending="!diagnosisCurrent" :seconds="diagnosticWindow" :start-year="Number(StartYear)" @window="(value) => diagnosticWindow = value" />
+      <diagnostic-panel class="mb-3" :diagnosis="diagnosis" :pending="!diagnosisCurrent" :seconds="diagnosticWindow" :start-year="Number(StartYear)" :hand.sync="diagnosticHand" @window="(value) => diagnosticWindow = value" />
 
       <v-card class="panel mb-3" data-summary="Track game-log event counts by month." elevation="1">
         <div class="panel-head">
@@ -188,6 +188,8 @@ export default {
       // The short-interval checklist: what the open save, the archive and the game's tables said for the race and save open when it was read ({ key, database, inputs }, `inputs` null until read), the window chosen and the read in progress.
       diagnostic: Object.freeze({ key: null, database: null, inputs: null }),
       diagnosticWindow: DEFAULT_WINDOW,
+      // Whether the player folded (true) or unfolded (false) the checklist during this visit, null until then: the panel is made again when the race changes, so the choice is kept here.
+      diagnosticHand: null,
       diagnosticRun: 0,
       settledContext: null,
       expandedGroups: [],

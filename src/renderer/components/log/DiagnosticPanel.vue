@@ -1,82 +1,84 @@
 <template>
   <v-card class="panel diagnostic" data-diagnostic data-summary="Review recent fire and boarding events in the game log." elevation="1" :data-state="diagnosis ? diagnosis.state : null" :data-verdict="diagnosis ? diagnosis.verdict : null">
     <div class="panel-head">
-      <div class="subtitle-2">Short-interval checklist<provenance-mark v-if="diagnosis" :result="diagnosis.results.events" label /></div>
+      <div class="subtitle-2"><v-btn icon x-small class="mr-1" :aria-label="folded ? 'Show the checklist' : 'Hide the checklist'" :aria-expanded="String(!folded)" aria-controls="diagnostic-content" data-diagnostic-toggle @click="toggle"><v-icon small>{{ folded ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon></v-btn>Short-interval checklist<provenance-mark v-if="diagnosis" :result="diagnosis.results.events" label /><span v-if="folded && note" class="caption text--secondary ml-2" data-diagnostic-note>{{ note }}</span></div>
       <v-select :value="seconds" :items="windows" item-text="text" item-value="seconds" label="Window" dense outlined hide-details class="diagnostic-window" data-diagnostic-window @change="(value) => $emit('window', value)" />
     </div>
 
-    <div v-if="pending" class="pa-4 text--secondary" data-diagnostic-pending role="status">Reading the log for this race.</div>
-    <div v-else-if="!diagnosis" class="pa-4 text--secondary" data-diagnostic-none role="status">No window can be placed: the open save gives no game time.</div>
-    <div v-else class="diagnostic-body">
-      <div class="diagnostic-window-line" data-window-line>
-        <span data-window-range><span data-window-from>{{ date(diagnosis.window.from) }}</span> to <span data-window-to>{{ date(diagnosis.window.to) }}</span></span>
-        <span class="diagnostic-state" :class="`diagnostic-state--${diagnosis.state}`" data-window-state>{{ stateText[diagnosis.state] }}</span>
-      </div>
-      <ul v-if="diagnosis.reasons.length" class="diagnostic-list" data-reasons>
-        <li v-for="reason in diagnosis.reasons" :key="reason" :data-reason="reason">{{ reasonText[reason] }}</li>
-      </ul>
-      <div v-if="diagnosis.failed" class="caption text--secondary" data-read-failed>The read of the log failed: {{ diagnosis.failed }}</div>
+    <div v-show="!folded" id="diagnostic-content">
+      <div v-if="pending" class="pa-4 text--secondary" data-diagnostic-pending role="status">Reading the log for this race.</div>
+      <div v-else-if="!diagnosis" class="pa-4 text--secondary" data-diagnostic-none role="status">No window can be placed: the open save gives no game time.</div>
+      <div v-else class="diagnostic-body">
+        <div class="diagnostic-window-line" data-window-line>
+          <span data-window-range><span data-window-from>{{ date(diagnosis.window.from) }}</span> to <span data-window-to>{{ date(diagnosis.window.to) }}</span></span>
+          <span class="diagnostic-state" :class="`diagnostic-state--${diagnosis.state}`" data-window-state>{{ stateText[diagnosis.state] }}</span>
+        </div>
+        <ul v-if="diagnosis.reasons.length" class="diagnostic-list" data-reasons>
+          <li v-for="reason in diagnosis.reasons" :key="reason" :data-reason="reason">{{ reasonText[reason] }}</li>
+        </ul>
+        <div v-if="diagnosis.failed" class="caption text--secondary" data-read-failed>The read of the log failed: {{ diagnosis.failed }}</div>
 
-      <div class="diagnostic-verdict" data-verdict-text>
-        <span v-if="diagnosis.verdict === 'found'" data-verdict-shown="found"><span data-verdict-count>{{ count(diagnosis.observed) }}</span> <span data-verdict-words>{{ verdictText.found[diagnosis.observed === 1 ? 'one' : 'many'] }}</span></span>
-        <span v-else-if="diagnosis.verdict === 'absent'" data-verdict-shown="absent"><span data-verdict-words>{{ verdictText.absent }}</span></span>
-        <span v-else data-verdict-shown="unavailable"><span data-verdict-words>{{ verdictText.unavailable }}</span></span>
+        <div class="diagnostic-verdict" data-verdict-text>
+          <span v-if="diagnosis.verdict === 'found'" data-verdict-shown="found"><span data-verdict-count>{{ count(diagnosis.observed) }}</span> <span data-verdict-words>{{ verdictText.found[diagnosis.observed === 1 ? 'one' : 'many'] }}</span></span>
+          <span v-else-if="diagnosis.verdict === 'absent'" data-verdict-shown="absent"><span data-verdict-words>{{ verdictText.absent }}</span></span>
+          <span v-else data-verdict-shown="unavailable"><span data-verdict-words>{{ verdictText.unavailable }}</span></span>
+        </div>
+
+        <div class="diagnostic-section">
+          <div class="subtitle-2">Event types watched</div>
+          <ul class="diagnostic-types">
+            <li v-for="entry in diagnosis.types" :key="entry.type" :data-type="entry.type" :data-count="diagnosis.verdict === 'unavailable' ? null : entry.count">
+              <v-icon small class="mr-1">{{ entry.icon }}</v-icon>
+              <span class="diagnostic-name">{{ entry.name }}</span>
+              <span class="diagnostic-chip">{{ groups[entry.group] }}</span>
+              <span class="diagnostic-count"><span v-if="diagnosis.verdict === 'unavailable'" data-count-unknown>{{ countText.unknown }}</span><span v-else-if="entry.count"><span data-count-value>{{ count(entry.count) }}</span> observed, newest <span data-newest-date>{{ date(entry.newest) }}</span></span><span v-else data-count-none>{{ countText.none }}</span></span>
+              <span v-if="entry.hidden" class="diagnostic-chip" data-hidden>{{ markText.hidden }}</span>
+              <span v-if="entry.listed === false" class="diagnostic-chip" data-unlisted>{{ markText.unlisted }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div v-if="diagnosis.observations.length" class="diagnostic-section">
+          <div class="subtitle-2">Observed events <span class="caption text--secondary">newest {{ count(shown.length) }} of {{ count(diagnosis.observations.length) }} groups</span></div>
+          <ul class="diagnostic-events">
+            <li v-for="observation in shown" :key="observation.key" data-observation :data-key="observation.key" :data-type="observation.type" :data-state="observation.state" :data-copies="observation.copies">
+              <div class="diagnostic-event-head">
+                <v-icon small class="mr-1">{{ iconOf(observation.type) }}</v-icon>
+                <span class="diagnostic-name">{{ nameOf(observation.type) }}</span>
+                <span v-if="observation.copies > 1" class="diagnostic-chip" data-event-copies><span data-copies-value>{{ count(observation.copies) }}</span> identical events</span>
+                <span class="diagnostic-date" data-event-date>{{ date(observation.time) }}</span>
+                <span class="diagnostic-source">Increment <span data-event-increment>{{ observation.increment[0] }}</span></span>
+                <span class="diagnostic-state" :class="`diagnostic-state--${observation.state}`" data-event-state>{{ stateText[observation.state] }}</span>
+              </div>
+              <div class="diagnostic-message">{{ observation.message }}</div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="diagnostic-section">
+          <div class="subtitle-2">Inputs</div>
+          <ul class="diagnostic-list" data-inputs>
+            <li v-for="input in inputs" :key="input.id" :data-input="input.id" :data-status="input.result.status">
+              <span class="diagnostic-name">{{ input.label }}</span><provenance-mark :result="input.result" label />
+              <span v-if="input.result.inputs.missing.length" class="caption text--secondary"> Not read: {{ input.result.inputs.missing.join('; ') }}.</span>
+            </li>
+          </ul>
+        </div>
       </div>
 
-      <div class="diagnostic-section">
-        <div class="subtitle-2">Event types watched</div>
-        <ul class="diagnostic-types">
-          <li v-for="entry in diagnosis.types" :key="entry.type" :data-type="entry.type" :data-count="diagnosis.verdict === 'unavailable' ? null : entry.count">
-            <v-icon small class="mr-1">{{ entry.icon }}</v-icon>
-            <span class="diagnostic-name">{{ entry.name }}</span>
-            <span class="diagnostic-chip">{{ groups[entry.group] }}</span>
-            <span class="diagnostic-count"><span v-if="diagnosis.verdict === 'unavailable'" data-count-unknown>{{ countText.unknown }}</span><span v-else-if="entry.count"><span data-count-value>{{ count(entry.count) }}</span> observed, newest <span data-newest-date>{{ date(entry.newest) }}</span></span><span v-else data-count-none>{{ countText.none }}</span></span>
-            <span v-if="entry.hidden" class="diagnostic-chip" data-hidden>{{ markText.hidden }}</span>
-            <span v-if="entry.listed === false" class="diagnostic-chip" data-unlisted>{{ markText.unlisted }}</span>
+      <div class="diagnostic-section diagnostic-pointers" data-pointers>
+        <div class="subtitle-2">Manual checks in the game</div>
+        <ul class="diagnostic-list">
+          <li v-for="entry in pointers" :key="entry.id" :data-pointer="entry.id">
+            <span class="diagnostic-name" data-pointer-name>{{ entry.term }}</span>
+            <div data-pointer-definition>{{ entry.definition }}</div>
           </li>
         </ul>
       </div>
 
-      <div v-if="diagnosis.observations.length" class="diagnostic-section">
-        <div class="subtitle-2">Observed events <span class="caption text--secondary">newest {{ count(shown.length) }} of {{ count(diagnosis.observations.length) }} groups</span></div>
-        <ul class="diagnostic-events">
-          <li v-for="observation in shown" :key="observation.key" data-observation :data-key="observation.key" :data-type="observation.type" :data-state="observation.state" :data-copies="observation.copies">
-            <div class="diagnostic-event-head">
-              <v-icon small class="mr-1">{{ iconOf(observation.type) }}</v-icon>
-              <span class="diagnostic-name">{{ nameOf(observation.type) }}</span>
-              <span v-if="observation.copies > 1" class="diagnostic-chip" data-event-copies><span data-copies-value>{{ count(observation.copies) }}</span> identical events</span>
-              <span class="diagnostic-date" data-event-date>{{ date(observation.time) }}</span>
-              <span class="diagnostic-source">Increment <span data-event-increment>{{ observation.increment[0] }}</span></span>
-              <span class="diagnostic-state" :class="`diagnostic-state--${observation.state}`" data-event-state>{{ stateText[observation.state] }}</span>
-            </div>
-            <div class="diagnostic-message">{{ observation.message }}</div>
-          </li>
-        </ul>
+      <div class="panel-foot caption text--secondary">
+        Review the logged events, coverage and in-game checks for a stalled short interval. These are evidence, not a diagnosis, and a cause remains unknown unless the player records one. The window ends at the open save's newest increment. Partial means it includes a gap, an increment that may still change or a failed read. Only observed events are listed, so others may exist. Each event carries the state of its own increment.
       </div>
-
-      <div class="diagnostic-section">
-        <div class="subtitle-2">Inputs</div>
-        <ul class="diagnostic-list" data-inputs>
-          <li v-for="input in inputs" :key="input.id" :data-input="input.id" :data-status="input.result.status">
-            <span class="diagnostic-name">{{ input.label }}</span><provenance-mark :result="input.result" label />
-            <span v-if="input.result.inputs.missing.length" class="caption text--secondary"> Not read: {{ input.result.inputs.missing.join('; ') }}.</span>
-          </li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="diagnostic-section diagnostic-pointers" data-pointers>
-      <div class="subtitle-2">Manual checks in the game</div>
-      <ul class="diagnostic-list">
-        <li v-for="entry in pointers" :key="entry.id" :data-pointer="entry.id">
-          <span class="diagnostic-name" data-pointer-name>{{ entry.term }}</span>
-          <div data-pointer-definition>{{ entry.definition }}</div>
-        </li>
-      </ul>
-    </div>
-
-    <div class="panel-foot caption text--secondary">
-      Review the logged events, coverage and in-game checks for a stalled short interval. These are evidence, not a diagnosis, and a cause remains unknown unless the player records one. The window ends at the open save's newest increment. Partial means it includes a gap, an increment that may still change or a failed read. Only observed events are listed, so others may exist. Each event carries the state of its own increment.
     </div>
   </v-card>
 </template>
@@ -84,13 +86,14 @@
 <script>
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import countFormat from '../../mixins/count-format'
-import { COUNT_TEXT, GROUPS, LISTED, MARK_TEXT, POINTER_TERMS, REASON_TEXT, STATE_TEXT, VERDICT_TEXT, WATCHED, WINDOWS } from '../../utilities/log-diagnostics'
+import { COUNT_TEXT, DEFAULT_WINDOW, GROUPS, LISTED, MARK_TEXT, POINTER_TERMS, REASON_TEXT, STATE_TEXT, VERDICT_TEXT, WATCHED, WINDOWS } from '../../utilities/log-diagnostics'
 import { termById } from '../../utilities/glossary'
 import { gameDateText } from '../../utilities/history-milestones'
 
 const INPUT_LABELS = { events: 'Race game log', hidden: 'Event types hidden in the game', types: 'Event table of the save', fleet: 'Ships, fleets and boarding parties' }
+const FOLDED_NOTE = { absent: 'None found', unavailable: 'Not covered by the log' }
 
-// The Short-interval checklist of the Game Log (utilities/log-diagnostics.js): `diagnosis` is the checklist for the open save's race, or null when none can be placed; `pending` is true while it has not been read for the race and save now open; `seconds` is the window chosen. It emits `window` with the seconds picked.
+// The Short-interval checklist of the Game Log (utilities/log-diagnostics.js): `diagnosis` is the checklist for the open save's race, or null when none can be placed; `pending` is true while it has not been read for the race and save now open; `seconds` is the window chosen. It emits `window` with the seconds picked. It folds under its title, leaving a note of the verdict: `hand` is null until the player folds or unfolds it, then true (folded) or false, and the host keeps it for the visit (`:hand.sync`), since the panel is made again when the race changes.
 export default {
   components: { ProvenanceMark },
   mixins: [countFormat],
@@ -99,9 +102,10 @@ export default {
     pending: { type: Boolean, default: false },
     seconds: { type: Number, required: true },
     startYear: { type: Number, required: true },
+    hand: { type: Boolean, default: null },
   },
   data() {
-    return { windows: WINDOWS, groups: GROUPS, stateText: STATE_TEXT, reasonText: REASON_TEXT, verdictText: VERDICT_TEXT, countText: COUNT_TEXT, markText: MARK_TEXT }
+    return { windows: WINDOWS, groups: GROUPS, stateText: STATE_TEXT, reasonText: REASON_TEXT, verdictText: VERDICT_TEXT, countText: COUNT_TEXT, markText: MARK_TEXT, decision: false, decided: false }
   },
   computed: {
     shown() {
@@ -115,8 +119,46 @@ export default {
     pointers() {
       return POINTER_TERMS.map((id) => termById[id]).filter(Boolean)
     },
+
+    folded() {
+      return this.hand === null ? this.decision : this.hand
+    },
+
+    note() {
+      return this.diagnosis ? (this.diagnosis.verdict === 'found' ? `${this.count(this.diagnosis.observed)} found` : FOLDED_NOTE[this.diagnosis.verdict]) : ''
+    },
+  },
+  watch: {
+    pending(value) {
+      if (value) {
+        this.decided = false
+      }
+
+      this.decide()
+    },
+
+    diagnosis() {
+      this.decide()
+    },
+  },
+  created() {
+    this.decide()
   },
   methods: {
+    // Folds once for each read scope, when the checklist arrives: only if the default window holds no found event, so a later window change never folds or unfolds it, and a fold or unfold by hand overrides it.
+    decide() {
+      if (this.pending || this.decided) {
+        return
+      }
+
+      this.decision = this.diagnosis !== null && this.seconds === DEFAULT_WINDOW && this.diagnosis.verdict !== 'found'
+      this.decided = this.diagnosis !== null
+    },
+
+    toggle() {
+      this.$emit('update:hand', !this.folded)
+    },
+
     date(seconds) {
       return gameDateText(this.startYear, seconds)
     },

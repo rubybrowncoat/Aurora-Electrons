@@ -104,7 +104,7 @@ const PAGE_HELP = Object.freeze({
       'Game Log options collapses daily repeats, keeps only custom-coloured events, switches the event archive on and resets the filters.',
       'Pinned holds copies of the events pinned from the list, each with a note of its own; Read in full opens the message and Unpin removes the copy.',
       'Event archive shows what the archive has observed on this branch, and Events listed from switches the list between This save and the Archive.',
-      'Short-interval checklist lists the fire and boarding events of the chosen Window and how far the log covers it, as evidence for a stalled short interval; it names no cause.',
+      'Short-interval checklist lists the fire and boarding events of the chosen Window and how far the log covers it, as evidence for a stalled short interval; it names no cause. The arrow at its title folds it, and it starts folded when the last day, the default window, holds no event or is not covered by the log.',
       'Timeline counts the events by month under the search, place and type filters; click a month to set From and Through, click it again to clear them, or pick a Month directly.',
       'In Events, click a message to read it in full, expand a daily repeat for each message, pin an event, hide its type, or open its place on the Galaxy Map or in the Colonization Planner; New marks the events since the last visit to this branch.',
     ],

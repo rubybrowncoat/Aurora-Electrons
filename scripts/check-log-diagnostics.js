@@ -9,6 +9,7 @@
   - verdicts: found, absent and unavailable are told apart; a window nothing covers, an empty log and a failed read are unavailable, never absent; an absent window is still partial where its newest increment may change;
   - inputs: the hidden event types and the event table of the save are read or unavailable (never none), the ship and fleet inputs are always unavailable, each with the status the window's state gives;
   - page: the panel on a save whose log was rewritten shows what SQL says for four windows, the states per window and per event, the hidden flag, the inputs and the pointers to the game's own checks; a race switched while its read is held shows nothing of the race before; a failed read and an empty window are never worded as safe or as nothing having happened; an older archive leaves a gap, an archive ahead of the save leaves the window observed. The page is read through the shared readers of scripts/lib/browser-observe.js (`installScreen`): the states, verdict, counts, copies, statuses, reasons and marks are read from what the panel draws, a word turned back into its value by the label maps of src/renderer/utilities/log-diagnostics.js (`labelKey`) and a numeral read in the grouping of the setting (`readFigure`); the hooks name the elements and must agree with what is drawn, and the rows, types, inputs and reasons are paired by their identity, never by place.
+  - fold: the checklist folds under its title through a toggle (`aria-expanded`, a label, the id of the content it controls) that sits in the head's first element, which the section navigation names the section by, and a note of the verdict shows there only while it is folded. It opens folded exactly when the default window (the last day) holds no found event, decided once for each read scope by the window then chosen and never again by a window change; a fold or unfold by hand stands for the rest of the visit. The page is read as the player meets it (the fold of the first read, then the unfolding through the toggle), and one race with events, one without and one whose read fails show the outcomes.
   Every planted fault (in the utilities, in the panel, in the page) and every rewrite that says the same thing is run against the whole suite: a fault is credited only when a check named for it fails by an assertion of its own on a value it read, never because a call of the code under test threw (scripts/lib/fault-credit.js), and a rewrite must pass every check. Each credited fault prints the first line of what each named check said and whether it failed on a value or a throw.
 
   Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. The heads (`units`, `page`, `recorder`) and every fault and rewrite (`unit-fault:N`, `unit-rewrite:N`, `page-fault:N`, `page-rewrite:N`) run through scripts/lib/suite-runner.js: one after another in a worker that writes the save, starts one page server and one browser and warms them first, each with a deadline, with a record that --resume continues and the control `control:warm-reset`, which runs a page fault and then the page's head on the same server. --only=<text> runs the heads and the faults and rewrites whose names hold the text (a focused run while working; the run that counts has none). The page part needs Playwright's Chromium (`bunx playwright install chromium` once).
@@ -646,6 +647,9 @@ const BANNED = /\b(safe|safely|no combat|no fighting|nothing happened|nothing ha
 const VOICE = /\b(I|me|my|mine|you|your|yours|we|our|ours)\b/i
 const FAILED_FETCH = 'Failed to load resource: the server responded with a status of 500 (Internal Server Error)'
 const WINDOW_SECONDS = [3600, 86400, 432000, 2592000]
+// The window the page opens on, the last day (the suite's own statement of it, never the module's), and the title the section navigation names the checklist by.
+const DEFAULT_SECONDS = WINDOW_SECONDS[1]
+const CHECKLIST_TITLE = 'Short-interval checklist'
 const SQL_WATCHED = WATCHED_TYPES.join(', ')
 
 const openRaw = (file, mode) => new Promise((resolve, reject) => {
@@ -772,6 +776,51 @@ const readPanel = () => {
   }
 }
 
+// What the fold of the panel shows; runs in the page, through the shared readers. The toggle as the player meets it (drawn, its `aria-expanded`, its label, the id it controls, whether it sits in the first element of the head and draws no text), the content that id names (drawn or not, holding every part under the head and none of the head), each part drawn or not, the title the section navigation takes from the head (the text of its first element outside the figures: chips, captions and secondary text), and the note drawn in the head.
+const readFold = () => {
+  const { visible, visibleText } = window.__screen
+  const root = document.querySelector('[data-diagnostic]')
+
+  if (!root) {
+    return { present: false }
+  }
+
+  const seen = (element) => Boolean(element) && visible(element)
+  const drawn = (element) => Boolean(element) && (visible(element) || visibleText(element) !== '')
+  const toggle = root.querySelector('[data-diagnostic-toggle]')
+  const note = root.querySelector('[data-diagnostic-note]')
+  const head = root.querySelector('.panel-head')
+  const title = head ? head.firstElementChild : null
+  const id = toggle ? toggle.getAttribute('aria-controls') : null
+  const target = id ? document.getElementById(id) : null
+  const parts = [...root.querySelectorAll('[data-diagnostic-pending], [data-diagnostic-none], .diagnostic-body, [data-pointers], .panel-foot')]
+  const words = []
+  const field = root.querySelector('[data-diagnostic-window]') ? root.querySelector('[data-diagnostic-window]').closest('.v-input') : null
+
+  if (title) {
+    const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT)
+
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const figure = node.parentElement.closest('.v-chip, .caption, .text--secondary')
+
+      if (!(figure && figure !== title && title.contains(figure))) {
+        words.push(node.textContent)
+      }
+    }
+  }
+
+  return {
+    present: true,
+    toggle: { found: Boolean(toggle), shown: seen(toggle), expanded: toggle ? toggle.getAttribute('aria-expanded') : null, label: toggle ? toggle.getAttribute('aria-label') : null, controls: id, inTitle: Boolean(toggle && title && title.contains(toggle)), text: toggle ? visibleText(toggle) : null },
+    content: { found: Boolean(target), shown: seen(target), holdsParts: Boolean(target) && parts.length > 0 && parts.every((part) => target.contains(part)), holdsHead: Boolean(target && head && target.contains(head)), parts: parts.map((part) => ({ name: part.getAttribute('data-pointers') !== null ? 'pointers' : part.classList.contains('panel-foot') ? 'foot' : part.classList.contains('diagnostic-body') ? 'body' : 'message', shown: seen(part) })) },
+    note: { found: Boolean(note), text: note && drawn(note) ? visibleText(note) : null, inTitle: Boolean(note && title && title.contains(note)) },
+    title: words.join(' ').replace(/\s+/g, ' ').trim(),
+    control: seen(field),
+    verdict: root.getAttribute('data-verdict'),
+    separatorName: window.$app.$store.getters.config.get('selectedSeparator', 'Tick'),
+  }
+}
+
 // A wait of the page for a condition it shows, polled and bounded by the suite's timeout like every wait of this file (a fixed sleep is too short under load and wasted otherwise).
 const until = (page, label, done, what, timeout = TIMEOUT) => waitFor({ done, what, label, clock: REAL_CLOCK, sleep: (ms) => page.waitForTimeout(ms), timeout })
 
@@ -797,8 +846,8 @@ const waitFor = async ({ done, what, label, clock, sleep, timeout = TIMEOUT }) =
 
 const REAL_CLOCK = { now: () => Date.now(), sleep: null }
 
-// The page that `observe` opens, made ready for the Game Log of the player's race: the race picked on the Empires page, the log opened and settled, each step named through `step` and bounded by TIMEOUT. `rules.hold` makes the reads it names wait in `held` until they are let go, `rules.fail` answers the reads it names with an error. `clock` is the clock of the waits (a virtual one in the controls of the waits).
-const prepare = async (page, url, step, clock = REAL_CLOCK) => {
+// The page that `observe` opens, made ready for the Game Log of the player's race: the race picked on the Empires page, the log opened and settled, each step named through `step` and bounded by TIMEOUT. `rules.hold` makes the reads it names wait in `held` until they are let go, `rules.fail` answers the reads it names with an error. `clock` is the clock of the waits (a virtual one in the controls of the waits). The checklist is read as the first read leaves it (`opened`) and, if it is folded, unfolded through its toggle as a player does before reading it, unless `keepFold` leaves it to the observation.
+const prepare = async (page, url, step, clock = REAL_CLOCK, keepFold = false) => {
   await installScreen(page)
 
   const state = { held: [], pending: new Map(), last: clock.now(), hold: null, fail: null }
@@ -868,7 +917,9 @@ const prepare = async (page, url, step, clock = REAL_CLOCK) => {
   step('waiting for the page to settle')
   await settle()
 
-  return { state, settle }
+  const opened = await unfoldFold(page, step, keepFold)
+
+  return { state, settle, opened }
 }
 
 // The waits of `prepare` on a page that is only enough of one, and a clock that is only advanced by the sleeps: a database call that never finishes must end the wait at the suite's timeout with a message that names the call (the observation's failure, never a fault of the product), and a call that finishes before the deadline must let the wait return.
@@ -999,6 +1050,119 @@ const settled = (screen, menu = null) => {
 
 const read = async (page, menu = null) => settled(await page.evaluate(readPanel), menu)
 
+// The words of the note a folded panel draws in its head: the verdicts that carry no count, and the count of a found verdict before its word. They are the suite's own, never the panel's.
+const NOTE_WORDS = { absent: 'None found', unavailable: 'Not covered by the log' }
+const NOTE_FOUND = /^(.+) found$/
+
+// The fold as read in the page, its note turned back into the verdict it stands for (`kind`: 'found' with its `count` read as a figure, 'absent', 'unavailable', null where none is drawn, and a note of the words where no map holds them). A panel that is not drawn is given back as it is.
+const settledFold = (raw) => {
+  if (!raw || !raw.present) {
+    return raw
+  }
+
+  const text = raw.note.text
+  const word = text === null ? undefined : Object.keys(NOTE_WORDS).find((key) => NOTE_WORDS[key] === text)
+  const found = text === null || word ? null : NOTE_FOUND.exec(text)
+  const kind = text === null ? null : word || (found ? 'found' : `a note no map holds: ${text}`)
+
+  return { ...raw, note: { ...raw.note, kind, count: found ? figureOf({ shown: found[1] }, raw.separatorName) : null } }
+}
+
+const readFolded = async (page) => settledFold(await page.evaluate(readFold))
+
+// The toggle pressed as a player presses it: clicked, and the page given the ticks and the frame that its update takes.
+const flipFold = async (page) => {
+  await page.locator('[data-diagnostic-toggle]').click({ timeout: 30000 })
+  await page.evaluate(async () => {
+    await window.$app.$nextTick()
+    await window.$app.$nextTick()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  })
+}
+
+// The checklist unfolded as a player unfolds it before reading it: the toggle pressed only where it is folded, and not at all with `keep`. The fold as it was read, before the press, is given back.
+const unfoldFold = async (page, step, keep = false) => {
+  const fold = await readFolded(page)
+
+  if (!keep && fold && fold.present && fold.toggle.expanded === 'false') {
+    step('the checklist is unfolded through its toggle')
+    await flipFold(page)
+  }
+
+  return fold
+}
+
+// A race opened as the other switches of an observation open one: the store holds it, and the page has settled.
+const openRace = async (page, settle, race, npr, what) => {
+  await switchRace(page, race, npr)
+  await until(page, what, () => raceOpenIn(page, race), () => 'the store does not hold the race')
+  await settle()
+}
+
+const pickWindow = async (page, settle, seconds) => {
+  await chooseWindow(page, seconds)
+  await settle()
+}
+
+// The fold as the player meets it, read after each step, with no fold or unfold by hand until the toggle is pressed: the race with events (the first read, `opened`), the race with none, a longer window chosen, the race whose read fails opened under that window and then the day chosen, the race with events again, the race whose read fails opened under the day, the race with events once more, the shortest window and the day chosen again; then the toggle pressed to fold it, the race without events, the race with events again, the toggle pressed to unfold it, the race without events and the race whose read fails; at last the race with events open again, for the reads that follow. The windows are chosen in the menu, the toggle is clicked and each race is opened as the other switches do.
+const foldSequence = async ({ page, step, state, settle, opened }) => {
+  const fold = { opened }
+
+  step('the race without events is opened')
+  await openRace(page, settle, QUIET, true, 'the switch to the race without events')
+  fold.quiet = await readFolded(page)
+  step('a longer window is chosen')
+  await pickWindow(page, settle, WINDOW_SECONDS[3])
+  fold.quietWide = await readFolded(page)
+  step('the race whose read fails is opened under that window')
+  state.fail = isRaceLog(BROKEN)
+  await openRace(page, settle, BROKEN, true, 'the switch to the race whose log fails')
+  fold.brokenWide = await readFolded(page)
+  step('the day is chosen')
+  await pickWindow(page, settle, WINDOW_SECONDS[1])
+  fold.brokenDay = await readFolded(page)
+  state.fail = null
+  step('the race with events is opened')
+  await openRace(page, settle, PLAYER, false, 'the switch back to the race with events')
+  fold.player = await readFolded(page)
+  step('the race whose read fails is opened under the default window')
+  state.fail = isRaceLog(BROKEN)
+  await openRace(page, settle, BROKEN, true, 'the switch to the race whose log fails')
+  fold.brokenArrival = await readFolded(page)
+  state.fail = null
+  step('the race with events is opened once more')
+  await openRace(page, settle, PLAYER, false, 'the switch back to the race with events')
+  step('the shortest window is chosen')
+  await pickWindow(page, settle, WINDOW_SECONDS[0])
+  fold.playerHour = await readFolded(page)
+  step('the day is chosen again')
+  await pickWindow(page, settle, WINDOW_SECONDS[1])
+  step('the checklist is folded through its toggle')
+  await flipFold(page)
+  fold.handFold = await readFolded(page)
+  step('the race without events is opened while it is folded by hand')
+  await openRace(page, settle, QUIET, true, 'the switch to the race without events')
+  fold.handQuiet = await readFolded(page)
+  step('the race with events is opened again')
+  await openRace(page, settle, PLAYER, false, 'the switch back to the race with events')
+  fold.handBack = await readFolded(page)
+  step('the checklist is unfolded through its toggle')
+  await flipFold(page)
+  fold.handOpen = await readFolded(page)
+  step('the race without events is opened while it is unfolded by hand')
+  await openRace(page, settle, QUIET, true, 'the switch to the race without events')
+  fold.handQuiet2 = await readFolded(page)
+  step('the race whose read fails is opened while it is unfolded by hand')
+  state.fail = isRaceLog(BROKEN)
+  await openRace(page, settle, BROKEN, true, 'the switch to the race whose log fails')
+  fold.handBroken = await readFolded(page)
+  state.fail = null
+  step('the race with events is opened for the reads that follow')
+  await openRace(page, settle, PLAYER, false, 'the switch back to the race with events')
+
+  return fold
+}
+
 // The window of `seconds` chosen as a player chooses it: the menu of the control opened and drawn (on screen, its opening transition run out; the menu sets its own opacity a frame after it opens), the label each entry draws read (`visibleText`, null for an entry not on screen) and turned back into its window by the window labels of the variant served, and the one entry whose label is that window's pressed. Where no entry, or more than one, draws it, nothing is pressed and the menu is closed: the screen read next shows the control as it is, and the checks say what is wrong. A menu that is not drawn within 30 s is read as it is, so its entries read as not on screen. Resolves to { seconds, shown }, the labels the menu drew.
 const chooseWindow = async (page, seconds) => {
   const entries = '.menuable__content__active .v-list-item'
@@ -1026,7 +1190,14 @@ const switchRace = (page, RaceID, NPR) => page.evaluate((race) => window.$app.$s
 
 const isRaceLog = (race) => (sql) => new RegExp(`^select FCT_GameLog\\.IncrementID, FCT_GameLog\\.Time, .* from FCT_GameLog where FCT_GameLog\\.GameID = ${GAME} and FCT_GameLog\\.RaceID = ${race}$`).test(sql)
 
-// The head and rewrites drive every window and race transition. A fault may name just the screens its credited checks read; their reader-path requirements are checked before the drive starts.
+// The checklist's fold on its own page, as a player meets it: no read of any race but the player's before it, and the races opened in turn by `foldSequence`. It is a page of its own because a race opened once is kept by the page's reads and never read again, which the held read of `observeSaved` needs it to be.
+const observeFolded = (browser, url) => observe(browser, async ({ page, step }) => {
+  const { state, settle, opened } = await prepare(page, url, step, REAL_CLOCK, true)
+
+  return { fold: await foldSequence({ page, step, state, settle, opened }) }
+}, { expected: [FAILED_FETCH] })
+
+// The head and rewrites drive every window and race transition. A fault may name just the screens its credited checks read; their reader-path requirements are checked before the drive starts. The checklist, if it opens folded, is unfolded through its toggle before the panel is read.
 const observeSaved = (browser, url, screens = null) => observe(browser, async ({ page, step }) => {
   const { state, settle } = await prepare(page, url, step)
   const seen = { windows: [] }
@@ -1069,6 +1240,7 @@ const observeSaved = (browser, url, screens = null) => observe(browser, async ({
 
     step('the held read is answered')
     await settle()
+    await unfoldFold(page, step)
     seen.quiet = await read(page)
   }
   if (wanted('broken') || wanted('back')) {
@@ -1077,6 +1249,7 @@ const observeSaved = (browser, url, screens = null) => observe(browser, async ({
     await switchRace(page, BROKEN, true)
     await until(page, 'the switch to the race whose log fails', () => raceOpenIn(page, BROKEN), () => 'the store does not hold the race')
     await settle()
+    await unfoldFold(page, step)
     seen.broken = await read(page)
   }
   state.fail = null
@@ -1416,8 +1589,8 @@ const incrementOf = (observation) => JSON.parse(observation.key)[0]
 const PAGE_CHECKS = []
 const pageCheck = (id, observation, name, test) => PAGE_CHECKS.push({ id, observation, name, run: test })
 
-// The checks of one observation, and those that hold for all of them.
-const forKind = (item, kind) => item.observation === kind || item.observation === 'any'
+// The checks of one observation, and those that hold for all of them: 'any' for the pages that show the panel's windows, 'every' for the fold's page as well.
+const forKind = (item, kind) => item.observation === kind || item.observation === 'every' || (item.observation === 'any' && kind !== 'fold')
 
 const windowScreens = (o) => o.windows.filter(Boolean)
 const windowPositions = (windows) => windows.map((screen, index) => (screen ? index : null))
@@ -1641,6 +1814,82 @@ pageCheck('back', 'saved', 'the player\'s race read again after the others shows
   assert.deepEqual(o.back.observations.map((observation) => observation.key), o.day.observations.map((observation) => observation.key), 'the order of the events read again')
 })
 
+// The verdict SQL gives a race for the default window and the count of the events it holds.
+const defaultOf = async (truth, race) => {
+  const lines = await truth.watched(race, truth.end - DEFAULT_SECONDS, truth.end)
+
+  return { verdict: lines.length ? 'found' : 'absent', total: [...countsOf(lines).values()].reduce((sum, count) => sum + count, 0) }
+}
+
+// Whether the toggle of a fold read says the checklist is folded, after the panel is found drawn with a toggle that says one or the other.
+const foldedOf = (fold, label) => {
+  assert.ok(fold && fold.present, `${label}: the panel is drawn`)
+  assert.equal(fold.toggle.found, true, `${label}: the toggle`)
+  assert.ok(['true', 'false'].includes(fold.toggle.expanded), `${label}: aria-expanded is ${fold.toggle.expanded}`)
+
+  return fold.toggle.expanded === 'false'
+}
+
+pageCheck('fold-rule', 'fold', 'the checklist opens folded exactly when the default window (the last day) holds no found event, decided on arrival for each read scope by the window then chosen: unfolded for the race with events, folded for the race with none and for none that can be read in the default window, and unfolded in another window; the fixture holds a race with events and a race without in the default window', async ({ o, truth }) => {
+  const player = await defaultOf(truth, PLAYER)
+  const quiet = await defaultOf(truth, QUIET)
+
+  assert.equal(player.verdict, 'found', 'the race with events holds one in the default window')
+  assert.equal(quiet.verdict, 'absent', 'the race without events holds none in the default window')
+
+  const arrivals = [['opened', 'found', DEFAULT_SECONDS], ['quiet', 'absent', DEFAULT_SECONDS], ['brokenWide', 'unavailable', WINDOW_SECONDS[3]], ['player', 'found', DEFAULT_SECONDS], ['brokenArrival', 'unavailable', DEFAULT_SECONDS]]
+
+  for (const [name, verdict, seconds] of arrivals) {
+    assert.equal(o.fold[name].verdict, verdict, `${name}: the verdict of the checklist that arrived`)
+    assert.equal(foldedOf(o.fold[name], name), seconds === DEFAULT_SECONDS && verdict !== 'found', `${name}: folded on arrival (${verdict}, window ${seconds})`)
+  }
+})
+
+pageCheck('fold-stays', 'fold', 'a window chosen after the checklist arrived never folds or unfolds it: a folded checklist stays folded under a longer window, and one opened under a longer window stays open when the default window is chosen, whatever its verdict, and when a window with no event is chosen', async ({ o }) => {
+  assert.equal(foldedOf(o.fold.quietWide, 'quietWide'), true, 'the longer window is chosen on a folded checklist')
+  assert.equal(foldedOf(o.fold.brokenDay, 'brokenDay'), false, 'the default window is chosen on a checklist opened under a longer window, whose verdict is not found')
+  assert.equal(foldedOf(o.fold.playerHour, 'playerHour'), false, 'a window with no event is chosen on an open checklist')
+})
+
+pageCheck('fold-hand', 'fold', 'a fold or unfold by hand through the toggle stands for the rest of the visit, over what the rule says for each race that is opened after it', async ({ o }) => {
+  assert.equal(foldedOf(o.fold.handFold, 'handFold'), true, 'the toggle folds an open checklist')
+  assert.equal(foldedOf(o.fold.handQuiet, 'handQuiet'), true, 'a checklist folded by hand stays folded for the race without events')
+  assert.equal(foldedOf(o.fold.handBack, 'handBack'), true, 'a checklist folded by hand stays folded for the race with events, which the rule opens')
+  assert.equal(foldedOf(o.fold.handOpen, 'handOpen'), false, 'the toggle unfolds a folded checklist')
+  assert.equal(foldedOf(o.fold.handQuiet2, 'handQuiet2'), false, 'a checklist unfolded by hand stays open for the race without events, which the rule folds')
+  assert.equal(foldedOf(o.fold.handBroken, 'handBroken'), false, 'a checklist unfolded by hand stays open for the race whose read fails, which the rule folds')
+})
+
+pageCheck('fold-toggle', 'fold', 'the toggle is drawn in the first element of the head, draws no text, says what it does (Show or Hide the checklist) and whether the content is shown, and controls the one element that holds every part below the head; that content is drawn exactly when the checklist is not folded; while it is folded a note of the verdict (None found, Not covered by the log, or the count found) is drawn apart from the title, and none while it is not; the window control is drawn either way', async ({ o, truth }) => {
+  const player = await defaultOf(truth, PLAYER)
+
+  for (const [name, fold] of Object.entries(o.fold)) {
+    const folded = foldedOf(fold, name)
+
+    assert.equal(fold.toggle.shown, true, `${name}: the toggle is drawn`)
+    assert.equal(fold.toggle.inTitle, true, `${name}: the toggle sits in the first element of the head`)
+    assert.equal(fold.toggle.text, '', `${name}: the toggle draws no text`)
+    assert.equal(fold.toggle.label, folded ? 'Show the checklist' : 'Hide the checklist', `${name}: the label of the toggle`)
+    assert.equal(fold.content.found, true, `${name}: the element the toggle controls (${fold.toggle.controls})`)
+    assert.equal(fold.content.holdsParts, true, `${name}: the content holds every part below the head`)
+    assert.equal(fold.content.holdsHead, false, `${name}: the content holds nothing of the head`)
+    assert.equal(fold.content.shown, !folded, `${name}: the content is drawn exactly when the checklist is not folded`)
+    assert.ok(fold.content.parts.length >= 3, `${name}: the parts`)
+    fold.content.parts.forEach((part) => assert.equal(part.shown, !folded, `${name}: the ${part.name} is drawn exactly when the checklist is not folded`))
+    assert.equal(fold.control, true, `${name}: the window control is drawn`)
+    assert.ok(fold.title.startsWith(CHECKLIST_TITLE), `${name}: the title is ${fold.title}`)
+    assert.equal(fold.note.inTitle || !fold.note.found, true, `${name}: the note is drawn in the first element of the head`)
+
+    if (folded) {
+      assert.equal(fold.note.kind, fold.verdict, `${name}: the note stands for the verdict`)
+      assert.equal(fold.note.count, fold.verdict === 'found' ? player.total : null, `${name}: the count of the note`)
+      assert.ok(!fold.title.includes(fold.note.text), `${name}: the note is no part of the title (${fold.title})`)
+    } else {
+      assert.equal(fold.note.text, null, `${name}: no note is drawn while the checklist is open`)
+    }
+  }
+})
+
 pageCheck('gap', 'older', 'an archive that stops before the save starts leaves a gap in a window that reaches into it, and what only the archive holds is listed with the state of its increment', async ({ o, seeded }) => {
   const thirty = o.windows[3]
 
@@ -1712,7 +1961,7 @@ pageCheck('hooks', 'any', 'the hooks the panel carries for the next item say wha
   })
 })
 
-pageCheck('no-errors', 'any', 'the page raises no error that no check named', async ({ unexpected }) => {
+pageCheck('no-errors', 'every', 'the page raises no error that no check named', async ({ unexpected }) => {
   assert.deepEqual(unexpected, [])
 })
 
@@ -1799,6 +2048,20 @@ const PAGE_FAULTS = [
   { name: 'an unavailable window draws the words of none observed under its unknown hook', file: PANEL, change: swapText('data-count-unknown>{{ countText.unknown }}</span>', 'data-count-unknown>{{ countText.none }}</span>'), fails: ['unavailable-read'], needs: ['saved'], screens: ['broken'] },
   { name: 'a hidden type draws the words of the unlisted mark under its hidden hook', file: PANEL, change: swapText('data-hidden>{{ markText.hidden }}</span>', 'data-hidden>{{ markText.unlisted }}</span>'), fails: ['hidden-flag'], needs: ['saved'], screens: ['window:1'] },
   { name: 'every window of the menu and the window chosen draw the label of the first window, the values intact', file: PANEL, change: swapText('item-text="text"', ':item-text="() => windows[0].text"'), fails: ['panel', 'window-chosen'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { name: 'the checklist always opens unfolded', file: PANEL, change: swapText("this.decision = this.diagnosis !== null && this.seconds === DEFAULT_WINDOW && this.diagnosis.verdict !== 'found'", 'this.decision = false'), fails: ['fold-rule'], needs: ['fold'] },
+  { name: 'the checklist always opens folded', file: PANEL, change: swapText("this.decision = this.diagnosis !== null && this.seconds === DEFAULT_WINDOW && this.diagnosis.verdict !== 'found'", 'this.decision = true'), fails: ['fold-rule'], needs: ['fold'] },
+  { name: 'the checklist opens folded for a found verdict and unfolded for the others', file: PANEL, change: swapText("this.diagnosis.verdict !== 'found'", "this.diagnosis.verdict === 'found'"), fails: ['fold-rule'], needs: ['fold'] },
+  { name: 'the checklist opens folded only for a verdict of none found', file: PANEL, change: swapText("this.diagnosis.verdict !== 'found'", "this.diagnosis.verdict === 'absent'"), fails: ['fold-rule'], needs: ['fold'] },
+  { name: 'the checklist opens folded in any window', file: PANEL, change: swapText('this.diagnosis !== null && this.seconds === DEFAULT_WINDOW && this.diagnosis.verdict', 'this.diagnosis !== null && this.diagnosis.verdict'), fails: ['fold-rule'], needs: ['fold'] },
+  { name: 'the checklist is folded or unfolded again by a window change', file: PANEL, change: swapText('    diagnosis() {\n      this.decide()\n    },\n', '    diagnosis() {\n      this.decide()\n    },\n\n    seconds() {\n      this.decided = false\n      this.decide()\n    },\n'), fails: ['fold-stays'], needs: ['fold'] },
+  { name: 'a choice by hand is dropped when the read scope changes', file: PAGE, change: swapText('      handler() {\n        this.loadDiagnostic()\n      },\n    },\n    database() {', '      handler() {\n        this.diagnosticHand = null\n        this.loadDiagnostic()\n      },\n    },\n    database() {'), fails: ['fold-hand'], needs: ['fold'] },
+  { name: 'the toggle leaves the fold as it is', file: PANEL, change: swapText("this.$emit('update:hand', !this.folded)", "this.$emit('update:hand', this.folded)"), fails: ['fold-hand'], needs: ['fold'] },
+  { name: 'the folded content is never hidden', file: PANEL, change: swapText('<div v-show="!folded" id="diagnostic-content">', '<div id="diagnostic-content">'), fails: ['fold-toggle'], needs: ['fold'] },
+  { name: 'the toggle says the opposite of what is shown', file: PANEL, change: swapText(':aria-expanded="String(!folded)"', ':aria-expanded="String(folded)"'), fails: ['fold-toggle'], needs: ['fold'] },
+  { name: 'the toggle keeps one label whatever it does', file: PANEL, change: swapText(":aria-label=\"folded ? 'Show the checklist' : 'Hide the checklist'\"", 'aria-label="Show the checklist"'), fails: ['fold-toggle'], needs: ['fold'] },
+  { name: 'the note is drawn as a part of the title', file: PANEL, change: swapText('class="caption text--secondary ml-2" data-diagnostic-note', 'class="ml-2" data-diagnostic-note'), fails: ['fold-toggle'], needs: ['fold'] },
+  { name: 'the note is drawn while the checklist is open', file: PANEL, change: swapText('v-if="folded && note"', 'v-if="note"'), fails: ['fold-toggle'], needs: ['fold'] },
+  { name: 'the note of a found verdict draws no count', file: PANEL, change: swapText('`${this.count(this.diagnosis.observed)} found`', "'Found'"), fails: ['fold-toggle'], needs: ['fold'] },
 ]
 
 // One equivalent rewrite of each family, made together so that the page is observed once for all of them: the window control written long-hand and listening to its input event, its labels bound by a function and one of them worded another way (R047-2), the page taking the window by an explicit handler, each condition in parentheses or turned round, the qualifier of the hidden mark moved from prefix to suffix, the verdicts, a pointer and the headings worded another way, the pointer ids registered by a spread and a template literal, the order of the events by parenthesised comparisons, each value drawn by `v-text`, through `Number`, `String` or a template literal, and each element and its ancestors at opacity 1 with its text in a child at opacity 1 (R161-6, R161-9). The page, the panel, the checklist and the glossary each change; where two families meet on one element, both are made on it.
@@ -1847,9 +2110,17 @@ const EQUIVALENT_GLOSSARY = chain(
   swapText("term('fleet-cease-fire', ", 'term(`fleet-cease-fire`, ')
 )
 
+// One equivalent rewrite of the fold: the toggle's state and the content's visibility written another way, and the folded state read through the hand choice first.
+const EQUIVALENT_FOLD = chain(
+  swapText(':aria-expanded="String(!folded)"', ':aria-expanded="folded ? \'false\' : \'true\'"'),
+  swapText('<div v-show="!folded" id="diagnostic-content">', '<div v-show="folded === false" id="diagnostic-content">'),
+  swapText('return this.hand === null ? this.decision : this.hand', 'return this.hand !== null ? this.hand : this.decision')
+)
+
 // A rewrite with `parts` changes each file of the list by its own change.
 const PAGE_REWRITES = [
   { name: 'one equivalent rewrite of each family on the panel, the page, the checklist and the glossary, made together', parts: [{ file: PANEL, change: EQUIVALENT_PANEL }, { file: PAGE, change: swapText('@window="(value) => diagnosticWindow = value"', 'v-on:window="(value) => { diagnosticWindow = value }"') }, { file: DIAGNOSTICS, change: EQUIVALENT_DIAGNOSTICS }, { file: GLOSSARY, change: EQUIVALENT_GLOSSARY }] },
+  { name: 'the fold written another way: the toggle state and the content visibility, the folded state read through the hand choice first, and the hand choice taken by an explicit handler', parts: [{ file: PANEL, change: EQUIVALENT_FOLD }, { file: PAGE, change: swapText(':hand.sync="diagnosticHand"', ':hand="diagnosticHand" @update:hand="(value) => diagnosticHand = value"') }], needs: ['fold'] },
   { name: 'the key of the checklist holds the revision of the record, not its snapshot, and the archive is computed through an early return', file: PAGE, change: chain(swapText('this.archiveSnapshot,', "this.archiveRecord ? this.archiveRecord.revision : '',"), swapText('return this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null', 'if (!this.archiveKey) {\n        return null\n      }\n\n      return readArchiveFile(this.campaignId, this.branchId, this.RaceID)')), needs: ['refresh'] },
 ]
 /* eslint-enable no-template-curly-in-string */
@@ -1957,7 +2228,7 @@ const refreshOf = (modules, ahead) => {
 
 // The page in a browser, set up once for each worker (`openScreen`, run by the runner before the worker's first variant): the copy of the save with the log written here, what SQL says of it, the page server (warmed) and Chromium, the archive files the page is given, and the baselines: the page as it is, of each kind a rewrite of the worker's queue sets its screen against, read by the setup (`readBaselines`) before the first variant, whichever that is, so that a rewrite reads only its own page. A setup that does not get through is kept as `failure`, and every observation of the worker is then one that did not happen.
 const SCREEN = { failure: null, modules: null, truth: null, server: null, chrome: null, seeds: null, refreshes: null, baselines: {}, cleanups: [] }
-const KINDS = ['saved', 'older', 'ahead', 'refresh']
+const KINDS = ['saved', 'older', 'ahead', 'refresh', 'fold']
 
 const openScreen = async () => {
   try {
@@ -2035,7 +2306,7 @@ const view = async (kind, variant) => {
   }
 
   try {
-    const seen = kind === 'saved' ? await observeSaved(chrome, server.url, variant && variant.screens) : kind === 'refresh' ? await observeRefreshed(chrome, server.url, seeds.ahead.file, refreshes) : await observeArchived(chrome, server.url, seeds[kind].file, kind === 'older' ? [1, 3] : [0, 1, 2, 3])
+    const seen = kind === 'saved' ? await observeSaved(chrome, server.url, variant && variant.screens) : kind === 'fold' ? await observeFolded(chrome, server.url) : kind === 'refresh' ? await observeRefreshed(chrome, server.url, seeds.ahead.file, refreshes) : await observeArchived(chrome, server.url, seeds[kind].file, kind === 'older' ? [1, 3] : [0, 1, 2, 3])
 
     // A page that did not get through is told whole where it is met, in the output of its variant: the step, the message with Playwright's call log, and what the page showed then. Its checks say it in one line.
     if (seen.error !== null) {
