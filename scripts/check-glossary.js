@@ -10,14 +10,15 @@
   - no text that a result gives a tooltip (the provenance mark of a result and of a rule, the footer of a chart) names its rule by id or carries a dotted name;
   - the figures a definition states hold in the app's own rules: the shortage and the hauling shortfall of a colony, the runway of a mineral and of a maintenance location, the RP left and the time left of research, and the climb of maintenance life are run on small made-up rows and held to what the definitions say (no source text is matched).
 
-  Then each mutation (an entry dropped, a review date or version label added, a rule named by a term, a first-person phrase, or an expression of one of those rules changed) must make at least one check fail.
+  Then each mutation (an entry dropped, a review date or version label added, a rule named by a term, a first-person phrase, or an expression of one of those rules changed) must make at least one check fail. With --no-mutations no mutation is planted and no child process is started: only the checks of the real sources run.
 
-  Usage: node scripts/check-glossary.js
+  Usage: node scripts/check-glossary.js [--no-mutations]
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild } = require('./lib/check-pool')
 
 const rendererDirectory = path.resolve(__dirname, '..', 'src', 'renderer')
@@ -399,6 +400,8 @@ const synthetic = (m, tree) => {
 
 // A copy of the folders the checks read, in the temp folder, in which `file` ('utilities/glossary.js') has `from` replaced by `to`.
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-glossary-mutant-'))
 
   COPIED.forEach((folder) => fs.cpSync(path.join(rendererDirectory, folder), path.join(directory, folder), { recursive: true }))
@@ -555,28 +558,30 @@ const run = async () => {
 
   const ruleModules = ruleModuleNames(path.join(rendererDirectory, 'utilities'))
 
-  // The mutations and the control run in children, side by side, while this process runs the checks of the real sources; the results print in order.
-  const children = inParallel([...MUTATIONS, null], (mutation) => (mutation ? tryMutation(mutation, ruleModules) : checksInChild(rendererDirectory, ruleModules)))
+  // The mutations and the control run in children, side by side, while this process runs the checks of the real sources; the results print in order. A quick run has neither: the control repeats the checks of the real sources.
+  const children = mutating() ? inParallel([...MUTATIONS, null], (mutation) => (mutation ? tryMutation(mutation, ruleModules) : checksInChild(rendererDirectory, ruleModules))) : null
   const modules = await loadModules(path.join(rendererDirectory, 'utilities'), ruleModules)
 
   for (const [name, result] of await runChecks(modules, rendererDirectory)) {
     check(name, result)
   }
 
-  const results = await children
-  const control = results.pop()
+  if (children) {
+    const results = await children
+    const control = results.pop()
 
-  for (const [label, result, detail] of results) {
-    check(`mutation caught: ${label}`, result, detail)
+    for (const [label, result, detail] of results) {
+      check(`mutation caught: ${label}`, result, detail)
+    }
+
+    if (control instanceof Error) {
+      throw control
+    }
+
+    const uncaught = failedNames(control)
+
+    check('a fresh process on the unchanged sources passes every check', uncaught.length === 0 ? true : `fails ${uncaught.join('; ')}`)
   }
-
-  if (control instanceof Error) {
-    throw control
-  }
-
-  const uncaught = failedNames(control)
-
-  check('a fresh process on the unchanged sources passes every check', uncaught.length === 0 ? true : `fails ${uncaught.join('; ')}`)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

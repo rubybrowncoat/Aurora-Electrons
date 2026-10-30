@@ -15,6 +15,7 @@
   - the pages' own wiring (scripts/lib/capability-pages.js): the real script of /lagrange, /commanders and /production run on the capability results of real copies (the unverified lookup rows and missing ship columns withhold the stabilisation ships, the roster's blocked bonuses are unknown and its queries wait for the check, the research read and the colony capacities leave a blocked bonus unknown). Each page is run again with one gate cut out of its script, and a page check must fail there;
   - the file's SHA-256 before and after a preflight on a copy, and that every query the preflight sent was a select;
   - the Aurora line (`lineResult`, `LINE_SIGNATURE`: the fourteen columns Aurora 2.7 added over 2.6): the signature is the fourteen columns; the real 2.7 saves are of the line with none missing; a copy without FCT_Game is refused as no Aurora save, a copy with all fourteen dropped is refused as a save from before 2.7 (the 2.6 save, when it is present, too) naming each, and a copy with one or seven dropped is still of the line, naming exactly those it lacks; the refused copies still have every report evaluated. The store's `line` and `refused` getters follow the result of the copy now open: nothing is refused before the check answers or after it failed, a retry keeps the refusal of the same copy, and a copy that replaced a refused one is not refused. Two mutants fail a consumer check: one in which the line counts a schema with some of the fourteen columns as one with none, one in which the store refuses a copy on the result of an earlier copy. What a player sees is checked by scripts/check-unsupported-save-page.js.
+  - `--no-mutations` runs the checks of the real code alone: no copy of the code with a gate taken out, no registry rewritten and no page cut is made, and `--write` is the only other option.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -28,6 +29,7 @@ const { readsOfFile, scanReads } = require('./lib/capability-scan')
 const { chainChecks } = require('./lib/capability-chains')
 const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
@@ -364,10 +366,11 @@ const alteredChecks = async (capabilities, source) => {
     // The prose control restates the effect the loaded registry declares now (found in the text by its own quoted form), so it still rewrites whatever the effect says.
     const quoted = (value) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
     const declared = capabilities.BONUS_NAMES[5].effect['/hauling']
-    const reworded = await withRegistryText('reworded', (text) => text.replace(quoted(declared), () => quoted(`${declared}, as the reserve ledger counts them`)))
-    const defaulted = await withRegistryText('defaulted', (text) => text.replace('entry.gate.effect[route] || entry.gate.effect.default', 'entry.gate.effect.default'))
-    const rewordedProduction = (await preflightOf(reworded.registry, productionRenamed)).result
-    const defaultedProduction = (await preflightOf(defaulted.registry, productionRenamed)).result
+    const planting = mutating()
+    const reworded = planting ? await withRegistryText('reworded', (text) => text.replace(quoted(declared), () => quoted(`${declared}, as the reserve ledger counts them`))) : null
+    const defaulted = planting ? await withRegistryText('defaulted', (text) => text.replace('entry.gate.effect[route] || entry.gate.effect.default', 'entry.gate.effect.default')) : null
+    const rewordedProduction = planting ? (await preflightOf(reworded.registry, productionRenamed)).result : null
+    const defaultedProduction = planting ? (await preflightOf(defaulted.registry, productionRenamed)).result : null
     const flip = (await preflightOf(capabilities, flipped)).result
     const retype = (await preflightOf(capabilities, retyped)).result
     const noBonus = (await preflightOf(capabilities, noBonusTable)).result
@@ -402,8 +405,10 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: a renamed Terraforming bonus (9) is named by /habitability with what it leaves out', terraform.reports['/habitability'].degraded.some((entry) => entry.gate && /terraforming/.test(entry.affects)), JSON.stringify(terraform.reports['/habitability'].degraded))
     check('altered: a renamed bonus does not disable /finances', rename.reports['/finances'].status === 'supported')
     check('altered: a renamed Production bonus (5) fails its lookup and degrades exactly the reports that read it, /hauling among them, by the lookup alone and carrying the effect the registry declares for it', productionRead(capabilities, production), JSON.stringify(production.reports['/hauling'].degraded))
-    check('altered: the effect of /hauling for the Production bonus rewritten in prose alone (an equivalent rewrite) leaves that read passing', reworded.text !== registryText && reworded.registry.BONUS_NAMES[5].effect['/hauling'] !== capabilities.BONUS_NAMES[5].effect['/hauling'] && productionRead(reworded.registry, rewordedProduction), JSON.stringify(rewordedProduction.reports['/hauling'].degraded))
-    check('altered: a registry that reports the default effect and not the one of the route fails that read', defaulted.text !== registryText && !productionRead(defaulted.registry, defaultedProduction), JSON.stringify(defaultedProduction.reports['/hauling'].degraded))
+    if (planting) {
+      check('altered: the effect of /hauling for the Production bonus rewritten in prose alone (an equivalent rewrite) leaves that read passing', reworded.text !== registryText && reworded.registry.BONUS_NAMES[5].effect['/hauling'] !== capabilities.BONUS_NAMES[5].effect['/hauling'] && productionRead(reworded.registry, rewordedProduction), JSON.stringify(rewordedProduction.reports['/hauling'].degraded))
+      check('altered: a registry that reports the default effect and not the one of the route fails that read', defaulted.text !== registryText && !productionRead(defaulted.registry, defaultedProduction), JSON.stringify(defaultedProduction.reports['/hauling'].degraded))
+    }
     check('altered: a rating (27) turned into a multiplier fails its lookup', failedGates(flip).join() === 'bonus 27' && /rating/.test(flip.gates.bonuses[27].inputs.missing.join()), failedGates(flip).join())
     check('altered: a renamed component type (29) degrades /lagrange only', failedGates(retype).join() === 'component type 29' && retype.reports['/lagrange'].status === 'degraded' && unrelated(retype, '/lagrange'), notSupported(retype).map((report) => report.route).join(', '))
     check('altered: DIM_CommanderBonusType dropped fails every bonus lookup, and /commanders (which reads it) is unsupported', failedGates(noBonus).length === Object.keys(capabilities.BONUS_NAMES).length && noBonus.reports['/commanders'].status === 'unsupported')
@@ -447,7 +452,7 @@ const alteredChecks = async (capabilities, source) => {
 
     check('altered: DIM_PlanetaryInstallation.NoBuild dropped (the flag that says whether a mine can be built) degrades /colony-outlook and /mineral-outlook by their mine inputs only, naming the column, and neither is unsupported', buildGaps.every(buildNamed) && Object.values(unbuildable.reports).every((report) => report.status !== 'unsupported'), JSON.stringify(buildGaps.map(([route]) => unbuildable.reports[route])))
 
-    {
+    if (mutating()) {
       const directory = mutatedCopy('utilities/capabilities.js', "const BUILDABILITY_READS = 'DIM_PlanetaryInstallation(CivilianInstallation NoBuild)'", "const BUILDABILITY_READS = 'DIM_PlanetaryInstallation(CivilianInstallation)'")
 
       try {
@@ -464,7 +469,7 @@ const alteredChecks = async (capabilities, source) => {
 
     check('altered: FCT_SystemBody.Xcor dropped (the position the deficit sites are placed by) makes /mineral-outlook unsupported, naming the column, as its deficit sites are a required input', xcorNamed(noPosition), `${noPosition.reports['/mineral-outlook'].status}`)
 
-    {
+    if (mutating()) {
       const directory = mutatedCopy('utilities/capabilities.js', "BodyDetail: 'the body detail', DeficitSites: 'the deficit sites'", "BodyDetail: 'the body detail'")
 
       try {
@@ -485,7 +490,7 @@ const alteredChecks = async (capabilities, source) => {
 
     check('altered: the notice of a report says what the save lacks in words, with no table or column name, for a degraded and an unsupported report', noticeFields(capabilities, crew, '/lagrange').join() === 'the current crew of ship' && noticeFields(capabilities, mineral, '/mineral-outlook').includes('the duranium of population') && ['/lagrange', '/mineral-outlook'].every((route) => [crew, mineral].every((result) => !noticeFields(capabilities, result, route).some(namesColumns))), noticeFields(capabilities, crew, '/lagrange').concat(noticeFields(capabilities, mineral, '/mineral-outlook')).join(' | '))
 
-    {
+    if (mutating()) {
       const directory = mutatedCopy('utilities/capabilities.js', 'fields: entry.gate ? entry.fields : entry.fields.map(fieldWords),', 'fields: entry.fields,')
 
       try {
@@ -505,20 +510,22 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_Ship.SensorDelay dropped (the delay a fleet starts with) is named by /colony-outlook, /logistics, /hauling, /information and /routes, which time a route with it', DELAY_ROUTES.every((route) => reportNames(undelayed, route, 'FCT_Ship.SensorDelay')), DELAY_ROUTES.map((route) => `${route} ${undelayed.reports[route].status}`).join(', '))
     check('reads: the command a terraformer fleet belongs to (FCT_Fleet.ParentCommandID) is read by the page input of /production and the body detail input of /habitability, which price the terraformers\' admin bonus', readsCommand(capabilities))
 
-    for (const [label, from, to, result, routes, field] of [['the start delay reads', "const START_DELAY_READS = 'FCT_Ship(SensorDelay)'", "const START_DELAY_READS = ''", noDelay, DELAY_ROUTES, 'FCT_Ship.SensorDelay']]) {
-      const directory = mutatedCopy('utilities/capabilities.js', from, to)
+    if (mutating()) {
+      for (const [label, from, to, result, routes, field] of [['the start delay reads', "const START_DELAY_READS = 'FCT_Ship(SensorDelay)'", "const START_DELAY_READS = ''", noDelay, DELAY_ROUTES, 'FCT_Ship.SensorDelay']]) {
+        const directory = mutatedCopy('utilities/capabilities.js', from, to)
 
-      try {
-        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
-        const reports = (await preflightOf(mutant, result)).result
+        try {
+          const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+          const reports = (await preflightOf(mutant, result)).result
 
-        check('altered: a copy of the code without ' + label + ' no longer names ' + field + ' on a save without it, as the check above must notice', routes.some((route) => !reportNames(reports, route, field)), routes.map((route) => `${route} ${reports.reports[route].status}`).join(', '))
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true })
+          check('altered: a copy of the code without ' + label + ' no longer names ' + field + ' on a save without it, as the check above must notice', routes.some((route) => !reportNames(reports, route, field)), routes.map((route) => `${route} ${reports.reports[route].status}`).join(', '))
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true })
+        }
       }
     }
 
-    {
+    if (mutating()) {
       const directory = mutatedCopy('utilities/capabilities.js', "const FLEET_COMMAND_READS = 'FCT_Fleet(ParentCommandID)'", "const FLEET_COMMAND_READS = ''")
 
       try {
@@ -539,11 +546,13 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_GroundUnitFormation.ShipID dropped degrades /survey-progress and /history by the observation read, naming the field, and leaves neither unsupported', observationOnly(formationShip, 'FCT_GroundUnitFormation.ShipID'), JSON.stringify([formationShip.reports['/survey-progress'], formationShip.reports['/history']]))
     check('altered: the observation read is the only input of /history that degrades, and /survey-progress degrades by it, the formations read and the ground survey commanders alone', units.reports['/history'].degraded.map((entry) => entry.key).join() === 'observationRead' && units.reports['/survey-progress'].degraded.map((entry) => entry.key).sort().join() === 'formations,groundCommanders,observationRead', JSON.stringify([units.reports['/survey-progress'].degraded.map((entry) => entry.key), units.reports['/history'].degraded.map((entry) => entry.key)]))
 
-    const historyRequired = await withRegistryText('historyrequired', (text) => text.replace("  '/history': (key) => key === 'observationRead',\n", ''))
-    const surveyRequired = await withRegistryText('surveyrequired', (text) => text.replace(", 'observationRead'].includes(key)", '].includes(key)'))
+    if (mutating()) {
+      const historyRequired = await withRegistryText('historyrequired', (text) => text.replace("  '/history': (key) => key === 'observationRead',\n", ''))
+      const surveyRequired = await withRegistryText('surveyrequired', (text) => text.replace(", 'observationRead'].includes(key)", '].includes(key)'))
 
-    check('altered: a registry that requires the observation read of /history fails the check that leaves /history in service', historyRequired.text !== registryText && !observationOnly((await preflightOf(historyRequired.registry, noUnits)).result, 'FCT_GroundUnitFormationElement.Units'))
-    check('altered: a registry that requires the observation read of /survey-progress fails the check that leaves /survey-progress in service', surveyRequired.text !== registryText && !observationOnly((await preflightOf(surveyRequired.registry, noUnits)).result, 'FCT_GroundUnitFormationElement.Units'))
+      check('altered: a registry that requires the observation read of /history fails the check that leaves /history in service', historyRequired.text !== registryText && !observationOnly((await preflightOf(historyRequired.registry, noUnits)).result, 'FCT_GroundUnitFormationElement.Units'))
+      check('altered: a registry that requires the observation read of /survey-progress fails the check that leaves /survey-progress in service', surveyRequired.text !== registryText && !observationOnly((await preflightOf(surveyRequired.registry, noUnits)).result, 'FCT_GroundUnitFormationElement.Units'))
+    }
 
     // The optional reads of Survey Progress (the ruins, the ancient constructs, the troop ships): a save without what one reads leaves the page in service with that input degraded, and the page then marks the work it cannot tell as unknown. Each case drops what only that input reads.
     const SURVEY_OPTIONAL = [
@@ -563,17 +572,19 @@ const alteredChecks = async (capabilities, source) => {
     }
 
     // The planted faults: an input of the page that is not optional makes the save without it unsupported, and the layout then withholds the whole page.
-    for (const [key, from, to] of [['constructSites', "'ruinSites', 'constructSites', 'troopBays'", "'ruinSites', 'troopBays'"], ['ruinSites', "'ruinSites', 'constructSites'", "'constructSites'"], ['troopBays', "'constructSites', 'troopBays'", "'constructSites'"], ['groundCommanders', "'formations', 'groundCommanders'", "'formations'"]]) {
-      const faulty = mutatedCopy('utilities/capabilities.js', from, to)
+    if (mutating()) {
+      for (const [key, from, to] of [['constructSites', "'ruinSites', 'constructSites', 'troopBays'", "'ruinSites', 'troopBays'"], ['ruinSites', "'ruinSites', 'constructSites'", "'constructSites'"], ['troopBays', "'constructSites', 'troopBays'", "'constructSites'"], ['groundCommanders', "'formations', 'groundCommanders'", "'formations'"]]) {
+        const faulty = mutatedCopy('utilities/capabilities.js', from, to)
 
-      try {
-        const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
-        const [, file, , field] = SURVEY_OPTIONAL.find((entry) => entry[2] === key)
-        const report = await surveyReport(broken, file)
+        try {
+          const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
+          const [, file, , field] = SURVEY_OPTIONAL.find((entry) => entry[2] === key)
+          const report = await surveyReport(broken, file)
 
-        check(`altered: a /survey-progress that required ${key} would be unsupported on a save without it (the planted fault the checks above must fail)`, !surveyKept(report, key, field) && report.status === 'unsupported', report.status)
-      } finally {
-        fs.rmSync(faulty, { recursive: true, force: true })
+          check(`altered: a /survey-progress that required ${key} would be unsupported on a save without it (the planted fault the checks above must fail)`, !surveyKept(report, key, field) && report.status === 'unsupported', report.status)
+        } finally {
+          fs.rmSync(faulty, { recursive: true, force: true })
+        }
       }
     }
 
@@ -594,29 +605,33 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_AetherGates dropped makes /hauling and /routes unsupported, naming the table, as the places they choose among and the orders they list rest on it', GATE_PAGES.every((route) => gateless.reports[route].status === 'unsupported' && gateless.reports[route].missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)')) && baseline.reports[route].status !== 'unsupported'), JSON.stringify(GATE_PAGES.map((route) => gateless.reports[route].status)))
     check('altered: the same copy leaves unsupported only the reports whose own required inputs read the table, and no report holds the gates as a part it can lose', GATE_PAGES.every((route) => gateReaders.includes(route)) && Object.values(gateless.reports).filter((report) => report.status === 'unsupported' && report.missing.some((entry) => entry.fields.includes('FCT_AetherGates (table)'))).map((report) => report.route).sort().join() === gateReaders.sort().join() && Object.values(gateless.reports).filter((report) => !gateReaders.includes(report.route) && report.status === 'unsupported').every((report) => baseline.reports[report.route].status === 'unsupported') && Object.values(capabilities.SOFT).every((groups) => groups.every((group) => group.key !== 'aetherGates')), notSupported(gateless).map((report) => report.route).join(', '))
 
-    const softGates = 'export const SOFT = Object.freeze({\n'
-    const withGroup = mutatedCopy('utilities/capabilities.js', softGates, `${softGates}  '/routes': Object.freeze([Object.freeze({ key: 'aetherGates', label: 'Aether gates', affects: 'the aether gates among the places to choose', fields: Object.freeze(['FCT_AetherGates.*']) })]),\n`)
-
-    try {
-      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(withGroup, 'utilities') })).capabilities
-      const reports = (await preflightOf(mutant, noGates)).result.reports
-
-      check('altered: a copy of the code in which /routes holds the gates as a part it can lose leaves it degraded on a save without the table, as the check above must notice', reports['/routes'].status === 'degraded' && reports['/routes'].missing.length === 0, reports['/routes'].status)
-    } finally {
-      fs.rmSync(withGroup, { recursive: true, force: true })
-    }
-
-    for (const route of ROUTE_PAGES) {
-      const entry = route === '/routes' ? "'/routes': (key) => key === 'positionFacts' || key === 'orbitFacts'," : route === '/information' ? "key === 'positionFacts' || key === 'orbitFacts',\n  '/hauling'" : "key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',\n  '/map'"
-      const plain = entry.replace(" || key === 'orbitFacts'", '')
-      const directory = mutatedCopy('utilities/capabilities.js', entry, plain)
+    if (mutating()) {
+      const softGates = 'export const SOFT = Object.freeze({\n'
+      const withGroup = mutatedCopy('utilities/capabilities.js', softGates, `${softGates}  '/routes': Object.freeze([Object.freeze({ key: 'aetherGates', label: 'Aether gates', affects: 'the aether gates among the places to choose', fields: Object.freeze(['FCT_AetherGates.*']) })]),\n`)
 
       try {
-        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(withGroup, 'utilities') })).capabilities
+        const reports = (await preflightOf(mutant, noGates)).result.reports
 
-        check('altered: a copy of the code in which ' + route + ' does not go on without its orbit facts makes it unsupported, as the check of the optional read must notice', (await preflightOf(mutant, noOrbit)).result.reports[route].status === 'unsupported')
+        check('altered: a copy of the code in which /routes holds the gates as a part it can lose leaves it degraded on a save without the table, as the check above must notice', reports['/routes'].status === 'degraded' && reports['/routes'].missing.length === 0, reports['/routes'].status)
       } finally {
-        fs.rmSync(directory, { recursive: true, force: true })
+        fs.rmSync(withGroup, { recursive: true, force: true })
+      }
+    }
+
+    if (mutating()) {
+      for (const route of ROUTE_PAGES) {
+        const entry = route === '/routes' ? "'/routes': (key) => key === 'positionFacts' || key === 'orbitFacts'," : route === '/information' ? "key === 'positionFacts' || key === 'orbitFacts',\n  '/hauling'" : "key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',\n  '/map'"
+        const plain = entry.replace(" || key === 'orbitFacts'", '')
+        const directory = mutatedCopy('utilities/capabilities.js', entry, plain)
+
+        try {
+          const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+          check('altered: a copy of the code in which ' + route + ' does not go on without its orbit facts makes it unsupported, as the check of the optional read must notice', (await preflightOf(mutant, noOrbit)).result.reports[route].status === 'unsupported')
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true })
+        }
       }
     }
 
@@ -625,16 +640,20 @@ const alteredChecks = async (capabilities, source) => {
     // The Notebook reads the tech type names; the map only reads its tags' bodies, so a save without them leaves /map supported. The planted fault gives /map a required read of that column, as a scan that followed the tags' mixin into the notes' tech query did.
     const techless = (await preflightOf(capabilities, noTechType)).result
     const mapReads = (result) => result.reports['/map'].status === 'supported' && result.reports['/map'].missing.length === 0
-    const faulty = mutatedCopy('utilities/capability-reads.js', "  '/map': {\n", "  '/map': {\n    tagTech: { label: 'the tech type names', reads: 'DIM_TechType(Description TechTypeID)' },\n")
 
-    try {
-      const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
-      const unsupported = (await preflightOf(broken, noTechType)).result
+    check('altered: DIM_TechType.Description dropped (a column only the Notebook reads) makes /notebook unsupported and leaves /map supported', techless.reports['/notebook'].status === 'unsupported' && mapReads(techless), JSON.stringify([techless.reports['/notebook'].status, techless.reports['/map'].status]))
 
-      check('altered: DIM_TechType.Description dropped (a column only the Notebook reads) makes /notebook unsupported and leaves /map supported', techless.reports['/notebook'].status === 'unsupported' && mapReads(techless), JSON.stringify([techless.reports['/notebook'].status, techless.reports['/map'].status]))
-      check('altered: a /map that required the tech type names would be unsupported on that save (the planted fault the check above must fail)', !mapReads(unsupported), unsupported.reports['/map'].status)
-    } finally {
-      fs.rmSync(faulty, { recursive: true, force: true })
+    if (mutating()) {
+      const faulty = mutatedCopy('utilities/capability-reads.js', "  '/map': {\n", "  '/map': {\n    tagTech: { label: 'the tech type names', reads: 'DIM_TechType(Description TechTypeID)' },\n")
+
+      try {
+        const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
+        const unsupported = (await preflightOf(broken, noTechType)).result
+
+        check('altered: a /map that required the tech type names would be unsupported on that save (the planted fault the check above must fail)', !mapReads(unsupported), unsupported.reports['/map'].status)
+      } finally {
+        fs.rmSync(faulty, { recursive: true, force: true })
+      }
     }
 
     // The preflight never writes: the copy's hash is the same afterwards, and every query was a select.
@@ -855,6 +874,8 @@ const isAvailableResult = (result) => result.status !== 'unavailable'
 
 // A copy of the utilities, mixins and store folders in the temp folder in which `file` ('utilities/x.js') has `from` replaced by `to`, for a check that its consumers notice a gate taken out.
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-capabilities-mutant-'))
 
   ;['utilities', 'mixins', 'store'].forEach((folder) => fs.cpSync(path.join(rendererDirectory, folder), path.join(directory, folder), { recursive: true }))
@@ -959,16 +980,18 @@ const consumerRun = async (mods, source, refusedFile) => {
 
   results.forEach(([statement, held]) => check(`consumers: ${statement}`, held))
 
-  for (const [label, file, from, to] of MUTATIONS) {
-    const directory = mutatedCopy(file, from, to)
+  if (mutating()) {
+    for (const [label, file, from, to] of MUTATIONS) {
+      const directory = mutatedCopy(file, from, to)
 
-    try {
-      const mutants = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
-      const broken = (await consumerResults(mutants, source, refusedFile)).filter(([, held]) => !held).map(([statement]) => statement)
+      try {
+        const mutants = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
+        const broken = (await consumerResults(mutants, source, refusedFile)).filter(([, held]) => !held).map(([statement]) => statement)
 
-      check(`consumers: a copy of the code in which ${label} fails a consumer check`, broken.length > 0)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
+        check(`consumers: a copy of the code in which ${label} fails a consumer check`, broken.length > 0)
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
     }
   }
 
@@ -1128,17 +1151,19 @@ const dependencyChecks = async (capabilities, source, scan) => {
     results.forEach(([statement, held, detail]) => check(`dependencies: ${statement}`, held, detail))
     check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/habitability', '/logistics', '/mineral-outlook', '/production'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
 
-    const [label, file, from, to] = UNION
-    const directory = mutatedCopy(file, from, to)
+    if (mutating()) {
+      const [label, file, from, to] = UNION
+      const directory = mutatedCopy(file, from, to)
 
-    try {
-      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
-      const broken = (await dependencyResults(mutant, cases)).filter(([, held]) => !held).map(([statement]) => statement)
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+        const broken = (await dependencyResults(mutant, cases)).filter(([, held]) => !held).map(([statement]) => statement)
 
-      console.log(`INFO  a copy of the code with the ${label} fails ${broken.length} of the dependency checks`)
-      check(`dependencies: a copy of the code with the ${label} fails a dependency check`, broken.length > 0)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
+        console.log(`INFO  a copy of the code with the ${label} fails ${broken.length} of the dependency checks`)
+        check(`dependencies: a copy of the code with the ${label} fails a dependency check`, broken.length > 0)
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
     }
 
     await sqlChecks(source, cases[0].file)
@@ -1165,7 +1190,7 @@ const markerChecks = async (capabilities) => {
 
 const main = async () => {
   const write = process.argv.includes('--write')
-  const unknown = process.argv.slice(2).filter((argument) => argument !== '--write')
+  const unknown = process.argv.slice(2).filter((argument) => argument !== '--write' && argument !== '--no-mutations')
 
   if (unknown.length) {
     console.error(`Unknown argument ${unknown[0]}`)

@@ -1,14 +1,14 @@
 /*
   Checks the Game Log's triage (src/renderer/utilities/event-triage.js and log-visit.js) against the DIM_EventType export (.github/exports/DIM_EventType.csv).
 
-  node scripts/check-event-triage.js
+  node scripts/check-event-triage.js [--no-mutations]
 
   - categories: every type of the export is in exactly one category, every `AttackEvent` type is in Combat, every type the short-interval checklist watches is in the export under its name and in Combat, no category lists a type the export lacks, and a type the export lacks falls into Other;
   - groups: the selector's groups come in the categories' order with Other last and present when the log holds no unknown type; a group is chosen or cleared as a whole;
   - presets: what a stored value must hold to be a preset, names, a preset's types keep every unknown type visible, keywords match any, as a case-insensitive substring, and no keyword matches everything;
   - visit: the Game Log's last look by branch (a number from before the branches is read through the ledger, a branch with no entry takes the lesser of its parent's look and the fork, an event is new when later than the look).
   - game-master-only events (`SMOnly`): the page's query, the archive list, the conflicts and the pins of the Game Log leave them out of every player-facing row and count, a row of one cannot be pinned, the Archive panel counts them without listing them, and the failed captures are listed newest first. Each gate is also planted out of the source, and the check that names it must fail.
-  Prints `N of N checks passed`; any failed check sets exit code 1.
+  Prints `N of N checks passed`; any failed check sets exit code 1. With `--no-mutations` no gate is planted and only the checks of the real sources run.
 */
 const fs = require('fs')
 const path = require('path')
@@ -16,7 +16,8 @@ const os = require('os')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
-const { patched } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 
 const rows = fs.readFileSync(path.resolve(__dirname, '..', '.github', 'exports', 'DIM_EventType.csv'), 'utf8').trim().split(/\r?\n/).slice(1).map((line) => line.split(','))
 const EXPORT = rows.map(([id, , , , attack]) => ({ id: Number(id), attack: attack === '1' }))
@@ -216,12 +217,12 @@ const loadGameMaster = async ({ utility = null, panel = null, page = null } = {}
     if (utility) {
       const file = path.join(directory, 'utilities', utility.file)
 
-      fs.writeFileSync(file, patched(utility.file, fs.readFileSync(file, 'utf8'), utility.find, utility.replace))
+      fs.writeFileSync(file, plantedPatch(utility.file, fs.readFileSync(file, 'utf8'), utility.find, utility.replace))
     }
 
     const panelFile = path.join(rendererDirectory, 'components', 'log', 'ArchivePanel.vue')
     const original = fs.readFileSync(panelFile, 'utf8').replace(/\r\n/g, '\n').replace(/from '\.\.\/\.\.\//g, "from '../")
-    const source = panel ? patched('ArchivePanel.vue', original, panel.find, panel.replace) : original
+    const source = panel ? plantedPatch('ArchivePanel.vue', original, panel.find, panel.replace) : original
 
     fs.writeFileSync(path.join(directory, 'pages', 'Panel.vue'), source)
 
@@ -387,7 +388,7 @@ const run = async () => {
   passed += gameMasterChecks.length - realFailed.length
   realFailed.forEach(({ name, message }) => console.log(`FAIL ${name}\n     ${message.split('\n').join('\n     ')}`))
 
-  for (const mutant of GAME_MASTER_MUTANTS) {
+  for (const mutant of mutating() ? GAME_MASTER_MUTANTS : []) {
     total++
 
     try {

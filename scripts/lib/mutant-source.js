@@ -9,6 +9,8 @@ const path = require('path')
 
 const acorn = require('acorn')
 
+const { refusePlanting } = require('./no-mutations')
+
 // vue/compiler-sfc takes tens of milliseconds to load and only a component needs it, so it loads on the first `.vue` file.
 const scriptOf = (file, text) => {
   if (!file.endsWith('.vue')) {
@@ -49,8 +51,17 @@ const patched = (file, text, from, to) => {
   return result
 }
 
-// A temporary copy of `directory` with `from` replaced by `to` in `file`, made only when the fault is valid, so an invalid one leaves nothing behind.
+// `patched` for a fault: it throws in a quick run (--no-mutations, scripts/lib/no-mutations.js), so a script that plants faults and ignores the flag fails. `patched` itself also serves the rewrites of a head check, which a quick run keeps.
+const plantedPatch = (file, text, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
+  return patched(file, text, from, to)
+}
+
+// A temporary copy of `directory` with `from` replaced by `to` in `file`, made only when the fault is valid, so an invalid one leaves nothing behind. A fault, so it throws in a quick run as `plantedPatch` does.
 const plantedCopy = (directory, prefix, file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const result = patched(file, fs.readFileSync(path.join(directory, file), 'utf8'), from, to)
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 
@@ -60,4 +71,4 @@ const plantedCopy = (directory, prefix, file, from, to) => {
   return copy
 }
 
-module.exports = { assertParses, patched, plantedCopy }
+module.exports = { assertParses, patched, plantedPatch, plantedCopy }

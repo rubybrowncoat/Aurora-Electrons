@@ -3,7 +3,7 @@
 
   node scripts/check-all.js [--jobs=N] [--scripts=N] [--browser] [--only=name,name] [--quick]
 
-  --jobs=N is the budget of workers for the whole run (default: the physical cores, half the logical processors, scripts/lib/check-pool.js); --scripts=N runs N scripts side by side (default 3, never more than the budget) and gives each an equal share of the budget through CHECK_JOBS, which its mutant pool reads, so the run never starts more workers than the budget. Both take a positive whole number. --quick passes --no-mutations to the scripts that take it. --browser also runs check-typography.js, which needs the web mode running (`bun run web`; BASE_URL says where when it is not http://127.0.0.1:9080). --only runs the named scripts (without the check- prefix or .js).
+  --jobs=N is the budget of workers for the whole run (default: the physical cores, half the logical processors, scripts/lib/check-pool.js); --scripts=N runs N scripts side by side (default 3, never more than the budget) and gives each an equal share of the budget through CHECK_JOBS, which its mutant pool reads, so the run never starts more workers than the budget. Both take a positive whole number. --quick runs the head checks only: it passes --no-mutations to the scripts that name it (a script that plants no fault takes no such flag, and one that does not know the flag stops on it) and sets CHECK_NO_MUTATIONS=1 for every script, so that a script that plants faults and does not name the flag fails at its first planting (scripts/lib/no-mutations.js, scripts/check-no-mutations.js). --browser also runs check-typography.js, which needs the web mode running (`bun run web`; BASE_URL says where when it is not http://127.0.0.1:9080). --only runs the named scripts (without the check- prefix or .js).
 
   Left out: check-engines.js (the install hook that refuses a package manager other than bun), check-harvesters.js (a report on one save, given on its command line). check-design-rules.js runs its --fixtures mode, which needs no save. check-save-switching.js and check-peeks.js run after the others, alone and with the whole budget (the cases of the first wait on watchers and timers within fixed limits, the second times its reads against a budget in wall time).
 */
@@ -54,7 +54,7 @@ const main = async () => {
     const source = fs.readFileSync(path.join(__dirname, name), 'utf8')
     const args = [...(ARGS[name] || []), ...(quick && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
     const begun = Date.now()
-    const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap } })
+    const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(quick ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
     const lines = `${stdout}\n${stderr}`.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
     const summary = lines.filter((line) => /\bchecks?\b.*\b(passed|ok|failed)\b|\bpassed\b/i.test(line)).pop() || lines.pop() || ''
     const result = { name, seconds: (Date.now() - begun) / 1000, code, summary }

@@ -1,7 +1,7 @@
 /*
   Checks the typed sweep domains (src/renderer/utilities/sweep-domain.js) and their use by the Propulsion Planner's search (engineSweep, engineFields and searchPropulsion in design-search.js).
 
-  node scripts/check-sweep-domains.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>]
+  node scripts/check-sweep-domains.js [--no-mutations] [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>]
 
   The synthetic checks need no save. They prove: steps of 0.1 and 0.05 and singleton domains give exactly the decimals of the grid, each once, with the preview's count equal to the iterator's; a bound between two steps is left out or tried once under the stated endpoint policy; negative or zero steps, NaN, infinity, text, reversed bounds, fractional counts, figures finer than the resolution and bounds outside the researched limits are refused with a message on the field that is wrong and no values; switching the display between HS and tons leaves the canonical domain as it was; and the engine grid equals the grid the search stepped before the domains existed (a copy of the old functions below is the reference), on a matrix of techs and on random limits, and equals a brute-force enumeration of the integer grid. Then every mutation of the modules (a tolerance removed, a check dropped, an endpoint left out, a unit factor changed) must fail at least one check.
 
@@ -13,6 +13,7 @@ const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -586,6 +587,8 @@ const synthetic = ({ domain, search, rules }) => {
 
 // A copy of the utilities folder in the temp folder in which `file` has `from` replaced by `to`.
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-sweep-mutant-'))
 
   fs.cpSync(utilitiesDirectory, directory, { recursive: true })
@@ -649,6 +652,8 @@ const parseArguments = (argv) => {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else if (argv[index] === '--part') {
       options.part = argv[++index]
     } else {
@@ -837,9 +842,11 @@ const run = async () => {
   }
 
   // In the order they print; the longest start first.
+  const planting = mutating()
+
   const parts = [
     { part: 'synthetic', weight: 10 },
-    ...MUTATIONS.map((_mutation, index) => ({ part: `mutation:${index}`, weight: 5 })),
+    ...(planting ? MUTATIONS : []).map((_mutation, index) => ({ part: `mutation:${index}`, weight: 5 })),
     ...SAVE_LABELS.map((label) => ({ part: label, weight: 30 })),
   ]
 
@@ -854,8 +861,12 @@ const run = async () => {
   }
 
   printed()
-  console.log('\nMutations: each must fail at least one check')
-  MUTATIONS.forEach(printed)
+
+  if (planting) {
+    console.log('\nMutations: each must fail at least one check')
+    MUTATIONS.forEach(printed)
+  }
+
   SAVE_LABELS.forEach(printed)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

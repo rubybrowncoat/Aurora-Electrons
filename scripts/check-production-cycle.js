@@ -1,9 +1,9 @@
 /*
   Checks what the Production page and the Mineral Outlook assume about the game's industrial production cycle, against a reference model of the cycle and the ledger a save holds, read-only.
 
-  node scripts/check-production-cycle.js [--save <save.db> <GameID> <RaceID>]...
+  node scripts/check-production-cycle.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785).
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785). With --no-mutations it plants no fault, starts no mutant child and replays the stock save alone, the cheaper of the two.
 
   The reference model is the game's rule for one colony's construction cycle, written out here from the rule and not from the app: each project that is out of the queue and not paused, in some order, is allocated its share of the colony's capacity times the years since the last cycle, builds that many units (the allocation over the build points a unit takes, at most the units it has left), cuts the build to what the colony's stock of each mineral covers (the stock the projects ahead of it left, in tonnes and fractions of a unit, the build rounded to 4 decimals), takes the minerals of what it built out of that stock, and adds the build to its partial completion, whole units delivered at once. A project that finishes lets the queued ones start in the next cycle.
 
@@ -35,6 +35,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
@@ -94,19 +95,24 @@ const diverges = (name, detail = '') => {
   console.log(`DIVERGES  ${name}${detail ? `  [${detail}]` : ''}`)
 }
 
+// A quick run replays the stock save alone: it has 64,779 candidates of the search to the modded save's 168,284 and takes the shorter replay, and the full run replays both.
+const defaultSaves = () => (mutating() ? DEFAULT_SAVES : DEFAULT_SAVES.filter((save) => save.game === 138))
+
 const parseArguments = (argv) => {
   const saves = []
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--save') {
       saves.push({ file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) })
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else {
       console.error(`Unknown option ${argv[index]}`)
       process.exit(2)
     }
   }
 
-  return saves.length ? saves : DEFAULT_SAVES
+  return saves.length ? saves : defaultSaves()
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.
@@ -435,6 +441,10 @@ const STEP_TOLERANCE = 1e-6
 
 // The engine loaded from a temp copy in which `from`, which must occur once in the file (the engine, or with `file` the decimal module it imports), is replaced by `to` (a mutant that must fail the case named with it; no mutation when `from` is null), with the decimal module counting the results it makes in `operations.count` so a case can measure work in operations of the type and not in time.
 const mutatedEngine = async (from, to, file = ENGINE_FILE) => {
+  if (from !== null) {
+    refusePlanting(from)
+  }
+
   const source = path.join(root, 'src', 'renderer', 'utilities')
   const texts = Object.fromEntries([ENGINE_FILE, DECIMAL_FILE, SEARCH_FILE].map((name) => [name, fs.readFileSync(path.join(source, name), 'utf8')]))
 
@@ -467,6 +477,8 @@ const mutatedEngine = async (from, to, file = ENGINE_FILE) => {
 
 // The utilities loaded from a temp copy of the folder in which `from`, which must occur once in `file`, is replaced by `to`: a mutant that must fail the case named with it.
 const mutatedUtilities = async (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const source = path.join(root, 'src', 'renderer', 'utilities')
   const parts = fs.readFileSync(path.join(source, file), 'utf8').split(from)
 
@@ -487,14 +499,18 @@ const mutatedUtilities = async (file, from, to) => {
 }
 
 // A page mutation (`loadPage`'s `mutate`) that fails unless `from` occurs once.
-const onceReplacing = (from, to) => (text) => {
-  const parts = text.split(from)
+const onceReplacing = (from, to) => {
+  refusePlanting(from)
 
-  if (parts.length !== 2) {
-    throw new Error(`the mutation of the page "${from}" matches ${parts.length - 1} times, not once`)
+  return (text) => {
+    const parts = text.split(from)
+
+    if (parts.length !== 2) {
+      throw new Error(`the mutation of the page "${from}" matches ${parts.length - 1} times, not once`)
+    }
+
+    return parts.join(to)
   }
-
-  return parts.join(to)
 }
 
 // The page loaded from a temp copy of the renderer's utilities and mixins in which `from`, which must occur once in the forecast driver (`mixins/queue-forecast.js`), is replaced by `to`: a mutant of the driver the Production page and Colony Outlook share, which must fail the page case named with it.
@@ -1901,6 +1917,8 @@ const mutantPairs = (lists) => Object.entries(lists).flatMap(([kind, list]) => [
 
 // Starts every mutant in a child, `jobs()` at a time, and answers with the function that gives the keys a mutant broke (or throws what stopped it) once they are in.
 const startMutants = (lists) => {
+  refusePlanting('mutant children')
+
   const all = mutantPairs(lists)
   const chunks = chunksOf(all.length)
   const done = inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANT_PREFIX)).then((outcomes) => spread(chunks, outcomes))
@@ -1942,7 +1960,8 @@ const main = async () => {
 
   const saves = parseArguments(process.argv.slice(2))
   const lists = mutantLists()
-  const brokenOf = startMutants(lists)
+  const planting = mutating()
+  const brokenOf = planting ? startMutants(lists) : null
   const apps = await loadUtilities(['production', 'minerals', 'industry-cycle', 'decimal', 'provenance'], { stubs: STUBS })
   const pageOptions = await loadPage('pages/production', { stubs: STUBS })
 
@@ -1954,7 +1973,7 @@ const main = async () => {
 
   check('SYNTHETIC with 20 t of Duranium arriving each cycle, every order finishes both jobs, and the finish cycle depends on the order', bounds.outcomes.every((outcome) => outcome.A && outcome.B) && new Set(bounds.outcomes.map((outcome) => `${outcome.A}-${outcome.B}`)).size > 1, JSON.stringify(bounds.outcomes))
 
-  const mutants = [
+  const mutants = !planting ? [] : [
     { name: 'a model whose jobs each see the whole stock (no shared debit)', fails: 'SYNTHETIC conservation: the jobs of a cycle take no more of a mineral than the colony held, in either order', run: () => workedCases((input) => cycle({ ...input, wholeStock: true })) },
     { name: 'a model that does not round the build to 4 decimals', fails: 'SYNTHETIC the build is rounded to 4 decimals: 10 t over 3 t a unit is 3.3333 units, not 3.3333333', run: () => workedCases((input) => cycle({ ...input, unrounded: true })) },
   ]
@@ -1974,14 +1993,14 @@ const main = async () => {
 
   wrapperResults.forEach(([statement, held]) => check(statement, held))
 
-  for (const [index, mutant] of lists.engine.entries()) {
+  for (const [index, mutant] of planting ? lists.engine.entries() : []) {
     const named = engineResults.find(({ key }) => key === mutant.fails)
     const broken = await brokenOf('engine', index)
 
     check(`${mutant.name} fails the check "${named.statement.slice(0, 90)}..."`, named.held && broken.includes(mutant.fails), `${broken.length} cases fail: ${broken.join(', ')}`)
   }
 
-  for (const [index, mutant] of lists.wrapper.entries()) {
+  for (const [index, mutant] of planting ? lists.wrapper.entries() : []) {
     const named = wrapperResults.find(([, , key]) => key === mutant.fails)
     const broken = await brokenOf('wrapper', index)
 
@@ -1993,7 +2012,7 @@ const main = async () => {
   console.log('\n== the page\'s rows on synthetic colonies ==')
   pageResults.forEach(([statement, held]) => check(statement, held))
 
-  for (const [index, mutant] of lists.page.entries()) {
+  for (const [index, mutant] of planting ? lists.page.entries() : []) {
     const named = pageResults.find(([, , key]) => key === mutant.fails)
     const broken = await brokenOf('page', index)
 
@@ -2020,7 +2039,7 @@ const main = async () => {
 
       normal.results.forEach(([statement, held, detail]) => check(`${database.file}: ${statement}`, held, detail))
 
-      if (agreeNormal === null && normal.results.some(([statement]) => statement === MUTATED_CHECK)) {
+      if (planting && agreeNormal === null && normal.results.some(([statement]) => statement === MUTATED_CHECK)) {
         agreeNormal = { database, save, page, normal }
       }
 

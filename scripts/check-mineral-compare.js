@@ -1,7 +1,7 @@
 /*
   Checks the mineral comparison of the Empire History page (src/renderer/utilities/mineral-compare.js and the mineral chart of src/renderer/pages/history.vue).
 
-  node scripts/check-mineral-compare.js
+  node scripts/check-mineral-compare.js [--no-mutations]
 
   The utility is run on synthetic snapshots worked by hand: a mineral's baseline is the first snapshot of the window, with its stock and game time; the percent change is 100 x (stock - baseline) / baseline; a baseline of 0 t, or one that was not recorded, makes the change undefined (no percentage, no line) and is never read as 0 or as infinity, and an unknown stock is never 0; a mineral's colour is the palette slot fixed for its ID, in every preset, whichever other minerals are picked, and the two minerals that share a slot are told apart by a dash; the CSV names a unit on each value column, the scale, the baseline's stock and game time of each mineral, the palette slot and colour of its ID, and leaves what is not known empty and says why.
 
@@ -22,6 +22,7 @@ const { loadPage, replacing } = require('./lib/page-loader')
 const { strictRecords } = require('./lib/csv-records')
 const { jobs } = require('./lib/check-pool')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -950,6 +951,8 @@ const MUTATIONS = [
 ]
 
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-mineral-compare-mutant-'))
 
   fs.cpSync(utilitiesDirectory, directory, { recursive: true })
@@ -1099,6 +1102,8 @@ const checkUtilityMutation = async ({ name, find, replace, fails, campaign: camp
 }
 
 const checkPageMutation = async ({ name, find, replace, fails }, campaignFile) => {
+  refusePlanting(name)
+
   const appearance = await loadAppearance()
   const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
   const settings = await loadUtilities(['campaign', 'preferences', 'remembered-views'], { stubs: STUBS })
@@ -1146,6 +1151,8 @@ const parseArguments = (argv) => {
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--part') {
       options.part = argv[++index]
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else if (argv[index] === '--campaign') {
       options.campaign = argv[++index]
     } else if (argv[index] === '--slice') {
@@ -1209,7 +1216,7 @@ const run = async () => {
     }
 
     const forwarded = campaignFile ? ['--campaign', campaignFile] : []
-    const parts = [{ part: 'head', weight: 30 }, ...MUTANTS.map(({ id }) => ({ part: id, weight: 3 }))]
+    const parts = [{ part: 'head', weight: 30 }, ...(mutating() ? MUTANTS : []).map(({ id }) => ({ part: id, weight: 3 }))]
     const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwarded], weight })))
     let at = 0
 
@@ -1221,8 +1228,11 @@ const run = async () => {
     }
 
     printed()
-    console.log('\nMutations: each must fail the checks it names')
-    MUTANTS.forEach(printed)
+
+    if (mutating()) {
+      console.log('\nMutations: each must fail the checks it names')
+      MUTANTS.forEach(printed)
+    }
   } finally {
     fs.rmSync(directory, { recursive: true, force: true })
   }

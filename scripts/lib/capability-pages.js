@@ -13,6 +13,7 @@
 const fs = require('fs')
 const { loadPage, replacing, instantiate } = require('./page-loader')
 const { routes: routeTable } = require('./store-routes')
+const { mutating } = require('./no-mutations')
 
 const FLEET = { ShipID: 1, ShipName: 'Surveyor', FleetID: 1, Damaged: 0, CurrentCrew: 100, ClassCrew: 100, ProductionBonus: 1.2, CaptainName: 'Captain' }
 
@@ -344,7 +345,7 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
 
     check('pages: the stores of the pages record and reject, answering undefined, a dispatch that is not an action of the root store, a prefixed name and a call with options', JSON.stringify(answers) === JSON.stringify([undefined, undefined, undefined, null]) && JSON.stringify(probe.calls.map(({ type, accepted }) => [type, accepted])) === JSON.stringify([['not-an-action', false], ['peeks/capabilities/preflight', false], ['capabilities/preflight', false], ['capabilities/retry', true]]) && probe.rejected().length === 3 && probe.dispatched.join() === 'capabilities/retry')
 
-    for (const [page, label, from, to] of MUTATIONS) {
+    for (const [page, label, from, to] of mutating() ? MUTATIONS : []) {
       const broken = (await PAGE_RESULTS[page](context, fixtures, replacing(from, to))).filter(([, held]) => !held).map(([statement]) => statement)
 
       check(`pages: a copy of ${page}.vue in which ${label} fails a page check`, broken.length > 0)

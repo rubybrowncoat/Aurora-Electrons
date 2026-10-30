@@ -1,7 +1,7 @@
 /*
   Checks the terraforming planner's inputs against observed campaigns (backlog AE-059-01), read only.
 
-  node scripts/check-terraform-campaigns.js
+  node scripts/check-terraform-campaigns.js [--no-mutations]
 
   Each group opens saves of a recorded campaign read only (SELECTs only) and compares a before/after pair with the rate and climate rules of docs/DATABASE.md:
   - passive: a non-player colony with a fixed fleet of terraformers adds one pressure step per snapshot until the target is passed, then the order is cleared;
@@ -17,7 +17,8 @@ const sqlite3 = require('sqlite3')
 const { Database } = require('bun:sqlite')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const SECONDS_PER_YEAR = 31536000
@@ -853,14 +854,14 @@ const main = async () => {
 
   await check('app capacity, plan years and plan work agree with the rules', async () => appOutputs(modules, appFixtures, plans))
 
-  for (const [label, file, from, to, needsPlans] of APP_FAULTS) {
+  for (const [label, file, from, to, needsPlans] of mutating() ? APP_FAULTS : []) {
     if (needsPlans && !plans.length) {
       continue
     }
 
     await check(`app planted fault ${label} is caught`, async () => {
       const text = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', `${file}.js`), 'utf8')
-      const planted = await loadUtilities(['habitability', 'terraforming', 'colonization-data'], { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [file]: patched(`${file}.js`, text, from, to) } })
+      const planted = await loadUtilities(['habitability', 'terraforming', 'colonization-data'], { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [file]: plantedPatch(`${file}.js`, text, from, to) } })
       const caught = await appOutputs(planted, appFixtures, plans).then(() => false, () => true)
 
       assert.ok(caught, 'the app-output assertions still pass')
@@ -878,7 +879,7 @@ const main = async () => {
     await check(`breakdown ${name}`, async () => run(modules))
   }
 
-  for (const { module = 'terraform-capacity', label, from, to, fails } of BREAKDOWN_FAULTS) {
+  for (const { module = 'terraform-capacity', label, from, to, fails } of mutating() ? BREAKDOWN_FAULTS : []) {
     const required = fails.filter((name) => present(...BREAKDOWN_CHECKS[name].needs))
 
     if (!required.length) {
@@ -888,7 +889,7 @@ const main = async () => {
 
     await check(`breakdown planted fault ${label} fails ${required.join(', ')}`, async () => {
       const text = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', `${module}.js`), 'utf8')
-      const planted = await loadUtilities(breakdownModules, { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [module]: patched(`${module}.js`, text, from, to) } })
+      const planted = await loadUtilities(breakdownModules, { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [module]: plantedPatch(`${module}.js`, text, from, to) } })
 
       for (const name of required) {
         const caught = await BREAKDOWN_CHECKS[name].run(planted).then(() => false, () => true)

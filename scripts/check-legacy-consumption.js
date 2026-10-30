@@ -1,7 +1,7 @@
 /*
   Checks the Mineral Outlook's model of the uses a save without a mineral ledger cannot show (utilities/legacy-consumption.js, through utilities/mineral-outlook.js and the real page) against the mineral ledger the saves hold, read-only.
 
-  node scripts/check-legacy-consumption.js [--save <save.db> <GameID> <RaceID>]...
+  node scripts/check-legacy-consumption.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
   With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a later copy of the stock save (saves/AuroraDB.db, game 138, race 785). A save that is not there is skipped and said so. A save is never written: the fallback is run on a copy of the stock save in the temp folder whose mineral ledger is emptied, deleted afterwards.
 
@@ -11,7 +11,7 @@
 
   Synthetic cases (labelled SYNTHETIC) pin the arithmetic where the saves hold no case: refineries and facilities cut to a whole number, status off, a missing switch, the remaining build points, paused and scrap tasks, retool slipways, a continual upgrade. A case the saves cannot show is printed as UNSUPPORTED and never counts as agreement.
 
-  Mutants. Each mutation changes a copy of the renderer's sources in the temp folder, runs the checks it names in a Node process of its own (the rule registry is module state) and counts as caught when every check it names fails.
+  Mutants. Each mutation changes a copy of the renderer's sources in the temp folder, runs the checks it names in a Node process of their own (the rule registry is module state) and counts as caught when every check it names fails. --no-mutations plants none and starts no child: the checks of the real sources run alone.
 
   Maintenance is held to the minerals at the colony (the scarcest of Duranium, Uridium and Gallicite over a year, spent once by all the colonies that draw on one stock: an NPR's colonies draw on the capital's). A mine on a body whose deposit of the mineral still holds some is not quantified, so where the stock cannot cover a year the figure is unknown, never unlimited; a mine on an exhausted deposit adds nothing. A colony whose saved stock is below a year's need is compared only as at most the rate at the tick, because the saved stock is the one after the tick. An installation row whose amount or type the save does not give makes the count unknown, never 0 (checked on a database in memory through the real query).
 
@@ -25,6 +25,7 @@ const v8 = require('v8')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -125,6 +126,8 @@ const parseArguments = (argv) => {
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--save') {
       saves.push({ key: `save${saves.length + 1}`, file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) })
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else {
       console.error(`Unknown option ${argv[index]}`)
       process.exit(2)
@@ -1708,6 +1711,8 @@ const MUTATIONS = [
 ]
 
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-legacy-mutant-'))
 
   COPIED.forEach((entry) => {
@@ -1805,10 +1810,11 @@ const run = async () => {
 
   // A mutation that names a check with no case here (a save or the campaign is not there) cannot be caught by it, and is left out.
   const hasNoCase = (id) => (id.startsWith('passive-') && !campaignSnapshots()) || (id.includes(':') && saves.some((save) => save.key === id.split(':')[1] && !fs.existsSync(path.resolve(root, save.file))))
-  const [runnable, left] = [MUTATIONS.filter(([, , , , fails]) => !fails.some(hasNoCase)), MUTATIONS.filter(([, , , , fails]) => fails.some(hasNoCase))]
+  const planting = mutating()
+  const [runnable, left] = planting ? [MUTATIONS.filter(([, , , , fails]) => !fails.some(hasNoCase)), MUTATIONS.filter(([, , , , fails]) => fails.some(hasNoCase))] : [[], []]
   const named = [...new Set(runnable.flatMap(([, , , , fails]) => fails))]
-  // The checks run here, the control and each mutation in a child of its own, all of them side by side; what they say is told in the order of a run one after another.
-  const finished = await inParallel([null, 'control', ...runnable], async (item) => {
+  // The checks run here, the control and each mutation in a child of its own, all of them side by side; what they say is told in the order of a run one after another. A quick run has neither the control nor a mutation: the control repeats the checks run here.
+  const finished = await inParallel(planting ? [null, 'control', ...runnable] : [null], async (item) => {
     if (item === null) {
       try {
         return await runList(list, null)
@@ -1821,7 +1827,7 @@ const run = async () => {
   })
   let skipped = 0
 
-  finished.slice(0, 2).forEach((outcome) => {
+  finished.slice(0, planting ? 2 : 1).forEach((outcome) => {
     if (outcome instanceof Error) {
       throw outcome
     }
@@ -1843,9 +1849,11 @@ const run = async () => {
     check(`mutation caught: ${label}`, result, detail)
   }
 
-  const control = finished[1].filter(([, result]) => result !== true && !isSkip(result)).map(([id]) => id)
+  if (planting) {
+    const control = finished[1].filter(([, result]) => result !== true && !isSkip(result)).map(([id]) => id)
 
-  check('a fresh process on the unchanged sources passes every check the mutations name', control.length === 0 ? true : `fails ${control.join('; ')}`)
+    check('a fresh process on the unchanged sources passes every check the mutations name', control.length === 0 ? true : `fails ${control.join('; ')}`)
+  }
 
   measured.forEach((text) => console.log(`MEASURED  ${text}`))
   unsupported.forEach((text) => console.log(`UNSUPPORTED  ${text}`))

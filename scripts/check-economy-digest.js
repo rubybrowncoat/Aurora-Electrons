@@ -7,7 +7,7 @@
   - a rewind or a fork cannot bridge a comparison it was not made on, and no branch, race or campaign reads or repeats another's acknowledgment;
   - a save whose snapshot the recorder failed to write is never compared with the older snapshot of the same game time, and nothing is acknowledged for it (the recorder is the real one, over in-memory stores).
 
-  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1.
+  Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. With `--no-mutations` no fault is planted and only the checks of the real sources run.
 
   The panel, the page and the template are checked by what they do: the compiled template's elements and bound expressions evaluated on figures, the page's bound props evaluated on an instance of it, the tracked read through the real load-state mixin, the coverage as data, and the recorder's failure through the real recorder. No statement matches source text or prose; only a planted fault names a source anchor.
 */
@@ -19,7 +19,8 @@ const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { routes: routeTable } = require('./lib/store-routes')
 const { loadPage, instantiate } = require('./lib/page-loader')
-const { patched } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -90,7 +91,7 @@ const build = async (mutation = null) => {
   const text = { ...ORIGINALS }
 
   if (mutation) {
-    text[mutation.target] = patched(FILES[mutation.target], text[mutation.target], mutation.find, mutation.replace)
+    text[mutation.target] = plantedPatch(FILES[mutation.target], text[mutation.target], mutation.find, mutation.replace)
   }
 
   const m = await loadUtilities(['economy-digest', 'colony-series'], { stubs: STUBS, sources: { 'economy-digest': text.digest }, texts })
@@ -1801,7 +1802,7 @@ const main = async () => {
     }
   }
 
-  for (const mutant of MUTANTS) {
+  for (const mutant of mutating() ? MUTANTS : []) {
     const missing = mutant.fails.filter((key) => !unique.has(key))
 
     if (missing.length) {

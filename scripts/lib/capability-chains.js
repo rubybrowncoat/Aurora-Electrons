@@ -12,6 +12,7 @@ const fs = require('fs')
 const path = require('path')
 const { Sequelize } = require('sequelize')
 const { loadUtilities } = require('./utilities')
+const { mutating } = require('./no-mutations')
 
 const NAVAL_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress', '/hauling', '/information']
 const MODULES = ['capabilities', 'minerals', 'mining-data', 'mineral-outlook', 'logistics', 'naval-admins', 'survey', 'terraform-capacity', 'cmc-policy']
@@ -154,7 +155,7 @@ const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, pre
 
     statements.forEach(([statement, held]) => check(`naval: ${statement}`, held))
 
-    for (const [label, file, from, to] of MUTATIONS) {
+    for (const [label, file, from, to] of mutating() ? MUTATIONS : []) {
       const directory = mutatedCopy(file, from, to)
 
       try {

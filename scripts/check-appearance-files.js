@@ -1,14 +1,17 @@
 /*
   Checks the portable appearance file (src/renderer/utilities/appearance-file.js, and its use by appearance.js).
 
-  node scripts/check-appearance-files.js
+  node scripts/check-appearance-files.js [--no-mutations]
+
+  --no-mutations runs the checks of the real sources alone: no fault is planted and no child process is started.
 
   It proves, without a browser: the table of roles is the roles of the five presets, each with the kind of value the presets use; every preset exports, reads back and exports again with its roles, name, mode, base, font and reference unchanged and no default used and no contrast finding; the three kinds of failure (an unsupported version, a malformed field, an unknown role) are told apart, a version failure comes alone, the unknown names `__proto__` and `constructor` are unknown, and the sizes are bounded (the text, each string, the failures kept); a partial file lists exactly the roles it left out with the base's value and says which base it used; a body ink the colour of the page, an unreadable text ink and an unsupported font are explained before anything is applied; a file that fails changes nothing, a draft writes nothing, Apply writes the document and the choice in one assignment of the store or not at all, and a fresh start reads the kept file back; a stored file that no longer passes is reported and left as it is; and the files the feature is made of name no game format. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing. Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -651,7 +654,7 @@ const runChecks = async (sources, first) => {
 }
 
 // The utilities as the checks load them with the fault planted: the text of the one module in which `file` has `from` replaced by `to`, by name, and the others read from the folder.
-const plantedSources = (file, from, to) => ({ [file.replace(/\.js$/, '')]: patched(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
+const plantedSources = (file, from, to) => ({ [file.replace(/\.js$/, '')]: plantedPatch(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
 
 const FILE = 'appearance-file.js'
 const APPEARANCE = 'appearance.js'
@@ -741,7 +744,7 @@ const run = async () => {
 
   console.log('Appearance files')
 
-  const verdicts = inParallel([...FAULTS.keys()], judgeApart)
+  const verdicts = mutating() ? inParallel([...FAULTS.keys()], judgeApart) : null
 
   for (const [name, result] of await runChecks()) {
     tally(result === true)
@@ -753,32 +756,34 @@ const run = async () => {
   tally(scanned === true)
   console.log(`${scanned === true ? 'PASS' : 'FAIL'}  the files of the feature claim no game format and name no source that is not to be named${scanned === true ? '' : `  [${scanned}]`}`)
 
-  console.log('\nMutations: each must fail at least one check')
+  if (verdicts) {
+    console.log('\nMutations: each must fail at least one check')
 
-  const judged = await verdicts
+    const judged = await verdicts
 
-  for (const [index, fault] of MUTATIONS.entries()) {
-    const { failed, invalid, error } = judged[index]
-    const [label] = fault
+    for (const [index, fault] of MUTATIONS.entries()) {
+      const { failed, invalid, error } = judged[index]
+      const [label] = fault
 
-    if (invalid !== undefined) {
-      tally(false)
-      console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
-    } else if (error !== undefined) {
-      tally(false)
-      console.log(`FAIL  mutation caught: ${label}  [${error}]`)
-    } else {
-      tally(failed > 0)
-      console.log(`${failed ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed ? `${failed} checks fail` : 'every check still passes'}]`)
+      if (invalid !== undefined) {
+        tally(false)
+        console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
+      } else if (error !== undefined) {
+        tally(false)
+        console.log(`FAIL  mutation caught: ${label}  [${error}]`)
+      } else {
+        tally(failed > 0)
+        console.log(`${failed ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed ? `${failed} checks fail` : 'every check still passes'}]`)
+      }
     }
-  }
 
-  for (const [index, entry] of INVALID.entries()) {
-    const [label] = entry
-    const unparsable = judged[MUTATIONS.length + index]
+    for (const [index, entry] of INVALID.entries()) {
+      const [label] = entry
+      const unparsable = judged[MUTATIONS.length + index]
 
-    tally(unparsable.invalid !== undefined)
-    console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
+      tally(unparsable.invalid !== undefined)
+      console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
+    }
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

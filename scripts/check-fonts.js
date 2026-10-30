@@ -6,13 +6,16 @@
 
   What a browser shows (the computed face and size of real elements, the canvas text, the loaded faces) is probed separately with Playwright; the run is recorded in docs/plans/backlog/evidence/AE-016-01.md.
 
-  Run: node scripts/check-fonts.js
+  Run: node scripts/check-fonts.js [--no-mutations]
+
+  --no-mutations runs the checks of the real sources alone: no fault is planted and no child process is started.
 */
 const fs = require('fs')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -84,7 +87,7 @@ const source = (relative, { patch = {}, sources } = {}) => {
     return text
   }
 
-  return patched(relative, text, ...patch[relative])
+  return plantedPatch(relative, text, ...patch[relative])
 }
 
 const code = (text) => text.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*|<!--)/.test(line)).join('\n')
@@ -499,7 +502,7 @@ const MUTATIONS = [
 ]
 
 // The utilities as the checks load them with the fault planted: the text of the one module that changes, by name, and the others read from the folder.
-const plantedSources = ({ file, from, to }) => ({ [file.replace(/\.js$/, '')]: patched(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
+const plantedSources = ({ file, from, to }) => ({ [file.replace(/\.js$/, '')]: plantedPatch(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
 
 const runChecks = async ({ sources, patch = {}, first } = {}) => {
   const results = []
@@ -573,37 +576,39 @@ const run = async () => {
 
   console.log('Typeface and text size')
 
-  const verdicts = inParallel([...FAULTS.keys()], judgeApart)
+  const verdicts = mutating() ? inParallel([...FAULTS.keys()], judgeApart) : null
 
   for (const [name, result] of await runChecks()) {
     tally(result === true)
     console.log(`${result === true ? 'PASS' : 'FAIL'}  ${name}${result === true ? '' : `  [${typeof result === 'string' ? result : 'false'}]`}`)
   }
 
-  console.log('\nMutations: each must fail at least one check')
+  if (verdicts) {
+    console.log('\nMutations: each must fail at least one check')
 
-  const judged = await verdicts
+    const judged = await verdicts
 
-  for (const [index, [label]] of MUTATIONS.entries()) {
-    const { failed, invalid, error } = judged[index]
+    for (const [index, [label]] of MUTATIONS.entries()) {
+      const { failed, invalid, error } = judged[index]
 
-    if (invalid !== undefined) {
-      tally(false)
-      console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
-    } else if (error !== undefined) {
-      tally(false)
-      console.log(`FAIL  mutation caught: ${label}  [${error}]`)
-    } else {
-      tally(failed > 0)
-      console.log(`${failed ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed ? `${failed} checks fail` : 'every check still passes'}]`)
+      if (invalid !== undefined) {
+        tally(false)
+        console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
+      } else if (error !== undefined) {
+        tally(false)
+        console.log(`FAIL  mutation caught: ${label}  [${error}]`)
+      } else {
+        tally(failed > 0)
+        console.log(`${failed ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed ? `${failed} checks fail` : 'every check still passes'}]`)
+      }
     }
-  }
 
-  for (const [index, [label]] of INVALID.entries()) {
-    const unparsable = judged[MUTATIONS.length + index]
+    for (const [index, [label]] of INVALID.entries()) {
+      const unparsable = judged[MUTATIONS.length + index]
 
-    tally(unparsable.invalid !== undefined)
-    console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
+      tally(unparsable.invalid !== undefined)
+      console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
+    }
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

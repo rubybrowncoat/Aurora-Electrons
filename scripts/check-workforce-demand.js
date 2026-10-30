@@ -1,7 +1,7 @@
 /*
   Checks the committed workforce of the Colony Outlook (utilities/workforce-demand.js, mixins/queue-forecast.js and the page's "With the queue" basis): the workers a colony needs once the installations in its queue and the shipyard upgrades under way are done, month by month along the population series.
 
-  node scripts/check-workforce-demand.js [--save <save.db> <GameID> <RaceID>]...
+  node scripts/check-workforce-demand.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
   With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
 
@@ -17,6 +17,7 @@ const os = require('os')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
@@ -64,6 +65,8 @@ const parseArguments = (argv) => {
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--save') {
       saves.push({ file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) })
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else {
       console.error(`Unknown option ${argv[index]}`)
       process.exit(2)
@@ -106,6 +109,8 @@ const rowsOf = async (database, sql) => (await database.query(sql))[0]
 
 // The utilities loaded from a temp copy of the folder in which `from`, which must occur once in `file`, is replaced by `to`: a mutant that must fail the check named with it.
 const mutatedUtilities = async (file, from, to) => {
+  refusePlanting(`${file}: ${from}`)
+
   const source = path.join(root, 'src', 'renderer', 'utilities')
   const parts = fs.readFileSync(path.join(source, file), 'utf8').split(from)
 
@@ -674,7 +679,7 @@ const main = async () => {
 
   results.forEach(([statement, held]) => check(statement, held))
 
-  for (const mutant of MUTANTS) {
+  for (const mutant of mutating() ? MUTANTS : []) {
     const mutated = syntheticCases(await mutatedUtilities(mutant.file, mutant.from, mutant.to), capacities)
     const named = results.find(([, , key]) => key === mutant.fails)
     const broken = mutated.filter(([, held]) => !held).map(([, , key]) => key)
@@ -686,7 +691,7 @@ const main = async () => {
 
   pageResults.forEach(([statement, held]) => check(statement, held))
 
-  for (const mutant of PAGE_MUTANTS) {
+  for (const mutant of mutating() ? PAGE_MUTANTS : []) {
     const mutated = await pageCases(await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, mutate: replacing(mutant.from, mutant.to) }), store)
     const named = pageResults.find(([, , key]) => key === mutant.fails)
     const broken = mutated.filter(([, held]) => !held).map(([, , key]) => key)

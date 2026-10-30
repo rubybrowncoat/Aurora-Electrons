@@ -1,7 +1,7 @@
 /*
   Checks the Pareto comparison of designs (src/renderer/utilities/pareto.js), the front the propulsion search keeps while it explores (`axes` of searchPropulsion in design-search.js) and the page's use of it (pages/propulsion.vue).
 
-  node scripts/check-pareto.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>]
+  node scripts/check-pareto.js [--no-mutations] [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>]
 
   The checks need no save except the last two groups. Small examples of two to five axes, worked by hand and against an independent oracle (every pair of sets compared, on the same grid of cells that count as alike), show that a set strictly worse on every axis is dropped and so is one that is no better on any axis and worse on one, that incomparable sets stay, that sets alike on every axis stay together by name (their count exact past the names kept), that reversing an axis reverses what is efficient, that the order sets arrive in changes nothing, and that a figure that is not computed (the range and endurance of a set with no fuel) never enters a comparison: it is not read as 0, the set takes no part and is counted and named. A front is provisional when the search stopped early (a candidate budget, a cancelled run, a step's snapshot), or when the front hit its limit, and only a whole domain that the limit did not cut is complete; the text it is shown with says which.
 
@@ -16,6 +16,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { strictRecords } = require('./lib/csv-records')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1006,6 +1007,8 @@ const parseArguments = (argv) => {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else if (argv[index] === '--part') {
       options.part = argv[++index]
     } else {
@@ -1073,6 +1076,8 @@ const checkHead = async (mods) => {
 }
 
 const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
+  refusePlanting(name)
+
   const sources = mutatedSources(file, find, replace)
   const began = Date.now()
   let failed = null
@@ -1105,6 +1110,8 @@ const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
 }
 
 const checkPageMutation = async ({ name, file = null, find, replace, fails }, mods) => {
+  refusePlanting(name)
+
   const began = Date.now()
   let failed = null
   let absent = []
@@ -1236,7 +1243,9 @@ const run = async () => {
   }
 
   // The longest parts first: the saves, then the checks of the real sources, then the mutants.
-  const parts = [{ part: 'head', weight: 30 }, ...MUTANTS.map(({ id }) => ({ part: id, weight: 3 })), ...SAVE_LABELS.map((label) => ({ part: label, weight: 60 }))]
+  const planting = mutating()
+  const mutants = planting ? MUTANTS : []
+  const parts = [{ part: 'head', weight: 30 }, ...mutants.map(({ id }) => ({ part: id, weight: 3 })), ...SAVE_LABELS.map((label) => ({ part: label, weight: 60 }))]
   const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
   const printed = (index) => {
     const counts = printSection(sections[index])
@@ -1246,13 +1255,16 @@ const run = async () => {
   }
 
   printed(0)
-  console.log('\nMutations: each must fail the checks it names')
 
-  for (let index = 1; index <= MUTANTS.length; index++) {
+  if (planting) {
+    console.log('\nMutations: each must fail the checks it names')
+  }
+
+  for (let index = 1; index <= mutants.length; index++) {
     printed(index)
   }
 
-  for (let index = MUTANTS.length + 1; index < sections.length; index++) {
+  for (let index = mutants.length + 1; index < sections.length; index++) {
     printed(index)
   }
 

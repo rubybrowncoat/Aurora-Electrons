@@ -9,7 +9,7 @@
 
   The sensor check rebuilds every active sensor, missile fire control, passive sensor and beam fire control the race owns from the techs its components name, each tech found by its tech type and never by the slot it sits in, and compares the strength, range, cost with its Uridium and Corbomite, crew, HTK, ECCM and CTD and, for a beam fire control, the size, range, tracking and special function with what the game stored (utilities/design-data.js `loadSensorFixture`; the rules are the design.*Sensor* and design.beamFireControl* ones of utilities/design-rules.js, the comparison is scripts/lib/sensor-reconcile.js). A figure whose tech the component does not name, names twice or names by a row the save lacks is counted as unknown and never as 0. A difference is explained only by an alternative of the reconciliation that fits (the techs the stored figures imply, a tenth of the cost, an uncapped range) or by a row of KNOWN_SENSOR_ROWS pinned to its stored and computed figures; any other is a mismatch.
 
-  node scripts/check-design-rules.js --fixtures                  runs the missile and sensor reports on the fixtures in scripts/lib/missile-fixtures.json and scripts/lib/sensor-fixtures.json, the checks of the rules and of the candidate evaluator (utilities/design-rules.js `evaluateMissile`) on them, and every planted fault of the rules, the loaders and the reconciliations (each must fail the checks it names); no save is read
+  node scripts/check-design-rules.js --fixtures [--no-mutations]  runs the missile and sensor reports on the fixtures in scripts/lib/missile-fixtures.json and scripts/lib/sensor-fixtures.json, the checks of the rules and of the candidate evaluator (utilities/design-rules.js `evaluateMissile`) on them, and every planted fault of the rules, the loaders and the reconciliations (each must fail the checks it names); no save is read; --no-mutations leaves out the planted faults
   node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]   writes the designs of the scope into the fixtures file
   node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]    writes the sensors and fire controls of the scope into the fixtures file
   node scripts/check-design-rules.js --run-mutant <name>        one planted fault of the rules in this process, its result printed as JSON: what --fixtures starts for each fault, so no fault shares module state with another or with the checks
@@ -19,6 +19,7 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, jobs, runChild } = require('./lib/check-pool')
 
 const RULES = ['engine', 'speed', 'range', 'jump', 'maintenance', 'missile', 'sensor']
@@ -69,6 +70,8 @@ const parseArguments = (argv) => {
       options.allGame = true
     } else if (argument === '--ledger') {
       options.ledger = true
+    } else if (argument === '--no-mutations') {
+      continue
     } else if (argument === '--fixtures') {
       options.fixtures = true
     } else if (argument === '--export-missile-fixture') {
@@ -2195,6 +2198,8 @@ const UTILITY_CLOSURE = ['design-rules', 'design-data', 'provenance', 'tank-pack
 
 // Copies the utilities and the reconciliation into a temporary folder with `replace` in place of `find`, which must be found once in one of the files that can be planted. Returns the folder and the two folders to load from.
 const plantedFault = (find, replace) => {
+  refusePlanting(find)
+
   const holders = PLANTABLE.map((file) => ({ ...file, source: fs.readFileSync(path.join(file.directory, `${file.name}.js`), 'utf8') })).filter(({ source }) => source.includes(find))
 
   if (holders.length !== 1) {
@@ -2287,7 +2292,7 @@ const runFixtures = async () => {
   const data = loadFixtures()
   const sensorData = loadSensorFixtures()
   const library = await loadMissileLibrary()
-  const pending = startMutants()
+  const pending = mutating() ? startMutants() : null
   const registry = () => JSON.stringify(library.provenance.listRules())
   const registryBefore = registry()
   const totals = { checked: 0, mismatches: 0, explained: 0, unsupported: 0, unknown: 0, resolved: 0 }
@@ -2331,14 +2336,14 @@ const runFixtures = async () => {
     console.log(result === true ? `check passed: ${name}` : `CHECK FAILED: ${name}: ${result}`)
   }
 
-  const mutants = printMutants(await pending)
+  const mutants = pending ? printMutants(await pending) : { caught: 0, missed: 0 }
   const registryAfter = registry()
   const registrySame = registryBefore === registryAfter
 
-  console.log(registrySame ? 'check passed: the rule registry of the checks is the same after the checks and the mutants' : 'CHECK FAILED: the rule registry of the checks is not the same after the checks and the mutants: a check or a mutant registered or changed a rule of the shared registry')
+  console.log(registrySame ? `check passed: the rule registry of the checks is the same after the checks${pending ? ' and the mutants' : ''}` : `CHECK FAILED: the rule registry of the checks is not the same after the checks${pending ? ' and the mutants' : ''}: a check${pending ? ' or a mutant' : ''} registered or changed a rule of the shared registry`)
   console.log(`fixtures: ${data.size}, ${totals.checked} compared, ${totals.mismatches} mismatches, ${totals.explained} explained, ${totals.unsupported} unsupported, ${totals.unknown} unknown; ${totals.resolved} of the compared resolved from the stored figure`)
   console.log(`sensor fixtures: ${sensorData.size}, ${sensorTotals.checked} compared, ${sensorTotals.mismatches} mismatches, ${sensorTotals.explained} explained, ${sensorTotals.unsupported} unsupported, ${sensorTotals.unknown} unknown; ${sensorTotals.resolved} of the compared resolved from the stored figure`)
-  console.log(`checks: ${checks.length + 1 - failedChecks - (registrySame ? 0 : 1)} of ${checks.length + 1} pass; mutants: ${mutants.caught} of ${ALL_MUTANTS.length} caught`)
+  console.log(`checks: ${checks.length + 1 - failedChecks - (registrySame ? 0 : 1)} of ${checks.length + 1} pass; mutants: ${pending ? `${mutants.caught} of ${ALL_MUTANTS.length} caught` : 'not run (--no-mutations)'}`)
 
   return totals.mismatches || sensorTotals.mismatches || failedChecks || !registrySame || mutants.missed ? 1 : 0
 }

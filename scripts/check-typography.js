@@ -1,7 +1,7 @@
 /*
   Regression check of long labels and numeric layout under the typeface families and text scales, in a browser.
 
-  BASE_URL=http://127.0.0.1:9081 bun scripts/check-typography.js
+  BASE_URL=http://127.0.0.1:9081 bun scripts/check-typography.js [--no-mutations]
 
   It needs the web mode running (`bun run web`, the dev server) with a save the page can open.
 
@@ -16,7 +16,7 @@
   What it does not cover, and was measured once by hand for the task that added it (docs/plans/backlog/evidence/AE-015-01.md): the other dialogs, the navigation flyouts and the help drawer, chart axes and ticks, canvas and Cytoscape labels, and the fallback of a typeface that is not installed.
 
   FULL=1 runs a pairwise matrix of typeface, scale and viewport, plus every family at the largest scale on 1280x720; the default is a short matrix on 1280x720. PAGES=/production,/finances narrows the pages.
-  VIEWPORTS=1920x1080 selects a focused viewport. --part=pages omits fixtures; --part=web-address runs the address regression; --part=matrix runs the matrix invariants, faults and reordered rewrite; --part=open-failure proves a required dependency's HTTP 504 stops the first step; --part=reader-failure proves a reader that throws after the first page opened leaves the other steps running. TYPOGRAPHY_TIMING=1 reports measured phases of each page read.
+  VIEWPORTS=1920x1080 selects a focused viewport. --part=pages omits fixtures; --part=web-address runs the address regression; --part=matrix runs the matrix invariants, faults and reordered rewrite; --part=open-failure proves a required dependency's HTTP 504 stops the first step; --part=reader-failure proves a reader that throws after the first page opened leaves the other steps running. TYPOGRAPHY_TIMING=1 reports measured phases of each page read. --no-mutations leaves out of a whole run what plants a fault in the harness (the planted-fault and rewrite variants of the address regression, the dependency and reader failures, the planted faults of the matrix, the render, foreign-error and palette fixtures that make the page throw) and runs the rest: the address regression of the real server, the matrix invariants, the pointer, keyboard, real-page and known-exception fixtures and the pages. --schedule prints the names of the steps of the pages part without opening a browser.
 */
 const fs = require('fs')
 const net = require('net')
@@ -25,7 +25,8 @@ const path = require('path')
 const Module = require('module')
 const { chromium } = require('playwright')
 const assert = require('./lib/bounded-assert')
-const { patched } = require('./lib/mutant-source')
+const { patched, plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 const { inParallel, jobs, runChild, startChild, lastJson } = require('./lib/check-pool')
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:9080'
@@ -94,13 +95,13 @@ const matrixChecks = () => {
 
   MATRIX_CHECKS.forEach(([name, inspect]) => check(name, inspect(rows)))
 
-  const faults = [
+  const faults = mutating() ? [
     ['matrix-count', [...rows, rows[0]]],
     ['matrix-family-scale', rows.filter(({ family, scale }) => !(family === 'roboto' && scale === 0.9))],
     ['matrix-family-viewport', rows.filter(({ family, viewport }) => !(family === 'monospace' && viewport === '2560x1440'))],
     ['matrix-scale-viewport', rows.filter(({ scale, viewport }) => !(scale === 1 && viewport === '1920x1080'))],
     ['matrix-extremes', rows.filter(({ family, scale, viewport }) => !(family === 'roboto-condensed' && scale === 1.25 && viewport === '1280x720'))],
-  ]
+  ] : []
 
   faults.forEach(([name, changed]) => check(`${name}: planted fault`, MATRIX_CHECKS.find(([key]) => key === name)[1](changed), true))
   check('matrix: reordered benign rewrite', MATRIX_CHECKS.flatMap(([, inspect]) => inspect([...rows].reverse())))
@@ -125,14 +126,14 @@ const webAddressChild = (key, folder, keepAlive = false) => {
   let source = fs.readFileSync(WEB_FILE, 'utf8')
 
   if (variant.patch) {
-    source = patched(WEB_FILE, source, ...variant.patch)
+    source = variant.fault ? plantedPatch(WEB_FILE, source, ...variant.patch) : patched(WEB_FILE, source, ...variant.patch)
   }
 
   source = patched(WEB_FILE, source, 'const PORT = Number(process.env.PORT) || 9080', 'const PORT = 0')
   source = patched(WEB_FILE, source, "cacheDir: path.join(__dirname, '..', '.vite-web')", `cacheDir: ${JSON.stringify(path.join(folder, 'vite-cache'))}`)
 
   if (key === 'dependency-504') {
-    source = patched(WEB_FILE, source, 'server.middlewares.use(guardHost)', "server.middlewares.use((request, response, next) => {\n        if (request.url.split('?')[0].endsWith('/deps/vue.js')) {\n          response.statusCode = 504\n          response.end('planted dependency failure')\n          return\n        }\n        next()\n      })\n      server.middlewares.use(guardHost)")
+    source = plantedPatch(WEB_FILE, source, 'server.middlewares.use(guardHost)', "server.middlewares.use((request, response, next) => {\n        if (request.url.split('?')[0].endsWith('/deps/vue.js')) {\n          response.statusCode = 504\n          response.end('planted dependency failure')\n          return\n        }\n        next()\n      })\n      server.middlewares.use(guardHost)")
   }
 
   source = patched(WEB_FILE, source, 'console.log(`[web] Renderer ready at $' + '{url}`)', `console.log('WEB_ADDRESS ' + JSON.stringify({ url, address: server.httpServer.address(), cacheDir: server.config.cacheDir }))${keepAlive ? '' : '\n  await server.close()\n  process.exit(0)'}`)
@@ -144,10 +145,14 @@ const webAddressChild = (key, folder, keepAlive = false) => {
   subject._compile(source, WEB_FILE)
 }
 
+// The variants a run starts: all of them, or in a quick run the real server alone (the others rewrite the server or plant a fault in it).
+const webVariants = () => WEB_VARIANTS.filter((variant) => mutating() || variant.key === 'head')
+
 const webAddressChecks = async () => {
   let passed = 0
+  const variants = webVariants()
 
-  for (const variant of WEB_VARIANTS) {
+  for (const variant of variants) {
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-typography-address-'))
     let result
 
@@ -170,8 +175,8 @@ const webAddressChecks = async () => {
     passed += Number(ok)
   }
 
-  assert.equal(passed, WEB_VARIANTS.length, 'the web address head and benign rewrite pass, and each planted fault fails by value')
-  console.log(`${passed}/${WEB_VARIANTS.length} web address checks passed`)
+  assert.equal(passed, variants.length, 'the web address head and benign rewrite pass, and each planted fault fails by value')
+  console.log(`${passed}/${variants.length} web address checks passed`)
 }
 
 // Runs the pages part for /about then /settings on 1280x720 against a private-cache web server of the variant `key`, and gives the child's outcome with its step lines.
@@ -237,7 +242,7 @@ const openingFailureCheck = async () => {
 const readerFaultChild = () => {
   let source = fs.readFileSync(__filename, 'utf8')
 
-  source = patched(__filename, source, 'const value = await work(held.page, ' + 'fail, drain)', "const value = route === '/about' ? await held.page.evaluate(() => { throw new Error('planted reader failure') }) : await work(held.page, fail, drain)\n      console.log('READER_DONE ' + JSON.stringify({ route }))")
+  source = plantedPatch(__filename, source, 'const value = await work(held.page, ' + 'fail, drain)', "const value = route === '/about' ? await held.page.evaluate(() => { throw new Error('planted reader failure') }) : await work(held.page, fail, drain)\n      console.log('READER_DONE ' + JSON.stringify({ route }))")
   source = patched(__filename, source, "if (process.argv[2] === '--reader-" + "fault-child') {", 'if (false) {')
 
   const subject = new Module(__filename, module)
@@ -1348,6 +1353,8 @@ const stepsOf = (width, height) => {
   const combos = FULL ? FULL_MATRIX[size] || COMBOS : COMBOS
   const steps = []
   const step = (fresh, name, work, route = null, combinations = []) => steps.push({ width, height, fresh, name: `${size} ${name}`, route, combinations, work })
+  // A fixture that makes the page throw or reports a planted error proves the check notices a defect: it is a fault, so a quick run schedules none.
+  const faultStep = (fresh, name, work) => (mutating() ? step(fresh, name, work) : steps)
 
   if (PART !== 'pages' && width === 1280) {
     step(true, '/about pointer and keyboard fixtures', async (page, fail, drain) => {
@@ -1367,28 +1374,28 @@ const stepsOf = (width, height) => {
 
       return { fixtureReads: read }
     })
-    step(false, '/about render fixture', async (page, fail) => {
+    faultStep(false, '/about render fixture', async (page, fail) => {
       await go(page, '/about')
 
       const rendering = await settled(page, '/about', () => renderFixture(page))
 
       rendering.forEach(([name, detail]) => fail('render fixture', name, detail))
     })
-    step(false, '/about foreign-error fixture', async (page, fail) => {
+    faultStep(false, '/about foreign-error fixture', async (page, fail) => {
       await go(page, '/about')
 
       const foreign = await settled(page, '/about', () => foreignFixture(page))
 
       foreign.forEach(([name, detail]) => fail('render fixture', name, detail))
     })
-    step(false, '/about palette-error fixture', async (page, fail) => {
+    faultStep(false, '/about palette-error fixture', async (page, fail) => {
       await go(page, '/about')
 
       const palette = await settled(page, '/about', () => paletteFixture(page))
 
       palette.forEach(([name, detail]) => fail('palette fixture', name, detail))
     })
-    step(false, '/about foreign-palette-error fixture', async (page, fail) => {
+    faultStep(false, '/about foreign-palette-error fixture', async (page, fail) => {
       await go(page, '/about')
 
       const foreignPalette = await settled(page, '/about', () => foreignPaletteFixture(page))
@@ -1567,12 +1574,19 @@ const main = async () => {
     return
   }
 
+  if (process.argv[2] === '--schedule') {
+    VIEWPORTS.flatMap(([width, height]) => stepsOf(width, height)).forEach(({ name }) => console.log(name))
+    return
+  }
+
   if (process.argv[2] === '--reader-fault-child') {
     readerFaultChild()
     return
   }
 
   assert.ok(['all', 'pages', 'web-address', 'matrix', 'open-failure', 'reader-failure'].includes(PART), `unknown typography part: ${PART}`)
+
+  const rewrites = PART !== 'all' || mutating()
 
   if (PART === 'all' || PART === 'web-address') {
     await webAddressChecks()
@@ -1582,11 +1596,11 @@ const main = async () => {
     matrixChecks()
   }
 
-  if (PART === 'all' || PART === 'open-failure') {
+  if (rewrites && (PART === 'all' || PART === 'open-failure')) {
     await openingFailureCheck()
   }
 
-  if (PART === 'all' || PART === 'reader-failure') {
+  if (rewrites && (PART === 'all' || PART === 'reader-failure')) {
     await readerFailureCheck()
   }
 

@@ -1,16 +1,17 @@
 /*
   Checks the mining-site readiness (src/renderer/utilities/mining-sites.js and the three warnings that read it) against worked fixtures and against the colonies and orbital miners saves hold, read-only.
 
-  node scripts/check-mining-sites.js [--save <save.db> <GameID> <RaceID>]...
+  node scripts/check-mining-sites.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
   With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785).
 
-  It proves: every verdict of the model on fixtures (a deposit never surveyed against one empty or exhausted, the orbital diameter limit, crew, the colony at the body and the assignment, the workforce of manned mines, radiation and mine production, each way minerals leave a colony, a productive isolated site being delivery-blocked and never idle, a save with no version making the rules read from the game unknown), then on each save that the sites join the same colonies and fleets as a direct query, that each warning lists only the sites its verdict names and that every row names what it lacks and links the colony or fleet to fix.
+  It proves: every verdict of the model on fixtures (a deposit never surveyed against one empty or exhausted, the orbital diameter limit, crew, the colony at the body and the assignment, the workforce of manned mines, radiation and mine production, each way minerals leave a colony, a productive isolated site being delivery-blocked and never idle, a save with no version making the rules read from the game unknown), then on each save that the sites join the same colonies and fleets as a direct query, that each warning lists only the sites its verdict names and that every row names what it lacks and links the colony or fleet to fix. A reader that hides every colony and fleet must make the comparison fail (a self-check, left out by --no-mutations).
 */
 const path = require('path')
 const fs = require('fs')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
@@ -46,6 +47,8 @@ const parseArguments = (argv) => {
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--save') {
       saves.push({ file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) })
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else {
       console.error(`Unknown option ${argv[index]}`)
       process.exit(2)
@@ -303,7 +306,7 @@ const runSave = async (utilities, save, label) => {
     // A reader that sees no colony or fleet must fail the comparison above, whenever the save has a row to lose.
     const blind = { query: (sql) => (/from FCT_(Population|Fleet) /.test(sql) ? Promise.resolve([[]]) : database.query(sql)) }
 
-    for (const key of KEYS) {
+    for (const key of mutating() ? KEYS : []) {
       const expected = [...expectedIds(expectations[key], 1), ...expectedIds(expectations[key], null)]
 
       if (expected.length) {
@@ -336,7 +339,10 @@ const main = async () => {
     await runSave(named, save, `save ${position + 1}`)
   }
 
-  check('the mutation self-check ran against at least one expected warning row', mutations > 0, `${mutations} warnings hidden`)
+  if (mutating()) {
+    check('the mutation self-check ran against at least one expected warning row', mutations > 0, `${mutations} warnings hidden`)
+  }
+
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)
 }

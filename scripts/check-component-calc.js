@@ -1,7 +1,9 @@
 /*
   Checks the Production page's component calculator (utilities/component-calc.js): the share of a colony's construction capacity that builds the manufactured components of a ship class by a deadline.
 
-  node scripts/check-component-calc.js [--save <save.db> <GameID> <RaceID>]...
+  node scripts/check-component-calc.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
+
+  --no-mutations runs the head and the saves alone: no mutant part is started and no fault is planted. The head still loads the calculator with its range scan cut to one hundredth (`narrowedUtilities`), a configuration of the real calculator for the search-limited cases and not a fault.
 
   With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
 
@@ -16,6 +18,7 @@ const fs = require('fs')
 const os = require('os')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { jobs } = require('./lib/check-pool')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
@@ -62,6 +65,8 @@ const parseArguments = (argv) => {
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--save') {
       saves.push({ file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) })
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else if (argv[index] === '--part') {
       part = argv[++index]
     } else {
@@ -98,8 +103,8 @@ const openSave = (file) => new Promise((resolve, reject) => {
 
 const rowsOf = async (database, sql) => (await database.query(sql))[0]
 
-// The utilities loaded from a temp copy of the folder in which each `from` (one string or a list), which must occur once in component-calc.js, is replaced by the `to` at its place: a mutant that must fail the check named with it.
-const mutatedUtilities = async (from, to) => {
+// The utilities loaded from a temp copy of the folder in which each `from` (one string or a list), which must occur once in component-calc.js, is replaced by the `to` at its place.
+const editedUtilities = async (from, to) => {
   const source = path.join(root, 'src', 'renderer', 'utilities')
   const edits = [].concat(from).map((text, index) => [text, [].concat(to)[index]])
   let code = fs.readFileSync(path.join(source, 'component-calc.js'), 'utf8')
@@ -125,6 +130,16 @@ const mutatedUtilities = async (from, to) => {
     fs.rmSync(directory, { recursive: true, force: true })
   }
 }
+
+// A mutant that must fail the check named with it: planted, so a quick run refuses it.
+const mutatedUtilities = (from, to) => {
+  refusePlanting(`component-calc.js: ${[].concat(from).join('; ')}`)
+
+  return editedUtilities(from, to)
+}
+
+// The utilities with the range scanned a share at a time cut to one hundredth: a configuration of the real calculator the head checks run (the search-limited cases), not a fault, so a quick run keeps it.
+const narrowedUtilities = () => editedUtilities(NARROW_SCAN[0], NARROW_SCAN[1])
 
 // The calculator's component as a page loads: its script from a temp copy of the renderer's utilities and mixins, with its imports one folder up (the loader reads a relative import a folder deep), `mutate` rewriting the script text.
 const loadCalculator = async (mutate = null) => {
@@ -798,14 +813,14 @@ const checkHead = async ({ apps, capacities }) => {
 
   console.log('\n== the calculator: worked cases ==')
 
-  const narrowApps = await mutatedUtilities(NARROW_SCAN[0], NARROW_SCAN[1])
+  const narrowApps = await narrowedUtilities()
   const verdict = verdictOf(await loadCalculator())
 
   syntheticCases(apps, capacities, narrowApps, verdict).forEach(([statement, held]) => check(statement, held))
 }
 
 const checkMutants = async ({ apps, capacities }, mutants) => {
-  const narrowApps = await mutatedUtilities(NARROW_SCAN[0], NARROW_SCAN[1])
+  const narrowApps = await narrowedUtilities()
   const verdict = verdictOf(await loadCalculator())
   const results = syntheticCases(apps, capacities, narrowApps, verdict)
 
@@ -867,7 +882,7 @@ const main = async () => {
   // In the order they print; the longest start first.
   const parts = [
     { part: 'head', weight: 10 },
-    ...Array.from({ length: shares }, (_unused, index) => ({ part: `mutants:${index}:${shares}`, weight: 20 })),
+    ...(mutating() ? Array.from({ length: shares }, (_unused, index) => ({ part: `mutants:${index}:${shares}`, weight: 20 })) : []),
     ...saves.map((_save, index) => ({ part: `save:${index}`, weight: 30 })),
   ]
 

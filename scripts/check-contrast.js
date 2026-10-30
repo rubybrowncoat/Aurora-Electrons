@@ -1,7 +1,9 @@
 /*
   The contrast and colour-vision gate for the shipped presets (src/renderer/utilities/appearance.js).
 
-  node scripts/check-contrast.js [--preset <id>] [--verbose]
+  node scripts/check-contrast.js [--no-mutations] [--preset <id>] [--verbose]
+
+  --no-mutations measures the presets alone: the self-test that plants mutations is skipped.
 
   Where a measurement needs no stylesheet and no browser (the WCAG ratios of the tokens against their surfaces), it lives in src/renderer/utilities/appearance-contrast.js, which the import of an appearance file measures a draft with as well; this script adds what needs the compiled stylesheet, the map page and the colour-vision simulation.
 
@@ -26,6 +28,7 @@ const vm = require('vm')
 const sass = require('sass')
 const { loadUtilities } = require('./lib/utilities')
 const { assertParses } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const CVD_NEIGHBOUR_DELTA = 8
 const SELECTION_DELTA = 20
@@ -651,6 +654,8 @@ const INVALID_MUTATIONS = [
 
 // A fault is judged only when it applies and the sources it leaves parse and compile: one that breaks the syntax of the stylesheet, of the map page or of a component, or whose pattern matches nothing, makes the gate report a failure that has nothing to do with what the fault was meant to plant, which would count as caught, so it is returned as invalid.
 const trial = (utilities, [label, id, mutate, expected, mutateSource, mutateMap, mutateComponents]) => {
+  refusePlanting(label)
+
   const mutated = mutate(utilities.resolveAppearance(id))
   let stylesheet
   let mapSource
@@ -702,6 +707,8 @@ const main = async () => {
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--preset') {
       options.preset = argv[++index]
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else if (argv[index] === '--verbose') {
       options.verbose = true
     } else {
@@ -737,18 +744,20 @@ const main = async () => {
 
   console.log(format(reports, options.verbose))
 
-  const trials = selfTest(appearance)
-  const invalid = trials.filter((mutation) => mutation.invalid !== undefined)
-  const missed = trials.filter((mutation) => mutation.invalid === undefined && !mutation.caught)
+  if (mutating()) {
+    const trials = selfTest(appearance)
+    const invalid = trials.filter((mutation) => mutation.invalid !== undefined)
+    const missed = trials.filter((mutation) => mutation.invalid === undefined && !mutation.caught)
 
-  console.log(`\nSelf-test: ${trials.length - invalid.length - missed.length} of ${MUTATIONS.length} mutations are caught`)
-  missed.forEach((mutation) => problems.push(`self-test: the gate does not catch ${mutation.label}`))
-  invalid.forEach((mutation) => problems.push(`self-test: invalid mutation, the sources it leaves do not compile (${mutation.label}): ${mutation.invalid}`))
+    console.log(`\nSelf-test: ${trials.length - invalid.length - missed.length} of ${MUTATIONS.length} mutations are caught`)
+    missed.forEach((mutation) => problems.push(`self-test: the gate does not catch ${mutation.label}`))
+    invalid.forEach((mutation) => problems.push(`self-test: invalid mutation, the sources it leaves do not compile (${mutation.label}): ${mutation.invalid}`))
 
-  const unparsable = INVALID_MUTATIONS.map((mutation) => trial(appearance, mutation))
+    const unparsable = INVALID_MUTATIONS.map((mutation) => trial(appearance, mutation))
 
-  console.log(`Self-test of the runner: ${unparsable.filter((mutation) => mutation.invalid !== undefined).length} of ${INVALID_MUTATIONS.length} unparsable mutations are reported as invalid`)
-  unparsable.filter((mutation) => mutation.invalid === undefined).forEach((mutation) => problems.push(`self-test: the runner does not report ${mutation.label} as invalid`))
+    console.log(`Self-test of the runner: ${unparsable.filter((mutation) => mutation.invalid !== undefined).length} of ${INVALID_MUTATIONS.length} unparsable mutations are reported as invalid`)
+    unparsable.filter((mutation) => mutation.invalid === undefined).forEach((mutation) => problems.push(`self-test: the runner does not report ${mutation.label} as invalid`))
+  }
 
   if (problems.length) {
     console.log(`\n${problems.length} problem${problems.length === 1 ? '' : 's'}:`)

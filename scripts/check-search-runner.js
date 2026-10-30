@@ -1,11 +1,11 @@
 /*
   Checks the bounded search runner (src/renderer/utilities/search-run.js) and the engine search as a run (searchPropulsion and propulsionRun in design-search.js).
 
-  node scripts/check-search-runner.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>]
+  node scripts/check-search-runner.js [--no-mutations] [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>]
 
   The synthetic checks need no save. They prove, on small domains that an unpruned enumeration can walk (an independent reference below: every engine of the sweep at every count, no bound, no early exit): the search's feasible candidates, by their deterministic names, are exactly the enumeration's, with its lightest, fastest and cheapest set, its ranked list, and frontiers that no feasible candidate beats or escapes, for custom count limits, the endpoint policy at the limits, each kind of engine, one of the race's own engines, range and endurance targets, no target, a speed no engine reaches and a share nothing fits in; the counts add up (`evaluated + pruned = total`, nothing left unexplored when the domain is exhausted); a search of more than the 50 sets it lists is complete for its domain, and says how many it left out of the list; a candidate budget stops after exactly that many candidates with the run truncated, one the domain just fits is complete, and a time budget (a clock the check supplies, never the wall clock) does the same; a run cancelled or invalidated at any step holds exactly the best of the candidates before the step, labelled incomplete, under the input it was given; a run that was superseded, whose save changed or that was never the current one is not published; and every step of the search is bounded by the work of its slice (the candidates, the tank packages and the engine designs it covers) whether it rejects at once or packs, so the caller regains control within the declared responsiveness budget (milliseconds are never asserted: scripts/bench-tank-packing.js measures them).
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it repeats the exhaustive comparison with the race's tanks, engines and tech, runs the page's default search as a run, and compares its digest with the one taken before runs existed. Each mutation of the utilities must fail at least one synthetic check. Exit code 1 when a check fails.
+  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it repeats the exhaustive comparison with the race's tanks, engines and tech, runs the page's default search as a run, and compares its digest with the one taken before runs existed. Each mutation of the utilities must fail at least one synthetic check. Exit code 1 when a check fails. With --no-mutations no mutation is planted and only the stock save is run, the cheaper of the two.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -13,6 +13,7 @@ const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1136,6 +1137,8 @@ const parseArguments = (argv) => {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--no-mutations') {
+      continue
     } else if (argv[index] === '--part') {
       options.part = argv[++index]
     } else {
@@ -1195,6 +1198,8 @@ const checkSynthetic = (mods) => {
 }
 
 const checkMutation = async ([label, file, from, to, probe]) => {
+  refusePlanting(`${file}: ${from}`)
+
   const sources = mutatedSources(file, from, to)
   let failed = []
   let mutant = null
@@ -1233,6 +1238,8 @@ const checkPage = async () => {
 }
 
 const checkPageMutation = async ([label, from, to]) => {
+  refusePlanting(label)
+
   let failed = []
 
   try {
@@ -1356,13 +1363,16 @@ const run = async () => {
     endSection(checks, failures)
   }
 
-  // In the order they print; the longest start first.
+  // In the order they print; the longest start first. A quick run plants nothing and runs the stock save alone, which has 64,779 candidates of the default search to the modded save's 168,284.
+  const planting = mutating()
+  const labels = planting ? SAVE_LABELS : ['stock']
+
   const parts = [
     { part: 'synthetic', weight: 20 },
-    ...MUTATIONS.map((_mutation, index) => ({ part: `utility:${index}`, weight: 10 })),
+    ...(planting ? MUTATIONS : []).map((_mutation, index) => ({ part: `utility:${index}`, weight: 10 })),
     { part: 'page', weight: 2 },
-    ...PAGE_MUTATIONS.map((_mutation, index) => ({ part: `page:${index}`, weight: 2 })),
-    ...SAVE_LABELS.map((label) => ({ part: label, weight: 60 })),
+    ...(planting ? PAGE_MUTATIONS : []).map((_mutation, index) => ({ part: `page:${index}`, weight: 2 })),
+    ...labels.map((label) => ({ part: label, weight: 60 })),
   ]
 
   const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
@@ -1376,12 +1386,20 @@ const run = async () => {
   }
 
   printed()
-  console.log('\nMutations: each must fail at least one check')
-  MUTATIONS.forEach(printed)
+
+  if (planting) {
+    console.log('\nMutations: each must fail at least one check')
+    MUTATIONS.forEach(printed)
+  }
+
   console.log('\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)')
   printed()
-  PAGE_MUTATIONS.forEach(printed)
-  SAVE_LABELS.forEach(printed)
+
+  if (planting) {
+    PAGE_MUTATIONS.forEach(printed)
+  }
+
+  labels.forEach(printed)
 
   console.log('\nstep times are not asserted here; scripts/bench-tank-packing.js reports them against the responsiveness budget')
   console.log(`\n${checks - failures} of ${checks} checks passed`)
