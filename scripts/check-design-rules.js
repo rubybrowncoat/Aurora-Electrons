@@ -1246,7 +1246,7 @@ const evaluatorChecks = (library, data) => {
         const effect = effectOf(evaluation, id)
         const confirmed = getRule(rule).verification === 'confirmed'
 
-        return effect ? firstFailure(expectThat(`${id} is verified ${effect.verified}, its rule is ${getRule(rule).verification}`, effect.rule === rule && effect.verified === confirmed), expectThat(`${id} is counted ${effect.counted}`, effect.counted === (confirmed && effect.value !== null)), expectThat(`${id} is not excluded with a reason`, effect.counted || ((effect.reason || '').length > 0 && evaluation.efficacy.excluded.some((entry) => entry.id === id))), expectThat(`${id} has no reason to be unverified`, confirmed || effect.reason.includes('not confirmed'))) : `${id} is not among the effects`
+        return effect ? firstFailure(expectThat(`${id} is verified ${effect.verified}, its rule is ${getRule(rule).verification}`, effect.rule === rule && effect.verified === confirmed), expectThat(`${id} is counted ${effect.counted}`, effect.counted === (confirmed && effect.value !== null)), expectThat(`${id} is not excluded with a reason`, effect.counted || ((effect.reason || '').length > 0 && evaluation.efficacy.excluded.some((entry) => entry.id === id))), expectThat(`${id} has no reason to be unverified`, confirmed || effect.reason.includes('not confirmed')), expectThat(`${id} names its rule in the reason`, !effect.reason || (!effect.reason.includes(rule) && !/\b(?!e\.g\b|i\.e\b)[A-Za-z_]\w*\.[A-Za-z_]\w*\b/.test(effect.reason)))) : `${id} is not among the effects`
       })
       const payload = ['warheadStrength', 'speed', 'endurance', 'maxRange'].map((id) => effectOf(evaluation, id))
       const retargeting = effectOf(evaluation, 'retargeting')
@@ -1495,6 +1495,10 @@ const MISSILE_MUTANTS = [
   { name: 'the endurance and flight time of second stages confirmed', find: 'const staged = input.stages > 0 ? [STAGED_FLIGHT_ASSUMPTION] : []', replace: 'const staged = []', fails: [N.provenance] },
   { name: 'the feasibility taken at its own status', find: 'parts: compared, compute:', replace: 'parts: {}, compute:', fails: [N.provenance] },
   { name: 'an estimated figure counted as confirmed', find: 'rule.verification === STATUS.CONFIRMED && !weak', replace: 'rule.verification === STATUS.CONFIRMED', fails: [N.provenance] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the reason an effect is not counted names its rule by id', find: '`the rule for this effect is ${rule.verification}, not confirmed against saved data`', replace: '`${rule.id} is ${rule.verification}, not confirmed against saved data`', fails: [N.efficacy] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the reason an effect is not counted names a column of a table', find: '`the rule for this effect is ${rule.verification}, not confirmed against saved data`', replace: '`the rule for this effect is ${rule.verification}, not confirmed against saved data (FCT_Ship.CurrentCrew)`', fails: [N.efficacy] },
   { name: 'an omitted stage mineral read as 0', find: '[name, amountOf(stage.minerals[name], ', replace: '[name, amountOf(stage.minerals[name] ?? 0, ', fails: [N.validation] },
   { name: 'an engine counted with no engine accepted', find: 'if (engines > 0 && !hasEngine) {', replace: 'if (false) {', fails: [N.validation] },
   { name: 'a stage counted with no stage accepted', find: 'if (stages > 0 && !hasStage) {', replace: 'if (false) {', fails: [N.validation] },

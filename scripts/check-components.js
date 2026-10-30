@@ -255,7 +255,7 @@ const run = async () => {
     // recomputed component: strength follows the named rule
     const recomputed = data.recomputedComponent({ id: 'engine-hypothetical', name: 'Hypothetical engine', typeId: 1, sizeHS: 4, cost: 10, crew: 4, quantities: { enginePower: 20 } }, { rule: 'design.engineDesign', source })
 
-    check('a recomputed component takes the verification of the design rule it names and carries the typed figure', read(recomputed, 'enginePower').value === 20 && read(recomputed, 'enginePower').status === utilities.provenance.getRule('design.engineDesign').verification && read(recomputed, 'enginePower').assumptions.some((text) => text.includes('design.engineDesign')) && recomputed.source.origin === 'recomputed' && read(recomputed, 'powerDemand').status === STATUS.UNAVAILABLE)
+    check('a recomputed component takes the verification of the design rule it names and carries the typed figure', read(recomputed, 'enginePower').value === 20 && read(recomputed, 'enginePower').status === utilities.provenance.getRule('design.engineDesign').verification && read(recomputed, 'enginePower').assumptions.includes('Worked out by a design rule, not read from the save') && read(recomputed, 'enginePower').assumptions.every((text) => !text.includes('design.engineDesign')) && recomputed.source.origin === 'recomputed' && read(recomputed, 'powerDemand').status === STATUS.UNAVAILABLE)
     check('a recomputed component of this race and save combines with the imported ones', data.componentTotals([{ component: imported, count: 1 }, { component: recomputed, count: 1 }]).conflicts.length === 0)
 
     return { database, context }

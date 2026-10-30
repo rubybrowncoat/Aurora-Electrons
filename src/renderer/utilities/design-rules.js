@@ -959,7 +959,7 @@ const missileEffect = (definition, context) => {
   const { value, reason: unavailableReason, status = null, caveats = [] } = definition.read(context)
   const weak = status === STATUS.ESTIMATED || status === STATUS.ASSUMED
   const verified = Boolean(rule) && rule.verification === STATUS.CONFIRMED && !weak
-  const unverifiedReason = rule ? (rule.verification === STATUS.CONFIRMED ? `the figure is ${status} here, not confirmed against saved data: ${caveats.join('; ')}` : `${rule.id} is ${rule.verification}, not confirmed against saved data`) : 'no rule models this effect'
+  const unverifiedReason = rule ? (rule.verification === STATUS.CONFIRMED ? `the figure is ${status} here, not confirmed against saved data: ${caveats.join('; ')}` : `the rule for this effect is ${rule.verification}, not confirmed against saved data`) : 'no rule models this effect'
   const counted = verified && value !== null
 
   return { id: definition.id, option: definition.option, label: definition.label, units: definition.units, rule: definition.rule, verification: rule ? rule.verification : null, verified, counted, value, reason: counted ? null : verified ? unavailableReason : unverifiedReason }

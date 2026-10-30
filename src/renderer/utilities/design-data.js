@@ -225,7 +225,7 @@ const stated = (component, label, value, units, assumptions = []) => {
 
   if (source.origin === COMPONENT_ORIGIN.RECOMPUTED) {
     status = getRule(source.rule).verification
-    notes.push(`Worked out by ${source.rule}`)
+    notes.push('Worked out by a design rule, not read from the save')
   } else if (source.origin === COMPONENT_ORIGIN.IMPORTED) {
     status = ruleSupports(rule, source.formulaVersion) === true ? STATUS.CONFIRMED : STATUS.ESTIMATED
 

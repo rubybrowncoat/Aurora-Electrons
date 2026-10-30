@@ -7,6 +7,7 @@
   - every term has a local definition of its own, a reviewed date and a game version label, and every link a title, a note on what it covers and an https address;
   - the help speaks in the impersonal voice, and a definition is short, original text with no address in it;
   - links and provenance stay apart: no glossary entry names a rule or a verification, no link's text claims to verify a figure, and no registered rule cites a glossary link;
+  - no text that a result gives a tooltip (the provenance mark of a result and of a rule, the footer of a chart) names its rule by id or carries a dotted name;
   - the figures a definition states hold in the app's own rules: the shortage and the hauling shortfall of a colony, the runway of a mineral and of a maintenance location, the RP left and the time left of research, and the climb of maintenance life are run on small made-up rows and held to what the definitions say (no source text is matched).
 
   Then each mutation (an entry dropped, a date or version label removed, a link made http or left without its note, a first-person phrase, a link cited as a rule's source, or an expression of one of those rules changed) must make at least one check fail.
@@ -139,7 +140,7 @@ const synthetic = (m, tree) => {
   const { TERMS, LINKS, PAGE_HELP, GAME_VERSION, helpFor, helpRoutes } = m.glossary
   const read = (file) => fs.readFileSync(path.join(tree, file), 'utf8')
   const panel = () => read(HELP_PANEL)
-  const { provenance, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime, colonies } = m
+  const { provenance, finances, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime, colonies } = m
   const definitionOf = (id) => (TERMS.find((item) => item.id === id) || { definition: '' }).definition
   const says = (id, ...phrases) => phrases.map((phrase) => [`${id} definition`, definitionOf(id).includes(phrase) ? '' : `does not say "${phrase}"`])
   const planners = helpRoutes()
@@ -242,6 +243,21 @@ const synthetic = (m, tree) => {
       const rules = provenance.listRules()
 
       return firstProblem(rules.flatMap((rule) => [rule.note, ...rule.assumptions].map((text) => [rule.id, code.test(text) ? `says "${code.exec(text)[0]}"` : ''])))
+    }],
+
+    ['no text a result gives a tooltip names its rule by id or carries a dotted name: the provenance mark of a result and of a rule, and the footer of a chart', async () => {
+      const dotted = /\b(?!e\.g\b|i\.e\b)[A-Za-z_]\w*\.[A-Za-z_]\w*\b/
+      const rules = provenance.listRules()
+
+      return firstProblem([
+        ['rules', rules.length >= 100 ? '' : `${rules.length} rules loaded`],
+        ...rules.flatMap((rule) => {
+          const result = provenance.ofRule({ rule: rule.id, value: 1, inputs: { present: ['a figure'] } })
+          const lacking = provenance.unavailable({ rule: rule.id, missing: ['a figure'] })
+
+          return [['the mark of a result', provenance.describeResult(result)], ['the mark of an unavailable result', provenance.describeResult(lacking)], ['the mark of a rule', provenance.describeRule(rule.id)], ['the footer of a chart', finances.statusText(result)]].map(([where, text]) => [rule.id, text.includes(rule.id) ? `${where} names the rule by its id` : dotted.test(text) ? `${where} says "${dotted.exec(text)[0]}"` : ''])
+        }),
+      ])
     }],
 
     ['no unavailable result names a table or column among its missing inputs, as the provenance mark shows them', async () => {
@@ -511,6 +527,16 @@ const MUTATIONS = [
   ['the words of a failed read keep the tables of a link that does not match', path.join('utilities', 'provenance.js'), '  [/^foreign key mismatch - "([^"]*)" referencing "([^"]*)"$/, (_found, child, parent) => `the link of ${named(child)} to ${named(parent)} does not match`],\n', '', ['the words of a missing field and of a failed read']],
   ['the words of a failed read keep the rule of a check', path.join('utilities', 'provenance.js'), '[/^CHECK constraint failed: .*$/, () => \'a value breaks a rule of the save\'],', '', ['the words of a missing field and of a failed read']],
   ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://aurora4x.com/.', ['no registered rule cites a glossary link']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the footer of a chart names the rule by its id', path.join('utilities', 'finances.js'), "(result ? STATUS_MARKS[result.status].label : '')", '(result ? `${STATUS_MARKS[result.status].label}: ${result.rule.id}` : \'\')', ['no text a result gives a tooltip']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the mark of a result names the rule by its id', path.join('utilities', 'provenance.js'), '`${STATUS_MARKS[result.status].label}: ${result.rule.note}`', '`${STATUS_MARKS[result.status].label}: ${result.rule.id}: ${result.rule.note}`', ['no text a result gives a tooltip']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the mark of a rule names the rule by its id', path.join('utilities', 'provenance.js'), '`${STATUS_MARKS[rule.verification].label}: ${rule.note}`', '`${STATUS_MARKS[rule.verification].label}: ${rule.id}: ${rule.note}`', ['no text a result gives a tooltip']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the mark of a result names a column of a table', path.join('utilities', 'provenance.js'), '`${STATUS_MARKS[result.status].label}: ${result.rule.note}`', '`${STATUS_MARKS[result.status].label}: ${result.rule.note} (FCT_Ship.CurrentCrew)`', ['no text a result gives a tooltip']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the footer of a chart names a property of an object', path.join('utilities', 'finances.js'), "(result ? STATUS_MARKS[result.status].label : '')", '(result ? `${STATUS_MARKS[result.status].label}: ledger.series2` : \'\')', ['no text a result gives a tooltip']],
   ['the help card speaks to the reader', HELP_PANEL, 'Definitions kept in the app', 'Your definitions kept in the app', ['the help speaks in the impersonal voice']],
   ['a page overview speaks to the reader', GLOSSARY, 'overview: \'Production Recap lists every job', 'overview: \'Your Production Recap lists every job', ['the help speaks in the impersonal voice']],
   ['a page usage note is blank', GLOSSARY, '    usage: [\n      \'Show picks', '    usage: [\n      \'\',\n      \'Show picks', ['every planner route of the registry has help with an overview']],

@@ -293,8 +293,8 @@ export const buildLedger = ({ treasury, wealth, windowDays }) => {
   }
 }
 
-// A result in a few words for a chart tooltip: its status and rule.
-export const statusText = (result) => (result ? `${STATUS_MARKS[result.status].label}: ${result.rule.id}` : '')
+// A result in a word for a chart tooltip: its status. The rule behind it is a code name, so the figure's own mark beside the chart's title carries the note.
+export const statusText = (result) => (result ? STATUS_MARKS[result.status].label : '')
 
 // Why a figure is missing, for a note under a dash: "No wealth history".
 export const reasonText = (result) => {
