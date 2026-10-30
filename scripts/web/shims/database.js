@@ -4,6 +4,7 @@
 import { DatabaseRetired } from '../../../src/renderer/utilities/retired'
 
 import { databaseRequest } from './database-request'
+import { tracked } from './pending-reads'
 import { webError } from './web-error'
 
 const modelStubs = new WeakSet()
@@ -47,7 +48,7 @@ class DatabaseExpired extends DatabaseRetired {
   }
 }
 
-const request = async (route, payload) => {
+const send = async (route, payload) => {
   const response = await databaseRequest(route, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -68,6 +69,11 @@ const request = async (route, payload) => {
 
   return body
 }
+
+// What a call asks, for the label of a wait that is told what it waited for: the statement of a query, the model and method of a model call, the route of any other.
+const labelOf = (route, payload) => `${route}${payload && payload.sql ? ` ${String(payload.sql).replace(/\s+/g, ' ')}` : ''}${payload && payload.model ? ` ${payload.model}.${payload.method}` : ''}`
+
+const request = (route, payload) => tracked(labelOf(route, payload), () => send(route, payload))
 
 // Pages call `toJSON()`/`get()` on results, so give plain objects that much of the Sequelize instance API.
 const instanceMethods = {

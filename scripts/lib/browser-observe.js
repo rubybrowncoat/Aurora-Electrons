@@ -20,6 +20,10 @@
 // The screen as the player sees it, read the one way every page check reads it:
 // const { installScreen, readFigure, rounded, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 // await installScreen(page) puts the readers at `window.__screen` in the page: `visible(element)`, `visibleText(element)` and `hooked(root, attribute)`, each told where it is defined. A check reads the elements its hooks name with `hooked`, brings back their text and whether each is on screen, and judges them in the check: `readFigure` reads a number drawn in the grouping of the setting, `rounded` is the oracle's number as the page rounds it, `labelKey` reads a word back through the component's own table of words, `rolesRead` compares a region by the role of each element and `pairedBy` a list by the identity of each line. Checked by scripts/check-browser-observe.js.
+//
+// Waiting for the page to finish what a step set going:
+// const { settled } = require('./lib/browser-observe')
+// await settled(page, { limit: 120000, loading: require('../page-loading') }) waits, by the page's own count of the database calls it has out (scripts/web/shims/pending-reads.js) and never by a quiet period, until none is out, none starts in a round of the page's own work (a task and two frames) after the last answer and `loading` (a function run in the page) says the page is not working on what it read; a read that another read's answer makes a watcher start is waited for as the first is. It ends when the reads do, and past `limit` it throws what was still out; a page with no count is a HarnessError. What the page has only scheduled for later than that round (a debounce, a timer) is no call out: a step that sets one going waits first, in the check, for the condition that timer brings about (a `waitForFunction` on what the page shows), and then calls `settled` for the reads it starts. Checked by scripts/check-browser-observe.js.
 const { step: reportStep } = require('./suite-runner')
 
 const MESSAGE_LIMIT = 4000
@@ -229,6 +233,87 @@ const describe = (label, seen) => `BROWSER ${label} did not get through\n  phase
 const report = (label, seen) => {
   if (seen.error !== null) {
     console.error(describe(label, seen))
+  }
+}
+
+// ---------- the page has finished its reads ----------
+
+// Run in the page by `settled`: `{ limit }` is the longest it waits in milliseconds, `loading` a function that says whether the page still works on what it read (or null). One round lets the page run what an answer sets going (a microtask, a task, then two frames of the renderer), and the page is settled when a round that began with no call out ends with none out, none started during it and `loading` saying no: a round that began with a call out does not count, as that call's answer may have come during it and what the answer sets going runs after the round has ended. A call that started during the round, or that is out after it, makes another round once the calls are in, so a read that a watcher starts when another finishes, and one that read starts in turn, is waited for to its end. It never waits on a quiet period: how long it takes is what the reads take. What the page has only scheduled for later than the round (a timer, a debounce) is not a call out: a step that sets one going waits for its effect first. At the limit the wait ends as a failure, whichever part of it was under way (`stage`), never as a page that has settled.
+const settleInPage = async ({ limit }, loading) => {
+  const reads = window.__auroraReads
+
+  if (!reads) {
+    return { signal: false }
+  }
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const EXPIRED = {}
+  let timer = null
+  let stage = ''
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(resolve, limit, EXPIRED)
+  })
+  const within = async (promise, part) => {
+    stage = part
+
+    if ((await Promise.race([promise, expired])) === EXPIRED) {
+      throw EXPIRED
+    }
+  }
+
+  try {
+    for (;;) {
+      const open = reads.pending.size
+      const before = reads.started
+
+      await within(sleep(0), 'a task of its own')
+      await within(frames(), 'two frames')
+
+      const working = Boolean(loading && loading())
+
+      if (!open && !working && reads.started === before) {
+        return { signal: true, settled: true }
+      }
+
+      if (reads.pending.size) {
+        await within(reads.idle(), 'the calls out')
+      }
+    }
+  } catch (thrown) {
+    if (thrown !== EXPIRED) {
+      throw thrown
+    }
+
+    return { signal: true, settled: false, pending: [...reads.pending.values()], working: Boolean(loading && loading()), stage }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+const SETTLE_LIMIT = 120000
+const SETTLE_NAMED = 5
+
+// Waits until the reads the page has started are done, by the page's own count of its database calls (scripts/web/shims/pending-reads.js) and no quiet period, and until `loading`, a function run in the page (scripts/page-loading.js is one), says the page is done working on them. Bounded by `limit` (ms): past it the wait throws and names what was still out. A page with no count is a HarnessError, never a page that has settled.
+const settled = async (page, { limit = SETTLE_LIMIT, loading = null } = {}) => {
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+    throw new HarnessError(`the limit of a wait for the page to settle is a number of milliseconds above 0, not ${String(limit)}`)
+  }
+
+  if (loading !== null && typeof loading !== 'function') {
+    throw new HarnessError('what says the page is still loading is a function run in the page, or null')
+  }
+
+  const seen = await page.evaluate(`(${settleInPage})(${JSON.stringify({ limit })}, ${loading ? `(${loading})` : 'null'})`)
+
+  if (!seen.signal) {
+    throw new HarnessError('the page has no count of its database calls (window.__auroraReads, put there by scripts/web/shims/pending-reads.js): it is not served by the web shims, and a wait for its reads would end at once')
+  }
+
+  if (!seen.settled) {
+    const named = seen.pending.slice(0, SETTLE_NAMED).join('; ')
+
+    throw new Error(`the page did not settle within ${limit} ms, while waiting for ${seen.stage}: ${seen.pending.length} database calls still out${seen.pending.length ? ` (${named}${seen.pending.length > SETTLE_NAMED ? `; and ${seen.pending.length - SETTLE_NAMED} more` : ''})` : ''}${seen.working ? ', and the page still loading' : ''}`)
   }
 }
 
@@ -445,4 +530,4 @@ const labelKey = (text, labels) => {
   return keys.length === 1 ? keys[0] : null
 }
 
-module.exports = { observe, validate, failedObservation, completedObservation, failureLine, describe, report, HarnessError, installScreen, GROUPINGS, readFigure, rounded, rolesRead, pairedBy, labelKey }
+module.exports = { observe, validate, failedObservation, completedObservation, failureLine, describe, report, HarnessError, settled, installScreen, GROUPINGS, readFigure, rounded, rolesRead, pairedBy, labelKey }

@@ -19,7 +19,11 @@
   - hooked: each element of a hook gives its role, the text it draws and whether it is on screen (by its box, or by the text it draws out of a box of no area), in the order of the document, and a reader given no element throws; read by role, a role drawn out of a box of no area counts and a hidden one does not;
   - figures: the 90 texts the page's own formatter (countText and thousandsSeparator of src/renderer/utilities/math.js) writes of 18 numbers in each of the five settings read back as the number rounded as the page rounds it; with a plus, with the Unicode minus for the hyphen, with a trailing .0 they are the same number, with the sign turned over or in the grouping of another setting they are not; a list of texts that are no figure is refused and a list that are is read; a grouping that is no name of the setting, and a value or places `rounded` cannot round, are a HarnessError;
   - roles: a region read by role passes when each role is drawn once, on screen, with the value expected, in any order and beside an element of the role that is off screen; a value under another role, a role drawn twice, missing or only off screen, a role that is none but drawn and a role not expected fail; a list paired by identity pairs in any order and tells a missing, a doubled and a foreign line and two rows of one identity; a word reads back to the key of its label and a word of two labels or none to null.
-  Each planted fault rewrites one line of a copy of the helper and must make a named case fail on an assertion; each equivalent rewrite of a copy must keep its case passing.
+  Each case of the wait for a page to finish its reads serves a page from memory with the real count of its database calls (scripts/web/shims/pending-reads.js) and drives `settled`:
+  - the count holds a call from its start to its answer or failure and ends it before the caller goes on with the answer, counts every start, says when none is out and cuts a long label;
+  - a chain of reads, each started by the answer of the one before (by a microtask, two frames and a task later, the last instantly answered), is waited for to its last read, and a page that says it is still loading is waited for with no call out;
+  - a call that never answers and a page that never stops loading end the wait at its limit with a failure of the page, no HarnessError, that names the calls out and the loading, and so does a page whose frames never come; a page with no count of its calls, and a limit or a loading of another shape, are a HarnessError.
+  Each planted fault rewrites one line of a copy of the helper (or, for the count of a page's calls, of a copy of its file) and must make a named case fail on an assertion; each equivalent rewrite of a copy must keep its case passing.
 
   Prints `N of N checks passed`; any failed check sets exit code 1.
 */
@@ -142,6 +146,39 @@ const SETTINGS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 const REFUSED = [['1000', 'Tick'], ['1,000', 'Tick'], ["1'000", 'Comma'], ["1'000", 'None'], ["1'00", 'Tick'], ["12'3456", 'Tick'], ['1.2.3', 'None'], ['', 'None'], ['-', 'None'], ['-0', 'None'], ['\u22120.0', 'None'], ['--1', 'None'], ['1 000', 'Tick'], ['01', 'None'], ["0'001", 'Tick'], ['1e3', 'None'], ['1.', 'None'], ['.5', 'None'], ['\u0661\u0662', 'None'], ['+-1', 'None'], ['++1', 'None'], ['+', 'None'], ["+1'00", 'Tick'], ['+\u22121', 'None'], ['\u2212\u22121', 'None'], ['-\u0661', 'None'], ['\u20131', 'None'], ['\u22481', 'None'], ['(1)', 'None'], ['x12', 'None'], ['10 t', 'None'], [' 1', 'None'], ['1 ', 'None'], ['1\u00A0000', 'Space'], ['1\u202F000', 'Space'], [null, 'None'], [1, 'None']]
 // Texts that are figures, with the number of each.
 const READ = [['+1', 'None', 1], ["+1'000", 'Tick', 1000], ['+1-000.5', 'Dash', 1000.5], ['1 000', 'Space', 1000], ['1,000.5', 'Comma', 1000.5], ['1-000', 'Dash', 1000], ['-1-000', 'Dash', -1000], ['\u22121-000', 'Dash', -1000], ['-5', 'Dash', -5], ['\u22121', 'None', -1], ["\u22121'000", 'Tick', -1000], ['1000', 'None', 1000], ['995.0', 'Tick', 995], ['0', 'Comma', 0], ['+0', 'None', 0], ['0.5', 'None', 0.5]]
+
+const TRACKER = path.join(__dirname, 'web', 'shims', 'pending-reads.js')
+// A page that has the page's count of its database calls and `tracked`, which a call counts through, as globals.
+const COUNTED = '<script type="module">import { tracked } from "/pending-reads.js"; window.tracked = tracked</script>'
+
+// A page of `html` in a context of its own, served with the count of its database calls from the file `tracker` at /pending-reads.js, and what `work` does with the page.
+const counting = async (browser, tracker, html, work) => {
+  const context = await browser.newContext({ viewport: { width: 800, height: 600 } })
+
+  try {
+    const page = await context.newPage()
+
+    await serve(page, html, { '/pending-reads.js': { status: 200, contentType: 'text/javascript', body: fs.readFileSync(tracker, 'utf8') } })
+
+    return await work(page)
+  } finally {
+    await context.close()
+  }
+}
+
+// What `call` gives ({ value }) or throws ({ error }); a call that has not ended in `ms` is { late: true }, a failure of the case that does not hold the run.
+const outcome = async (call, ms = 20000) => {
+  let timer = null
+  const late = new Promise((resolve) => {
+    timer = setTimeout(resolve, ms, { late: true })
+  })
+
+  try {
+    return await Promise.race([call.then((value) => ({ value }), (error) => ({ error })), late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 // Whether a call stops with the HarnessError of `lib`.
 const stopsRun = (lib, call) => {
@@ -429,6 +466,133 @@ const CASES = {
     assert.deepEqual([lib.labelKey('Too large', labels), lib.labelKey('Fits', labels), lib.labelKey('too large', labels), lib.labelKey('X', { a: 'X', b: 'X' })], ['over', 'fits', null, null], 'a word read back through its table')
     assert.deepEqual([() => lib.rolesRead('x', [{ role: 1 }], {}), () => lib.rolesRead('x', [], []), () => lib.rolesRead('x', [], {}, 'read'), () => lib.pairedBy('x', null, [], String, String), () => lib.labelKey('x', null)].map((call) => stopsRun(lib, call)), [true, true, true, true, true], 'arguments of another shape stop the run')
   },
+
+  // The page's own count of its database calls, as the file `tracker` keeps it (the real scripts/web/shims/pending-reads.js, or a copy with a fault in it): one call out, its answer, a failure, the wait for no call out, and the cut of a label.
+  tracked: async (_lib, browser, tracker = TRACKER) => counting(browser, tracker, COUNTED, async (page) => {
+    const seen = await page.evaluate(async () => {
+      const reads = window.__auroraReads
+      const stuck = new Promise((resolve) => setTimeout(resolve, 1000, 'stuck'))
+      const idleNone = await Promise.race([reads.idle().then(() => 'idle'), stuck])
+      const first = window.tracked('first', () => new Promise((resolve) => setTimeout(resolve, 50, 'answer')))
+      const whileOut = { size: reads.pending.size, started: reads.started, labels: [...reads.pending.values()] }
+      const idle = reads.idle().then(() => 'idle')
+      const answered = await first.then((value) => ({ value, size: reads.pending.size }))
+      const idleOut = await Promise.race([idle, stuck])
+      const failure = await window.tracked('failing', () => Promise.reject(new Error('boom'))).then(() => 'answered', (error) => ({ message: error.message, size: reads.pending.size }))
+
+      window.tracked('x'.repeat(500), () => new Promise(() => {}))
+
+      const [long] = [...reads.pending.values()]
+
+      return { idleNone, whileOut, answered, idleOut, failure, started: reads.started, clipped: long.length < 500 }
+    })
+
+    assert.deepEqual(seen, { idleNone: 'idle', whileOut: { size: 1, started: 1, labels: ['first'] }, answered: { value: 'answer', size: 0 }, idleOut: 'idle', failure: { message: 'boom', size: 0 }, started: 3, clipped: true })
+  }),
+
+  // A read that ends, one that a watcher starts a microtask after it, one that starts two frames after that, and one that starts a task after it, each longer than the last started: the wait ends when the last is answered, not when the first is.
+  'settled-chain': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<script>
+    window.log = []
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const read = (name, work) => tracked(name, work).then(() => window.log.push(name))
+    window.start = () => read('A', () => wait(300)).then(() => read('B', () => wait(200))).then(frames).then(() => read('C', () => wait(150))).then(() => wait(0)).then(() => read('D', () => wait(100))).then(() => read('E', () => Promise.resolve()))
+  </script>`, async (page) => {
+    await page.evaluate(() => {
+      window.start()
+    })
+
+    const out = await outcome(lib.settled(page, { limit: 20000 }), 8000)
+
+    assert.ok('value' in out, out.late ? 'the wait did not end' : String(out.error))
+    assert.deepEqual(await page.evaluate(() => window.log), ['A', 'B', 'C', 'D', 'E'], 'the wait ended before the reads of the chain did')
+  }),
+
+  'settled-loading': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<p>page</p>`, async (page) => {
+    await page.evaluate(() => {
+      window.busy = true
+      setTimeout(() => { window.busy = false }, 600)
+    })
+
+    const out = await outcome(lib.settled(page, { limit: 20000, loading: () => window.busy }), 8000)
+
+    assert.ok('value' in out, out.late ? 'the wait did not end' : String(out.error))
+    assert.equal(await page.evaluate(() => window.busy), false, 'the wait ended while the page was still loading')
+  }),
+
+  // A read that is out when the wait begins is answered during its first round (by the first animation frame the round asks for), and what its answer sets going, a second read two frames later, runs after that round: a round that began with a call out does not settle the page, so the wait goes on to the second read's end.
+  'settled-late-answer': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, COUNTED, async (page) => {
+    await page.evaluate(() => {
+      const frame = window.requestAnimationFrame.bind(window)
+      const frames = () => new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)))
+      let answer = null
+      let first = true
+
+      window.log = []
+      window.tracked('A', () => new Promise((resolve) => {
+        answer = resolve
+      })).then(() => {
+        window.log.push('A')
+
+        return frames()
+      }).then(() => window.tracked('B', () => new Promise((resolve) => setTimeout(resolve, 150)))).then(() => window.log.push('B'))
+      window.requestAnimationFrame = (callback) => frame((time) => {
+        callback(time)
+
+        if (first) {
+          first = false
+          answer()
+        }
+      })
+    })
+
+    const out = await outcome(lib.settled(page, { limit: 20000 }), 8000)
+
+    assert.ok('value' in out, out.late ? 'the wait did not end' : String(out.error))
+    assert.deepEqual(await page.evaluate(() => window.log), ['A', 'B'], 'the wait ended after a round that began with a call out')
+  }),
+
+  // A page whose frames never come (its animation-frame callbacks never run) has not finished a round of its own work: the wait ends at its limit with a failure, never as a page that has settled.
+  'settled-frozen': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<p>page</p>`, async (page) => {
+    await page.evaluate(() => {
+      window.requestAnimationFrame = () => 0
+    })
+
+    const out = await outcome(lib.settled(page, { limit: 700 }), 10000)
+
+    assert.ok(out.error, out.late ? 'the wait did not end at its limit' : 'the wait ended at its limit as a page that has settled')
+    assert.ok(!(out.error instanceof lib.HarnessError) && out.error.message.includes('700 ms'), out.error.message)
+  }),
+
+  // A call that never answers and a page that never stops loading: the wait ends at its limit with a failure that is no HarnessError, and names what was out.
+  'settled-timeout': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<p>page</p>`, async (page) => {
+    await page.evaluate(() => {
+      window.busy = true
+      window.tracked('/query select 1 from the_stuck_table', () => new Promise(() => {}))
+    })
+
+    const began = Date.now()
+    const out = await outcome(lib.settled(page, { limit: 700, loading: () => window.busy }), 10000)
+
+    assert.ok(out.error, out.late ? 'the wait did not end at its limit' : 'the wait ended at its limit without a failure')
+    assert.ok(!(out.error instanceof lib.HarnessError), 'a page that does not settle is no failure of the harness')
+    assert.ok(Date.now() - began < 8000, 'the wait outlasted its limit')
+    assert.deepEqual(['700 ms', '1 database calls', '/query select 1 from the_stuck_table', 'still loading'].filter((part) => !out.error.message.includes(part)), [], out.error.message)
+  }),
+
+  'settled-no-count': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, '<p>a page of the app that is not served by the web shims</p>', async (page) => {
+    const out = await outcome(lib.settled(page, { limit: 700 }))
+
+    assert.ok(out.error instanceof lib.HarnessError, 'a page with no count of its calls is a HarnessError, not a page that has settled')
+    assert.ok(out.error.message.includes('__auroraReads'), out.error.message)
+  }),
+
+  'settled-arguments': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<p>page</p>`, async (page) => {
+    const calls = [{ limit: 0 }, { limit: Number.NaN }, { limit: '5' }, { limit: -1 }, { loading: 'yes' }]
+    const outs = await Promise.all(calls.map((given) => outcome(lib.settled(page, given))))
+
+    assert.deepEqual(outs.map((out) => out.error instanceof lib.HarnessError), calls.map(() => true), 'an argument of another shape stops the run')
+  }),
 }
 
 const WORDS = {
@@ -456,6 +620,14 @@ const WORDS = {
   hooked: 'each element of a hook gives its role, the text it draws and whether it is on screen by its box or its text, in the order of the document, and a reader given no element throws',
   figures: 'the 90 texts of the page\'s own formatter read back, signed and in their grouping, as the numbers rounded as the page rounds them, and every text that is no figure is refused',
   roles: 'a region is read by role and a list by identity, never by place or as a set, and a word is read back through its table',
+  tracked: 'the page\'s count of its database calls holds a call from its start to its answer or failure, ends it before the caller goes on with the answer, counts every start, says when none is out and cuts a long label',
+  'settled-chain': 'the wait for the page ends when the last read is answered, through a read that a watcher starts a microtask, two frames and a task after another, not when the first is',
+  'settled-loading': 'the wait for the page goes on while the page says it is still loading, with no call out',
+  'settled-timeout': 'a wait that is not over at its limit fails there, as a failure of the page and not of the harness, and names the calls still out and that the page was loading',
+  'settled-no-count': 'a page with no count of its database calls is a HarnessError, never a page that has settled',
+  'settled-arguments': 'a limit that is no positive number and a loading that is no function stop the run',
+  'settled-frozen': 'a page whose frames never come is no page that has settled: the wait ends at its limit with a failure',
+  'settled-late-answer': 'a round that began with a call out does not settle the page, so a read that the answer of that call starts two frames later is waited for',
 }
 
 // [name, text replaced in a copy of the helper, replacement, the case that must fail on an assertion].
@@ -533,6 +705,21 @@ const FAULTS = [
   ['a line no row has is not told', ';[...byIdentity.keys()].filter((id) => !ids.includes(id))', ';[].filter((id) => !ids.includes(id))', 'roles'],
   ['two rows of one identity are not told', 'if (new Set(ids).size !== ids.length) {', 'if (false) {', 'roles'],
   ['a word of two labels reads as the first', 'return keys.length === 1 ? keys[0] : null', 'return keys.length ? keys[0] : null', 'roles'],
+  ['a wait that is over at its limit is a page that settled', 'return { signal: true, settled: false, pending: [...reads.pending.values()], working: Boolean(loading && loading()), stage }', 'return { signal: true, settled: true, pending: [...reads.pending.values()], working: Boolean(loading && loading()), stage }', 'settled-timeout'],
+  ['the limit of a wait that is under way is no failure', 'throw EXPIRED', 'stage = stage', 'settled-frozen'],
+  ['a page that has settled never gives the wait back', 'return { signal: true, settled: true }', 'await new Promise(() => {})', 'settled-chain'],
+  ['a round that began with a call out settles the page', 'if (!open && !working && reads.started === before) {', 'if (!working && reads.started === before) {', 'settled-late-answer'],
+  ['a call that started during the round does not hold the wait', 'if (!open && !working && reads.started === before) {', 'if (!open && !working) {', 'settled-chain'],
+  ['the wait for a page does not let it run what an answer sets going', "await within(frames(), 'two frames')", 'void frames', 'settled-chain'],
+  ['the wait for a page does not look at its loading', 'const working = Boolean(loading && loading())', 'const working = false', 'settled-loading'],
+  ['a wait for a page that is over its limit does not say what was out', "const named = seen.pending.slice(0, SETTLE_NAMED).join('; ')", "const named = ''", 'settled-timeout'],
+  ['a page with no count of its calls has settled', 'if (!seen.signal) {', 'if (false) {', 'settled-no-count'],
+  ['a limit of any kind is a limit', "if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {", 'if (false) {', 'settled-arguments'],
+  ['a call is not counted when it fails', 'return work().finally(() => {', 'return work().then(() => {', 'tracked', TRACKER],
+  ['a call is counted from its answer, after the caller goes on', 'pending.delete(id)', 'setTimeout(() => pending.delete(id), 0)', 'tracked', TRACKER],
+  ['the calls that have started are not counted', 'const id = ++started', 'const id = started', 'tracked', TRACKER],
+  ['the wait for no call out never ends', 'done.forEach((resolve) => resolve())', 'done.forEach(() => {})', 'tracked', TRACKER],
+  ['a label is not cut', 'String(label).slice(0, LABEL_LIMIT)', 'String(label)', 'tracked', TRACKER],
 ]
 
 // [name, text replaced in a copy of the helper, a replacement that says the same, the case that must keep passing].
@@ -541,6 +728,7 @@ const REWRITES = [
   ['the whitespace the browser collapses as a class in another order', "text.replace(/[ \\t\\n\\r]+/g, ' ')", "text.replace(/[\\r\\n\\t ]+/g, ' ')", 'text'],
   ['ten to the places by Math.pow', 'return Math.round(value * 10 ** decimals) / 10 ** decimals', 'return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals)', 'figures'],
   ['an element on screen told by a comparison', 'entries.filter((entry) => entry.on).forEach', 'entries.filter((entry) => entry.on === true).forEach', 'roles'],
+  ['a page that is loading told by a conditional', 'const working = Boolean(loading && loading())', 'const working = loading ? Boolean(loading()) : false', 'settled-loading'],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -563,14 +751,13 @@ const main = async () => {
     }
 
     if (options.mutations) {
-      const source = fs.readFileSync(HELPER, 'utf8')
-      // What the named case threw over a copy of the helper with `from` replaced by `to`, or null when it held.
-      const over = async (from, to, name) => {
+      // What the named case threw over a copy of `target` (the helper, or the file of the count of a page's calls) with `from` replaced by `to`, or null when it held.
+      const over = async (from, to, name, target = HELPER) => {
         const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-browser-observe-'))
-        const file = path.join(folder, 'browser-observe.js')
+        const file = path.join(folder, path.basename(target))
 
         folders.push(folder)
-        fs.writeFileSync(file, patched(HELPER, source, from, to))
+        fs.writeFileSync(file, patched(target, fs.readFileSync(target, 'utf8'), from, to))
 
         // The modules the helper loads, beside the copy as beside the helper.
         for (const sibling of ['suite-runner.js', 'check-pool.js']) {
@@ -578,7 +765,7 @@ const main = async () => {
         }
 
         try {
-          await CASES[name](require(file), browser)
+          await (target === HELPER ? CASES[name](require(file), browser) : CASES[name](lib, browser, file))
         } catch (error) {
           return error
         }
@@ -588,16 +775,16 @@ const main = async () => {
 
       console.log('\nPlanted faults')
 
-      for (const [name, from, to, caught] of FAULTS) {
-        const thrown = await over(from, to, caught)
+      for (const [name, from, to, caught, target] of FAULTS) {
+        const thrown = await over(from, to, caught, target)
 
         check(`planted: ${name}: caught by ${caught}: ${WORDS[caught]}`, thrown instanceof assert.AssertionError, thrown ? `${thrown.name}: ${String(thrown.message).split('\n')[0]}` : 'nothing failed')
       }
 
       console.log('\nEquivalent rewrites')
 
-      for (const [name, from, to, kept] of REWRITES) {
-        const thrown = await over(from, to, kept)
+      for (const [name, from, to, kept, target] of REWRITES) {
+        const thrown = await over(from, to, kept, target)
 
         check(`rewrite: ${name}: ${kept} still holds`, thrown === null, thrown ? `${thrown.name}: ${String(thrown.message).split('\n')[0]}` : '')
       }

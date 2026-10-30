@@ -17,7 +17,7 @@ const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
 const { fuelServiceTruth } = require('./lib/fuel-service-oracle')
 const { checkFuelService } = require('./check-harvesters')
-const { observe, validate, HarnessError, installScreen, pairedBy, labelKey, readFigure, rounded } = require('./lib/browser-observe')
+const { observe, validate, HarnessError, settled, installScreen, pairedBy, labelKey, readFigure, rounded } = require('./lib/browser-observe')
 const { assert, through, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
@@ -651,8 +651,6 @@ const readScreen = () => {
 }
 
 const prepare = async (page, url, step) => {
-  const state = { inFlight: 0, last: Date.now() }
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
   const stored = { logisticsTankersTable: { sortBy: ['Fuel'], sortDesc: [true], itemsPerPage: -1 }, logisticsHarvestersTable: { sortBy: [], sortDesc: false, itemsPerPage: -1 } }
 
   await page.context().addInitScript((seed) => {
@@ -663,30 +661,6 @@ const prepare = async (page, url, step) => {
       sessionStorage.setItem('aurora-check-seeded', '1')
     }
   }, stored)
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
-    }
-  })
-
-  const settle = async (quiet = 1500) => {
-    const started = Date.now()
-
-    while (state.inFlight > 0 || Date.now() - state.last < quiet || await page.evaluate(pageLoading)) {
-      if (Date.now() - started > TIMEOUT) {
-        throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-      }
-
-      await page.waitForTimeout(250)
-    }
-  }
 
   step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
@@ -706,24 +680,14 @@ const prepare = async (page, url, step) => {
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
   step('waiting for the reads that the picking of the race starts')
 
-  const picked = Date.now()
-
-  while (state.inFlight > 0 || Date.now() - state.last < 1500) {
-    if (Date.now() - picked > TIMEOUT) {
-      throw new Error(`the reads that the picking of the race starts did not finish (${state.inFlight} database calls in flight)`)
-    }
-
-    await page.waitForTimeout(250)
-  }
+  await settled(page, { limit: TIMEOUT })
 
   step('opening /logistics')
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/logistics')
   await page.waitForFunction(pageLoading.arrived, '/logistics', { timeout: TIMEOUT })
   await page.waitForFunction(`document.querySelector('[data-donor-panel] [data-donor-ship]') !== null || !(${pageLoading})()`, null, { timeout: TIMEOUT }).catch(() => {})
   step('waiting for the page to settle')
-  await settle()
-
-  return settle
+  await settled(page, { limit: TIMEOUT, loading: pageLoading })
 }
 
 // The tanker table sorted by its Eligible surplus column as a player does it: the header above the surplus cells clicked once (ascending) and again (descending), the rows read after each. Empty lists when the table has no surplus cell.
@@ -754,11 +718,8 @@ const sortBySurplus = async (page, step) => {
 
 const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// The wait after a step of the reserve form: the screen has drawn what the step changed and the reads that follow it are in.
-const settleAfter = async (page, settle) => {
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-  await settle(600)
-}
+// The wait after a step of the reserve form: the screen has drawn what the step changed, and the reads that follow it and the reads those start in turn are in.
+const settleAfter = (page) => settled(page, { limit: TIMEOUT, loading: pageLoading })
 
 const recordLine = (page, name) => page.locator('[data-fuel-record]').filter({ has: page.locator('[data-fuel-record-name]').filter({ hasText: new RegExp(`^\\s*${escapePattern(name)}\\s*$`) }) })
 
@@ -766,7 +727,7 @@ const recordLine = (page, name) => page.locator('[data-fuel-record]').filter({ h
 const formDone = (page) => page.waitForFunction(() => document.querySelector('[data-fuel-form]') === null || document.querySelector('[data-fuel-message]') !== null, null, { timeout: TIMEOUT })
 
 // A reserve kept as a player does it: the record form opened, the kind of source chosen, the source picked from the list by what it is called, the scenario typed, the litres entered and the record kept.
-const keepReserve = async (page, settle, step, { type, search, pattern, scenario, amount }) => {
+const keepReserve = async (page, step, { type, search, pattern, scenario, amount }) => {
   step(`keeping a reserve of ${amount} L for a ${type}`)
   await page.locator('[data-fuel-new]').click({ timeout: TIMEOUT })
   await page.locator(`[data-fuel-type-option="${type}"]`).click({ timeout: TIMEOUT })
@@ -777,19 +738,19 @@ const keepReserve = async (page, settle, step, { type, search, pattern, scenario
   await page.locator('input[data-fuel-input]').fill(String(amount), { timeout: TIMEOUT })
   await page.locator('[data-fuel-save]').click({ timeout: TIMEOUT })
   await formDone(page)
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
-const editReserve = async (page, settle, step, name, amount) => {
+const editReserve = async (page, step, name, amount) => {
   step(`editing the reserve of ${name} to ${amount} L`)
   await recordLine(page, name).locator('[data-fuel-edit]').click({ timeout: TIMEOUT })
   await page.locator('input[data-fuel-input]').fill(String(amount), { timeout: TIMEOUT })
   await page.locator('[data-fuel-save]').click({ timeout: TIMEOUT })
   await formDone(page)
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
-const clearReserve = async (page, settle, step, name) => {
+const clearReserve = async (page, step, name) => {
   step(`clearing the reserve of ${name}`)
 
   const line = recordLine(page, name)
@@ -797,11 +758,11 @@ const clearReserve = async (page, settle, step, name) => {
   await line.locator('[data-fuel-clear]').click({ timeout: TIMEOUT })
   await line.locator('[data-fuel-clear-confirm]').click({ timeout: TIMEOUT })
   await page.waitForFunction(() => document.querySelector('[data-fuel-clear-confirm]') === null, null, { timeout: TIMEOUT })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 }
 
 // The screen while the reserve records are not read, then the records put back: `loading` is the page before the Fuel panel has reported (the page holds none), `failed` the Fuel panel with a read that failed, set through the panel's own record of failed reads so its readiness and its report follow from it.
-const unreadStage = async (page, settle, step, how) => {
+const unreadStage = async (page, step, how) => {
   step(`reading the screen while the reserve records are ${how}`)
   await page.evaluate((mode) => {
     const panel = document.querySelector('[data-fuel-reserves]').__vue__
@@ -819,7 +780,7 @@ const unreadStage = async (page, settle, step, how) => {
       panel.loadErrors = { ...panel.loadErrors, reserveObjects: 'planted failure' }
     }
   }, how)
-  await settleAfter(page, settle)
+  await settleAfter(page)
 
   const { rows, values, harvesters } = await page.evaluate(readScreen)
 
@@ -829,14 +790,14 @@ const unreadStage = async (page, settle, step, how) => {
     held.panel.loadErrors = held.loadErrors
     held.vm.fuelReserves = held.panel.reserves
   })
-  await settleAfter(page, settle)
+  await settleAfter(page)
 
   return { rows, values, harvesters }
 }
 
 // The page as it opens, sorted both ways, then the reserves kept, edited and cleared as a player does it, the screen read after each step: `stages` holds the tanker rows, the totals and the records of each.
 const observePage = (browser, url) => observe(browser, async ({ page, step }) => {
-  const settle = await prepare(page, url, step)
+  await prepare(page, url, step)
   step('reading the screen')
 
   const screen = await page.evaluate(readScreen)
@@ -845,16 +806,16 @@ const observePage = (browser, url) => observe(browser, async ({ page, step }) =>
   const stages = [screen]
   const read = async () => stages.push(await page.evaluate(readScreen))
 
-  await keepReserve(page, settle, step, { type: 'class', search: plan.className, pattern: new RegExp(`^\\s*${escapePattern(plan.className)}\\s*$`), scenario: plan.scenario, amount: plan.first })
+  await keepReserve(page, step, { type: 'class', search: plan.className, pattern: new RegExp(`^\\s*${escapePattern(plan.className)}\\s*$`), scenario: plan.scenario, amount: plan.first })
   await read()
-  const unread = { loading: await unreadStage(page, settle, step, 'loading'), failed: await unreadStage(page, settle, step, 'failed') }
-  await editReserve(page, settle, step, plan.className, plan.second)
+  const unread = { loading: await unreadStage(page, step, 'loading'), failed: await unreadStage(page, step, 'failed') }
+  await editReserve(page, step, plan.className, plan.second)
   await read()
-  await keepReserve(page, settle, step, { type: 'ship', search: plan.shipName, pattern: new RegExp(`^\\s*${escapePattern(plan.shipName)} ·`), scenario: plan.scenario, amount: plan.override })
+  await keepReserve(page, step, { type: 'ship', search: plan.shipName, pattern: new RegExp(`^\\s*${escapePattern(plan.shipName)} ·`), scenario: plan.scenario, amount: plan.override })
   await read()
-  await clearReserve(page, settle, step, plan.shipName)
+  await clearReserve(page, step, plan.shipName)
   await read()
-  await clearReserve(page, settle, step, plan.className)
+  await clearReserve(page, step, plan.className)
   await read()
 
   return { ...screen, sorts, unread, stages: stages.map(({ rows, values, fuelRecords }) => ({ rows, values, fuelRecords })) }
