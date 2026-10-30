@@ -672,7 +672,7 @@ const prepare = async (page, url, step) => {
   return settle
 }
 
-// A row of the locations table opened as a player does it: the expand button of the row is clicked and the drill-down read once it is drawn; then the row is closed.
+// A row of the locations table opened as a player does it: a click on the row (on the place under its name, which holds no control) opens it and the drill-down is read once it is drawn; then the expand button of the row closes it.
 const drill = async (page, settle, step, key) => {
   const row = page.locator('tr', { has: page.locator(`[data-location="${key}"]`) }).last()
 
@@ -684,7 +684,7 @@ const drill = async (page, settle, step, key) => {
     throw new Error(`the location ${key} is not in the table; the table lists ${present.length} rows: ${short(present.slice(0, 6))}`)
   }
 
-  await row.locator('.v-data-table__expand-icon').first().click({ timeout: 30000 })
+  await row.locator('[data-location-place]').first().click({ timeout: 30000 })
   step(`waiting for the drill-down of ${key}`)
   await page.waitForFunction((wanted) => document.querySelector(`[data-pool="${wanted}"]`) !== null, key, { timeout: 30000 }).catch(async (error) => {
     await page.screenshot({ path: path.join(os.tmpdir(), 'ae-maintenance-pools-failure.png') })
@@ -1127,7 +1127,7 @@ const PAGE_BENIGN = [
   { name: 'the tonnage line states its qualifier after the figure instead of before it', file: POOL_FILE, change: swap('Tonnage of the assigned ships: <span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span>', '<span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span> is the tonnage of the assigned ships') },
   { name: 'a word of the panel\'s foot put another way', file: PAGE_FILE, change: swap('craft in military hangars need none', 'craft inside military hangars need none') },
   { name: 'the condition of the drill-down parenthesised', file: POOL_FILE, change: swap('<template v-if="location.pool">', '<template v-if="(location.pool)">') },
-  { name: 'the heading of the settled points reworded', file: POOL_FILE, change: swap('How the game\'s rules were read', 'How the rules were read') },
+  { name: 'the heading of the settled points reworded', file: POOL_FILE, change: swap('<div class="pool-title">Rules used</div>', '<div class="pool-title">Rules applied</div>') },
   { name: 'the names of the ships drawn through a text binding', file: POOL_FILE, change: swap('data-cell="name">{{ item.name }}</div>', 'data-cell="name" v-text="item.name"></div>') },
   { name: 'the names of the providers drawn through a text binding', file: POOL_FILE, change: swap('<span data-cell="name">{{ provider.name }}</span>', '<span data-cell="name" v-text="provider.name"></span>') },
   { name: 'the supply caption of a row worded with another word of the reviewed table', file: POOLS_FILE, change: swap('supply: \'on supply ships\'', 'supply: \'aboard supply ships\'') },

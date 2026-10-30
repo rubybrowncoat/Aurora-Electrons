@@ -215,7 +215,7 @@
               <span>Maintenance locations<provenance-mark rule="logistics.maintenanceLocation" label /></span>
               <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
             </div>
-            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" show-expand single-expand :expanded.sync="expandedLocations" :custom-sort="sortNullLast" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
+            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" show-expand single-expand :expanded.sync="expandedLocations" :custom-sort="sortNullLast" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
               <template #[`item.name`]="{ item }">
                 <div class="py-2" :data-location="item.key">
                   <div class="font-weight-medium"><span data-location-name>{{ item.name }}</span><page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
