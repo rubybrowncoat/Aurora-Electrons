@@ -28,7 +28,7 @@
         </v-row>
 
         <template v-if="steps.length">
-          <v-card class="panel" data-summary="Wealth earned and spent in each production cycle, by category, with the net." elevation="1">
+          <v-card class="panel" data-summary="Track wealth earned and spent by category in each production cycle, with the net change." elevation="1">
             <div class="panel-head">
               <span>Income and spending, every {{ stepLabel }}<provenance-mark :result="ledger.cycle" /><provenance-mark :result="ledger.stepLedger" label /></span>
               <v-btn-toggle v-model="flowsView" mandatory dense>
@@ -56,7 +56,7 @@
 
           <v-row>
             <v-col cols="12" lg="6">
-              <v-card class="panel" data-summary="Each source of income and each kind of spending as a yearly total and a share." elevation="1">
+              <v-card class="panel" data-summary="Compare income sources and spending categories by yearly totals and shares." elevation="1">
                 <div class="panel-head">
                   <span>Income and spending by source</span>
                   <span><v-chip small>Per year, last {{ coverageText }}</v-chip><provenance-mark :result="ledger.coverage" /></span>
@@ -81,7 +81,7 @@
               </v-card>
             </v-col>
             <v-col cols="12" lg="6">
-              <v-card class="panel" data-summary="The treasury balance over the window." elevation="1">
+              <v-card class="panel" data-summary="Track the treasury balance over the selected window." elevation="1">
                 <div class="panel-head">
                   <span>Treasury<provenance-mark :result="ledger.treasurySeries" label /></span>
                 </div>
@@ -95,7 +95,7 @@
           </v-row>
         </template>
 
-        <v-card class="panel" data-summary="The stored treasury set against the logged cycles between recorded snapshots." elevation="1">
+        <v-card class="panel" data-summary="Compare stored treasury changes with logged cycles between recorded snapshots." elevation="1">
           <div class="panel-head">
             <span>Treasury against the log<provenance-mark rule="finances.treasuryResidual" label /></span>
             <v-chip small>Every recorded snapshot on this branch</v-chip>
@@ -115,10 +115,10 @@
               </v-data-table>
             </template>
           </div>
-          <div class="panel-foot caption text--secondary">Stored change is the later snapshot's treasury less the earlier one's. Logged net is the cycles after the earlier snapshot, up to and including the later one, income less spending. The residual is the difference: what the log does not hold, with no cause named. A residual of 0 means the log accounts for the whole change. Only snapshots of this race on this branch are compared. A snapshot counts only when it carries a digest of the ledger it was taken on and this save's own ledger reproduces it, so it is an earlier point of this save. A dash means the span cannot be compared: a snapshot recorded before the app kept that digest, one taken on another branch, a merged history or a replayed past, one later than this save, or a log that does not cover the span.</div>
+          <div class="panel-foot caption text--secondary">Stored change is the later snapshot's treasury less the earlier one's. Logged net is income less spending over the cycles after the earlier snapshot, up to and including the later one. The residual is the difference: what the log does not hold, with no cause named. A residual of 0 means the log accounts for the whole change. Only snapshots of this race on this branch are compared. A snapshot counts only when it carries a digest of the ledger it was taken on and this save's own ledger reproduces it, so it is an earlier point of this save. A dash means the span cannot be compared. The causes are a snapshot recorded before the app kept that digest, one taken on another branch, a merged history or a replayed past, one later than this save, or a log that does not cover the span.</div>
         </v-card>
 
-        <v-card class="panel" data-summary="What a civilian shipping line is paid per unit carried and per billion km, with a worked payout estimate." elevation="1">
+        <v-card class="panel" data-summary="Estimate civilian shipping-line payouts using rates per unit carried and per billion km." elevation="1">
           <div class="panel-head">
             <span>Civilian shipping-line payouts<provenance-mark rule="civilianTariff.rates" label /></span>
             <v-chip small>{{ tariffVersionText }}</v-chip>
@@ -186,7 +186,7 @@
             <div class="mt-1">Net cost of shipping-line payouts to the treasury: <span class="font-weight-medium">{{ netCost.value === null ? '—' : signed(netCost.value) }}</span><provenance-mark :result="netCost" label /></div>
             <div class="caption text--secondary">{{ netCost.value === null ? limitationText(netCost) : 'The window\'s logged payout uses less the logged taxes on them.' }}</div>
           </div>
-          <div class="panel-foot caption text--secondary">A shipping-line payout is what a line earns for a trip at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. A computer-run empire's lines are paid half of it. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them; nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending and no net cost is worked out. The estimate is shown only where the rates are published.</div>
+          <div class="panel-foot caption text--secondary">A shipping-line payout is what a line earns for a trip at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. A computer-run empire's lines are paid half of it. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them. Nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending and no net cost is worked out. The estimate is shown only where the rates are published.</div>
         </v-card>
 
         <shipping-runway :ledger="ledger" :treasury="treasury" :wealth="wealth" :window-days="windowDays" :window-options="windowOptions" :formula-version="formulaVersion" :npr="shippingTax ? shippingTax.npr : null" :tax="shippingTax" :tax-state="shippingTaxState" :date="date" :separator="separator" :history-recorded="historyRecorded" @retry="retryShippingTax" />

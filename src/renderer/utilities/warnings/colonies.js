@@ -4,7 +4,7 @@ import { deliveryVerdict } from '../mining-sites'
 import { assessRedeployment, assetText, unknownInputs } from '../mining-redeployment'
 import { QUARTER, amount, anyOf, bandOf, bandWords, bodyText, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, needInputs, needsCell, needsSignature, needWords, readMiningSites, readRedeploymentSites, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
-export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers.' }
+export const group = { key: 'colonies', title: 'Colonies', summary: 'Review colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers.' }
 
 const POPULATION = 'the colony\'s population'
 const OUTPUT_PER_UNIT = 'the output per unit of an installation'

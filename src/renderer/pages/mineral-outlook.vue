@@ -25,7 +25,7 @@
       <template v-if="forecastReady">
         <stat-tiles :tiles="tiles" compact class="mt-2" />
 
-        <v-card v-if="focusRow" class="panel" data-summary="How long the chosen mineral will last at current rates, with projected stockpile and mining output." elevation="1">
+        <v-card v-if="focusRow" class="panel" data-summary="Track the selected mineral's projected stock and mining output to see how long it lasts at current rates." elevation="1">
           <div class="panel-head">
             <span>{{ focusRow.name }} outlook</span>
             <span class="d-flex align-center flex-wrap">
@@ -64,7 +64,7 @@
             </div>
           </div>
         </v-card>
-        <v-card class="panel" data-summary="For every mineral, its stock, production, use and how long the stock will last." elevation="1">
+        <v-card class="panel" data-summary="Compare mineral stocks, production and use to see how long each stock lasts." elevation="1">
           <div class="panel-head">
             <span>Mineral runway<provenance-mark rule="mineral.runway" label /></span>
             <v-chip small>{{ coverageLabel }}</v-chip>
@@ -108,7 +108,7 @@
             {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is modelled, not measured, from the industry queue, the refineries, the maintenance facilities and the shipyards over the next 12 months (see Mineral uses).' }} Click a row to see its outlook. Use the table to see which minerals are heading for a shortage.
           </div>
         </v-card>
-        <v-card class="panel" data-summary="The purposes that use minerals, observed in the game's ledger or modelled from the save, each with a switch to leave it out of the runway." elevation="1">
+        <v-card class="panel" data-summary="Review logged or modelled mineral uses and choose which to include in the runway." elevation="1">
           <div class="panel-head">
             <span>Mineral uses<provenance-mark rule="mineral.flowPerYear" label /></span>
             <v-chip small>{{ hasLedger ? 'Observed in the ledger' : 'Modelled, no ledger' }}</v-chip>
@@ -172,7 +172,7 @@
         </v-dialog>
       </template>
 
-      <v-card v-if="depositsReady" class="panel" data-summary="Each deposit worked by mines and miners, with its yield and when it will run down." elevation="1">
+      <v-card v-if="depositsReady" class="panel" data-summary="Compare deposits being mined by their yield and projected depletion." elevation="1">
         <div class="panel-head">
           <span>Deposits being mined<provenance-mark rule="mineral.depositForecast" label /></span>
           <span class="d-flex align-center">

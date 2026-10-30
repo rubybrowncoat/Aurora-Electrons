@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel mineral-supply" data-summary="What each site extracts of the mineral, and where it goes." elevation="1">
+  <v-card class="panel mineral-supply" data-summary="Trace the selected mineral from extraction sites to its destinations." elevation="1">
     <div class="panel-head">
       <span>Extraction, export and delivered supply<provenance-mark rule="mineralSupply.supply" label /></span>
       <v-chip small>{{ mineralName }}</v-chip>
@@ -56,7 +56,7 @@
       </v-data-table>
     </template>
     <div class="panel-foot caption text--secondary">
-      Use it to tell stock at an extraction site from supply at a colony that uses it, and to try a hypothetical delivery without assuming one. A mineral a site extracts goes into that colony's own stock and reaches industry elsewhere only through a mass-driver packet, which the totals do not count as income; output the race buys for a destination goes straight into a packet, and stock above the reserve ships only by the site's own drivers. A packet carries no origin in the save, so each counts once, for the colony it is bound for: in flight until it lands there, in that colony's stock after. Observed figures are the ledger's sums over its window, annualised, and are unknown without a ledger, never 0. The ledger records a packet when drivers send stock, not when civilian output goes straight into one, so sent and received tonnes need not match. A civilian purchase choice that is not stored leaves the packet output, the stock added and the supply of a site with a destination unknown, and freighter orders are not read. A hypothetical delivery is an input entered here for one site and one colony, never stored and never counted anywhere else.
+      Distinguish stock at an extraction site from supply at a colony that uses it, or test a hypothetical delivery without assuming one. A mineral a site extracts enters that colony's own stock. It reaches industry elsewhere only through mass-driver packets, which the totals do not count as income. Output the race buys for a destination goes straight into a packet, and stock above the reserve ships only through the site's own drivers. The save records no packet origin, so each packet counts once for the colony it is bound for: in flight until it lands there, in that colony's stock after. Observed figures are the ledger's sums over its window, annualised. Without a ledger they are unknown, not 0. The ledger records a packet when drivers send stock, not when civilian output goes straight into one, so sent and received tonnes need not match. If the civilian purchase choice is not stored, packet output, stock added and supply remain unknown for a site with a destination. Freighter orders are not read. A hypothetical delivery is an input entered here for one site and one colony. It is never stored and never counted anywhere else.
     </div>
   </v-card>
 </template>

@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="A map of the known systems, shaded by how much survey work each has left." elevation="1">
+        <v-card class="panel" data-summary="Explore known systems shaded by their remaining survey work." elevation="1">
           <div class="panel-head">
             <span>Survey map</span>
             <span class="legend">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, with the points left and the time the ships there would take." elevation="1">
+        <v-card ref="systemsPanel" class="panel" data-summary="Compare gravitational and geological survey progress by system, with points left and time needed by the ships there." elevation="1">
           <div class="panel-head">
             <span>Systems<provenance-mark rule="survey.bodyPoints" /></span>
             <span class="d-flex align-center">
@@ -81,7 +81,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Survey fleets, where they are, what they are doing and how fast they survey." elevation="1">
+        <v-card class="panel" data-summary="Compare survey fleets by location, current activity and survey rate." elevation="1">
           <div class="panel-head">
             <span>Survey fleets</span>
             <v-chip small>{{ formulaVersion ? 'Rates follow the game\'s rules' : 'Rates are estimates' }}</v-chip>
@@ -112,11 +112,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see whether the survey ships are used well. Points a day: the undamaged sensors' rating × 24 h × the officer factor (the science officer's Survey bonus while the ship's Science Department is undamaged, times half the captain's bonus; 1 for a ship without a captain) × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The mark beside a rate shows how far it can be trusted: hover for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
+            Check whether the survey ships are used well. Points a day are the undamaged sensors' rating × 24 h × the officer factor × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), then × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The officer factor is the science officer's Survey bonus while the ship's Science Department is undamaged, times half the captain's bonus, and 1 for a ship without a captain. The mark beside a rate shows how far it can be trusted. Hover it for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
           </div>
         </v-card>
 
-        <v-card v-if="groundRows.length" class="panel" data-summary="Bodies with mineral potential that could be surveyed on the ground, with progress and time left." elevation="1">
+        <v-card v-if="groundRows.length" class="panel" data-summary="Compare bodies with ground-survey mineral potential, their survey progress and time left." elevation="1">
           <div class="panel-head">
             <span>Ground surveys</span>
             <v-chip small>{{ groundRows.length }} {{ groundRows.length === 1 ? 'body' : 'bodies' }} with potential</v-chip>
@@ -147,7 +147,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="deployment" class="panel" data-deploy="panel" data-summary="The race's geological survey and xenoarchaeology formations, each once, with their state and the known targets they could serve." elevation="1">
+        <v-card v-if="deployment" class="panel" data-deploy="panel" data-summary="Review geological survey and xenoarchaeology formations, their activity and known deployment targets." elevation="1">
           <div class="panel-head">
             <span>Specialist deployments</span>
             <v-chip small>{{ count(deployTotals.formations) }} {{ deployTotals.formations === 1 ? 'formation' : 'formations' }}</v-chip>
@@ -209,11 +209,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see which specialists are free to redeploy and where known work waits. Each geological survey or xenoarchaeology formation is listed once, and the save stores no task for it, so the state is read from the location: a formation is busy when stationed at a colony on a body with work for its role, and the commander's multiplier is not applied, so one the game would give no rating may show busy without making progress. A geological formation at a colony on a body the race has not surveyed shows idle. A xenoarchaeology formation on a ruin outside the known targets, one with a rating the save leaves unknown where a target is, and a formation that may do xenoarchaeology and has no known work, when the ruins or constructs could not be read, show an activity that is not known, counted as neither idle nor free to redeploy. An embarked formation does no survey work, and one whose place is not stored has no state. Idle formations are packed into the troop ships' bays, the largest first; a formation no bay holds is shown as that, and where the troop ships stand is not read. {{ count(deployTotals.others) }} {{ deployTotals.others === 1 ? 'formation of the race is' : 'formations of the race are' }} no geological or xenoarchaeology specialist, or {{ deployTotals.others === 1 ? 'has' : 'have' }} a rating the save leaves unknown. No assignment is issued.
+            Find which specialists are free to redeploy and where known work waits. Each geological survey or xenoarchaeology formation is listed once. The save stores no task for it, so the state is read from the location. A formation is busy when stationed at a colony on a body with work for its role. The commander's multiplier is not applied, so a formation the game would give no rating may show busy without making progress. A geological formation at a colony on a body the race has not surveyed shows idle. A xenoarchaeology formation on a ruin outside the known targets, one with a rating the save leaves unknown where a target is, and a formation that may do xenoarchaeology and has no known work, when the ruins or constructs could not be read, show an activity that is not known. These are counted as neither idle nor free to redeploy. An embarked formation does no survey work, and one whose place is not stored has no state. Idle formations are packed into the troop ships' bays, the largest first. A formation no bay holds is shown as that, and where the troop ships stand is not read. {{ count(deployTotals.others) }} {{ deployTotals.others === 1 ? 'formation of the race is' : 'formations of the race are' }} no geological or xenoarchaeology specialist, or {{ deployTotals.others === 1 ? 'has' : 'have' }} a rating the save leaves unknown. No assignment is issued.
           </div>
         </v-card>
 
-        <v-card v-if="deployment" class="panel" data-targets="panel" data-summary="The known bodies where a geological survey or xenoarchaeology formation has work." elevation="1">
+        <v-card v-if="deployment" class="panel" data-targets="panel" data-summary="Find known bodies with work for geological survey or xenoarchaeology formations." elevation="1">
           <div class="panel-head">
             <span>Survey targets</span>
             <span class="d-flex align-center">
@@ -235,7 +235,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once, by role: geological survey, xenoarchaeology or other." elevation="1">
+        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="Review ground formations by geological survey, xenoarchaeology or other roles." elevation="1">
           <div class="panel-head">
             <span>Ground formations</span>
             <span v-if="formationModel" class="d-flex align-center">

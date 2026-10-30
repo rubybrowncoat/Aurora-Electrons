@@ -946,7 +946,7 @@ const panel = (ctx) => {
 
     return /class="panel platform-paths"/.test(startTag) && sentence.trim().length > 0 && !/\d/.test(sentence) && !/\b(I|me|my|mine|you|your|we|our)\b/i.test(sentence) ? true : sentence
   })
-  add('panel-template: the foot states the paths, the occupied capacity, the unknown figures, the labour and that no path is named cheaper or quicker in general', () => ['one task for each', 'station project', 'the capacity it occupies', 'the minerals the colony lacks', 'never nought', 'labour', 'names no path as cheaper or quicker in general', 'has not researched', 'makes no progress'].filter((phrase) => !foot.includes(phrase)).map((phrase) => `the foot lacks "${phrase}"`).join('; ') || true)
+  add('panel-template: the foot states the paths, the occupied capacity, the unknown figures, the labour and that no path is named cheaper or quicker in general', () => ['one task for each', 'station project', 'the capacity it occupies', 'the minerals the colony lacks', 'never 0', 'labour', 'names no path as cheaper or quicker in general', 'has not researched', 'makes no progress'].filter((phrase) => !foot.includes(phrase)).map((phrase) => `the foot lacks "${phrase}"`).join('; ') || true)
   add('panel-template: the foot is in the UI voice: no first or second person', () => (/\b(I|me|my|mine|you|your|we|our)\b/i.test(foot.replace(/<[^>]*>/g, '')) ? 'the foot speaks to a person' : true))
   add('panel-template: the template compiles', () => { const errors = templateErrors(text); return errors.length ? short(errors) : true })
   add('panel-template: a time that is not known is a dash with its mark, never a number, and the table sorts the unknown last', () => (text.includes('<span v-if="item.days !== null"') && text.includes('<span v-else class="text--secondary text-no-wrap">—<provenance-mark :result="item.timeResult" />') && text.includes(':custom-sort="sortNullLast"') ? true : 'the time cell or the sort changed'))
@@ -1094,7 +1094,7 @@ const MUTATIONS = [
   { name: 'an installation whose definition is missing dropped', file: U, find: 'left join DIM_PlanetaryInstallation', replace: 'inner join DIM_PlanetaryInstallation', fails: ['loader'] },
   { name: 'installations the save lacks not marked', file: U, find: 'installationUnknown: installations === null })', replace: 'installationUnknown: false })', fails: ['loader'] },
   { name: 'installations read without their definitions', file: U, find: ' && [\'PlanetaryInstallationID\', \'Name\', \'Workers\', \'ConstructionValue\'].every((column) => definitionColumns.has(column))', replace: '', fails: ['loader'] },
-  { name: 'the data-summary with a figure', file: V, find: 'data-summary="The ways a mining platform class', replace: 'data-summary="The 2 ways a mining platform class', fails: ['panel-template'] },
+  { name: 'the data-summary with a figure', file: V, find: 'data-summary="Compare shipyard construction', replace: 'data-summary="Compare 2 shipyard construction', fails: ['panel-template'] },
   { name: 'the panel without a data-summary', file: V, find: 'class="panel platform-paths" data-summary="', replace: 'class="panel platform-paths" data-sum="', fails: ['panel-template'] },
   { name: 'an unknown time drawn as a number', file: V, find: '<span v-if="item.days !== null"', replace: '<span v-if="true"', fails: ['panel-template'] },
   { name: 'the unknown times not sorted last', file: V, find: ' :custom-sort="sortNullLast"', replace: '', fails: ['panel-template'] },

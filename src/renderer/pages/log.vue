@@ -38,7 +38,7 @@
 
       <diagnostic-panel class="mb-3" :diagnosis="diagnosis" :pending="!diagnosisCurrent" :seconds="diagnosticWindow" :start-year="Number(StartYear)" @window="(value) => diagnosticWindow = value" />
 
-      <v-card class="panel mb-3" data-summary="How many events the game log holds for each month." elevation="1">
+      <v-card class="panel mb-3" data-summary="Track game-log event counts by month." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Timeline</div>
           <div class="date-fields">
@@ -57,7 +57,7 @@
         </div>
       </v-card>
 
-      <v-card class="panel" data-summary="The events in the game log, newest first." elevation="1">
+      <v-card class="panel" data-summary="Review game-log events from newest to oldest." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Events <span class="caption text--secondary">{{ count(filteredEvents.length) }} of {{ count(listEvents.length) }}</span><span v-if="archiveListed" class="caption text--secondary"> · from the archive</span></div>
           <div class="caption text--secondary">
@@ -95,7 +95,7 @@
         </window-virtual-scroll>
         <div v-else class="pa-6 text--secondary">{{ listPending ? 'Reading the archive.' : listEvents.length ? 'No events match these filters.' : archiveListed ? 'The archive holds no events of this race.' : 'This race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
-          Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message; pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment the previous visit to this page saw on this branch; the first visit to a branch inherits what its parent saw up to the fork.
+          Rows keep this race's custom alert and text colours. Click a message to read it in full, expand a daily repeat to read each message, or pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment that the previous visit to this page saw on this branch. The first visit to a branch inherits what its parent saw up to the fork.
         </div>
       </v-card>
     </template>

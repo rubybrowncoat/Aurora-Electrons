@@ -6,7 +6,7 @@
       <template v-if="ready">
         <change-digest :config="config" :campaign="resolved" :race-id="RaceID" :game-time="GameTime" :notes="digestNotes" :names="installationNames" :start-year="StartYear" :separator="separator" :history-revision="historyRevision" :recording="recording" />
 
-        <v-card class="panel notebook-form" data-summary="A note on one body, colony, fleet or tech, with a status and the next action to take." elevation="1">
+        <v-card class="panel notebook-form" data-summary="Create or edit a note for a body, colony, fleet or technology, with a status and next action." elevation="1">
           <div class="panel-head">
             <span>{{ draft.uuid ? 'Edit note' : 'New note' }}</span>
             <span class="caption text--secondary" data-note-count>{{ caption }}</span>
@@ -42,7 +42,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel notebook-list" data-summary="The notes kept for this race, filtered by system." elevation="1">
+        <v-card class="panel notebook-list" data-summary="Review project notes filtered by system." elevation="1">
           <div class="panel-head">
             <span>Project notes</span>
             <v-autocomplete v-model="filterSystem" :items="systemFilter" :item-text="countedText" item-value="value" label="System" dense outlined hide-details class="notebook__filter" data-note-filter />
@@ -80,7 +80,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel notebook-tags" data-summary="Short personal tags on single bodies of the systems the race knows, shared with the Galaxy Map." elevation="1">
+        <v-card class="panel notebook-tags" data-summary="Review personal tags on bodies in known systems, shared with the Galaxy Map." elevation="1">
           <div class="panel-head">
             <span>Body tags</span>
             <v-autocomplete :value="tagFilterValue" :items="tagOptions" :item-text="countedText" item-value="value" label="Tag" dense outlined hide-details class="notebook__filter" data-tag-filter @change="tagFilter = $event" />

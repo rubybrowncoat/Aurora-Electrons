@@ -34,7 +34,7 @@
       </div>
     </v-card>
 
-    <v-card v-if="tech" class="panel" data-summary="The chain of technologies leading to the selected one, coloured by status." elevation="1">
+    <v-card v-if="tech" class="panel" data-summary="Trace the selected technology's prerequisites, coloured by research status." elevation="1">
       <div class="panel-head">
         <span>Prerequisites</span>
         <span class="legend">
@@ -48,7 +48,7 @@
 
     <v-row v-if="tech">
       <v-col cols="12" md="6">
-        <v-card class="panel" data-summary="The technologies the race still needs before this one, in the order that reaches it." elevation="1">
+        <v-card class="panel" data-summary="Review the remaining prerequisites for the selected technology in research order." elevation="1">
           <div class="panel-head"><span>{{ order.length > 1 ? 'Research in this order' : 'Nothing else needed' }}</span></div>
           <div class="panel-body">
             <div v-if="entry.status === 'done'" class="empty">Already researched.</div>
@@ -64,7 +64,7 @@
         </v-card>
       </v-col>
       <v-col cols="12" md="6">
-        <v-card class="panel" data-summary="The technologies that the selected one unlocks." elevation="1">
+        <v-card class="panel" data-summary="Review the technologies unlocked by the selected technology." elevation="1">
           <div class="panel-head"><span>Opens</span></div>
           <div class="panel-body">
             <div v-if="!opens.length" class="empty">Nothing waits on this technology.</div>

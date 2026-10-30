@@ -1673,7 +1673,7 @@ const MUTATIONS = [
   { name: 'an invalid manifest exported', file: C, find: 'return !this.manifest.invalid', replace: 'return true', fails: ['component'] },
   { name: 'the sizes of the tons not passed on', file: C, find: 'components: this.procurement.components,', replace: 'components: {},', fails: ['component'] },
   { name: 'the panel without a data-summary', file: C, find: 'class="panel procurement-manifest" data-summary="', replace: 'class="panel procurement-manifest" data-sum="', fails: ['template'] },
-  { name: 'the data-summary with a figure', file: C, find: 'data-summary="What a batch of ship hulls', replace: 'data-summary="What a batch of 100 ship hulls', fails: ['template'] },
+  { name: 'the data-summary with a figure', file: C, find: 'data-summary="Find component shortages for a batch of hulls', replace: 'data-summary="Find component shortages for a batch of 100 hulls', fails: ['template'] },
   { name: 'the foot speaking to a person', file: C, find: 'The classes are served in the order listed', replace: 'Your classes are served in the order listed', fails: ['template'] },
   { name: 'the CSV button gone', file: C, find: ' data-manifest-csv @click="downloadCsv"', replace: '', fails: ['template'] },
   { name: 'the copy button gone', file: C, find: ' data-manifest-copy @click="copyText"', replace: '', fails: ['template'] },

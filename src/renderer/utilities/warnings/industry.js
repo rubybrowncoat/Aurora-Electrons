@@ -3,7 +3,7 @@ import { isKnownNumber, roundToDecimal } from '../math'
 import { MINERALS, projectShortages } from '../minerals'
 import { QUARTER, amount, bandOf, bandWords, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, listWords, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
-export const group = { key: 'industry', title: 'Industry', summary: 'Idle factory capacity, stalled projects and unused shipyards.' }
+export const group = { key: 'industry', title: 'Industry', summary: 'Review idle factory capacity, stalled projects and unused shipyards.' }
 
 const PRODUCTION_KINDS = { 1: 'Ordnance', 2: 'Fighters' }
 

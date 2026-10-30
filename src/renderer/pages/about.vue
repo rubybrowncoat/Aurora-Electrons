@@ -3,7 +3,7 @@
     <v-container fluid class="about-page">
       <v-row class="my-0">
         <v-col cols="12" md="6" class="d-flex flex-column py-0">
-          <v-card class="panel flex-grow-1" data-summary="What this app is, its version, the Aurora saves it supports and who made it." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Review the app's purpose, version, supported Aurora saves and author." elevation="1">
             <div class="panel-head">
               <span class="d-flex align-center flex-wrap">
                 <span>Aurora Electrons</span>
@@ -40,7 +40,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column py-0">
-          <v-card class="panel flex-grow-1" data-summary="Places to report bugs, follow updates and discuss the app." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Open links to report bugs, follow updates and discuss the app." elevation="1">
             <div class="panel-head"><span>Links</span></div>
             <v-list dense>
               <v-list-item>
@@ -73,7 +73,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column py-0">
-          <v-card class="panel flex-grow-1" data-summary="The save this window shows and where the app keeps its settings and Empire History files." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Locate the current save, settings and Empire History files." elevation="1">
             <div class="panel-head">
               <span>Data</span>
               <v-btn v-if="dataFolder" small outlined @click="openDataFolder"><v-icon small left>mdi-folder-open-outline</v-icon>Open folder</v-btn>
@@ -96,7 +96,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column py-0">
-          <v-card class="panel flex-grow-1" data-summary="The libraries and tools the app is built on." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Review the libraries and tools used to build the app." elevation="1">
             <div class="panel-head"><span>Built with</span></div>
             <div class="panel-body">
               <external-link v-for="item in stack" :key="item.name" :href="item.href" class="stack-link mr-2 mb-2">
@@ -107,7 +107,7 @@
         </v-col>
 
         <v-col cols="12" class="py-0">
-          <v-card class="panel" data-summary="The fonts, icons and community themes the app uses, with their authors and licenses." elevation="1" data-credits>
+          <v-card class="panel" data-summary="Review the fonts, icons and community themes used by the app, with their authors and licenses." elevation="1" data-credits>
             <div class="panel-head"><span>Credits</span></div>
             <v-simple-table class="credits-table">
               <thead>
@@ -138,12 +138,12 @@
                 </tr>
               </tbody>
             </v-simple-table>
-            <div class="panel-foot caption text--secondary">Each notice is the license text as it comes with the asset's package, or with the community themes the presets are adapted from, bundled into the app. Bundled files ship in the app; visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages; they are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
+            <div class="panel-foot caption text--secondary">Open a notice to read the license text as it comes with the asset's package, or with the community themes the presets are adapted from, bundled into the app. Bundled files ship with the app. Visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages and are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
           </v-card>
         </v-col>
 
         <v-col cols="12" class="py-0">
-          <v-card class="panel" data-summary="How to contribute pull requests and issues." elevation="1">
+          <v-card class="panel" data-summary="Follow the steps for contributing pull requests and issues." elevation="1">
             <div class="panel-head"><span>Contribute</span></div>
             <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
             <v-list dense>

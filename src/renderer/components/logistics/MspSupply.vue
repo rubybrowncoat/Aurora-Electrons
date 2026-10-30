@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel msp-supply" data-summary="The maintenance supplies each colony's facilities make once incoming minerals are counted." elevation="1">
+  <v-card class="panel msp-supply" data-summary="Compare maintenance supply output by colony with incoming minerals included." elevation="1">
     <div class="panel-head">
       <span class="text-no-wrap">Maintenance supplies with incoming minerals<provenance-mark rule="mspSupply.supplied" label /></span>
       <v-btn-toggle :value="years" mandatory dense class="msp-horizon" @change="$emit('years', $event)">
@@ -73,7 +73,7 @@
         </template>
       </v-data-table>
       <div class="panel-foot caption text--secondary">
-        Use it to see which input mineral limits the output and which delivery it waits for. The colony's stock alone makes the stock-only output, the figure of the table above, and the supplied output adds what mining, packets and hauls bring, each on the day it arrives. It takes out the colony's own claims in the game's order: the build queue, then the mass driver export of stock above the reserve, then maintenance, which no reserve protects; the queue is shown idle and served first, since the saved projects show what they still need and not when they draw it. A colony gives to a haul only what its own production leaves, and each freighter serves one haul of the plan, in the planner's order. All the mining on a body draws on its deposit together, taxed output included, and the colony keeps only its own share. A delivery with no timing or no size is listed and left out, never counted as 0. Packets the colonies launch during the period are not counted.
+        Identify the mineral that limits output and the delivery needed to increase it. Stock-only output uses the colony's current stock, as in the table above. Supplied output also counts mining, packets and hauls on their arrival days. The colony's claims follow the game's order: the build queue, mass-driver exports of stock above the reserve, then maintenance, which no reserve protects. The queue is treated as idle and supplied first because saved projects record their remaining needs but not when they draw stock. A colony supplies a haul only from what its own production leaves. Each freighter serves one planned haul, in planner order. All mining on a body depletes the same deposit, including taxed output, but the colony keeps only its own share. Deliveries with unknown timing or size are listed but excluded, not counted as 0. Packets launched by colonies during the period are excluded.
       </div>
     </template>
   </v-card>

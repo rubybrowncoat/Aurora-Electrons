@@ -50,7 +50,7 @@
 
         <stat-tiles class="mt-1" :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Every job the colonies are building, researching, training or terraforming, with its status and finish time." elevation="1">
+        <v-card class="panel" data-summary="Review colony construction, research, training and terraforming jobs, with their status and finish time." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Work in progress<provenance-mark rule="production.jobCount" /></span>
@@ -125,7 +125,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Stock assumed to reach a colony on a given day, entered by hand." elevation="1">
+        <v-card class="panel" data-summary="Enter assumed stock arrivals at a colony on specified days." elevation="1">
           <div class="panel-head">
             <span>Assumed arrivals</span>
             <v-btn small text :disabled="!arrivals.length" @click="arrivals = []">Remove all</v-btn>
@@ -145,13 +145,13 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see which of the colony's projects the stock releases. Nothing is read from the save, and nothing is shipped automatically. An arrival adds its quantity to the colony's stock from the first cycle that ends on or after its day. These are assumptions, never observed stock: removing them restores the colony's own stock, and nothing is kept when the race changes.
+            Test which of the colony's projects the stock releases. Nothing is read from the save, and nothing is shipped automatically. An arrival adds its quantity to the colony's stock from the first cycle that ends on or after its day. These are assumptions, never observed stock. Removing them restores the colony's own stock, and nothing is kept when the race changes.
           </div>
         </v-card>
 
         <v-row>
           <v-col cols="12" xl="5">
-            <v-card class="panel" data-summary="How many jobs finish in each period ahead, by kind." elevation="1">
+            <v-card class="panel" data-summary="Track the number of jobs finishing in each upcoming period, by kind." elevation="1">
               <div class="panel-head">
                 <span>Completions<provenance-mark rule="production.timeline" /></span>
                 <v-btn-toggle v-model="horizon" mandatory dense>
@@ -166,12 +166,12 @@
                 <div v-else class="caption text--secondary">None of the jobs shown finishes in the next {{ timeline.option.label }}.</div>
               </div>
               <div class="panel-foot caption text--secondary">
-                Use it to plan around coming completions. The jobs in the table, per {{ timeline.option.unit }} they finish in. Paused jobs, jobs that never start and jobs the colony's stock cannot finish are left out<span v-if="timeline.later">, and {{ timeline.later }} {{ timeline.later === 1 ? 'finishes' : 'finish' }} later</span>. Short of minerals counts only jobs at a colony the cycle forecast cannot cover, at the time they would finish if the minerals arrive.<span v-if="timeline.skipped.unknown"> {{ timeline.skipped.unknown }} {{ timeline.skipped.unknown === 1 ? 'job has' : 'jobs have' }} no finish time known and {{ timeline.skipped.unknown === 1 ? 'is' : 'are' }} not counted<provenance-mark :result="timeline.result" />.</span><span v-else><provenance-mark :result="timeline.result" /></span>
+                Plan around coming completions. The jobs in the table are counted per {{ timeline.option.unit }} they finish in. Paused jobs, jobs that never start and jobs the colony's stock cannot finish are left out<span v-if="timeline.later">, and {{ timeline.later }} {{ timeline.later === 1 ? 'finishes' : 'finish' }} later</span>. Short of minerals counts only jobs at a colony the cycle forecast cannot cover, at the time they would finish if the minerals arrive.<span v-if="timeline.skipped.unknown"> {{ timeline.skipped.unknown }} {{ timeline.skipped.unknown === 1 ? 'job has' : 'jobs have' }} no finish time known and {{ timeline.skipped.unknown === 1 ? 'is' : 'are' }} not counted<provenance-mark :result="timeline.result" />.</span><span v-else><provenance-mark :result="timeline.result" /></span>
               </div>
             </v-card>
           </v-col>
           <v-col cols="12" xl="7">
-            <v-card class="panel" data-summary="The construction, ordnance, fighter, training, research and slipway capacity that each colony leaves unused." elevation="1">
+            <v-card class="panel" data-summary="Find unused construction, ordnance, fighter, training, research and slipway capacity at each colony." elevation="1">
               <div class="panel-head">
                 <span class="d-flex align-center">
                   <span>Idle capacity by colony<provenance-mark rule="production.capacityFree" /></span>
@@ -205,7 +205,7 @@
                 </template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">
-                Use it to find where more work can start. What each colony leaves idle, of its total: build points a year for construction, ordnance, fighters and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity; a dash means the figure is not known, and its mark names what is missing.
+                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, fighters and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
               </div>
             </v-card>
           </v-col>

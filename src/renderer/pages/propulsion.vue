@@ -121,7 +121,7 @@
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
-        <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship they take." elevation="1">
+        <v-card class="panel" data-summary="Compare propulsion sets meeting the hull's speed and range targets, ranked by the share of the ship they occupy." elevation="1">
           <div class="panel-head">
             <span>Propulsion sets<v-chip v-if="result && result.run.incomplete && !searching" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip><v-chip v-if="propulsionAssumptions.length" x-small color="warning" outlined class="ml-2" data-tech="hypothetical-chip">Hypothetical tech</v-chip></span>
             <span class="d-flex align-center flex-wrap">
@@ -237,7 +237,7 @@
 
         <mission-brief-panel :draft="briefDraft" :identity="briefOpening" :saved="briefSaved" :ahead="briefAhead" :selected="briefEntry ? briefEntry.uuid : null" :dirty="briefDirty" :can-save="briefCanSave" :problems="briefProblems" :evaluation="briefEvaluation" :preview="briefPreview" :accepted="briefAccepted" :presets="briefPresets" :size-unit="briefSizeUnit" :message="briefNotice" :conflict="briefConflict" :pending="pendingBrief" @select="selectBrief" @new="newBrief" @preset="previewBriefPreset" @field="setBriefField" @axes="setBriefAxes" @invalid="setBriefInvalid" @size-unit="briefSizeUnit = $event" @toggle="toggleBriefItem" @apply="applyBriefPreview" @cancel-preview="cancelBriefPreview" @save="saveBriefDraft(false)" @save-over="saveBriefDraft(true)" @remove="removeBrief" @move="moveBriefHere" @discard="discardPendingBrief" @keep="keepPendingBrief" />
 
-        <v-card class="panel" data-summary="The sets no other beats on the share of the ship the propulsion takes against speed or range." elevation="1">
+        <v-card class="panel" data-summary="Compare efficient trade-offs between propulsion's share of the finished ship and speed or range." elevation="1">
           <div class="panel-head">
             <span>Trade-off</span>
             <span class="d-flex align-center flex-wrap">
@@ -273,7 +273,7 @@
           <div class="panel-foot caption text--secondary">Use it to see what extra speed or range costs in hull. A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures, with the saved class first, and the mark beside each figure keeps its status: a saved class's figures are observed, a designed set's BP is an estimate.</div>
         </v-card>
 
-        <v-card class="panel" data-summary="The sets that meet the targets and that no other set beats on every axis picked." data-pareto="panel" elevation="1">
+        <v-card class="panel" data-summary="Compare propulsion sets that meet the targets and that no other set beats on every selected axis." data-pareto="panel" elevation="1">
           <div class="panel-head">
             <span>Efficient sets<v-chip v-if="efficientProvisional && !searching" x-small color="warning" outlined class="ml-2" data-pareto="provisional-chip">Provisional</v-chip></span>
           </div>
@@ -317,12 +317,12 @@
               </td>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">The axes are BP, propulsion tonnage, speed, range, endurance and payload, each taken as least or most as picked; no score is added up. A set is listed when no other set that meets the targets is as good on every axis picked and better on one. A set with a figure that is not known on a picked axis takes no part, and is counted above. The comparison covers every set the search evaluated that meets the targets, not only the sets the table above lists, and stays provisional while the search has stopped early or when more sets are efficient than the comparison holds. Sets with the same figures on every axis picked are kept under the first found; open a row to read them. The payload is the hull, the same for every set of one search, so it never tells two sets apart. Changing an axis runs the search again.</div>
+          <div class="panel-foot caption text--secondary">The axes are BP, propulsion tonnage, speed, range, endurance and payload. Each axis is taken as least or most as picked, and no score is added up. A set is listed when no other set that meets the targets is as good on every axis picked and better on one. A set with a figure that is not known on a picked axis takes no part and is counted above. The comparison covers every set the search evaluated that meets the targets, not only the sets the table above lists. It stays provisional while the search has stopped early or when more sets are efficient than the comparison holds. Sets with the same figures on every axis picked are kept under the first found, and a row opens to show them. Payload is the hull, the same for every set of one search, so it never tells two sets apart. Changing an axis runs the search again.</div>
         </v-card>
 
         <v-row>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="The stock fuel tanks that hold the chosen set's fuel in the fewest HS." elevation="1">
+            <v-card class="panel" data-summary="Review the stock fuel tanks that hold the selected set's fuel in the fewest HS." elevation="1">
               <div class="panel-head">
                 <span>Fuel tanks</span>
                 <v-chip v-if="selectedRow" small>{{ selectedSetLabel }}</v-chip>
@@ -357,11 +357,11 @@
                 </tbody>
               </v-simple-table>
               <div v-if="selectedRow && selectedRow.tankPackage" class="panel-body pt-3 caption text--secondary"><provenance-mark :result="selectedRow.provenance.tanks" label /><span class="ml-2">{{ tankPackageText(selectedRow) }}</span></div>
-              <div class="panel-foot caption text--secondary">Use it to fit the fuel a range or endurance needs. Each pick shows its litres and cost. Tanks are picked from the stock tanks the race holds: the package with the fewest HS that holds the litres the set needs, then the fewest BP, then the fewest tanks. Two tanks of a smaller size can beat one of a larger size, so the choice is never greedy by size. A package is met within a relative 1e-9 of the litres; the spare litres are what the whole tanks add. When the table behind the search runs out on a very large request the package is marked not proved. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
+              <div class="panel-foot caption text--secondary">Fit the fuel a range or endurance target needs. Each pick shows its litres and cost. Tanks are picked from the stock tanks the race holds: the package with the fewest HS that holds the litres the set needs, then the fewest BP, then the fewest tanks. Two tanks of a smaller size can beat one of a larger size, so the choice is never greedy by size. A package meets the litres within a relative 1e-9. The spare litres are what the whole tanks add. When the table behind the search runs out on a very large request, the package is marked not proved. The game has no packing rule, so this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="How fast the chosen set burns its fuel, and how long it lasts at full power, half power and the cruise share." elevation="1">
+            <v-card class="panel" data-summary="Compare the selected set's fuel burn and endurance at full power, half power and the cruise share." elevation="1">
               <div class="panel-head">
                 <span>Burn and endurance</span>
                 <v-chip v-if="selectedRow" small>{{ selectedSetLabel }}</v-chip>
@@ -387,12 +387,12 @@
                   </tr>
                 </tbody>
               </v-simple-table>
-              <div class="panel-foot caption text--secondary">Use it to see what a slower cruise buys. The engines burn their power times the fuel per engine power hour every hour, scaled by the share of power in use, so a slower cruise lengthens the endurance and leaves the range as it is. The range is the fuel over the burn at full power, times the speed, times 3,600.</div>
+              <div class="panel-foot caption text--secondary">See what a slower cruise buys. The engines burn their power times the fuel per engine power hour every hour, scaled by the share of power in use, so a slower cruise lengthens the endurance and leaves the range as it is. The range is the fuel over the burn at full power, times the speed, times 3,600.</div>
             </v-card>
           </v-col>
         </v-row>
 
-        <v-card class="panel" data-summary="The jump drives the game would add to the finished hull, military and commercial." elevation="1">
+        <v-card class="panel" data-summary="Compare military and commercial jump drives the game would add to the finished hull." elevation="1">
           <div class="panel-head">
             <span>Jump drive</span>
             <v-chip v-if="selectedRow" small>Hull with the propulsion: {{ count(jumpHullHS, 2) }} HS</v-chip>

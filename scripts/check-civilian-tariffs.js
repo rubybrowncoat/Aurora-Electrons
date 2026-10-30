@@ -259,7 +259,7 @@ const attempt = (test) => {
 
 // The pages' wiring, on the text of the pages: [[name, held]]. Each statement must hold of the real pages and fail of a page with one gate cut out.
 const wiring = ({ finances, information, utility, tariff, provenance }) => {
-  const panel = between(finances, '<v-card class="panel" data-summary="What a civilian shipping line', '</v-card>')
+  const panel = between(finances, '<v-card class="panel" data-summary="Estimate civilian shipping-line payouts', '</v-card>')
   const noteSource = between(information, 'payoutNote() {', 'problems() {')
   const estimateSource = between(finances, '    estimate() {', '    // The ledger\'s civilian uses')
   const all = []
@@ -412,7 +412,7 @@ const PAGE_MUTATIONS = [
   ['Finances reads the rates for a fixed 2.7 version', 'finances', 'rateOf(this.formulaVersion, category.id)', 'rateOf(\'2.7.x\', category.id)'],
   ['Finances asks the net cost for a fixed 2.7 version', 'finances', 'netCostResult({ version: this.formulaVersion,', 'netCostResult({ version: \'2.7.x\','],
   ['Finances builds its own complete mapping', 'finances', 'const TARIFF_MAPPING = treasuryMapping()', 'const TARIFF_MAPPING = { complete: true, uses: [], unplaced: [] }'],
-  ['Finances loses the summary of the panel', 'finances', 'data-summary="What a civilian shipping line', 'data-x="What a civilian shipping line'],
+  ['Finances loses the summary of the panel', 'finances', 'data-summary="Estimate civilian shipping-line payouts', 'data-x="Estimate civilian shipping-line payouts'],
   ['Finances shows a net cost figure while it is unavailable', 'finances', 'netCost.value === null ? \'—\' : signed(netCost.value)', 'signed(netCost.value)'],
   ['Finances stops reading the schema version', 'finances', 'return await loadFormulaVersion(this.database)', 'return \'2.7.x\''],
   ['Finances speaks to the reader', 'finances', 'Units carried times the rate times the one-way', 'Your units carried times the rate times the one-way'],

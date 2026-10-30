@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel colony-worksheet" data-summary="The bodies selected in the table side by side, with colony cost, population limit and minerals." elevation="1">
+  <v-card class="panel colony-worksheet" data-summary="Compare selected bodies side by side by colony cost, population limit and minerals." elevation="1">
     <div class="panel-head">
       <span>Colony comparison<provenance-mark :rule="depositRule" label /></span>
       <span class="d-flex align-center flex-wrap controls">

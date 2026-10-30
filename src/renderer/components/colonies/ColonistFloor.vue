@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel colonist-floor" data-summary="How many colonists each colony can give up while its installations stay staffed." elevation="1">
+  <v-card class="panel colonist-floor" data-summary="Compare how many colonists each colony can give up while keeping its installations staffed." elevation="1">
     <div class="panel-head">
       <span class="text-no-wrap">Colonist floor<provenance-mark rule="colonistFloor.removable" label /></span>
       <span v-if="!unread" class="caption text--secondary text-no-wrap">{{ headline }}<provenance-mark rule="colonistFloor.outcome" /></span>
@@ -149,7 +149,7 @@
       </template>
     </v-data-table>
     <div class="panel-foot caption text--secondary">
-      Use it to choose a source colony for a colonist transport without starving its industry. Each row shows what remains if the batch leaves that colony alone: the services and agriculture the remaining people need come first and the rest can work, as in the Colonies panel. The staffing floor is the lowest population that still has the workers today's installations and shipyards need, so a colony already short can give nothing. The retained floor is entered per colony, a blank floor means no floor, not 0, and the smaller limit binds. People aboard Ark ships do not count as workers or population. With the queue counted, the workers needed come from the committed workforce at the horizon against today's people, with no growth credited. The emigrant pool limits only shipping-line pickups, and only from an imperial colony marked as a source and not kept for military use; the save's numbering suggests which colonies are sources without confirming it, and no future pickup is given because the ships that will call, the pool after loads already queued and the pressure at the next refresh are not known.
+      Choose a source colony without leaving its industry short of workers. Each row shows what remains if the batch leaves that colony alone. As in the Colonies panel, services and agriculture take the workers the remaining population needs before any are available for industry. The staffing floor is the lowest population that can staff today's installations and shipyards. A colony already short of workers can give none. Enter a retained floor for each colony. A blank means no floor, not 0, and the smaller removal limit applies. People aboard Ark ships count as neither workers nor population. With the queue counted, the workers needed are the committed workforce at the horizon, compared with today's population without growth. The emigrant pool limits only shipping-line pickups from imperial colonies marked as sources and not kept for military use. The save's numbering suggests which colonies are sources but does not confirm them. Future pickups are not estimated because the arriving ships, the pool after queued loads and the pressure at the next refresh are unknown.
     </div>
   </v-card>
 </template>

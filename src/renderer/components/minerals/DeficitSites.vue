@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel deficit-sites" data-summary="Surveyed deposits of the selected mineral, ranked by how soon a first load could reach a chosen colony." elevation="1">
+  <v-card class="panel deficit-sites" data-summary="Compare surveyed deposits of the selected mineral by how soon a first load could reach the chosen colony." elevation="1">
     <div class="panel-head">
       <span>Sites for a deficit mineral<provenance-mark rule="deficitSites.rank" label /></span>
       <span class="d-flex align-center">
@@ -79,7 +79,7 @@
       </v-data-table>
     </template>
     <div class="panel-foot caption text--secondary">
-      Use it to compare sites for a mineral the race is short of. Only deposits on bodies the race has surveyed are listed, and a deposit under a known alien colony or with nothing left is left out. A site already worked by mines has no deployment; a new site waits for the mines to be built at the chosen colony, with the idle construction capacity the Production page shows, and carried to the body. The first load is dug at the extraction the mines give, as accessibility falls once the deposit is mined past half. One representative carrier flies it back over the explored jump points, empty out and loaded back, with a tonne of mineral taking two tonnes of its hold. A mass-driver route the save names to the chosen colony delivers now only where the save shows it supplying. The carrier is taken as free and at the chosen colony, with no loading, refuelling or acceleration time, and a colony on a new body is not founded here. The order is the earliest first delivery, then the larger delivery a year; a site with no known first delivery, or one whose deposit holds less than one load, is not ranked.
+      Only deposits on surveyed bodies are listed. Empty deposits and deposits under known alien colonies are excluded. A site already worked by mines needs no deployment. A new site waits for mines to be built at the chosen colony using the idle construction capacity shown on the Production page, then transported to the body. The first load uses the extraction the mines give, with accessibility falling once the deposit is mined past half. One representative carrier returns the load through explored jump points, flying out empty and back loaded. Each tonne of mineral uses two tonnes of its hold. A mass-driver route the save names to the chosen colony delivers now only where the save shows it supplying. The carrier is assumed to be free and at the chosen colony. Loading, refuelling and acceleration take no time in this estimate, and a colony on a new body is not founded here. Sites rank by earliest first delivery, then larger yearly delivery. A site is not ranked if its first delivery is unknown or its deposit holds less than one load.
     </div>
   </v-card>
 </template>

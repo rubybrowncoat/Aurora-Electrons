@@ -1005,7 +1005,7 @@ const PAGE_MUTATIONS = [
   { name: 'the tooltip dropping the stock behind a change', find: '`${name}: ${signed(item.parsed.y)} (${this.count(stock, 0)} t)`', replace: '`${name}: ${signed(item.parsed.y)}`', fails: ['page: the tooltip gives the stock in tonnes'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the tooltip giving an unknown figure as 0', find: 'return `${name}: ${UNKNOWN_TEXT}`', replace: 'return `${name}: 0 t`', fails: ['page: the tooltip gives the stock in tonnes'] },
-  { name: 'the summary left unchanged by a count', find: 'Stockpiles of the selected minerals over time.\',', replace: 'Stockpiles of the selected minerals over time, 11 in all.\',', fails: ['page: the section\'s summary says what it shows without a figure that changes'] },
+  { name: 'the summary left unchanged by a count', find: 'Track stockpiles of the selected minerals over time.\',', replace: 'Track stockpiles of the selected minerals over time, 11 in all.\',', fails: ['page: the section\'s summary says what it shows without a figure that changes'] },
   { name: 'the change rule left off the section', find: 'rules: [\'history.stockpile\', \'history.mineralChange\'],', replace: 'rules: [\'history.stockpile\'],', fails: ['page: the section\'s summary says what it shows'] },
   { name: 'the default picks changed', find: 'default: [1, 2, 11], normalise', replace: 'default: [1, 2, 3], normalise', fails: ['page: the minerals picked and the scale are views declared for the app', 'page: the minerals the page starts with are Duranium, Neutronium and Gallicite'] },
 ]

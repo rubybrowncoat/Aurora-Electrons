@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel component-calculator" data-summary="The share of a colony's construction capacity that builds a ship class's manufactured components by a deadline." elevation="1">
+  <v-card class="panel component-calculator" data-summary="Estimate the construction capacity share needed to build a ship class's manufactured components at a colony by a deadline." elevation="1">
     <div class="panel-head">
       <span>Component calculator<provenance-mark rule="production.componentPlan" /></span>
       <span class="d-flex align-center">
@@ -56,7 +56,7 @@
       </v-data-table>
     </template>
     <div class="panel-foot caption text--secondary">
-      Use it to see whether a colony can build the manufactured components of a ship class by a deadline, and what share of its construction capacity that takes. The stock held is used once against the hulls together, and the rest is built by one project for each component, which draws on the construction capacity and the shared minerals. A row the save leaves without an amount is not known, and a figure typed over it is an assumption dropped when the save is read again. The share needed is the least that finishes every project by the deadline in the production forecast, marked "at most" when sampled over a wide range and "at least" when above the whole capacity. Where the search is not settled, the panel says so instead of saying the colony cannot do it. Armour, missile engines, civilian line components, prototypes and obsolete components are built with the hull, and a component the race has not researched cannot be built by a project; none of them is in the share. Stock at other colonies is not counted.
+      Stock held is used once across all the hulls together. The rest is built by one project for each component, which draws on the construction capacity and the shared minerals. A row the save leaves without an amount is not known. A figure typed over it is an assumption, dropped when the save is read again. The share needed is the least that finishes every project by the deadline in the production forecast. It is marked "at most" when sampled over a wide range and "at least" when above the whole capacity. Where the search is not settled, the panel says so instead of saying the colony cannot do it. Armour, missile engines, civilian-line components, prototypes and obsolete components are built with the hull, and a component the race has not researched cannot be built by a project. None of them is in the share. Stock at other colonies is not counted.
     </div>
   </v-card>
 </template>

@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="A map of the known systems, shaded by how many stable Lagrange points each has." elevation="1">
+        <v-card class="panel" data-summary="Explore known systems shaded by their number of stable Lagrange points." elevation="1">
           <div class="panel-head">
             <span>Lagrange map<provenance-mark rule="lagrange.pointCounts" /></span>
             <span class="legend">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="bodiesPanel" class="panel" data-summary="The planets and moons that have, or could be given, a stable Lagrange point, with the time to stabilise each." elevation="1">
+        <v-card ref="bodiesPanel" class="panel" data-summary="Compare planets and moons with existing or potential stable Lagrange points and the time to stabilise each." elevation="1">
           <div class="panel-head">
             <span>Planets and moons<provenance-mark rule="lagrange.stabilisationDays" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -71,7 +71,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="shipRows.length" class="panel" data-summary="Ships with a jump point stabilisation module, with their captains, crews and current activity." elevation="1">
+        <v-card v-if="shipRows.length" class="panel" data-summary="Review ships with jump point stabilisation modules, their captains, crews and current activity." elevation="1">
           <div class="panel-head">
             <span>Stabilisation ships<provenance-mark rule="lagrange.stabilisationMultiplier" label /></span>
           </div>
@@ -101,7 +101,7 @@
           </v-data-table>
         </v-card>
 
-        <v-card v-if="infrastructureRows.length" class="panel" data-jump-infrastructure data-summary="Each jump point the race has charted, with its gate status, stabilisation orders, mines, buoys and detected objects." elevation="1">
+        <v-card v-if="infrastructureRows.length" class="panel" data-jump-infrastructure data-summary="Review charted jump points, their gate status, stabilisation orders, mines, buoys and detected objects." elevation="1">
           <div class="panel-head">
             <span>Jump point infrastructure<provenance-mark rule="jumpInfrastructure.stabilisation" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -139,7 +139,7 @@
             <template #[`footer.page-text`]="{ pageStart, pageStop, itemsLength }">{{ pageStart }}-{{ pageStop }} of <span data-jump-total>{{ itemsLength }}</span></template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see where the race holds and watches its jump points, and to open a point on the map. A stabilised jump point is a gate: the save records no other state, so the Gate column shows both, and a builder the save does not give is not recorded. Stabilisation shows only the orders of the race's own fleets; another race's work is not known, and no time left is given because the order's time has no known unit. Minefields and Buoys count the race's own stationary missile salvos within 1 km of the point in each coordinate, one for each salvo and not for the missiles in it; a salvo of a design with a second stage is taken as a mine, and another race's salvos are known only as contacts. Detected counts those detected now, once each, and neither their kind nor any that went undetected is known, so none detected is not none there. Probes are ordinary ships that the save does not mark, so no probe count is given. {{ unknownText }} is never 0.
+            Find where the race holds and watches its jump points, or open a point on the map. A stabilised jump point is a gate. The save records no other state, so the Gate column shows both, and a builder the save does not give is not recorded. Stabilisation shows only the orders of the race's own fleets. Another race's work is not known, and no time left is given because the order's time has no known unit. Minefields and Buoys count the race's own stationary missile salvos within 1 km of the point in each coordinate, one for each salvo and not for the missiles in it. A salvo of a design with a second stage is taken as a mine, and another race's salvos are known only as contacts. Detected counts those detected now, once each. Neither their kind nor any that went undetected is known, so none detected is not none there. Probes are ordinary ships that the save does not mark, so no probe count is given. {{ unknownText }} is never 0.
           </div>
         </v-card>
       </template>

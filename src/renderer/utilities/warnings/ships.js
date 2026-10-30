@@ -5,7 +5,7 @@ import { isKnownNumber, roundToDecimal } from '../math'
 import { loadFormulaVersion } from '../capabilities'
 import { QUARTER, TRAINING_COMMAND, TRAINING_JOINS, allOf, amount, anyOf, bandOf, bandWords, categoriesOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, countWords, figure, lacking, levelTone, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
-export const group = { key: 'ships', title: 'Ships', summary: 'Ships and ship classes with crew, damage, maintenance, training or design problems.' }
+export const group = { key: 'ships', title: 'Ships', summary: 'Review ships and ship classes with crew, damage, maintenance, training or design problems.' }
 
 const fleetLink = (ship) => (ship.FleetID ? linkTo.routes({ from: place.fleet(ship.FleetID) }) : undefined)
 

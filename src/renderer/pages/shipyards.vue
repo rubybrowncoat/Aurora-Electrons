@@ -15,7 +15,7 @@
 
         <stat-tiles :tiles="tiles" />
 
-        <v-card v-if="view === 'yards'" class="panel" data-summary="Every shipyard of the race once, with its tasks, its upgrade or retool and its slipway price." elevation="1">
+        <v-card v-if="view === 'yards'" class="panel" data-summary="Review each shipyard's tasks, upgrade or retool and price for adding a slipway." elevation="1">
           <div class="panel-head">
             <span>Shipyards<provenance-mark rule="production.shipyardUpgradeFinish" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -132,7 +132,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="view === 'growth'" class="panel" data-summary="What it costs, in build points and time, to add a slipway or capacity to one shipyard." elevation="1">
+        <v-card v-if="view === 'growth'" class="panel" data-summary="Compare build-point costs and time to add a slipway or capacity to a shipyard." elevation="1">
           <div class="panel-head">
             <span>Yard growth<provenance-mark rule="shipyardGrowth.capacityStep" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -177,7 +177,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="view === 'refits'" class="panel" data-summary="Every refit between the race's ship classes, one direction at a time." elevation="1">
+        <v-card v-if="view === 'refits'" class="panel" data-summary="Compare refits between ship classes in each direction." elevation="1">
           <div class="panel-head">
             <span>Refit matrix<provenance-mark rule="refit.cost" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -232,11 +232,11 @@
             </div>
           </div>
           <div class="panel-foot caption text--secondary">
-            Use it to find upgrades worth refitting and to avoid needless tooling changes. Each cell shows the time and cost of refitting a ship of the row's class into the column's class, and how many yards can take it or be retooled for it; the opposite cell is a separate figure. Its time is at the quickest yard that can take the column's class now or once a slipway is free, one slipway working; a dash means a yard's eligibility or rate is not known, so the quickest is not known either, and "Retool first" means only a retooled yard could take it. S and T are the refit's cost as a share of the source (row) class's cost and of the target (column) class's cost. The wrench is the number of yards that take the target class now or when a slipway frees, the tools are the yards that would take it after a retool, and a ≥ marks a count that has yards not known either way. A check mark: a yard tooled for the source builds or refits to the target without retooling. Components the target drops earn no credit, and with the size window on a class with no partner inside the window leaves the matrix.
+            Find upgrades worth refitting and avoid needless tooling changes. Each cell shows the time and cost of refitting a ship of the row's class into the column's class, and how many yards can take it or be retooled for it. The opposite cell is a separate figure. The time is at the quickest yard that can take the column's class now or once a slipway is free, one slipway working. A dash means a yard's eligibility or rate is not known, so the quickest is not known either. "Retool first" means only a retooled yard could take it. S and T are the refit's cost as a share of the source (row) class's cost and of the target (column) class's cost. The wrench is the number of yards that take the target class now or when a slipway frees. The tools are the yards that would take it after a retool. A ≥ marks a count that has yards not known either way. A check mark means a yard tooled for the source builds or refits to the target without retooling. Components the target drops earn no credit. With the size window on, a class with no partner inside the window leaves the matrix.
           </div>
         </v-card>
 
-        <v-card v-if="view === 'refits'" class="panel" data-summary="One refit in full: its cost by part, its minerals, the components that change and the ships that would take it." elevation="1">
+        <v-card v-if="view === 'refits'" class="panel" data-summary="Review the selected refit's costs by part, minerals, component changes and ships that could take it." elevation="1">
           <div class="panel-head">
             <span>Selected refit<provenance-mark rule="refit.minerals" label /></span>
             <span class="d-flex align-center flex-wrap controls">
@@ -336,7 +336,7 @@
             </v-row>
           </div>
           <div class="panel-foot caption text--secondary">
-            Use it to see why a refit is dear and whether the reverse refit is cheaper. The cost is the added components' cost times 1.2 plus the size change (the difference in size over the source class's size). Percentages name their denominator: the source class is what the ship is worth as it stands, the target class what a new one costs. A removed component refunds nothing, so the minerals count the added parts only, each count at one decimal.<provenance-mark rule="refit.cost" />
+            See why a refit is dear and whether the reverse refit is cheaper. The cost is the added components' cost times 1.2 plus the size change (the difference in size over the source class's size). Percentages name their denominator: the source class is what the ship is worth as it stands, and the target class is what a new one costs. A removed component refunds nothing, so the minerals count the added parts only, each count at one decimal.<provenance-mark rule="refit.cost" />
           </div>
         </v-card>
 
@@ -402,7 +402,7 @@
 
         <platform-paths v-if="view === 'classes'" :classes="classes" :extras="platformSources.extras" :components="components" :yards="yards" :colonies="platformColonies" :context="eligibilityContext" :version="formulaVersion" :researched="platformSources.researched" />
 
-        <v-card v-if="(view === 'refits' || view === 'classes') && runningRows.length" class="panel" data-summary="Refits and retools the yards are working on now, with the stored cost beside the cost the rules give." elevation="1">
+        <v-card v-if="(view === 'refits' || view === 'classes') && runningRows.length" class="panel" data-summary="Compare stored and rule-calculated costs for refits and retools currently under way." elevation="1">
           <div class="panel-head">
             <span>Running refits and retools<provenance-mark rule="production.shipFinish" label /></span>
           </div>
@@ -644,7 +644,7 @@ export default {
     },
 
     yardsSummary() {
-      return this.view === 'refits' ? 'The race\'s shipyards against the selected refit, with the time and the retooling cost at each.' : 'The race\'s shipyards against one class and one kind of work, with the reasons each can or cannot take it.'
+      return this.view === 'refits' ? 'Compare shipyards for the selected refit by time and retooling cost.' : 'Compare shipyards for the selected class and work type, with the reasons each can or cannot take it.'
     },
 
     yardsHint() {

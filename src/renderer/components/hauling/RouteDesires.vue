@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel route-desires" data-summary="The routes wanted between two colonies, set against the observed routes." elevation="1" data-route-desires>
+  <v-card class="panel route-desires" data-summary="Compare desired routes between two colonies with the observed routes." elevation="1" data-route-desires>
     <div class="panel-head">
       <span>Desired routes</span>
       <v-chip v-if="read && !read.error && !repositoryError && scope" small data-desire-count><span><span data-desire-count-number>{{ rows.length }}</span> {{ rows.length === 1 ? 'route' : 'routes' }}</span></v-chip>

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel recovery-ledger" data-summary="The life pods and wrecks in the systems the race knows, each with a status." elevation="1">
+  <v-card class="panel recovery-ledger" data-summary="Review life pods and wrecks in known systems and their statuses." elevation="1">
     <div class="panel-head">
       <span>Recovery ledger</span>
       <v-chip v-if="view && scope && !view.error && !repositoryError" small data-recovery-count>{{ count(presentRows.length) }} in the save, {{ count(keptCount) }} with a status</v-chip>

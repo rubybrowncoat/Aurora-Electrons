@@ -10,7 +10,7 @@
 
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Unassigned officers who would do a post better than its current holder." elevation="1">
+        <v-card class="panel" data-summary="Find unassigned officers whose relevant bonuses improve on the current post holders." elevation="1">
           <div class="panel-head">
             <span>Better assignments<provenance-mark rule="commanders.bonusSuggestion" /></span>
             <v-btn-toggle v-model="suggestionView" mandatory dense>
@@ -53,7 +53,7 @@
               <div v-if="unratedMore(visibleUnratedGovernors)">and {{ count(unratedMore(visibleUnratedGovernors)) }} more</div>
             </div>
             <div class="panel-foot caption text--secondary">
-              As the game ranks governors: a candidate must have the colony's required bonus, and ranks by it, then the secondary, then the tertiary bonus (set on the Governor tab of the Economics window). Only unassigned administrators are considered.
+              Only unassigned administrators are considered. A candidate must have the colony's required bonus, as the game ranks governors. Candidates rank by that bonus, then the secondary bonus, then the tertiary bonus, as set on the Governor tab of the Economics window.
             </div>
           </template>
 
@@ -93,7 +93,7 @@
               <div v-if="unratedMore(shipAssessment.unrated)">and {{ count(unratedMore(shipAssessment.unrated)) }} more</div>
             </div>
             <div class="panel-foot caption text--secondary">
-              Terraformers and miners use their captain's full bonus. Survey ships with a Science Department use their science officer's (one rank below the captain), others half their captain's. Candidates are unassigned naval officers of exactly the post's rank, as automatic assignment uses; "other ranks" would need a promotion, or a manual assignment.
+              Terraformers and miners use the captain's full bonus. Survey ships with a Science Department use the science officer's bonus, and that post is one rank below the captain. Other survey ships use half the captain's bonus. Candidates are unassigned naval officers of exactly the post's rank, as automatic assignment requires. Officers under "other ranks" would need a promotion or a manual assignment.
             </div>
           </template>
 
@@ -129,7 +129,7 @@
           </template>
         </v-card>
 
-        <v-card class="panel" data-summary="Every commander of the race with rank, post, bonuses and health." elevation="1">
+        <v-card class="panel" data-summary="Review commander ranks, posts, bonuses and health." elevation="1">
           <div class="panel-head">
             <span>Roster<provenance-mark rule="commanders.count" /></span>
             <v-btn-toggle v-model="typeId" mandatory dense>
@@ -209,7 +209,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Commanders who are prisoners, retired or dead, with their careers." elevation="1">
+        <v-card class="panel" data-summary="Review the careers of commanders who are prisoners, retired or dead." elevation="1">
           <div class="panel-head">
             <span>Former commanders<provenance-mark rule="commanders.groupCount" /></span>
             <v-btn-toggle :value="formerGroup" mandatory dense @change="(value) => (formerView = value)">
@@ -277,7 +277,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The naval admin commands with their fleets and ships, or the ground formations, with the commander in each post." elevation="1" data-structure>
+        <v-card class="panel" data-summary="Review naval admin commands, fleets and ships or ground formations, with the commander in each post." elevation="1" data-structure>
           <div class="panel-head">
             <span>Command structure</span>
             <span class="d-flex align-center flex-wrap controls">
@@ -310,7 +310,7 @@
             </v-data-table>
           </template>
           <div class="panel-foot caption text--secondary">
-            The naval structure leaves out the shipping lines' fleets and ships unless Shipping lines is on, which lists them marked in their own column and in both exports. A fleet is not a post. A link to a parent that is missing, belongs to another race or loops is listed as its own top-level entry with a note, and a post whose holders cannot be told is not shown as vacant. The CSV holds one row per entry, with its path from the top. Both files are named for the empire, or for the game and race IDs when the name has no usable form. The Markdown file lists every entry nested under its parent, after a Mermaid diagram of the admin commands, or of the formations that head others, which GitHub and Obsidian draw; a diagram of more than {{ diagramLimit }} such units is left out. Branch exports one admin command or formation and everything under it as a Markdown file of its own, with its own diagram unless the branch holds more than {{ diagramLimit }} units, so a large organisation is drawn a branch at a time.
+            Export the structure as CSV or Markdown. The naval structure leaves out the fleets and ships of shipping lines unless Shipping lines is on, which lists them, marks them in their own column and includes them in both exports. A fleet is not a post. An entry whose parent is missing, belongs to another race or loops appears at the top level with a note. A post whose holders cannot be told is not marked vacant. The CSV has one row per entry, with its path from the top. Both filenames use the empire's name, or the game and race IDs when the name has no usable form. The Markdown file lists every entry nested under its parent. It begins with a Mermaid diagram of the admin commands or of the formations that head others, which GitHub and Obsidian can render. The diagram is omitted above {{ diagramLimit }} such units. Branch exports one admin command or formation and everything under it as a Markdown file of its own. Its diagram is also omitted above {{ diagramLimit }} units, so a large organisation is drawn a branch at a time.
           </div>
         </v-card>
       </template>

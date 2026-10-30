@@ -1796,7 +1796,7 @@ const MUTANTS = [
   ['the roster waits for the structure to load', PAGE, 'return allLoaded(this.loadErrors, CORE_INPUTS)', 'return allLoaded(this.loadErrors, Object.keys(INPUT_LABELS))', ['page-structure-loading', 'page-optional-read-failure']],
   ['the download is saved as plain text', PAGE, 'new Blob([file.text], { type: file.type })', 'new Blob([file.text], { type: \'text/plain\' })', ['page-download', 'page-download-ground']],
   ['the CSV button saves the Markdown', PAGE, '@click="downloadStructure(\'csv\')"', '@click="downloadStructure(\'markdown\')"', ['page-download']],
-  ['the structure panel has no summary', PAGE, 'data-summary="The naval admin commands', 'data-note="The naval admin commands', ['page-summaries']],
+  ['the structure panel has no summary', PAGE, 'data-summary="Review naval admin commands', 'data-note="Review naval admin commands', ['page-summaries']],
   ['the post filter is not a saved field', PAGE, 'postFilter: { key: \'commandersPost\', default: null },', '', ['page-filters-persisted', 'page-post-filter', 'page-renders']],
   ['the age bound takes any value in the saved view', PAGE, 'ageMin: { key: \'commandersAgeMin\', default: null, valid: validBound },', 'ageMin: { key: \'commandersAgeMin\', default: null },', ['page-filters-persisted', 'page-age-stored-number']],
   ['a builder writes to the rows it is given', U('naval-hierarchy'), 'kept.push(row)', 'kept.push(Object.assign(row, { kept: true }))', ['naval-frozen']],

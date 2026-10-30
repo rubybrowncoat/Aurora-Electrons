@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel save-panel" data-summary="The save this window shows and the saves opened before it." elevation="1" data-save-panel>
+  <v-card class="panel save-panel" data-summary="Review the current save and previously opened saves." elevation="1" data-save-panel>
     <div class="panel-head">
       <span>Save</span>
       <v-btn small outlined :disabled="busy" data-save-choose @click="choose"><v-icon small left>mdi-folder-open-outline</v-icon>Open a save…</v-btn>

@@ -85,7 +85,7 @@
         </div>
       </div>
 
-      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks." elevation="1">
+      <v-card class="panel map-card" data-summary="Explore known systems and jump links, coloured by the selected measure with markers chosen in Show." elevation="1">
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel notebook-digest" data-summary="Changes to the economy shown by the saves the app observed, since the last acknowledged save." elevation="1">
+  <v-card class="panel notebook-digest" data-summary="Review economic changes in observed saves since the last acknowledged save." elevation="1">
     <div class="panel-head">
       <span>Economic changes since the last acknowledgment</span>
       <span class="caption text--secondary" data-digest-caption>{{ caption }}</span>

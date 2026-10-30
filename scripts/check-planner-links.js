@@ -1212,7 +1212,7 @@ const MUTATIONS = [
 
 // The faults of the templates: each must be found by the template statements.
 const TEMPLATE_FAULTS = [
-  { name: 'the handover panel loses its summary', templates: { sensors: (text) => text.replace(/ data-summary="The missile handed over[^"]*"/, '') }, fails: ['template: every top-level panel of the three pages'] },
+  { name: 'the handover panel loses its summary', templates: { sensors: (text) => text.replace(/ data-summary="Review the missile imported from Missile Designer[^"]*"/, '') }, fails: ['template: every top-level panel of the three pages'] },
   { name: 'the voice slips into the first person in the handover panel', templates: { sensors: (text) => text.replace('Editing a sizing input ends the handover.', 'I end the handover when you edit a sizing input.') }, fails: ['template: the words of the links and the notices'] },
   { name: 'the voice slips into the second person in the comparison', templates: { compare: (text) => text.replace('Size sensors for this missile', 'Size your sensors for this missile') }, fails: ['template: the words of the links and the notices'] },
   { name: 'the back link is a clickable div', templates: { sensors: (text) => text.replace('<page-link :to="handoffBackLink"', '<div @click="go" data-planner-link="back"').replace('data-planner-link="back" />', 'data-planner-link="back"></div>') }, fails: ['template: every link of the handover is a page link'] },

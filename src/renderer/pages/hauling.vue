@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, and the freighters that carry them." elevation="1" data-hauling-plan>
+        <v-card class="panel" data-summary="Plan hauls to cover colony mineral shortages and compare the freighters that could carry them." elevation="1" data-hauling-plan>
           <div class="panel-head">
             <span>Hauling plan<provenance-mark rule="hauling.planTonnes" label /></span>
             <span class="d-flex align-center flex-wrap plan-tools">
@@ -87,11 +87,11 @@
             A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too) needs more than it holds plus the mass-driver packets on their way; with Fill reserves on, it is also short when it holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs, and minerals already in a freighter's hold aren't counted. A class is timed on full holds and round trips at top speed, fully crewed and undamaged, with its Logistics bonuses counted as 1, so a real ship may load faster. A tonne of mineral takes two tonnes of cargo space, and the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load only at a colony with a spaceport or cargo shuttle station and is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held, so its distance, times and fuel follow the way round, and a colony the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
           </div>
           <div class="panel-foot caption text--secondary" data-propagation-basis>
-            A class's round trip is flown cycle after cycle for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading as waits; the round trip on the saved positions stands beside it with the throughput between them. A haul to anything else, to a system with no survey, to a body whose orbit does not rebuild to within a kilometre, or by a class that is not faster than the body, keeps the saved positions and says why.
+            A class's round trip is flown cycle after cycle for a year, with loading and unloading counted as waits. Independent asteroids, moons, trojans and eccentric bodies within one orbit of their last update are placed where they will be on each arrival. The round trip on the saved positions is shown beside it, with the throughput between them. A haul to anything else, to a system with no survey, to a body whose orbit does not rebuild to within a kilometre, or by a class that is not faster than the body, keeps the saved positions and says why.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, cycle time, yearly moves and fuel." elevation="1" data-hauling-routes>
+        <v-card class="panel" data-summary="Compare repeating fleets by their stops, cycle time, yearly moves and fuel use." elevation="1" data-hauling-routes>
           <div class="panel-head">
             <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
@@ -186,10 +186,10 @@
             A fleet sails at its set speed, held to the effective maximum of its slowest ship under its own power (from the undamaged engines, the overhaul and the mass of a ship it tows), and at that maximum when the fleet is set to it. Each ship burns fuel at its own engine power scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet that can't be profiled, or whose every hold is in a hangar or under tow, is left out of the totals with the reason.
           </div>
           <div class="panel-foot caption text--secondary" data-cycle-basis>
-            A transit takes no time. After each jump every ship of the fleet that is not in a hangar draws a delay from its crew, and the fleet waits at the next jump point only for what the flight and stops since the jump have not used: a range from the lowest to the highest draw, the cycle being timed at the upper case with the lower case beside it. The cycle repeats, so the delay after the last jump carries into the first. The game retries a blocked transit at the start of each subpulse and the length of the subpulses ahead is not known, so the longest wait runs up to two subpulses (12 hours) past the second the delay clears. A fleet whose crew is not in the save has no cycle time and is left out of the totals.
+            A transit takes no time. After each jump, every ship of the fleet that is not in a hangar draws a delay from its crew. The fleet waits at the next jump point only for what the flight and stops since the jump have not used. That wait is a range from the lowest to the highest draw, and the cycle is timed at the upper case with the lower case beside it. The cycle repeats, so the delay after the last jump carries into the first. The game retries a blocked transit at the start of each subpulse, and the length of the subpulses ahead is not known. The longest wait therefore runs up to two subpulses (12 hours) past the second the delay clears. A fleet whose crew is not in the save has no cycle time and is left out of the totals.
           </div>
           <div class="panel-foot caption text--secondary" data-propagation-basis>
-            A cycle is flown for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading and order delays as waits, so the next leg leaves from where the fleet arrived. The cycle and the yearly figures are the propagated ones, with the cycle on the saved positions beside them; an order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
+            A cycle is flown for a year with loading, unloading and order delays counted as waits, so the next leg leaves from where the fleet arrived. Independent asteroids, moons, trojans and eccentric bodies within one orbit of their last update are placed where they will be on each arrival. The cycle and the yearly figures are the propagated ones, with the cycle on the saved positions beside them. An order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
           </div>
         </v-card>
 
@@ -199,7 +199,7 @@
 
         <v-row>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="What the repeating routes bring to each colony every year, by cargo." elevation="1">
+            <v-card class="panel" data-summary="Compare yearly cargo deliveries to each colony from repeating routes." elevation="1">
               <div class="panel-head"><span>Deliveries by destination<provenance-mark rule="hauling.deliveries" label /></span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :sort-by.sync="deliveriesTable.sortBy" :sort-desc.sync="deliveriesTable.sortDesc" :items-per-page.sync="deliveriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.destination`]="{ item }">
@@ -211,7 +211,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="Freighter classes with their capacity, speed and yearly distance and fuel." elevation="1">
+            <v-card class="panel" data-summary="Compare freighter classes by capacity, speed, yearly distance and fuel use." elevation="1">
               <div class="panel-head"><span>Freighter classes<provenance-mark rule="hauling.classYear" label /></span></div>
               <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.ClassName`]="{ item }">

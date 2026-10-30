@@ -67,7 +67,7 @@
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
-            <v-card class="panel" data-summary="The known systems shaded by distance from the first stop, with the planned route drawn across them." elevation="1">
+            <v-card class="panel" data-summary="Explore the planned route across known systems shaded by distance from the first stop." elevation="1">
               <div class="panel-head">
                 <span>Route map<provenance-mark rule="route.reachShade" /></span>
                 <span class="legend">
@@ -81,12 +81,12 @@
               <div class="panel-body">
                 <system-map :systems="mapNodes" :links="links" :route="plan.systems" :route-color="colors.route" :selected="lastStop ? lastStop.SystemID : null" aria-label="Known systems by distance from the first stop, with the route" @select="(systemId) => insertStop(stopKeys.length, { key: `system:${systemId}`, kind: 'system' })" />
               </div>
-              <div class="panel-foot caption text--secondary">Positions as on the game's galactic map, shaded by distance from the first stop, and systems the save leaves at the game's centre are drawn beside a linked system. Numbers mark the stops. Click a system to add it as the last stop. A leg with no explored route is bridged by a straight line.</div>
+              <div class="panel-foot caption text--secondary">Click a system to add it as the last stop. Numbers mark the stops. Positions are as on the game's galactic map, and systems are shaded by distance from the first stop. Systems the save leaves at the game's centre are drawn beside a linked system. A leg with no explored route is bridged by a straight line.</div>
             </v-card>
           </v-col>
         </v-row>
 
-        <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way." data-leg-detail elevation="1">
+        <v-card v-if="detailRows.length" class="panel" data-summary="Review each route leg, its jump points, distance and travel time." data-leg-detail elevation="1">
           <div class="panel-head">
             <span>Route detail<provenance-mark rule="route.detailTotal" label /></span>
           </div>
@@ -128,7 +128,7 @@
           <div class="panel-foot caption text--secondary">Times are flying {{ speedText }}, counted from the first stop. {{ shockFoot }}<provenance-mark :result="speedResult" /></div>
         </v-card>
 
-        <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time." elevation="1" data-distance-panel>
+        <v-card class="panel" data-summary="Compare explored-route distances, jumps and travel times from the first stop to every known system." elevation="1" data-distance-panel>
           <div class="panel-head">
             <span>Distances from {{ origin ? origin.name : '—' }}<provenance-mark rule="route.reachableCount" label /></span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />

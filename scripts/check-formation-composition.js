@@ -1664,7 +1664,7 @@ const MUTANTS = [
   ['no class is an STO class by its weapon', 'let found = known && row.STOWeapon > 0', 'let found = false', GROUND_FILE, ['model-template', 'replacement-review']],
   ['no class is an STO class by its equipment', '} else if (component && component.STO > 0) {', '} else if (false) {', GROUND_FILE, ['model-template', 'replacement-review']],
   ['a class that is not known to be STO is not an STO class', 'return found ? true : known ? false : null', 'return found', GROUND_FILE, ['model-template', 'replacement-review']],
-  ['the formations panel has no summary', 'data-summary="The race\'s ground formations, each once', 'data-hint="The race\'s ground formations, each once', SURVEY_FILE, ['browser-panels'], true, []],
+  ['the formations panel has no summary', 'data-summary="Review ground formations', 'data-hint="Review ground formations', SURVEY_FILE, ['browser-panels'], true, []],
   ['the basis toggle is disconnected', 'v-model="formationBasis"', ':value="formationBasis"', SURVEY_FILE, ['browser-basis', 'browser-switch', 'browser-detail'], true, ['short']],
   ['the rows cannot be expanded', 'show-expand single-expand :expanded.sync="formationExpanded"', 'single-expand :expanded.sync="formationExpanded"', SURVEY_FILE, ['browser-got-through', 'browser-detail'], true, ['short']],
   ['the detail names the other template', ':data-compare-template-id="compareOf(item).template.id"', ':data-compare-template-id="compareOf(item).otherTemplate.id"', SURVEY_FILE, ['browser-detail', 'browser-switch'], true, ['short']],

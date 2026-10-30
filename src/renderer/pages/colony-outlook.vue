@@ -27,7 +27,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" class="mt-2" />
 
-        <v-card class="panel" data-summary="Each colony's population, growth, body capacity, infrastructure and workers, projected forward." elevation="1">
+        <v-card class="panel" data-summary="Compare colony population, growth and worker projections with body capacity and infrastructure." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Colonies<provenance-mark rule="colonies.populationProjection" label /></span>
@@ -165,11 +165,11 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see which colonies will outgrow their bodies or lack workers. Growth is an estimate from the game's growth rule: it slows as a colony fills its body and stops at the infrastructure cap, and the species and governor modifiers apply. Workers needed are today's installations and shipyards; with the queue counted they also include the installations queued and the shipyard upgrades under way, each from the date the production forecast supports. The first figure counts only completions with a supported date, and "At worst" counts every completion that could happen: a job with no date, a queued job the forecast may start in an order it did not try, and a continual upgrade add nothing to the first, and a paused or stalled job adds nothing certain. The figures for now and for the horizon are endpoints: a colony short of workers on the way is not counted in them but stays in the attention filter, and its row says from which month. Population aboard Ark ships is listed apart, with no growth applied. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
+            Find colonies that will outgrow their bodies or lack workers. Growth is an estimate from the game's growth rule. It slows as a colony fills its body and stops at the infrastructure cap, and the species and governor modifiers apply. Workers needed are today's installations and shipyards. With the queue counted, they also include the installations queued and the shipyard upgrades under way, each from the date the production forecast supports. The first figure counts only completions with a supported date. "At worst" counts every completion that could happen. A job with no date, a queued job the forecast may start in an order it did not try, and a continual upgrade add nothing to the first figure, and a paused or stalled job adds nothing certain. The figures for now and for the horizon are endpoints. A colony short of workers on the way is not counted in them but stays in the attention filter, and its row names the month the shortage starts. Population aboard Ark ships is listed separately, with no growth applied. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
           </div>
         </v-card>
 
-        <v-card v-if="ark.ships.length" class="panel" data-summary="Population living aboard Ark ships at colonies, with the species aboard and the berths still empty." elevation="1">
+        <v-card v-if="ark.ships.length" class="panel" data-summary="Review the population and species aboard Ark ships at colonies, along with their empty berths." elevation="1">
           <div class="panel-head">
             <span>Ark population<provenance-mark rule="arks.occupied" label /></span>
             <span class="caption text--secondary">{{ arkHeadline }}<provenance-mark :result="ark.totals.occupied" /></span>
@@ -243,7 +243,7 @@
 
         <colonist-floor :key="`${GameID}-${RaceID}`" :colonies="rows" :sources="colonistSources" :committed-view="committedView" :loading="colonistState.loading" :failed="colonistState.failed" :error="colonistState.error" @retry="retryColonistSources" />
 
-        <v-card class="panel mine-bootstrap" data-summary="Three ways to add mining capacity at a colony." elevation="1">
+        <v-card class="panel mine-bootstrap" data-summary="Compare the three ways to add mining capacity at a colony." elevation="1">
           <div class="panel-head">
             <span>Mine bootstrap<provenance-mark rule="mineBootstrap.localBuild" label /></span>
           </div>

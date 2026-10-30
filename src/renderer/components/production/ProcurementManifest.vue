@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel procurement-manifest" data-summary="What a batch of ship hulls still lacks of each component after stock and queued projects are counted." elevation="1">
+  <v-card class="panel procurement-manifest" data-summary="Find component shortages for a batch of hulls after available stock and queued production are allocated." elevation="1">
     <div class="panel-head">
       <span>Procurement manifest<provenance-mark rule="production.procurementManifest" /></span>
       <span>
@@ -85,7 +85,7 @@
       <div v-if="message" class="px-4 pb-2 caption" data-manifest-message>{{ message }}</div>
     </template>
     <div class="panel-foot caption text--secondary">
-      Use it to see which components a batch still lacks, where the stock sits and what has to be moved to the build colony, and to export the plan as CSV. The classes are served in the order listed, and a unit of stock or of a queued project goes to one class only; each takes the stock at its own colony first, then stock elsewhere, then queued projects. What is short is the need left after that. Components built with the hull (armour, missile engines, prototypes, civilian-line and obsolete parts) have no project, so their shortage is built with the hull, and a component the race has not researched is taken from stock, only the shortage left after that being listed as not available (stock required). A row the save leaves without an amount is not known, never none held, and a shortage that rests on supply not known or not counted reads "at most". A paused project is listed apart and is not supply, and cargo already on its way is not counted. An automatic refit with Use Components on, and a task or claim that cannot be read, hold back the whole stock of the component at the colony until known. The CSV has one record for each plan, component, transport and claim; an empty cell is not known, never 0.
+      Find which components a batch still lacks, where the stock sits and what has to be moved to the build colony, and export the plan as CSV. The classes are served in the order listed. A unit of stock or of a queued project goes to one class only. Each class takes the stock at its own colony first, then stock elsewhere, then queued projects. What is short is the need left after that. Components built with the hull (armour, missile engines, prototypes, civilian-line and obsolete parts) have no project, so their shortage is built with the hull. A component the race has not researched is taken from stock, and only the shortage left after that is listed as not available (stock required). A row the save leaves without an amount is not known, never none held. A shortage that rests on supply not known or not counted reads "at most". A paused project is listed apart and is not supply, and cargo already on its way is not counted. An automatic refit with Use Components on, and a task or claim that cannot be read, hold back the whole stock of the component at the colony until it is known. The CSV has one record for each plan, component, transport and claim. An empty cell is not known, never 0.
     </div>
   </v-card>
 </template>

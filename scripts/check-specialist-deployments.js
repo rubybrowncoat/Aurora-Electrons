@@ -1433,7 +1433,7 @@ const MUTANTS = [
   ['a formation of unknown rating at an inactive construct is not marked', ' || (roles.xeno === null && index.constructs && index.constructs.inactive.has(bodyId))', '', SPEC_FILE, ['construct-sites']],
   ['a construct on a body with a ruin worked is counted as a second work', "if (construct && !work.some((item) => item.role === 'xeno')) {", 'if (construct) {', SPEC_FILE, ['construct-sites']],
   ['the constructs of bodies with no colony of the race are read', 'from FCT_AncientConstruct inner join FCT_Population on', 'from FCT_AncientConstruct left join FCT_Population on', SPEC_FILE, ['targets-eligible', 'construct-sites', 'save-1-constructs']],
-  ['the deployments panel has no summary', 'data-summary="The race\'s geological survey', 'data-hint="The race\'s geological survey', SURVEY_FILE, ['browser-panels'], true],
+  ['the deployments panel has no summary', 'data-summary="Review geological survey and xenoarchaeology formations', 'data-hint="Review geological survey and xenoarchaeology formations', SURVEY_FILE, ['browser-panels'], true],
   ['the roles filter is disconnected from its chips', 'v-model="deployRoles"', ':value="deployRoles"', SURVEY_FILE, ['browser-roles', 'browser-restored'], true],
   ['the states filter is disconnected from its chips', 'v-model="deployStates"', ':value="deployStates"', SURVEY_FILE, ['browser-states', 'browser-restored'], true],
   ['the switch of the targets is disconnected', 'v-model="deployUnstaffed"', ':input-value="deployUnstaffed"', SURVEY_FILE, ['browser-unstaffed', 'browser-restored'], true],

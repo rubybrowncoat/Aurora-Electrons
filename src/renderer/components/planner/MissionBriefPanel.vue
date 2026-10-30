@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel" data-summary="What the ship is for, written as limits to meet and preferences to order by." elevation="1" data-brief="panel">
+  <v-card class="panel" data-summary="Define the ship's requirements and the preferences used to rank alternatives." elevation="1" data-brief="panel">
     <div class="panel-head">
       <span>Mission brief<v-chip v-if="dirty" x-small color="warning" outlined class="ml-2" data-brief="dirty-chip">{{ briefWords.unsaved }}</v-chip><v-chip v-if="draft.preset" x-small outlined class="ml-2" data-brief="preset-chip">From {{ presetLabel(draft.preset) }}</v-chip></span>
       <span class="d-flex align-center flex-wrap">
@@ -168,7 +168,7 @@
     </div>
 
     <div class="panel-foot caption text--secondary">
-      Every alternative is judged against the limits, and each limit reads pass, fail or unknown with the figure found, the figure required and the reason. Requirements decide the verdict: meets (every one passes), open (none fails and one is unknown) or fails (one fails). Preferences order the alternatives within a verdict and are never added up. A preset fills the fields as a starting point to edit. A ship size of 50 tons is 1 HS. A cargo hold stores 50 tons for each HS of its size, and a hangar holds ships by their HS. A propulsion set is engines and tanks over a hull, so its cargo, hangar and deployment are unknown, and a saved class gives them as the save stores them. The presets are guidance, not game rules, and a brief is kept for the race on every branch of the campaign.
+      Every alternative is judged against the limits. Each limit shows pass, fail or unknown, with the figure found, the figure required and the reason. Requirements decide the verdict: meets if every one passes, open if none fails and one is unknown, or fails if one fails. Preferences rank the alternatives within a verdict and are never added up. A preset fills the fields with a starting point to edit. A ship size of 50 tons is 1 HS. A cargo hold stores 50 tons for each HS of its size, and a hangar holds ships by their HS. A propulsion set is engines and tanks over a hull, so its cargo, hangar and deployment are unknown. A saved class gives them as the save stores them. The presets are guidance, not game rules. A brief is kept for the race on every branch of the campaign.
     </div>
   </v-card>
 </template>

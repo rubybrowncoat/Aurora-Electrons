@@ -40,7 +40,7 @@
         The latest save couldn't be read for a snapshot (the game may have been writing it), so this history is missing it. The app tries again at the next save. The console has the details.
       </v-alert>
 
-      <v-card v-if="campaignView" class="panel history-campaign" data-summary="Which campaign this save belongs to, its branches and the saves attached to it." elevation="1">
+      <v-card v-if="campaignView" class="panel history-campaign" data-summary="Review this save's campaign, its branches and attached saves." elevation="1">
         <div class="panel-head">
           <span>Campaign<v-chip v-if="campaignView.carriedOver" x-small outlined class="ml-2" title="History recorded before campaigns were tracked is assumed to belong to this campaign">carried over</v-chip></span>
           <span class="caption text--secondary">{{ campaignView.title }}</span>
@@ -101,7 +101,7 @@
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
         </v-alert>
 
-        <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Every race recorded in this game on one chosen measure over time." elevation="1">
+        <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Compare every recorded race in the game on the selected measure over time." elevation="1">
           <div class="panel-head">
             <span>Rivals<provenance-mark :rule="rivals.rule" /> <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
             <span class="legend">
@@ -164,7 +164,7 @@
         </v-card>
       </template>
 
-      <v-card class="panel history-milestones" data-summary="Notes pinned to an exact game time, each with a type and an optional link to an object." elevation="1">
+      <v-card class="panel history-milestones" data-summary="Review notes pinned to exact game times, with their types and optional object links." elevation="1">
         <div class="panel-head">
           <span>Milestones</span>
           <span class="caption text--secondary" data-milestone-count>{{ milestoneCaption }}</span>
@@ -251,7 +251,7 @@
 
       <colony-series :database="database" :config="config" :game-id="GameID" :race-id="RaceID" :game-time="GameTime" :resolved="resolved" :view="colonyBudget" :cap="retentionView.profile.cap" :date="date" :separator="separator" @changed="colonyChanges++" />
 
-      <v-card class="panel history-retention" data-summary="How many samples the race's history keeps, how far apart they are and how large the record is." elevation="1">
+      <v-card class="panel history-retention" data-summary="Review the history's retained sample count, sample spacing and record size." elevation="1">
         <div class="panel-head">
           <span>Retention</span>
           <span class="caption text--secondary">{{ retentionView.sampling }}</span>
@@ -313,7 +313,7 @@
         </div>
       </v-card>
 
-      <v-card class="panel history-backup" data-summary="A file of the campaigns, the race histories and the planners' annotations, to keep or to move to another computer." elevation="1">
+      <v-card class="panel history-backup" data-summary="Back up campaigns, race histories and planner annotations, or transfer them to another computer." elevation="1">
         <div class="panel-head">
           <span>Backup</span>
           <span class="caption text--secondary">Export the history, or restore it from a file</span>
@@ -1469,7 +1469,7 @@ export default {
         key: 'minerals',
         title: 'Mineral stockpiles',
         rules: ['history.stockpile', 'history.mineralChange'],
-        summary: 'Stockpiles of the selected minerals over time.',
+        summary: 'Track stockpiles of the selected minerals over time.',
         compare: { scales: MINERAL_SCALES, resetDisabled: this.span === 0, csvDisabled: !this.mineralIds.length || !this.snapshots.length },
         picker: {
           model: this.mineralIds,
@@ -1527,7 +1527,7 @@ export default {
           key: 'population',
           title: 'Population',
           rules: ['history.population', 'history.colonies'],
-          summary: 'The population and the number of colonies over the years.',
+          summary: 'Track population and colony count over time.',
           data: { datasets: [line('Population', pick('population'), 0), line('Colonies', pick('colonies'), 1, 'y1')] },
           series: [field('population', 'M people'), field('colonies', 'colonies')],
           options: this.options({ y: people, y1: (value) => `${value}` }),
@@ -1536,7 +1536,7 @@ export default {
           key: 'wealth',
           title: 'Wealth',
           rules: ['history.treasury', 'history.income'],
-          summary: 'The treasury and annual income over time.',
+          summary: 'Track the treasury and annual income over time.',
           data: { datasets: [line('Treasury', pick('wealth'), 0), line('Annual income', pick('income'), 1, 'y1')] },
           series: [field('wealth', 'wealth'), field('income', 'wealth/yr')],
           options: this.options({ y: compact, y1: compact }),
@@ -1545,7 +1545,7 @@ export default {
           key: 'fleet',
           title: 'Fleet tonnage',
           rules: ['history.fleetTonnage'],
-          summary: 'The military and commercial tonnage fielded over time.',
+          summary: 'Track military and commercial fleet tonnage over time.',
           data: { datasets: [line('Military', pick('militaryTons'), 0), line('Commercial', pick('commercialTons'), 1)] },
           series: [field('militaryTons', 't'), field('commercialTons', 't')],
           options: this.options({ y: (value) => `${compact(value)} t` }),
@@ -1554,7 +1554,7 @@ export default {
           key: 'research',
           title: 'Research and exploration',
           rules: ['history.research', 'history.systems'],
-          summary: 'The research output and the number of systems known over time.',
+          summary: 'Track research output and the number of known systems over time.',
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
           series: [field('research', 'RP'), field('systems', 'systems')],
           options: this.options({ y: compact, y1: (value) => `${value}` }),
@@ -1564,7 +1564,7 @@ export default {
           key: 'installations',
           title: 'Installations',
           rules: ['history.installations'],
-          summary: 'How many installations of the selected types have been built over time.',
+          summary: 'Track the number of installations of the selected types over time.',
           picker: { model: this.chosenInstallations, options: this.installationOptions, change: this.setInstallations },
           extraNotes: this.installationNotes,
           data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => valueOrNull(installationResult(snapshot, id, this.installationNames[id] || `installation ${id}`))), index)) },
@@ -1575,7 +1575,7 @@ export default {
           key: 'logistics',
           title: 'Fuel and maintenance supplies',
           rules: ['history.stockpile'],
-          summary: 'The fuel and maintenance supply stocks over time.',
+          summary: 'Track fuel and maintenance supply stocks over time.',
           data: { datasets: [line('Fuel (L)', pick('fuel'), 0), line('MSP', pick('msp'), 1, 'y1')] },
           series: [field('fuel', 'L'), field('msp', 'MSP')],
           options: this.options({ y: (value) => `${compact(value)} L`, y1: compact }),

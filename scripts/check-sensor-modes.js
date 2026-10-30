@@ -718,7 +718,7 @@ const pageStatements = async (mutates, stock) => {
       return problems.length === 0 && needed.length === 0 && (template.match(/<v-card\b[^>]*class="panel"/g) || []).length === 14 ? true : short([...problems, ...needed])
     }],
     ['template: a panel without its data-summary is found in each mode', () => {
-      return panelProblems(TEMPLATE((source) => source.replace(/ data-summary="The smallest search sensor[^"]*"/, ''))).length === 1 && panelProblems(TEMPLATE((source) => source.replace(/ data-summary="The wanted beam range and tracking speed[^"]*"/, ''))).length === 1 ? true : 'the missing summaries were not found'
+      return panelProblems(TEMPLATE((source) => source.replace(/ data-summary="Find the smallest search sensor[^"]*"/, ''))).length === 1 && panelProblems(TEMPLATE((source) => source.replace(/ data-summary="Find beam fire control sizes[^"]*"/, ''))).length === 1 ? true : 'the missing summaries were not found'
     }],
     ['template: every figure of the new panels and the components carries its provenance mark', () => {
       const parts = { page: TEMPLATE(), sizing: templateOf(fs.readFileSync(componentPath('ActiveSizingPanel'), 'utf8')) }

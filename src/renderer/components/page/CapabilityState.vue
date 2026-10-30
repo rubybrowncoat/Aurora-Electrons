@@ -1,5 +1,5 @@
 <template>
-  <v-card v-if="unsupported" class="panel capability-state" elevation="1" :data-summary="`What the save lacks for ${title}, so the page is not shown, and a button to check the save again.`" data-capability-state="unsupported">
+  <v-card v-if="unsupported" class="panel capability-state" elevation="1" :data-summary="`Review what the save lacks to show ${title}, or check the save again.`" data-capability-state="unsupported">
     <div class="panel-head">
       <span><v-icon small left color="error">mdi-alert-outline</v-icon>{{ title }} cannot be shown for this save</span>
       <v-btn small outlined :loading="checking" data-capability-retry @click="$emit('retry')">Check again</v-btn>

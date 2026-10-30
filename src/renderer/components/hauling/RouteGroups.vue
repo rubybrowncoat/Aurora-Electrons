@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel route-groups" data-summary="The repeating routes that the saved orders make, with the fleets on each." elevation="1" data-route-groups>
+  <v-card class="panel route-groups" data-summary="Compare repeating routes grouped by saved orders, with the fleets assigned to each." elevation="1" data-route-groups>
     <div class="panel-head">
       <span>Route coverage<provenance-mark rule="hauling.routeGroup" label /></span>
       <span v-if="ready" class="d-flex align-center flex-wrap">
@@ -90,7 +90,7 @@
           <div v-if="record.orders.length" class="caption text--secondary" data-route-orders>Stored orders: <span v-for="(order, index) in record.orders" :key="order.MoveOrderID" :data-route-order="order.MoveOrderID">{{ index ? ', ' : '' }}#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span></div>
         </div>
       </div>
-      <div class="panel-foot caption text--secondary">Routes are told apart by the saved orders alone: the path, the service and the cargo limits of each order. The delay only sorts fleets within a route, and a different conditional order makes another route. The yearly capacity of a route is counted once, however many fleets share it. A template name is a match of content, since no table links a fleet to a template.</div>
+      <div class="panel-foot caption text--secondary">Routes are grouped only by their saved orders: the path, service and cargo limits of each order. Delay only sorts fleets within a route. A different conditional order creates a separate route. Each route's yearly capacity is counted once, regardless of how many fleets share it. Template names are matched by content because no table links a fleet to a template.</div>
     </template>
   </v-card>
 </template>

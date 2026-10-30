@@ -176,7 +176,7 @@
       <div v-for="note in read.notes" :key="note.uuid" class="px-4 caption text--secondary mt-1" data-reserve-unreadable>{{ note.reason }}</div>
 
       <div class="panel-foot caption text--secondary" data-reserve-limits>
-        Use it to see on which day a planned withdrawal would leave a colony short. The game minimum is the reserve the save stores for a colony's mineral; fuel and maintenance supplies have none. The class minimum is what a ship class keeps back when it gives fuel or supplies, shown as at least the figure when some classes record none. The player reserve is the player's own local record: it is not in the save, gives the game no order, and nothing in the game stops a ship or a mass driver from taking it. Events run on daily ticks, so a delivery or withdrawal due on day 0 counts on day 1: deliveries arrive first, then the withdrawals in the order of the scenario names, then production, and a withdrawal takes only what the stock holds above the reserve and is not retried. The refineries draw on the colony's Sorium and the maintenance facilities on its Duranium, Uridium and Gallicite, after the planned withdrawals; a colony whose production cannot be worked out is listed as not known on those minerals. A delivery with no time, and a delivery or withdrawal after the period, are listed apart and not counted. A record is held to its colony only while the save shows it is that colony or the player confirmed it.
+        Find the day a planned withdrawal would leave a colony short. The game minimum is the mineral reserve stored for a colony; fuel and maintenance supplies have no game minimum. The class minimum is what a ship class retains when supplying fuel or maintenance supplies. It is shown as at least the displayed amount when some classes have no recorded minimum. The player reserve is a local record, not a save value or game order. It does not stop ships or mass drivers from taking that stock. Events use daily ticks, so a delivery or withdrawal due on day 0 counts on day 1. Deliveries come first, then withdrawals in scenario-name order, then production. A withdrawal takes only stock above the reserve and is not retried. After the planned withdrawals, refineries consume the colony's Sorium and maintenance facilities consume its Duranium, Uridium and Gallicite. If a colony's production cannot be calculated, those minerals are marked as not known. Deliveries without a time and deliveries or withdrawals after the period are listed separately and excluded. A record applies to a colony only while its identity is established by the save or confirmed by the player.
       </div>
     </template>
   </v-card>
@@ -194,8 +194,8 @@ import { mineralFeeds, supplyFeeds } from '../../utilities/resource-feeds'
 import { LABEL_LENGTH, NOTE_LENGTH, PLANS_PER_RECORD, PLAN_KINDS, SCENARIO_LENGTH, confirmSource, deleteReserve, entriesForLedger, noteChoices, rebaseReserve, saveReserve, scenarioNames } from '../../utilities/resource-reserves'
 
 const SUMMARIES = {
-  supplies: 'The fuel and maintenance supplies each colony holds, set beside the minimums and the reserve the player keeps.',
-  minerals: 'The minerals each colony holds with the packets and hauls on their way, set beside the reserves.',
+  supplies: 'Compare colony fuel and maintenance supply stocks with minimums and player reserves.',
+  minerals: 'Compare colony mineral stocks and incoming packets and hauls with reserves.',
 }
 
 const TITLES = { supplies: 'Reserves and timed ledger: fuel and maintenance supplies', minerals: 'Reserves and timed ledger: minerals' }

@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel pinned" data-summary="The events pinned on this branch, kept as copies." elevation="1">
+  <v-card class="panel pinned" data-summary="Review copies of events pinned on this branch." elevation="1">
     <div class="panel-head">
       <div class="subtitle-2">Pinned <span v-if="!unavailable" class="caption text--secondary">{{ count(entries.length) }} on this branch</span></div>
     </div>

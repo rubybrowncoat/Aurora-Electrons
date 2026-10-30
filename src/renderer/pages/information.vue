@@ -82,7 +82,7 @@
         <v-alert v-if="!destination" type="info" dense outlined class="mt-4 mb-0">Pick a destination to see what the fleets could move there.</v-alert>
         <v-alert v-for="problem in problems" :key="problem.text" type="warning" dense outlined class="mt-4 mb-0">{{ problem.text }}</v-alert>
 
-        <v-card class="panel" data-summary="How long each fleet would take to sail the chosen run and how much it could carry." elevation="1">
+        <v-card class="panel" data-summary="Compare fleets by travel time and carrying capacity on the selected run." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Fleets on this run<provenance-mark rule="transport.roundTrip" label /></span>
@@ -140,7 +140,7 @@
           <div v-if="payoutNote" class="panel-foot caption text--secondary"><span class="font-weight-medium">Shipping-line payout</span><provenance-mark :result="payoutNote.result" label /> {{ payoutNote.text }}</div>
         </v-card>
 
-        <v-card class="panel" data-summary="How long a fleet would take to sail the chosen run as one, at the speed of its slowest ship." data-fleet-panel elevation="1">
+        <v-card class="panel" data-summary="Compare fleet travel times on the selected run, with each fleet moving at its slowest ship's speed." data-fleet-panel elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Fleets sailing together<provenance-mark rule="transport.fleetTrip" label /></span>
@@ -250,11 +250,11 @@
               </td>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Use it to see what a mixed fleet really does beside the classes timed alone, and whether its fuel lasts with the refuelling at the colonies and tankers on the way. A fleet sails at one speed: that of its slowest ship under its own power, which can be lower than the speed saved for the fleet and the class's rating. Every ship shares that travel time and burns fuel at its own engine power, scaled by the share of its maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted, and a fleet with every hold in tow is not supported; a ship with no working engines that nothing carries or tows keeps the fleet from moving. {{ versionNote }} Every jump is followed by a delay each ship draws from its own crew, the longest holding the fleet back, with the transit itself taking no time; the wait is counted for every jump there and back as a range, and the round trip is the upper case, which also allows up to 12 hours for a transit retried after a blocked jump. Where a ship's crew is not in the save the round trip is not given.</div>
-          <div class="panel-foot caption text--secondary" data-fuel-foot>A colony with a spaceport or refuelling station serves each ship at the race's refuelling rate from the stock above the local reserve. Stationary tankers with an undamaged transfer system serve from the fuel above the class minimum and the local reserve, richest first, and a tanker rated under 20,000 L/h serves recipients of 20 hull spaces or less only. The fleets shown draw on a shared stock one after another in the draw order, which is the order of the Fleets pick, or by fleet name when every fleet is shown, each fleet's whole round trip before the next, and which is not the order in time. Sorting the table changes neither that order nor any figure. {{ fillNote }} The fleet's own tankers are not counted, and a fleet starts with the fuel it has aboard now.</div>
+          <div class="panel-foot caption text--secondary">Compare a mixed fleet with the classes timed alone, and check whether its fuel lasts with the refuelling at the colonies and tankers on the way. A fleet sails at one speed: that of its slowest ship under its own power, which can be lower than the speed saved for the fleet and the class's rating. Every ship shares that travel time and burns fuel at its own engine power, scaled by the share of its maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet with every hold in tow is not supported. A ship with no working engines that nothing carries or tows keeps the fleet from moving. {{ versionNote }} Every jump is followed by a delay that each ship draws from its own crew, and the longest holds the fleet back. The transit itself takes no time. The wait is counted for every jump there and back as a range, and the round trip is the upper case, which also allows up to 12 hours for a transit retried after a blocked jump. Where a ship's crew is not in the save, the round trip is not given.</div>
+          <div class="panel-foot caption text--secondary" data-fuel-foot>A colony with a spaceport or refuelling station serves each ship at the race's refuelling rate from the stock above the local reserve. Stationary tankers with an undamaged transfer system serve from the fuel above the class minimum and the local reserve, richest first. A tanker rated under 20,000 L/h serves recipients of 20 hull spaces or less only. The fleets shown draw on a shared stock one after another in the draw order, which is the order of the Fleets pick, or by fleet name when every fleet is shown. Each fleet's whole round trip comes before the next, so the draw order is not the order in time. Sorting the table changes neither the draw order nor any figure. {{ fillNote }} The fleet's own tankers are not counted, and a fleet starts with the fuel it has aboard now.</div>
         </v-card>
 
-        <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way." elevation="1">
+        <v-card class="panel" data-summary="Review colony installation supply and demand, including quantities already in transit." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Civilian work orders<provenance-mark rule="transport.shipments" label /></span>

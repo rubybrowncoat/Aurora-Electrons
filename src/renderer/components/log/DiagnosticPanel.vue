@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel diagnostic" data-diagnostic data-summary="Fire and boarding events in the game log for a recent stretch of game time." elevation="1" :data-state="diagnosis ? diagnosis.state : null" :data-verdict="diagnosis ? diagnosis.verdict : null">
+  <v-card class="panel diagnostic" data-diagnostic data-summary="Review recent fire and boarding events in the game log." elevation="1" :data-state="diagnosis ? diagnosis.state : null" :data-verdict="diagnosis ? diagnosis.verdict : null">
     <div class="panel-head">
       <div class="subtitle-2">Short-interval checklist<provenance-mark v-if="diagnosis" :result="diagnosis.results.events" label /></div>
       <v-select :value="seconds" :items="windows" item-text="text" item-value="seconds" label="Window" dense outlined hide-details class="diagnostic-window" data-diagnostic-window @change="(value) => $emit('window', value)" />
@@ -76,7 +76,7 @@
     </div>
 
     <div class="panel-foot caption text--secondary">
-      The panel lists evidence and never names a cause: the events the game log holds, how far the log covers the window, and the checks the game itself offers for a stalled short interval. The window ends at the newest increment of the open save. A state of partial means the window meets a gap, an increment that may still change, or a failed read. The events listed are those observed, and others may exist. An event carries the state of its own increment. A cause of a stall stays unknown unless the player records one.
+      Review the logged events, coverage and in-game checks for a stalled short interval. These are evidence, not a diagnosis, and a cause remains unknown unless the player records one. The window ends at the open save's newest increment. Partial means it includes a gap, an increment that may still change or a failed read. Only observed events are listed, so others may exist. Each event carries the state of its own increment.
     </div>
   </v-card>
 </template>

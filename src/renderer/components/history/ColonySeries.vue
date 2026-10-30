@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel history-colonies" data-summary="The colonies the app follows through the race's history." elevation="1">
+  <v-card class="panel history-colonies" data-summary="Review the colonies followed through the recorded history." elevation="1">
     <div class="panel-head">
       <span>Colony series</span>
       <span class="caption text--secondary" data-colony-caption>{{ caption }}</span>

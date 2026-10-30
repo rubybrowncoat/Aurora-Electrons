@@ -1,5 +1,5 @@
 <template>
-  <v-card class="panel history-rates" data-summary="How fast a stock of the race or of a followed colony changed over recorded snapshots." elevation="1">
+  <v-card class="panel history-rates" data-summary="Compare how fast a stock of the race or of a followed colony changed between recorded snapshots." elevation="1">
     <div class="panel-head">
       <span>Stock rates<provenance-mark v-for="rule in rules" :key="rule" :rule="rule" /></span>
       <span class="caption text--secondary" data-rates-caption>{{ caption }}</span>

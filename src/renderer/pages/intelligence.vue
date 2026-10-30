@@ -21,7 +21,7 @@
 
           <stat-tiles :tiles="tiles" />
 
-          <v-card class="panel" data-summary="Every alien race met, with its status, communication and diplomatic standing." elevation="1">
+          <v-card class="panel" data-summary="Review known alien races, their status, communication and diplomatic standing." elevation="1">
             <div class="panel-head">
               <span>Known races<provenance-mark v-for="rule in RACE_RULES" :key="rule" :rule="rule" /></span>
             </div>
@@ -53,7 +53,7 @@
           </v-card>
 
           <template v-if="selected">
-            <v-card class="panel" data-summary="The selected race's status, and what has been learned about it so far." elevation="1">
+            <v-card class="panel" data-summary="Review the selected alien race's status and the information gathered about it." elevation="1">
               <div class="panel-head">
                 <span>
                   {{ selected.AlienRaceName }}
@@ -90,7 +90,7 @@
               </v-col>
             </v-row>
 
-            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species observed for the selected race." elevation="1">
+            <v-card class="panel" data-summary="Review observed ship classes, colonies, sensors, ground units, systems and species of the selected alien race." elevation="1">
               <div class="panel-head">
                 <span>Observed<provenance-mark v-for="rule in DETAIL_RULES[detailView]" :key="rule" :rule="rule" /></span>
                 <v-btn-toggle v-model="detailView" mandatory dense class="flex-wrap">
@@ -504,7 +504,7 @@ export default {
         {
           key: 'diplomacy',
           title: 'Diplomatic points',
-          summary: 'The diplomatic points of the selected race over time, against the levels where treaties and statuses change.',
+          summary: 'Track diplomatic points with the selected alien race against treaty and status thresholds.',
           note: `${recordedNote} Dashed lines are where treaties and statuses change.${gapNote(diplomacy)}`,
           results: [diplomacy],
           data: { datasets: [line('Diplomatic points', pointsOf(diplomacy), 0)] },
@@ -513,7 +513,7 @@ export default {
         {
           key: 'fleet',
           title: 'Ships tracked',
-          summary: 'The ships of the selected race tracked in service and destroyed, and their tonnage, over time.',
+          summary: 'Track the selected alien race\'s ships and tonnage over time, including ships in service and destroyed.',
           note: !this.selectedShips.length ? 'No ships tracked.' : `${isAvailable(fleet) ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'The fleet cannot be rebuilt.'}${gapNote(fleet)}`,
           results: [fleet],
           data: {
@@ -528,7 +528,7 @@ export default {
         {
           key: 'intelligence',
           title: translating ? 'Intelligence and translation' : 'Race intelligence',
-          summary: 'The intelligence points gathered on the selected race over time, with translation progress while contact is being attempted.',
+          summary: 'Track intelligence points on the selected alien race and translation progress during contact attempts.',
           note: `${recordedNote} Marks show where points were spent on a discovery.${gapNote(intelligence)}${gapNote(rewards)}${translation ? gapNote(translation) : ''}`,
           results: translation ? [intelligence, rewards, translation] : [intelligence, rewards],
           data: { datasets: intelDatasets },

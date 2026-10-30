@@ -1,7 +1,7 @@
 import { linkTo } from '../deep-links'
 import { amount, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, unknownCell, verdictRows } from './common'
 
-export const group = { key: 'administration', title: 'Administration', summary: 'Colonies, naval administrations and sectors that lack the governor or commander they need.' }
+export const group = { key: 'administration', title: 'Administration', summary: 'Review colonies, naval administrations and sectors missing a required governor or commander.' }
 
 // The name of the colony a post is based at: blank where it has none (a colony id of 0), a dash with the unavailable result where its id or the colony's name is not stored.
 const baseCell = (ctx, row) => row.PopName || (row.PopulationID === 0 ? '' : unknownCell(ctx, [row.PopulationID === null ? 'the colony the post is based at' : 'the name of the colony the post is based at']))

@@ -2311,7 +2311,7 @@ const MUTATIONS = [
   { name: 'the chosen builder ignored', file: P, find: 'this.bootstrapBuilders.find((option) => option.colony.PopulationID === this.bootstrapBuilderId) || this.bootstrapBuilders[0]', replace: 'this.bootstrapBuilders[0]', fails: ['page'] },
   { name: 'the read\'s label under another name', file: P, find: 'bootstrapSources: \'the mine bootstrap reads\'', replace: 'bootstrapSource: \'the mine bootstrap reads\'', fails: ['page'] },
   { name: 'the read tracked under another name', file: P, find: 'tracked(\'bootstrapSources\'', replace: 'tracked(\'bootstrapSource\'', fails: ['page'] },
-  { name: 'the data-summary with a figure', file: P, find: 'data-summary="Three ways to add mining capacity', replace: 'data-summary="3 ways to add mining capacity', fails: ['template'] },
+  { name: 'the data-summary with a figure', file: P, find: 'data-summary="Compare the three ways to add mining capacity', replace: 'data-summary="Compare the 3 ways to add mining capacity', fails: ['template'] },
   { name: 'the panel without a data-summary', file: P, find: 'class="panel mine-bootstrap" data-summary="', replace: 'class="panel mine-bootstrap" data-sum="', fails: ['template'] },
   { name: 'the foot speaking to a person', file: P, find: 'Each route builds the same number of mines of one type and shows', replace: 'Each route builds your mines of one type and shows', fails: ['template'] },
   { name: 'the foot without the unavailable ground route', file: P, find: 'It is unavailable where the save lacks the columns, and the figure', replace: 'The figure', fails: ['template'] },
