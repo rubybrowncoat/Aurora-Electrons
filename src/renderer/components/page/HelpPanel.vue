@@ -31,15 +31,6 @@
             <dd>{{ entry.definition }}</dd>
           </div>
         </dl>
-
-        <h3 class="help__heading">Learning link</h3>
-        <p class="help__note">The link opens in the browser. It explains terms and workflows and is no source for any figure; the mark beside a figure states how far it holds.</p>
-        <ul class="help__links">
-          <li v-for="item in help.links" :key="item.id" class="help__link" :data-link="item.id">
-            <external-link :href="item.url">{{ item.title }}</external-link>
-            <div class="help__covers">{{ item.covers }}</div>
-          </li>
-        </ul>
       </div>
     </v-navigation-drawer>
   </div>
@@ -47,7 +38,6 @@
 
 <script>
 import { helpFor } from '../../utilities/glossary'
-import ExternalLink from '../ExternalLink.vue'
 
 // Where the button sits below the app bar, and its size.
 const BUTTON_OFFSET = 8
@@ -57,10 +47,9 @@ const BUTTON_SIZE = 22
 const MAX_WIDTH = 380
 const MAX_SHARE = 0.4
 
-// The help of the open page: a button at the top of the strip the section ticks use, and a drawer of the page's overview, usage notes, glossary terms and learning links. The drawer is a right-hand application drawer under the app bar and above the footer, so it takes its width out of the page (`$vuetify.application.right`, which the page container, the app bar, the footer, this button and the section ticks all keep clear of) instead of covering controls. The terms are defined in utilities/glossary.js, so it reads the same without a network; the links are pointers with a title and a line on what they cover, kept apart from the provenance marks that say how far a figure holds. The drawer is no section of the page (it is not a `.panel`), so the section ticks do not list it.
+// The help of the open page: a button at the top of the strip the section ticks use, and a drawer of the page's overview, usage notes and glossary terms. The drawer is a right-hand application drawer under the app bar and above the footer, so it takes its width out of the page (`$vuetify.application.right`, which the page container, the app bar, the footer, this button and the section ticks all keep clear of) instead of covering controls. The terms are defined in utilities/glossary.js, so it reads the same without a network. The drawer is no section of the page (it is not a `.panel`), so the section ticks do not list it.
 export default {
   name: 'HelpPanel',
-  components: { ExternalLink },
   data () {
     return {
       open: false,
@@ -238,8 +227,7 @@ export default {
 }
 
 .help__lead,
-.help__overview,
-.help__note {
+.help__overview {
   margin: 0 0 8px;
   color: var(--ae-muted);
 }
@@ -261,8 +249,7 @@ export default {
   }
 }
 
-.help__terms,
-.help__links {
+.help__terms {
   margin: 0;
   padding: 0;
 }
@@ -285,17 +272,5 @@ export default {
   font-size: calc(11px * var(--ae-font-scale));
   font-weight: 400;
   color: var(--ae-muted);
-}
-
-.help__links {
-  list-style: none;
-}
-
-.help__link {
-  margin-bottom: 10px;
-}
-
-.help__covers {
-  color: var(--ae-ink);
 }
 </style>

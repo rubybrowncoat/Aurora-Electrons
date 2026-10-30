@@ -1,6 +1,6 @@
-// The local glossary and the learning links behind each page's help (components/page/HelpPanel.vue). A term is defined here in full, so the help reads the same with no network; a link is only a pointer to public material the definitions do not copy, with a title and a line on what it covers.
+// The local glossary behind each page's help (components/page/HelpPanel.vue). A term is defined here in full, so the help reads the same with no network.
 //
-// Links and provenance stay apart. A link explains a term or a workflow; it is never a source for a calculated figure, and no rule registered in utilities/provenance.js cites one. How far a figure holds is stated by its mark (components/page/ProvenanceMark.vue), never by a link. scripts/check-glossary.js enforces both.
+// How far a figure holds is stated by its mark (components/page/ProvenanceMark.vue), never by a definition: no entry names a rule or a verification. scripts/check-glossary.js enforces it.
 
 import { PAGES } from './navigation'
 
@@ -57,7 +57,7 @@ export const TERMS = Object.freeze([
   term('game-log', 'Game log', 'The events the game records as time passes, each with a type, a date and a message. It is a record of what has happened and not a forecast.', ''),
   term('project-note', 'Project note', 'A note the player keeps on one body, colony, fleet or tech, with a status and the next action to take. It is kept in the app\'s own files for the campaign and race, and it gives the game no order and writes nothing to the save. Its link to the object is checked against the save each time, so a note whose object has gone stays readable as stale.', ''),
   term('body-tag', 'Body tag', 'A short label the player puts on one planet, moon, asteroid or comet of a known system, to find it again from the Notebook and the Galaxy Map. It is kept in the app\'s own files for the campaign, race and branch, and it gives the game no order and writes nothing to the save. It belongs to that body alone, so tagging a moon leaves its planet and system untagged. A body that has gone leaves the tag listed as stale.', ''),
-  term('estimated-output', 'Estimated figure', 'A value the app computes from saved data rather than reads from the game. A mark beside it states how far it holds: confirmed (observed in the save, or reproduced by a rule checked against saves), estimated (approximate or not checked), assumed (it rests on a number entered or chosen) or unavailable (an input is missing, so the figure is blank and never 0). A help link explains a term and does not stand in for that mark.', ''),
+  term('estimated-output', 'Estimated figure', 'A value the app computes from saved data rather than reads from the game. A mark beside it states how far it holds: confirmed (observed in the save, or reproduced by a rule checked against saves), estimated (approximate or not checked), assumed (it rests on a number entered or chosen) or unavailable (an input is missing, so the figure is blank and never 0).', ''),
   term('sensor-resolution', 'Sensor resolution', 'The size of target an active sensor is built to see. A target with a cross-section under the resolution is seen at its range cut by the square of the cross-section over the resolution, so a target half the resolution is seen at a quarter of the range. A larger resolution suits larger targets and needs a larger sensor to reach the same range against a small one.', 'HS'),
   term('sensor-jammer', 'Sensor jammer', 'A target\'s defence against active sensors. Each level of jammer above the sensor\'s ECCM cuts the sensor\'s range to 0.75 of it; ECCM at or above the jammer cuts nothing. It is a different figure from the jammer of a missile in the hit chance, which does not change a sensor\'s range.', ''),
   term('fire-control', 'Fire control', 'The sensor that guides weapons onto a target. A missile fire control reaches twice the range of a search sensor of the same size. A beam fire control has a range, capped at 1,400,000 km, and a tracking speed, each set by its own multiplier and sized apart; a single weapon control is restricted to one weapon.', 'km, km/s'),
@@ -68,14 +68,7 @@ export const TERMS = Object.freeze([
   term('electronic-hardening', 'Hardening and ECCM', 'Protection a sensor or fire control is built with. Hardening sets its Uridium and ECCM adds Corbomite on top, each from the level of its tech and each changing the BP. ECCM lowers the jammer a sensor meets, so a higher level keeps more of its range against a jamming target.', 'BP'),
 ])
 
-// `title` and `covers` say what the pointer is and what it deals with, in the words of this app, never as a verification.
-export const LINKS = Object.freeze([
-  Object.freeze({ id: 'community-forum', title: 'Aurora 4X community forum', url: 'https://aurora4x.com/', covers: 'Discussion of the game and its releases, and the place to ask for help.' }),
-])
-
-const RESOURCES = ['community-forum']
-
-// What each page's help shows: terms in reading order and links, by route. A route is a page of the registry (utilities/navigation.js); scripts/check-glossary.js holds every page that belongs to a section to an entry.
+// What each page's help shows: terms in reading order, by route. A route is a page of the registry (utilities/navigation.js); scripts/check-glossary.js holds every page that belongs to a section to an entry.
 const PAGE_HELP = Object.freeze({
   '/production': {
     overview: 'Production Recap lists every job the colonies are building, researching, training or terraforming, with the time each has left, and sets the idle capacity beside it. It reads the industrial projects, research projects, shipyard tasks, training tasks and terraforming of the save and forecasts each finish from the colony\'s capacity and stock. Finish dates are estimates with a mark; the save is only read.',
@@ -90,7 +83,6 @@ const PAGE_HELP = Object.freeze({
       'A finish date is a forecast under the rules in each section\'s footer; a dash is a job with no date, and the mark beside it says why.',
     ],
     terms: ['build-points', 'research-points', 'production-capacity', 'mineral-shortage', 'slipway', 'estimated-output'],
-    links: RESOURCES,
   },
   '/warnings': {
     overview: 'Warnings runs a set of checks over the save and lists what each one flags, in groups: fleets, ships, industry, colonies, research, administration, and contacts and space. Each check has a severity, and a warning stays listed until the condition clears in the save or it is muted or snoozed here. Mutes and snoozes are the app\'s own records for this race; nothing is written to the save.',
@@ -104,7 +96,6 @@ const PAGE_HELP = Object.freeze({
       'A check that could not be read says so in place of its rows, and a count it cannot settle is not 0.',
     ],
     terms: ['warning-check', 'maintenance-supply', 'fuel-litres', 'mineral-shortage', 'estimated-output'],
-    links: RESOURCES,
   },
   '/log': {
     overview: 'Game Log reads the events the game has logged for the race, newest first, with filters, colours and pins the game does not offer. It can keep an archive of the events each save showed, so events that have fallen out of the save\'s window stay readable. Pins and the archive are the app\'s own records for this race and branch, the presets are saved filter sets kept for the whole app, and the save is only read.',
@@ -118,7 +109,6 @@ const PAGE_HELP = Object.freeze({
       'In Events, click a message to read it in full, expand a daily repeat for each message, pin an event, hide its type, or open its place on the Galaxy Map or in the Colonization Planner; New marks the events since the last visit to this branch.',
     ],
     terms: ['game-log', 'production-cycle', 'cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window'],
-    links: RESOURCES,
   },
   '/minerals': {
     overview: 'Mineral Breakdown sets each mineral\'s deposits in the ground against what is mined, held and needed in the colonies, so the next mining site, mining ship or transfer can be chosen. It reads the surveyed deposits, the colonies\' stocks, reserves and queues, the mass drivers and the civilian mining complexes of the save. Figures are as of the save, the policy acknowledgments are the app\'s own records, and the save is only read.',
@@ -134,7 +124,6 @@ const PAGE_HELP = Object.freeze({
       'A dash is a figure the save does not record, never 0, and the mark beside it names what is missing.',
     ],
     terms: ['deposit', 'accessibility', 'mining-rate', 'mineral-shortage', 'civilian-mining', 'mass-driver', 'ton', 'estimated-output'],
-    links: RESOURCES,
   },
   '/mineral-outlook': {
     overview: 'Mineral Outlook projects how long each mineral lasts: its stock, what the mines produce, what industry uses and the years of runway left, then where the mined mineral goes and where more of a short one could come from. It reads the game\'s mineral ledger where the save keeps one, and models the uses from the queues, refineries, maintenance facilities and shipyards where it does not. Every figure past today is a projection under the rules in the footers; the save is only read.',
@@ -149,7 +138,6 @@ const PAGE_HELP = Object.freeze({
       'A rate from the ledger is observed; a modelled use, a projection and a first-load time are estimates with a mark, and a figure the save cannot support is a dash, never 0.',
     ],
     terms: ['runway', 'mining-rate', 'deposit', 'accessibility', 'ton', 'estimated-output'],
-    links: RESOURCES,
   },
   '/finances': {
     overview: 'Finances adds up the wealth the game logs each production cycle, income and spending by category, and sets the treasury beside it. It reads the race\'s wealth log and treasury from the save, and the history snapshots the app has recorded on this branch. What the game does not log as income or spending is missing from the totals, the shipping scenarios are estimates entered here, and the save is only read.',
@@ -164,7 +152,6 @@ const PAGE_HELP = Object.freeze({
       'Logged amounts are observed; every runway and payout is an estimate with a mark.',
     ],
     terms: ['wealth', 'production-cycle', 'civilian-shipping', 'civilian-mining', 'runway', 'estimated-output'],
-    links: RESOURCES,
   },
   '/notebook': {
     overview: 'Project Notebook keeps the player\'s own notes on bodies, colonies, fleets and techs of the race, each with a status and a next action, with short tags on single bodies and a digest of what changed in the economy since the last acknowledgment. Notes, tags and acknowledgments are kept in the app\'s files for this campaign, race and branch, and each note\'s link is checked against the open save every time. Nothing here gives the game an order or writes to the save.',
@@ -177,7 +164,6 @@ const PAGE_HELP = Object.freeze({
       'A note whose object has gone stays readable as stale with the name it had; a colony or a designed tech has no date in the save, so its link reads not checked and the note shows what holds that ID now.',
     ],
     terms: ['project-note', 'body-tag', 'research-project', 'component-design'],
-    links: RESOURCES,
   },
   '/colony-outlook': {
     overview: 'Colony Outlook projects each colony\'s population, growth, body capacity, infrastructure and workers over a horizon, so the colonies that will outgrow their bodies or run short of workers show before they do. It reads the colonies, species, installations, shipyards and queues of the save and applies the game\'s growth rule. Figures past today are estimates with a mark; the save is only read.',
@@ -191,7 +177,6 @@ const PAGE_HELP = Object.freeze({
       'A dash is a figure the save cannot support, and the mark beside it names what is missing; colonies short of workers today are also on Warnings.',
     ],
     terms: ['population-growth', 'body-capacity', 'infrastructure', 'workers', 'ark', 'estimated-output'],
-    links: RESOURCES,
   },
   '/habitability': {
     overview: 'Colonization Planner ranks the known bodies as places to settle next for a species, by the people they hold, the minerals they offer or both, with the colony cost, the terraforming it would take and the transit from the race\'s colonies. It reads the surveyed bodies, the species, the deposits, the Lagrange points and the charted routes of the save. The ranking is the planner\'s own ordering, not a game rule; the save is only read.',
@@ -205,7 +190,6 @@ const PAGE_HELP = Object.freeze({
       'A figure that cannot be worked out shows a dash and names what is missing; an unsurveyed body keeps its deposits unknown.',
     ],
     terms: ['colony-cost', 'infrastructure', 'body-capacity', 'terraforming', 'accessibility', 'jump-point', 'estimated-output'],
-    links: RESOURCES,
   },
   '/logistics': {
     overview: 'Fuel & Maintenance sets what the race makes of fuel and maintenance supplies against what its ships burn and use, by colony and by ship, and keeps the player\'s reserve records and fleet station notes beside them. It reads the refineries, harvesters, tankers, maintenance facilities, supply ships and stocks of the save. Yearly figures are estimates under the rules in the footers, the records are the app\'s own, and the save is only read.',
@@ -221,7 +205,6 @@ const PAGE_HELP = Object.freeze({
       'A rate the save does not give leaves a figure not known, never 0; a figure with a mark carries what it rests on.',
     ],
     terms: ['fuel-litres', 'sorium', 'maintenance-supply', 'maintenance-capacity', 'maintenance-life', 'deployment-time', 'runway', 'estimated-output'],
-    links: RESOURCES,
   },
   '/hauling': {
     overview: 'Hauling Planner works out the hauls that would cover what the colonies lack of each mineral and which freighter class carries each one soonest, then reads the freight routes the fleets already run on repeat. It reads the colonies\' stocks, reserves and queues, the mass-driver packets, the freighter classes and the saved cycle orders of the fleets. The plan and the desired routes are the app\'s own; nothing is ordered in the game or written to the save.',
@@ -236,7 +219,6 @@ const PAGE_HELP = Object.freeze({
       'Hauls cover the queue shortfalls first, the larger first, each from the nearest colony with stock to spare; a class counts the Logistics bonuses of a commander, governor and sector as 1, so a real ship may load faster.',
     ],
     terms: ['haul-shortfall', 'mineral-shortage', 'mass-driver', 'round-trip', 'ton', 'speed', 'fuel-litres', 'estimated-output'],
-    links: RESOURCES,
   },
   '/information': {
     overview: 'Transport Capacity times a run between two places for the race\'s freighters and colony ships, class by class and fleet by fleet, and gives what each could carry in a year; the civilian work orders show what the shipping lines are carrying meanwhile. It reads the fleets, classes, crews, colonies and charted routes of the save. Every trip is a projection at full loads under the rules in the footers; the save is only read.',
@@ -250,7 +232,6 @@ const PAGE_HELP = Object.freeze({
       'Loading takes 20 s per ton and 10 s per colonist, shortened by the cargo shuttle bays, the shuttle technology and the Logistics bonuses of the commander, administration and governor; a class timed alone must fit the run in one tank with no refuelling time counted, shipping-line ships excepted, while a fleet sailing together is timed with its refuelling.',
     ],
     terms: ['round-trip', 'speed', 'civilian-shipping', 'ton', 'estimated-output'],
-    links: RESOURCES,
   },
   '/map': {
     overview: 'Galaxy Map draws the systems the race knows and the jump links between them, coloured by a measure and marked with what is chosen, and lets the layout be arranged, pinned and saved back to the game. It reads the systems, jump points, surveys, colonies, sectors, contacts and the game\'s own map positions of the save. Save positions is the one action in the app that writes to the save; tags, pins, clusters and recovery statuses are the app\'s own records.',
@@ -265,7 +246,6 @@ const PAGE_HELP = Object.freeze({
       'A system the save leaves at the game\'s centre is drawn beside a linked system until the map is saved.',
     ],
     terms: ['jump-point', 'sector', 'survey-progress', 'body-tag', 'estimated-output'],
-    links: RESOURCES,
   },
   '/intelligence': {
     overview: 'Intelligence gathers what the race has learned of every alien race it has met: its status, communication and diplomatic standing, and the classes, colonies, sensors, ground units, systems and species observed. It reads the race\'s contact and intelligence records of the save and the history snapshots the app has recorded on this branch, so the page needs the race recorded. Every figure is an observation, not the alien race\'s full state; the save is only read.',
@@ -277,7 +257,6 @@ const PAGE_HELP = Object.freeze({
       'A race that Empire History does not record shows a notice instead of the page, and what has not been observed is unknown, not 0.',
     ],
     terms: ['observed-intel', 'estimated-output'],
-    links: RESOURCES,
   },
   '/survey-progress': {
     overview: 'Survey Progress shows how much gravitational and geological survey work each known system still needs, what the survey fleets and ground formations are doing and where they would pay off. It reads the systems, bodies, survey points, fleets, sensors, formations and ruins of the save and applies the game\'s survey rate rules. Rates and times are estimates with a mark, the observed formation records are the app\'s own, and the save is only read.',
@@ -292,7 +271,6 @@ const PAGE_HELP = Object.freeze({
       'Travel between targets is not counted in a time, and a formation whose place or rating the save does not hold has no state.',
     ],
     terms: ['survey-progress', 'speed', 'deployment-time', 'maintenance-life', 'estimated-output'],
-    links: RESOURCES,
   },
   '/routes': {
     overview: 'Route Finder & Distances plans a route through any number of stops over the jump points the race has explored and times it at a speed, and lists the distance from the first stop to every known system. It reads the systems, jump points, Lagrange points, bodies, waypoints and fleets of the save and the game\'s galactic map positions. Routes and times are the planner\'s own under the rules in the footers; the save is only read.',
@@ -305,7 +283,6 @@ const PAGE_HELP = Object.freeze({
       'A leg with no explored route is bridged by a straight line on the map and has no time; the footer of Route detail says how the delay after a jump is counted.',
     ],
     terms: ['jump-point', 'speed', 'lagrange-point', 'estimated-output'],
-    links: RESOURCES,
   },
   '/lagrange': {
     overview: 'Lagrange Points maps the stable Lagrange points of the known systems, the planets and moons that could be given one and the time a stabilisation ship would take, and lists the infrastructure the race holds at each jump point. It reads the systems, bodies, Lagrange points, jump points, fleets, stabilisation modules and stationary salvos of the save. Stabilisation times are estimates under the rule in the footer; the save is only read.',
@@ -317,7 +294,6 @@ const PAGE_HELP = Object.freeze({
       'A time follows the body\'s mass and the captain and crew of the quickest usable ship, as the footer states; a count the save cannot give is unknown, never 0.',
     ],
     terms: ['lagrange-point', 'stabilisation', 'jump-point', 'estimated-output'],
-    links: RESOURCES,
   },
   '/history': {
     overview: 'Empire History charts the snapshots the app records each time it reads a save of the race: population, wealth, fleet tonnage, research, minerals, installations and supplies, with the rivals\' measures where the game records them. It keeps the record in the app\'s own files by campaign and branch, with milestones, followed colonies, retention and backups, so the page needs the race recorded. The save is only read; a rewound save becomes a branch, and nothing recorded is written back.',
@@ -333,7 +309,6 @@ const PAGE_HELP = Object.freeze({
       'Backup exports all campaigns or this one to a file and restores from one, with a preview that chooses Merge, Replace or Keep for each branch before Apply.',
     ],
     terms: ['snapshot', 'wealth', 'research-points', 'estimated-output'],
-    links: RESOURCES,
   },
   '/commanders': {
     overview: 'Commanders lists every commander of the race with rank, post, bonuses and health, finds the unassigned officers who would do a post better than its holder, and lays out the naval and ground command structure. It reads the commanders, their careers, the colonies, ships, research projects and admin commands of the save and ranks candidates as the game\'s automatic assignment does. Nothing is assigned here; the save is only read.',
@@ -345,7 +320,6 @@ const PAGE_HELP = Object.freeze({
       'A candidate is ranked under the rules in each table\'s footer; a post whose holders cannot be told is not shown as vacant, and health risk is the game\'s own figure.',
     ],
     terms: ['commander-bonus', 'research-project', 'estimated-output'],
-    links: RESOURCES,
   },
   '/technologies': {
     overview: 'Tech Tree shows the race\'s technologies by research field, the upgrade lines of each field level by level, and the chain of prerequisites that leads to any one technology, with the time each running project has left. It reads the technologies, research projects, labs and scientists of the save. Finish times are estimates from a project\'s RP left and the labs on it; the save is only read.',
@@ -358,7 +332,6 @@ const PAGE_HELP = Object.freeze({
       'A notice at the top reports starting technology points the race has not spent, where the save holds them.',
     ],
     terms: ['research-project', 'research-points', 'component-design', 'estimated-output'],
-    links: RESOURCES,
   },
   '/designed-tech': {
     overview: 'Designed Tech lists the component designs the race knows by category, with the figures of each type, the classes that mount them and the ships in service, and sets chosen designs side by side. It reads the designs, classes and ships of the save. Figures are as stored in the design data, the picks are kept by the app for each category and race, and the save is only read.',
@@ -370,7 +343,6 @@ const PAGE_HELP = Object.freeze({
       'A figure the save does not store is a dash, never 0, and a design no longer known drops out of the picks.',
     ],
     terms: ['component-design', 'hull-space', 'build-points', 'estimated-output'],
-    links: RESOURCES,
   },
   '/propulsion': {
     overview: 'Propulsion Planner searches the engine sets that give a hull its speed and range or endurance from the engine, fuel and thrust technologies the race holds, and ranks them by how little of the ship they take. It reads the race\'s technologies, its saved classes and its stock fuel tanks, and builds each engine as the game would. Every designed set is a planner estimate under the rules in the footers; nothing is designed in the game or written to the save.',
@@ -384,7 +356,6 @@ const PAGE_HELP = Object.freeze({
       'The search tries every engine size from 1 HS up to the largest researched, in steps that widen with the size, and every thrust between the least and the most researched in steps of 0.05; the sweep line shows how many combinations that is.',
     ],
     terms: ['engine-power', 'fuel-litres', 'speed', 'range-endurance', 'hull-space', 'build-points', 'maintenance-supply', 'estimated-output'],
-    links: RESOURCES,
   },
   '/missile-designer': {
     overview: 'Missile Designer sets a saved missile beside alternatives designed from the race\'s technology, a hypothetical next level or typed figures, every column judged under one scenario of target speed, jammer, tactical modifier and signature. It reads the race\'s missiles, tech levels, sensors and fire controls from the save and rebuilds each figure from the game\'s rules. Designs and comparisons are the app\'s own records for this race and branch; nothing is designed in the game or written to the save.',
@@ -399,7 +370,6 @@ const PAGE_HELP = Object.freeze({
       'A hit chance follows the game\'s combat rules under the scenario entered, and the point-defence planner figure is the app\'s own heuristic, not a game statistic; a figure the save lacks is unknown, never 0, and a run that stops early says so.',
     ],
     terms: ['speed', 'range-endurance', 'engine-power', 'fuel-litres', 'sensor-resolution', 'sensor-jammer', 'estimated-output'],
-    links: RESOURCES,
   },
   '/sensors': {
     overview: 'Sensor Planner sizes the active search sensor and missile fire control that reach a wanted range against a target, the beam fire control that meets a range and tracking speed, and shows the thermal and EM signatures of the race\'s classes against passive sensors of typed strength. It reads the race\'s sensor, fire control, cloak and engine technologies, its sensor designs and its classes from the save. Every proposed sensor is a planner figure under the rules in the footers, the enemy figures are typed assumptions, and the save is only read.',
@@ -415,7 +385,6 @@ const PAGE_HELP = Object.freeze({
       'A blank enemy figure is unknown and never 0, a size beyond the largest legal one is reported as such; a table lists every point, while a chart leaves out the points a logarithmic axis cannot draw and the sensors beyond its series limit.',
     ],
     terms: ['hull-space', 'sensor-resolution', 'sensor-jammer', 'fire-control', 'electronic-hardening', 'engine-power', 'speed', 'observed-intel', 'estimated-output'],
-    links: RESOURCES,
   },
   '/shipyards': {
     overview: 'Shipyard Planner lists the race\'s shipyards with their tasks and growth, prices every refit between its classes and says which yards can take a class or a refit now, after a retool or not at all. It reads the shipyards, slipways, tasks, classes, components and stocks of the save and prices refits, retools and growth by the game\'s rules. Prices and times are estimates with a mark where the save stores nothing to compare with; the save is only read.',
@@ -431,19 +400,17 @@ const PAGE_HELP = Object.freeze({
       'A figure the save lacks is not known, never 0; a dash in a time means a yard\'s eligibility or rate is not known, and the footer of each section states the pricing rule.',
     ],
     terms: ['refit', 'retool', 'slipway', 'build-points', 'hull-space', 'estimated-output'],
-    links: RESOURCES,
   },
 })
 
 const termById = Object.freeze(Object.fromEntries(TERMS.map((entry) => [entry.id, entry])))
-const linkById = Object.freeze(Object.fromEntries(LINKS.map((entry) => [entry.id, entry])))
 
-export { PAGE_HELP, termById, linkById }
+export { PAGE_HELP, termById }
 
 // The pages that belong to a section of the navigation, which are the ones a help is owed to; Empires, Settings and About stand outside it.
 export const helpRoutes = () => PAGES.filter(({ section, planned }) => section && !planned).map(({ route }) => route)
 
-// The help of a route with its text, terms and links in full: { route, title, overview, usage, terms, links }, or null for a route with none.
+// The help of a route with its text and terms in full: { route, title, overview, usage, terms }, or null for a route with none.
 export const helpFor = (route) => {
   const entry = PAGE_HELP[route]
   const page = PAGES.find((item) => item.route === route)
@@ -458,6 +425,5 @@ export const helpFor = (route) => {
     overview: entry.overview,
     usage: entry.usage,
     terms: entry.terms.map((id) => termById[id]),
-    links: entry.links.map((id) => linkById[id]),
   }
 }

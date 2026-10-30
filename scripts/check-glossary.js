@@ -1,16 +1,16 @@
 /*
-  Checks the local glossary and the page help built on it (src/renderer/utilities/glossary.js, src/renderer/components/page/HelpPanel.vue, mounted by SectionNav.vue). Needs no save and no network; the addresses it holds are checked for their form, not opened.
+  Checks the local glossary and the page help built on it (src/renderer/utilities/glossary.js, src/renderer/components/page/HelpPanel.vue, mounted by SectionNav.vue). Needs no save and no network.
 
   What it holds the glossary to:
-  - every page of the registry that belongs to a section has a help entry with terms and links, every entry names terms and links that exist, and none stands unused or for a page that is gone;
+  - every page of the registry that belongs to a section has a help entry with terms, every entry names terms that exist, and none stands unused or for a page that is gone;
   - the unit and estimate terms the planning pages need (cost, runway, maintenance, estimated outputs) are mapped to the pages that show them;
-  - every term has a local definition of its own and none carries a review date or a game version label, and every link a title, a note on what it covers and an https address;
+  - every term has a local definition of its own, and none carries a review date or a game version label;
   - the help speaks in the impersonal voice, and a definition is short, original text with no address in it;
-  - links and provenance stay apart: no glossary entry names a rule or a verification, no link's text claims to verify a figure, and no registered rule cites a glossary link;
+  - provenance stays apart from the help: no glossary entry names a rule or a verification;
   - no text that a result gives a tooltip (the provenance mark of a result and of a rule, the footer of a chart) names its rule by id or carries a dotted name;
   - the figures a definition states hold in the app's own rules: the shortage and the hauling shortfall of a colony, the runway of a mineral and of a maintenance location, the RP left and the time left of research, and the climb of maintenance life are run on small made-up rows and held to what the definitions say (no source text is matched).
 
-  Then each mutation (an entry dropped, a review date or version label added, a link made http or left without its note, a first-person phrase, a link cited as a rule's source, or an expression of one of those rules changed) must make at least one check fail.
+  Then each mutation (an entry dropped, a review date or version label added, a rule named by a term, a first-person phrase, or an expression of one of those rules changed) must make at least one check fail.
 
   Usage: node scripts/check-glossary.js
 */
@@ -37,7 +37,7 @@ const STUBS = {
   'lodash/groupBy': 'export default (list, by) => list.reduce((groups, item) => { (groups[by(item)] = groups[by(item)] || []).push(item); return groups }, {})',
 }
 
-// What each page owes its readers beyond some term and some link: the terms of its cost, runway, maintenance and wealth units, and the estimate term every page of calculated figures carries. The game log lists events and calculates nothing.
+// What each page owes its readers beyond some term: the terms of its cost, runway, maintenance and wealth units, and the estimate term every page of calculated figures carries. The game log lists events and calculates nothing.
 const REQUIRED_TERMS = {
   '/production': ['build-points', 'research-points', 'production-capacity'],
   '/mineral-outlook': ['runway', 'mining-rate'],
@@ -51,11 +51,9 @@ const REQUIRED_TERMS = {
 const WITHOUT_ESTIMATES = ['/log', '/notebook']
 
 const MAX_DEFINITION = 560
-const MAX_COVERS = 200
 
 const FIRST_OR_SECOND_PERSON = /\b(?:me|my|myself|we|our|ours|ourselves|us|you|your|yours|yourself|yourselves)\b|\bmine\b(?=\s*(?:[.,;:!?)]|$))/i
 const FIRST_PERSON_I = /\bI(?:['’](?:m|ll|ve|d))?\b/
-const VERIFICATION_CLAIM = /\b(?:verif\w*|confirm\w*|prov(?:e|es|ed|en|ing)|validat\w*|authoritative|checked against|official formula)\b/i
 const FORBIDDEN_FIELDS = ['rule', 'rules', 'verification', 'verifies', 'verifiedBy', 'provenance', 'reviewed', 'versions']
 
 let failures = 0
@@ -81,8 +79,6 @@ const firstProblem = (problems) => {
 
   return found ? `${found[0]}: ${found[1]}` : true
 }
-
-const phraseOf = (value) => (value === undefined || value === null ? '' : String(value))
 
 const voiceProblem = (value) => {
   const found = FIRST_OR_SECOND_PERSON.exec(value) || FIRST_PERSON_I.exec(value)
@@ -122,12 +118,12 @@ const ruleModuleNames = (directory) => {
   return found
 }
 
-// Every module the checks run: the glossary and the registry of pages, the rules whose figures the definitions state, and every module that registers a rule, which the check of the glossary's links against the rules needs. `ruleModules` is the discovery of the tree, made once and handed to each child, since a mutation never changes whether a file registers a rule (mutatedCopy refuses one that would).
+// Every module the checks run: the glossary and the registry of pages, the rules whose figures the definitions state, and every module that registers a rule, which the check of the notes of the registered rules needs. `ruleModules` is the discovery of the tree, made once and handed to each child, since a mutation never changes whether a file registers a rule (mutatedCopy refuses one that would).
 const loadModules = (directory, ruleModules) => loadUtilities([...new Set([...MODULES, ...RULE_MODULES, ...ruleModules])], { stubs: STUBS, directory })
 
 // The checks that need no save, over the modules `m` ({ glossary, navigation }) and the renderer folder `tree` they and the component sources were read from: [[name, async () => true or a message]]. Run on the real sources and again on each mutated copy, where one at least must fail.
 const synthetic = (m, tree) => {
-  const { TERMS, LINKS, PAGE_HELP, helpFor, helpRoutes } = m.glossary
+  const { TERMS, PAGE_HELP, helpFor, helpRoutes } = m.glossary
   const read = (file) => fs.readFileSync(path.join(tree, file), 'utf8')
   const panel = () => read(HELP_PANEL)
   const { provenance, finances, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime, colonies } = m
@@ -138,32 +134,22 @@ const synthetic = (m, tree) => {
   return [
     ['the registry has planner routes to cover', async () => (planners.length >= 20 ? true : `${planners.length} routes`)],
 
-    ['every planner route of the registry has help with an overview, usage notes, terms and links', async () => firstProblem(planners.map((route) => {
+    ['every planner route of the registry has help with an overview, usage notes and terms', async () => firstProblem(planners.map((route) => {
       const help = helpFor(route)
 
-      return [route, !help ? 'no entry' : !text(help.overview) ? 'no overview' : !Array.isArray(help.usage) || help.usage.length < 4 || !help.usage.every(text) ? 'fewer than four usage notes' : help.terms.length === 0 ? 'no terms' : help.links.length === 0 ? 'no links' : '']
+      return [route, !help ? 'no entry' : !text(help.overview) ? 'no overview' : !Array.isArray(help.usage) || help.usage.length < 4 || !help.usage.every(text) ? 'fewer than four usage notes' : help.terms.length === 0 ? 'no terms' : '']
     }))],
 
     ['no help is kept for a route the registry does not list as a planner', async () => firstProblem(Object.keys(PAGE_HELP).map((route) => [route, planners.includes(route) ? '' : 'not a planner route of the registry']))],
 
-    ['every term and link a page names exists', async () => firstProblem(Object.entries(PAGE_HELP).flatMap(([route, entry]) => [
-      ...entry.terms.map((id) => [`${route} term`, TERMS.some((item) => item.id === id) ? '' : `${id} is not defined`]),
-      ...entry.links.map((id) => [`${route} link`, LINKS.some((item) => item.id === id) ? '' : `${id} is not defined`]),
-    ]))],
+    ['every term a page names exists', async () => firstProblem(Object.entries(PAGE_HELP).flatMap(([route, entry]) => entry.terms.map((id) => [`${route} term`, TERMS.some((item) => item.id === id) ? '' : `${id} is not defined`])))],
 
-    ['no page lists a term or a link twice', async () => firstProblem(Object.entries(PAGE_HELP).flatMap(([route, entry]) => [
-      [`${route} terms`, new Set(entry.terms).size === entry.terms.length ? '' : 'a term is repeated'],
-      [`${route} links`, new Set(entry.links).size === entry.links.length ? '' : 'a link is repeated'],
-    ]))],
+    ['no page lists a term twice', async () => firstProblem(Object.entries(PAGE_HELP).map(([route, entry]) => [`${route} terms`, new Set(entry.terms).size === entry.terms.length ? '' : 'a term is repeated']))],
 
-    ['every term and link is shown on some page', async () => {
+    ['every term is shown on some page', async () => {
       const usedTerms = new Set(Object.values(PAGE_HELP).flatMap((entry) => entry.terms))
-      const usedLinks = new Set(Object.values(PAGE_HELP).flatMap((entry) => entry.links))
 
-      return firstProblem([
-        ...TERMS.map((item) => [`term ${item.id}`, usedTerms.has(item.id) ? '' : 'shown on no page']),
-        ...LINKS.map((item) => [`link ${item.id}`, usedLinks.has(item.id) ? '' : 'shown on no page']),
-      ])
+      return firstProblem(TERMS.map((item) => [`term ${item.id}`, usedTerms.has(item.id) ? '' : 'shown on no page']))
     }],
 
     ['the unit, cost, runway and maintenance terms are mapped to the pages that show them', async () => firstProblem(Object.entries(REQUIRED_TERMS).flatMap(([route, ids]) => ids.map((id) => [route, helpFor(route) && helpFor(route).terms.some((item) => item.id === id) ? '' : `lacks ${id}`])))],
@@ -182,47 +168,13 @@ const synthetic = (m, tree) => {
 
     ['a definition is short text of its own with no address and no quotation block', async () => firstProblem(TERMS.map((item) => [item.id, item.definition.length > MAX_DEFINITION ? `${item.definition.length} characters` : /https?:|www\./i.test(item.definition) ? 'holds an address' : /\n/.test(item.definition) ? 'spans lines' : '']))],
 
-    ['link ids are unique and every address is unique', async () => firstProblem([
-      ['ids', new Set(LINKS.map((item) => item.id)).size === LINKS.length ? '' : 'an id is repeated'],
-      ['addresses', new Set(LINKS.map((item) => item.url)).size === LINKS.length ? '' : 'an address is repeated'],
-    ])],
-
-    ['every link has a title and a note on what it covers', async () => firstProblem(LINKS.flatMap((item) => [
-      [`${item.id} title`, text(item.title) ? '' : 'missing'],
-      [`${item.id} covers`, text(item.covers) ? (item.covers.length > MAX_COVERS ? `${item.covers.length} characters` : '') : 'missing'],
-    ]))],
-
-    ['every link address is https', async () => firstProblem(LINKS.map((item) => {
-      try {
-        const url = new URL(item.url)
-
-        return [item.id, url.protocol !== 'https:' ? `${url.protocol} address` : !url.hostname.includes('.') ? 'host without a domain' : url.username || url.password ? 'holds credentials' : '']
-      } catch (error) {
-        return [item.id, `not an address: ${phraseOf(item.url)}`]
-      }
-    }))],
-
     ['the help speaks in the impersonal voice', async () => firstProblem([
       ...TERMS.flatMap((item) => [item.term, item.units, item.definition].map((value) => [`term ${item.id}`, voiceProblem(value)])),
       ...Object.entries(PAGE_HELP).flatMap(([route, entry]) => [entry.overview, ...entry.usage].map((value) => [`help ${route}`, voiceProblem(value)])),
-      ...LINKS.flatMap((item) => [item.title, item.covers].map((value) => [`link ${item.id}`, voiceProblem(value)])),
       ...templateText(panel()).map((value) => ['card', voiceProblem(value)]),
     ])],
 
-    ['no entry names a rule or a verification, or carries a review date or a version label, and no link text claims to verify a figure', async () => firstProblem([
-      ...[...TERMS, ...LINKS].flatMap((item) => FORBIDDEN_FIELDS.map((field) => [`${item.id}`, Object.prototype.hasOwnProperty.call(item, field) ? `has a ${field} field` : ''])),
-      ...LINKS.flatMap((item) => [item.title, item.covers].map((value) => [`link ${item.id}`, VERIFICATION_CLAIM.test(value) ? `says "${VERIFICATION_CLAIM.exec(value)[0]}"` : ''])),
-    ])],
-
-    ['no registered rule cites a glossary link', async () => {
-      const hosts = [...new Set(LINKS.map((item) => new URL(item.url).hostname))]
-      const rules = provenance.listRules()
-
-      return firstProblem([
-        ['rules', rules.length >= 100 ? '' : `${rules.length} rules loaded`],
-        ...rules.flatMap((rule) => hosts.map((host) => [rule.id, JSON.stringify(rule).includes(host) ? `names ${host}` : ''])),
-      ])
-    }],
+    ['no entry names a rule or a verification, or carries a review date or a version label', async () => firstProblem(TERMS.flatMap((item) => FORBIDDEN_FIELDS.map((field) => [`${item.id}`, Object.prototype.hasOwnProperty.call(item, field) ? `has a ${field} field` : ''])))],
 
     ['no registered rule states a table or column name, a code span or a release number in its note or assumptions', async () => {
       const code = /\b(?:FCT|DIM|VIR)_\w+|`[^`]*`|\b2\.[67](?:\.\d+|\.x)?\b|\b[a-z]+[A-Za-z]*\.[a-z][A-Za-z]+\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|\b[A-Z]{2,}_[A-Z_]+\b|[A-Za-z-]+\.js\b/
@@ -438,7 +390,7 @@ const synthetic = (m, tree) => {
       const help = helpFor(planners[0])
 
       return firstProblem([
-        ['entry', help && help.title && help.terms.every((item) => item.definition) && help.links.every((item) => item.url) ? '' : 'incomplete'],
+        ['entry', help && help.title && help.terms.every((item) => item.definition) ? '' : 'incomplete'],
         ['unlisted', helpFor('/no-such-page') === null && helpFor('/settings') === null ? '' : 'an unlisted route has help'],
       ])
     }],
@@ -477,8 +429,8 @@ const GLOSSARY = path.join('utilities', 'glossary.js')
 const MUTATIONS = [
   ['a planner page loses its entry', GLOSSARY, '\'/lagrange\': {', '\'/lagrange-gone\': {', ['every planner route of the registry has help', 'no help is kept for a route']],
   ['a planner page is added to the registry with no entry', path.join('utilities', 'navigation.js'), '  { route: \'/\', section: null,', '  { route: \'/new-planner\', section: \'design\', tab: \'New\', title: \'New Planner\', icon: \'mdi-help\', blurb: \'x\', keywords: \'x\' },\n  { route: \'/\', section: null,', ['every planner route of the registry has help']],
-  ['a page names a term that is not defined', GLOSSARY, '[\'game-log\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', '[\'game-log-missing\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', ['every term and link a page names exists']],
-  ['a term is no longer shown on any page', GLOSSARY, 'terms: [\'game-log\', \'production-cycle\'', 'terms: [\'production-cycle\'', ['every term and link is shown on some page']],
+  ['a page names a term that is not defined', GLOSSARY, '[\'game-log\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', '[\'game-log-missing\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', ['every term a page names exists']],
+  ['a term is no longer shown on any page', GLOSSARY, 'terms: [\'game-log\', \'production-cycle\'', 'terms: [\'production-cycle\'', ['every term is shown on some page']],
   ['the runway term leaves the Mineral Outlook', GLOSSARY, 'terms: [\'runway\', \'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', 'terms: [\'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', ['mapped to the pages that show them']],
   ['a term carries a review date', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, reviewed: \'2026-10-13\' })', ['carries a review date or a version label']],
   ['a term carries a game version label', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, versions: \'2.7.x\' })', ['carries a review date or a version label']],
@@ -486,10 +438,7 @@ const MUTATIONS = [
   ['a definition holds an address', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'See https://example.com for the mass unit of ships, cargo and minerals;', ['a definition is short text of its own']],
   ['a definition speaks in the first person', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'The mass unit of my ships, cargo and minerals;', ['the help speaks in the impersonal voice']],
   ['a definition speaks to the reader', GLOSSARY, 'A ship that houses population aboard.', 'A ship that houses your population aboard.', ['the help speaks in the impersonal voice']],
-  ['a link is http', GLOSSARY, '\'https://aurora4x.com/\'', '\'http://aurora4x.com/\'', ['every link address is https']],
-  ['a link loses its note on what it covers', GLOSSARY, ' covers: \'Discussion of the game and its releases, and the place to ask for help.\'', ' covers: \'\'', ['every link has a title']],
-  ['a link claims to verify a formula', GLOSSARY, 'Discussion of the game and its releases,', 'Verifies the formulas; discussion of the game and its releases,', ['no link text claims to verify a figure']],
-  ['a link names a rule', GLOSSARY, 'Object.freeze({ id: \'community-forum\', ', 'Object.freeze({ rule: \'finances.treasury\', id: \'community-forum\', ', ['no entry names a rule or a verification']],
+  ['a term names a rule', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ rule: \'finances.treasury\', id, term: name, units, definition })', ['no entry names a rule or a verification']],
   ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a missing site input named by its saved column', path.join('utilities', 'minerals.js'), "const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']", "const DEPOSIT_INPUTS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']", ['no unavailable result names a table or column']],
@@ -512,7 +461,6 @@ const MUTATIONS = [
   // eslint-disable-next-line no-template-curly-in-string
   ['the words of a failed read keep the tables of a link that does not match', path.join('utilities', 'provenance.js'), '  [/^foreign key mismatch - "([^"]*)" referencing "([^"]*)"$/, (_found, child, parent) => `the link of ${named(child)} to ${named(parent)} does not match`],\n', '', ['the words of a missing field and of a failed read']],
   ['the words of a failed read keep the rule of a check', path.join('utilities', 'provenance.js'), '[/^CHECK constraint failed: .*$/, () => \'a value breaks a rule of the save\'],', '', ['the words of a missing field and of a failed read']],
-  ['a rule cites a glossary link', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as explained at https://aurora4x.com/.', ['no registered rule cites a glossary link']],
   // eslint-disable-next-line no-template-curly-in-string
   ['the footer of a chart names the rule by its id', path.join('utilities', 'finances.js'), "(result ? STATUS_MARKS[result.status].label : '')", '(result ? `${STATUS_MARKS[result.status].label}: ${result.rule.id}` : \'\')', ['no text a result gives a tooltip']],
   // eslint-disable-next-line no-template-curly-in-string
