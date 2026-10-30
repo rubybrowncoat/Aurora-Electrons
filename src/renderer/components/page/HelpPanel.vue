@@ -221,7 +221,7 @@ export default {
 }
 
 .help__body {
-  padding: 10px 14px 14px;
+  padding: 12px 14px 14px;
   font-size: calc(12px * var(--ae-font-scale));
   line-height: calc(17px * var(--ae-font-scale));
 }
@@ -230,6 +230,10 @@ export default {
 .help__overview {
   margin: 0 0 8px;
   color: var(--ae-muted);
+}
+
+.help__body > .help__heading:first-child {
+  margin-top: 0;
 }
 
 .help__heading {
