@@ -4,7 +4,7 @@
       <div class="toolbar">
         <div class="tool tool--species">
           <div class="tool__label caption text--secondary">Species<provenance-mark v-if="speciesPopulationGap" :result="speciesPopulationGap" /></div>
-          <v-select v-model="selectedSpeciesId" :items="speciesItems" item-text="text" item-value="value" aria-label="Species" dense outlined hide-details />
+          <v-autocomplete v-model="selectedSpeciesId" :items="speciesItems" item-text="text" item-value="value" aria-label="Species" dense outlined hide-details />
         </div>
         <div class="tool">
           <div class="tool__label caption text--secondary">Goal</div>
@@ -112,7 +112,7 @@
                     <v-text-field :value="transitSpeed" type="number" min="0" label="Speed (km/s)" hint="Blank: no time, only jumps and distance" persistent-hint :rules="[rules.speed]" dense outlined @change="setTransitSpeed" />
                   </v-col>
                   <v-col cols="12" sm="6">
-                    <v-select :value="pickedClass" :items="transitClassItems" item-text="text" item-value="id" label="Take from a ship class" :hint="transitClassItems.length ? 'Its top speed and whether its own jump drive carries it' : 'The race has no ship that moves'" persistent-hint :disabled="!transitClassItems.length" dense outlined @change="takeClass" />
+                    <v-autocomplete :value="pickedClass" :items="transitClassItems" item-text="text" item-value="id" label="Take from a ship class" :hint="transitClassItems.length ? 'Its top speed and whether its own jump drive carries it' : 'The race has no ship that moves'" persistent-hint :disabled="!transitClassItems.length" dense outlined @change="takeClass" />
                   </v-col>
                 </v-row>
                 <div class="tool__label caption text--secondary mt-2">Crossing jump points</div>

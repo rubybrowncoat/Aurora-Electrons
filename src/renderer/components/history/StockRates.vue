@@ -9,7 +9,7 @@
         <v-btn-toggle v-model="rateScope" mandatory dense class="mr-3" data-rates-scope>
           <v-btn v-for="option in scopes" :key="option.value" :value="option.value" small :title="option.title">{{ option.text }}</v-btn>
         </v-btn-toggle>
-        <v-select v-if="scope === 'colony' && colonyOptions.length" :value="colonyId" :items="colonyOptions" label="Colony" dense hide-details class="history-rates__select mr-3" data-rates-colony @change="rateColony = $event" />
+        <v-autocomplete v-if="scope === 'colony' && colonyOptions.length" :value="colonyId" :items="colonyOptions" label="Colony" dense hide-details class="history-rates__select mr-3" data-rates-colony @change="rateColony = $event" />
         <v-select :value="stockKey" :items="stockOptions" label="Stock" dense hide-details class="history-rates__select mr-3" data-rates-stock @change="rateStock = $event" />
         <v-btn-toggle v-model="rateWindow" mandatory dense data-rates-window>
           <v-btn v-for="option in windows" :key="option.value" :value="option.value" small :title="option.title">{{ option.text }}</v-btn>

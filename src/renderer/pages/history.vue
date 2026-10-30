@@ -392,7 +392,7 @@
                         </v-btn-toggle>
                       </td>
                       <td class="history-backup__races">
-                        <v-select :value="file.races || []" :items="file.raceChoices" item-value="RaceID" item-text="label" multiple chips small-chips deletable-chips dense hide-details placeholder="All races" :disabled="item.skipped || file.policy === 'keep' || file.raceChoices.length < 2" @change="chooseRaces(item.id, file.branchId, $event)" />
+                        <v-autocomplete :value="file.races || []" :items="file.raceChoices" item-value="RaceID" item-text="label" multiple chips small-chips deletable-chips dense hide-details placeholder="All races" :disabled="item.skipped || file.policy === 'keep' || file.raceChoices.length < 2" @change="chooseRaces(item.id, file.branchId, $event)" />
                       </td>
                       <td class="text-right">{{ count(file.totals.stored) }}</td>
                       <td class="text-right">{{ count(file.totals.backup) }}</td>

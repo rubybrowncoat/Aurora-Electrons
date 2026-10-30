@@ -18,7 +18,7 @@
         </div>
         <div class="manifest-line">
           <v-btn small text data-manifest-add @click="addPlan"><v-icon small left>mdi-plus</v-icon>Add a class</v-btn>
-          <v-select :value="targetId" :items="colonyItems" item-text="text" item-value="id" label="Needed at" dense outlined hide-details style="max-width: 280px" @input="chosenTarget = $event" />
+          <v-autocomplete :value="targetId" :items="colonyItems" item-text="text" item-value="id" label="Needed at" dense outlined hide-details style="max-width: 280px" @input="chosenTarget = $event" />
         </div>
       </div>
       <div v-if="manifest.invalid" class="px-4 pb-3 error--text" data-manifest-invalid>The manifest needs {{ manifest.invalid }}.</div>
@@ -74,8 +74,8 @@
         </div>
         <div class="px-4 pb-3">
           <div v-for="entry in entered" :key="entry.id" class="manifest-line">
-            <v-select :value="entry.populationId" :items="colonyItems" item-text="text" item-value="id" label="Colony" dense outlined hide-details style="max-width: 240px" @input="setEntry(entry, 'populationId', $event)" />
-            <v-select :value="entry.componentId" :items="componentItems" item-text="text" item-value="id" label="Component" dense outlined hide-details style="max-width: 260px" @input="setEntry(entry, 'componentId', $event)" />
+            <v-autocomplete :value="entry.populationId" :items="colonyItems" item-text="text" item-value="id" label="Colony" dense outlined hide-details style="max-width: 240px" @input="setEntry(entry, 'populationId', $event)" />
+            <v-autocomplete :value="entry.componentId" :items="componentItems" item-text="text" item-value="id" label="Component" dense outlined hide-details style="max-width: 260px" @input="setEntry(entry, 'componentId', $event)" />
             <v-text-field :value="entry.units" label="Units held back" type="number" min="0" step="1" dense outlined hide-details :error="!enteredValid(entry)" style="max-width: 150px" @input="setEntry(entry, 'units', $event)" />
             <v-btn small icon aria-label="Remove the claim" @click="removeEntry(entry)"><v-icon small>mdi-close</v-icon></v-btn>
           </div>

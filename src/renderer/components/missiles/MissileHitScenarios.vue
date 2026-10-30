@@ -97,7 +97,7 @@
     <div v-if="focus" class="panel-body missile-hit__focus">
       <div class="missile-hit__focus-head">
         <div class="subtitle-2">Where the chance changes</div>
-        <v-select :value="focus.key" class="missile-hit__pick" :items="rows" item-text="name" item-value="key" aria-label="Missile to chart" dense outlined hide-details @change="(key) => (focusKey = key)" />
+        <v-autocomplete :value="focus.key" class="missile-hit__pick" :items="rows" item-text="name" item-value="key" aria-label="Missile to chart" dense outlined hide-details @change="(key) => (focusKey = key)" />
       </div>
       <stat-tiles compact :tiles="tiles" />
       <v-row class="mt-2">

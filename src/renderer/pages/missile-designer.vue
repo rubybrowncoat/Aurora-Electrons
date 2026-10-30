@@ -21,17 +21,13 @@
                 <div class="tool__label caption text--secondary">Baseline, a saved missile<page-link v-if="baselineLink" :to="baselineLink" :name="baselineName" class="ml-1" /></div>
                 <v-autocomplete :value="baselineId" :items="savedItems" item-text="text" item-value="value" placeholder="None" prepend-inner-icon="mdi-rocket-launch-outline" aria-label="Saved missile pinned as the baseline" clearable dense outlined hide-details data-field="baseline" @change="setBaseline" />
               </div>
+              <div class="tool tool--saved">
+                <div class="tool__label caption text--secondary">Add a saved missile as an alternative</div>
+                <v-autocomplete ref="savedPick" :items="savedItems" item-text="text" item-value="value" placeholder="Pick a saved missile" prepend-inner-icon="mdi-plus" aria-label="Add a saved missile as an alternative" :disabled="!savedItems.length || alternatives.length >= maxAlternatives" dense outlined hide-details data-action="add-saved" @change="pickSaved" />
+              </div>
               <div class="tool tool--actions">
                 <div class="tool__buttons">
                   <v-btn outlined :disabled="!canSeed || alternatives.length >= maxAlternatives" aria-label="Add a design seeded from the baseline" data-action="seed" @click="seedFromBaseline"><v-icon small left>mdi-content-copy</v-icon>Seed from baseline</v-btn>
-                  <v-menu offset-y :close-on-content-click="true" max-height="360">
-                    <template #activator="{ on, attrs }">
-                      <v-btn outlined :disabled="!savedItems.length || alternatives.length >= maxAlternatives" aria-label="Add a saved missile as an alternative" data-action="add-saved" v-bind="attrs" v-on="on"><v-icon small left>mdi-plus</v-icon>Saved missile</v-btn>
-                    </template>
-                    <v-list dense>
-                      <v-list-item v-for="item in savedItems" :key="item.value" @click="addSaved(item.value)"><v-list-item-title>{{ item.text }}</v-list-item-title></v-list-item>
-                    </v-list>
-                  </v-menu>
                   <v-btn outlined :disabled="alternatives.length >= maxAlternatives" aria-label="Add a blank design" data-action="add-blank" @click="addBlank"><v-icon small left>mdi-plus</v-icon>Blank design</v-btn>
                 </div>
               </div>
@@ -73,8 +69,8 @@
             <div v-if="scenarioNotice" class="caption warning--text mb-2" data-tech="notice">{{ scenarioNotice }}</div>
             <v-row dense>
               <v-col v-for="line in techLines" :key="line.type" cols="12" sm="6" md="4" xl="3" :data-tech-line="line.type">
-                <v-select :value="line.selected" :items="line.items" item-text="text" item-value="value" :label="line.label" :disabled="!line.items.length" dense outlined hide-details @change="(id) => setTech(line.type, id)" />
-                <v-select v-if="line.candidates.length" :value="line.candidate" :items="line.candidates" item-text="text" item-value="value" :label="`${line.label}: next tech (hypothetical)`" clearable dense outlined hide-details class="mt-1" @change="(id) => chooseNextTech(line.type, id)" />
+                <v-autocomplete :value="line.selected" :items="line.items" item-text="text" item-value="value" :label="line.label" :disabled="!line.items.length" dense outlined hide-details @change="(id) => setTech(line.type, id)" />
+                <v-autocomplete v-if="line.candidates.length" :value="line.candidate" :items="line.candidates" item-text="text" item-value="value" :label="`${line.label}: next tech (hypothetical)`" clearable dense outlined hide-details class="mt-1" @change="(id) => chooseNextTech(line.type, id)" />
                 <div v-if="line.hypothetical" class="caption warning--text pt-1 pl-3" data-tech="hypothetical-line">Hypothetical: the results use a level the race has not researched.</div>
                 <div v-if="line.unresolved" class="caption warning--text pt-1 pl-3" data-tech="unresolved-line">{{ line.unresolvedText }}<v-btn x-small text class="ml-1" @click="forgetChoice(line.type)">Forget the choice</v-btn></div>
                 <div v-if="line.next" class="d-flex align-center caption text--disabled pt-1 pl-3">Next: {{ line.nextText }}<page-link :to="linkTo.techTree({ tech: line.next.id })" :name="line.next.name" class="ml-1" /></div>
@@ -944,6 +940,12 @@ export default {
       }
     },
 
+    // A saved missile picked from the list is added as an alternative and the picker starts over, empty.
+    pickSaved(id) {
+      this.addSaved(id)
+      this.$refs.savedPick.resetPick()
+    },
+
     addSaved(id) {
       const before = this.alternatives.length
 
@@ -1439,7 +1441,8 @@ export default {
     white-space: nowrap;
   }
 
-  .tool--baseline {
+  .tool--baseline,
+  .tool--saved {
     flex: 1 1 260px;
     max-width: 420px;
   }

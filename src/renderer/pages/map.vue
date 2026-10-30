@@ -18,7 +18,7 @@
         </div>
         <div class="tool tool--tags">
           <div class="tool__label caption text--secondary">Tag</div>
-          <v-select :value="tagFilterValue" :items="tagItems" aria-label="Show the systems that hold a body with a tag" dense outlined hide-details @change="chooseTag" />
+          <v-autocomplete :value="tagFilterValue" :items="tagItems" aria-label="Show the systems that hold a body with a tag" dense outlined hide-details @change="chooseTag" />
         </div>
         <div class="tool tool--actions">
           <v-menu v-model="arrangeMenu" offset-y left :close-on-content-click="false" max-width="400">

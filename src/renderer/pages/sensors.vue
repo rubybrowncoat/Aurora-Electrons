@@ -24,7 +24,7 @@
             </div>
             <div v-else-if="targetKind === 'class'" class="tool tool--class">
               <div class="tool__label caption text--secondary">Target class</div>
-              <v-autocomplete :value="targetClass ? targetClass.id : null" :items="classItems" item-text="text" item-value="value" placeholder="None" prepend-inner-icon="mdi-ferry" aria-label="Class the sensor is sized against" dense outlined hide-details data-sensors="target-class" @change="targetClassId = Number.isInteger($event) ? $event : null" />
+              <v-autocomplete :value="targetClass ? targetClass.id : null" :items="classItems" item-text="text" item-value="value" placeholder="None" prepend-inner-icon="mdi-ferry" aria-label="Class the sensor is sized against" clearable dense outlined hide-details data-sensors="target-class" @change="targetClassId = Number.isInteger($event) ? $event : null" />
             </div>
             <div v-else class="tool tool--figure">
               <div class="tool__label caption text--secondary">Missile size</div>
@@ -83,7 +83,7 @@
             </div>
             <div class="tool tool--class">
               <div class="tool__label caption text--secondary">Class for the speed and reduction panels</div>
-              <v-autocomplete :value="selectedClass ? selectedClass.id : null" :items="classItems" item-text="text" item-value="value" placeholder="None" prepend-inner-icon="mdi-ferry" aria-label="Class for the speed and thermal reduction panels" dense outlined hide-details @change="pickClass" />
+              <v-autocomplete :value="selectedClass ? selectedClass.id : null" :items="classItems" item-text="text" item-value="value" placeholder="None" prepend-inner-icon="mdi-ferry" aria-label="Class for the speed and thermal reduction panels" clearable dense outlined hide-details @change="pickClass" />
             </div>
           </template>
           <div class="tool tool--switch">

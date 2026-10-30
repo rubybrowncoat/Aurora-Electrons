@@ -131,7 +131,7 @@
             <v-btn small text :disabled="!arrivals.length" @click="arrivals = []">Remove all</v-btn>
           </div>
           <div class="arrival-form">
-            <v-select v-model="arrivalForm.populationId" :items="arrivalColonies" item-text="colonyName" item-value="PopulationID" label="Colony" dense outlined hide-details style="max-width: 240px" />
+            <v-autocomplete v-model="arrivalForm.populationId" :items="arrivalColonies" item-text="colonyName" item-value="PopulationID" label="Colony" dense outlined hide-details style="max-width: 240px" />
             <v-select v-model="arrivalForm.resource" :items="arrivalResources" label="Stock" dense outlined hide-details style="max-width: 160px" />
             <v-text-field v-model="arrivalForm.day" label="Days from now" type="number" min="0" dense outlined hide-details style="max-width: 140px" />
             <v-text-field v-model="arrivalForm.quantity" :label="arrivalForm.resource === 'fuel' ? 'Litres' : 'Tonnes'" type="number" min="0" dense outlined hide-details style="max-width: 140px" />

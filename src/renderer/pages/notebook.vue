@@ -45,10 +45,7 @@
         <v-card class="panel notebook-list" data-summary="The notes kept for this race, filtered by system." elevation="1">
           <div class="panel-head">
             <span>Project notes</span>
-            <v-select v-model="filterSystem" :items="systemFilter" item-value="value" label="System" dense outlined hide-details class="notebook__filter" data-note-filter>
-              <template #selection="{ item }">{{ item.text }} ({{ item.count }})</template>
-              <template #item="{ item }">{{ item.text }} ({{ item.count }})</template>
-            </v-select>
+            <v-autocomplete v-model="filterSystem" :items="systemFilter" :item-text="countedText" item-value="value" label="System" dense outlined hide-details class="notebook__filter" data-note-filter />
           </div>
           <div class="panel-body">
             <div v-if="shown.length" data-note-list>
@@ -86,10 +83,7 @@
         <v-card class="panel notebook-tags" data-summary="Short personal tags on single bodies of the systems the race knows, shared with the Galaxy Map." elevation="1">
           <div class="panel-head">
             <span>Body tags</span>
-            <v-select :value="tagFilterValue" :items="tagOptions" item-value="value" label="Tag" dense outlined hide-details class="notebook__filter" data-tag-filter @change="tagFilter = $event">
-              <template #selection="{ item }">{{ item.text }} ({{ item.count }})</template>
-              <template #item="{ item }">{{ item.text }} ({{ item.count }})</template>
-            </v-select>
+            <v-autocomplete :value="tagFilterValue" :items="tagOptions" :item-text="countedText" item-value="value" label="Tag" dense outlined hide-details class="notebook__filter" data-tag-filter @change="tagFilter = $event" />
           </div>
           <div class="panel-body">
             <world-tags :entries="tagShown" :choices="tagChoices" :suggestions="tagSuggestions" :systems="systems" :system-id.sync="tagPickSystem" :hint="tagHint" :problem="tagProblem" :message="tagMessage" :message-type="tagMessageType" :busy="tagBusy" :scope-key="tagScopeKey" :start-year="StartYear" :empty="tagEmpty" show-system :expect="tagExpect" :save="tagSave" :retag="tagRetag" :clear="tagClear" />
@@ -368,6 +362,11 @@ export default {
     },
   },
   methods: {
+    // The words of a filter choice: the text and the number of notes or bodies behind it.
+    countedText(option) {
+      return `${option.text} (${option.count})`
+    },
+
     // Empties the form and what waits on it, for a draft that no longer belongs to what is shown.
     resetDraft() {
       this.draft = blankDraft()

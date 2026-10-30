@@ -3,7 +3,7 @@
     <div class="panel-head">
       <span>Colony comparison<provenance-mark :rule="depositRule" label /></span>
       <span class="d-flex align-center flex-wrap controls">
-        <v-select :value="chosenId" :items="speciesItems" item-text="text" item-value="id" label="Species" placeholder="As the table shows each body" persistent-placeholder dense outlined hide-details clearable class="species-picker" data-control="species" @input="speciesId = $event || null" />
+        <v-autocomplete :value="chosenId" :items="speciesItems" item-text="text" item-value="id" label="Species" placeholder="As the table shows each body" persistent-placeholder dense outlined hide-details clearable class="species-picker" data-control="species" @input="speciesId = $event || null" />
       </span>
     </div>
     <div v-if="loading" class="panel-body caption text--secondary" data-state="loading">The selected bodies are being worked out.</div>

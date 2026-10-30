@@ -15,13 +15,13 @@
       <div class="px-4 pt-2">
         <v-row dense>
           <v-col cols="12" sm="6" md="3">
-            <v-select :value="destination ? destination.PopulationID : null" :items="colonyItems" item-text="text" item-value="id" label="Deliver to colony" hint="Blank: no route and no arrival time" persistent-hint clearable dense outlined @change="setDestination" />
+            <v-autocomplete :value="destination ? destination.PopulationID : null" :items="colonyItems" item-text="text" item-value="id" label="Deliver to colony" hint="Blank: no route and no arrival time" persistent-hint clearable dense outlined @change="setDestination" />
           </v-col>
           <v-col cols="12" sm="6" md="3">
-            <v-select :value="builder ? builder.colony.PopulationID : null" :items="builderItems" item-text="text" item-value="id" label="Build new mines at" hint="Idle construction capacity, BP/yr" persistent-hint dense outlined @change="setBuilder" />
+            <v-autocomplete :value="builder ? builder.colony.PopulationID : null" :items="builderItems" item-text="text" item-value="id" label="Build new mines at" hint="Idle construction capacity, BP/yr" persistent-hint dense outlined @change="setBuilder" />
           </v-col>
           <v-col cols="12" sm="6" md="3">
-            <v-select :value="type ? type.PlanetaryInstallationID : null" :items="typeItems" item-text="text" item-value="id" label="Mine type" :hint="typeItems.length ? 'For a site no mine works yet' : 'The save lists no mine the race can build'" persistent-hint :disabled="!typeItems.length" dense outlined @change="setType" />
+            <v-autocomplete :value="type ? type.PlanetaryInstallationID : null" :items="typeItems" item-text="text" item-value="id" label="Mine type" :hint="typeItems.length ? 'For a site no mine works yet' : 'The save lists no mine the race can build'" persistent-hint :disabled="!typeItems.length" dense outlined @change="setType" />
           </v-col>
           <v-col cols="12" sm="6" md="3">
             <v-text-field v-model="mineCount" label="Number of mines" type="number" min="1" hint="Blank: the new mines are not known" persistent-hint dense outlined :error="mines === null" />
@@ -33,7 +33,7 @@
             <v-text-field :value="speed" type="number" min="0" label="Speed (km/s)" hint="Blank: no travel time" persistent-hint dense outlined @change="setSpeed" />
           </v-col>
           <v-col cols="12" sm="6" md="3">
-            <v-select :value="pickedClass" :items="classItems" item-text="text" item-value="id" label="Take from a ship class" :hint="classItems.length ? 'Its top speed, jump drive and cargo' : 'The race has no ship that moves'" persistent-hint :disabled="!classItems.length" dense outlined @change="takeClass" />
+            <v-autocomplete :value="pickedClass" :items="classItems" item-text="text" item-value="id" label="Take from a ship class" :hint="classItems.length ? 'Its top speed, jump drive and cargo' : 'The race has no ship that moves'" persistent-hint :disabled="!classItems.length" dense outlined @change="takeClass" />
           </v-col>
           <v-col cols="12" sm="6" md="3">
             <v-text-field :value="cargo" type="number" min="0" label="Cargo hold (t)" :hint="cargoHint" persistent-hint dense outlined @change="setCargo" />

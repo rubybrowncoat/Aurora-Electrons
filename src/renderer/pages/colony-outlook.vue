@@ -249,16 +249,16 @@
           </div>
           <v-row dense class="px-4 pt-2">
             <v-col cols="12" sm="6" md="3">
-              <v-select v-model="bootstrapColonyId" :items="bootstrapColonyItems" item-text="text" item-value="value" label="Colony to gain mining" aria-label="Colony to gain mining" dense outlined hide-details clearable />
+              <v-autocomplete v-model="bootstrapColonyId" :items="bootstrapColonyItems" item-text="text" item-value="value" label="Colony to gain mining" aria-label="Colony to gain mining" dense outlined hide-details clearable />
             </v-col>
             <v-col cols="12" sm="6" md="3">
-              <v-select :value="bootstrapType ? bootstrapType.PlanetaryInstallationID : null" :items="bootstrapTypeItems" item-text="text" item-value="value" label="Mine type" aria-label="Mine type" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapTypeId = $event" />
+              <v-autocomplete :value="bootstrapType ? bootstrapType.PlanetaryInstallationID : null" :items="bootstrapTypeItems" item-text="text" item-value="value" label="Mine type" aria-label="Mine type" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapTypeId = $event" />
             </v-col>
             <v-col cols="12" sm="6" md="2">
               <v-text-field v-model="bootstrapQuantity" label="Number of mines" aria-label="Number of mines" type="number" min="1" dense outlined hide-details :disabled="!bootstrapColonyId" :error="bootstrapColonyId !== null && bootstrapCount === null" />
             </v-col>
             <v-col cols="12" sm="6" md="4">
-              <v-select :value="bootstrapBuilders.length ? (bootstrapBuilders.find((option) => option.colony.PopulationID === bootstrapBuilderId) || bootstrapBuilders[0]).colony.PopulationID : null" :items="bootstrapBuilderItems" item-text="text" item-value="value" label="Builder for the import" aria-label="Builder for the import" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapBuilderId = $event" />
+              <v-autocomplete :value="bootstrapBuilders.length ? (bootstrapBuilders.find((option) => option.colony.PopulationID === bootstrapBuilderId) || bootstrapBuilders[0]).colony.PopulationID : null" :items="bootstrapBuilderItems" item-text="text" item-value="value" label="Builder for the import" aria-label="Builder for the import" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapBuilderId = $event" />
             </v-col>
           </v-row>
           <div v-if="bootstrapState.loading || bootstrapState.failed" class="px-4 py-2" data-bootstrap-state>

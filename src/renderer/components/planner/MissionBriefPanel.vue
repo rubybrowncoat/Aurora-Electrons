@@ -40,7 +40,7 @@
 
       <v-row dense>
         <v-col cols="12" md="4">
-          <v-select :value="selected" :items="saved" item-text="name" item-value="uuid" label="Saved brief" dense outlined clearable hide-details="auto" :no-data-text="'No brief saved for this race yet.'" data-brief="select" @change="(value) => $emit('select', value)" />
+          <v-autocomplete :value="selected" :items="saved" item-text="name" item-value="uuid" label="Saved brief" dense outlined clearable hide-details="auto" :no-data-text="'No brief saved for this race yet.'" data-brief="select" @change="(value) => $emit('select', value)" />
         </v-col>
         <v-col cols="12" md="4">
           <v-text-field :value="draft.name" label="Name" dense outlined hide-details="auto" :counter="nameLength" :error-messages="nameError" data-brief="name" @input="(value) => $emit('field', 'name', value)" />

@@ -21,24 +21,18 @@
           </div>
           <div class="tool tool--speed">
             <div class="tool__label caption text--secondary">Speed</div>
-            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="speedPlaceholder" suffix="km/s" aria-label="Speed in km/s" data-speed dense outlined hide-details>
-              <template #append>
-                <v-menu offset-y left max-height="420">
-                  <template #activator="{ on, attrs }">
-                    <v-icon small title="Use a ship class's speed" v-bind="attrs" v-on="on">mdi-rocket-launch-outline</v-icon>
-                  </template>
-                  <v-list dense>
-                    <v-subheader>Speed of a class in service</v-subheader>
-                    <v-list-item v-for="shipClass in classOptions" :key="shipClass.ShipClassID" @click="speed = shipClass.MaxSpeed">
-                      <v-list-item-content>
-                        <v-list-item-title>{{ shipClass.ClassName }}</v-list-item-title>
-                        <v-list-item-subtitle>{{ count(shipClass.MaxSpeed) }} km/s · {{ shipClass.Ships }} {{ shipClass.Ships === 1 ? 'ship' : 'ships' }}{{ shipClass.JumpRating ? '' : ' · no jump drive' }}</v-list-item-subtitle>
-                      </v-list-item-content>
-                    </v-list-item>
-                  </v-list>
-                </v-menu>
+            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="speedPlaceholder" suffix="km/s" aria-label="Speed in km/s" data-speed dense outlined hide-details />
+          </div>
+          <div class="tool tool--class-speed">
+            <div class="tool__label caption text--secondary">Speed of a class in service</div>
+            <v-autocomplete ref="classPick" :items="classOptions" item-text="ClassName" item-value="ShipClassID" placeholder="Use a ship class's speed" prepend-inner-icon="mdi-rocket-launch-outline" aria-label="Use a ship class's speed" :disabled="!classOptions.length" dense outlined hide-details data-speed-class @change="useClassSpeed">
+              <template #item="{ item }">
+                <v-list-item-content>
+                  <v-list-item-title>{{ item.ClassName }}</v-list-item-title>
+                  <v-list-item-subtitle>{{ count(item.MaxSpeed) }} km/s · {{ item.Ships }} {{ item.Ships === 1 ? 'ship' : 'ships' }}{{ item.JumpRating ? '' : ' · no jump drive' }}</v-list-item-subtitle>
+                </v-list-item-content>
               </template>
-            </v-text-field>
+            </v-autocomplete>
           </div>
           <div class="tool tool--actions">
             <v-menu offset-y left :close-on-content-click="false" max-width="420">
@@ -904,6 +898,17 @@ export default {
     this.readStops()
   },
   methods: {
+    // The speed of a class picked from the list is taken as the speed and the picker starts over, empty.
+    useClassSpeed(id) {
+      const shipClass = this.classOptions.find((candidate) => candidate.ShipClassID === id)
+
+      if (shipClass) {
+        this.speed = shipClass.MaxSpeed
+      }
+
+      this.$refs.classPick.resetPick()
+    },
+
     withAlpha,
 
     filterSystem(_value, query, item) {
@@ -1470,6 +1475,10 @@ export default {
 
   .tool--speed {
     flex: 0 0 180px;
+  }
+
+  .tool--class-speed {
+    flex: 0 1 280px;
   }
 
   .toolbar .v-btn-toggle .v-btn,

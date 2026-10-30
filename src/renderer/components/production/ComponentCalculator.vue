@@ -13,7 +13,7 @@
     <template v-else>
       <div class="calculator-form">
         <v-autocomplete :value="chosenClass" :items="classItems" item-text="text" item-value="id" label="Ship class" dense outlined hide-details style="max-width: 300px" @input="classId = $event" />
-        <v-select :value="chosenColony" :items="colonies" item-text="name" item-value="id" label="Colony" dense outlined hide-details style="max-width: 240px" @input="populationId = $event" />
+        <v-autocomplete :value="chosenColony" :items="colonies" item-text="name" item-value="id" label="Colony" dense outlined hide-details style="max-width: 240px" @input="populationId = $event" />
         <v-text-field v-model="hulls" label="Hulls" type="number" min="1" step="1" dense outlined hide-details :error="hullCount === null" style="max-width: 110px" />
         <v-text-field v-model="deadline" label="Deadline, days from now" type="number" min="1" dense outlined hide-details :error="deadlineDays === null" style="max-width: 200px" />
         <span class="caption text--secondary">{{ deadlineDate }}</span>

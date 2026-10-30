@@ -6,7 +6,7 @@
     <div v-for="sensor in sensors" :key="sensor.role" class="launcher-coverage__sensor" :data-launch-sensor="sensor.role">
       <div class="caption text--secondary">{{ sensor.label }}</div>
       <div class="launcher-coverage__row">
-        <v-select :value="selection[sensor.role].id" :items="items[sensor.role]" item-text="text" item-value="value" :placeholder="'Typed figures'" :aria-label="`${sensor.label}: a saved sensor of the race`" clearable dense outlined hide-details class="launcher-coverage__pick" :data-field="`launcher-${sensor.role}`" @change="(value) => $emit('sensor', sensor.role, 'id', value === undefined ? null : value)" />
+        <v-autocomplete :value="selection[sensor.role].id" :items="items[sensor.role]" item-text="text" item-value="value" :placeholder="'Typed figures'" :aria-label="`${sensor.label}: a saved sensor of the race`" clearable dense outlined hide-details class="launcher-coverage__pick" :data-field="`launcher-${sensor.role}`" @change="(value) => $emit('sensor', sensor.role, 'id', value === undefined ? null : value)" />
         <v-text-field v-for="part in parts" :key="part.id" :value="selection[sensor.role][part.id]" :label="part.label" :suffix="part.unit" :disabled="selection[sensor.role].id !== null" :error-messages="sensor.problems[part.id]" :aria-label="`${sensor.label}: ${part.label}`" dense outlined hide-details="auto" class="launcher-coverage__figure" :data-field="`launcher-${sensor.role}-${part.id}`" @input="(value) => $emit('sensor', sensor.role, part.id, value)" />
       </div>
       <div class="caption mt-1" :data-coverage="sensor.role">{{ sensor.text }}</div>
