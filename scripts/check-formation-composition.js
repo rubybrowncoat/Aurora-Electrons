@@ -18,9 +18,9 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const rawAssert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { patched, plantedPatch } = require('./lib/mutant-source')
 const { startPageServer } = require('./lib/page-server')
-const { observe, failedObservation, report, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
+const { observe, failedObservation, report, HarnessError, installScreen, readFigure, labelKey, pairedBy, settled } = require('./lib/browser-observe')
 const { assert, through, subjectModule, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 const { runSuite } = require('./lib/suite-runner')
 const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
@@ -109,6 +109,9 @@ const framed = (line) => {
 
   return { frame: frame + rest, figures: line.figures }
 }
+
+// The parts a builder of the module gives (`{ text }` for words, `{ role, text }` for a figure) as the line the screen would show of them, `{ text, figures }`.
+const lineOfParts = (parts) => ({ text: parts.map((part) => part.text).join(''), figures: parts.filter((part) => part.role !== undefined).map(({ role, text }) => ({ role, text })) })
 
 // A line as a frame ({ frame, figures }), or a sentence as a plain string. The placeholders of a frame are the figures, in order.
 const lineOf = (line) => (typeof line === 'string' ? { frame: line, figures: [] } : line)
@@ -651,6 +654,39 @@ add('gap-order', 'the table orders the formations by what is short, then over, t
   assert.equal(labels.size, 5, 'each state reads differently')
 })
 
+// The sentences the module's builders write, judged by value with no page: the parts a builder gives (`lineOfParts`) are read back through the module's own tables of words by the readers the browser checks read the screen with (`framed`, `meaning`, `figureOf`, `gapMeaning`), so that a rewording changes nothing and a wrong figure, kind or sign does.
+add('carry-text', 'the troop fit is written in the words of the module, its mass and its largest bay each a figure of its own in tonnes', (ctx) => {
+  const written = (fit) => framed(lineOfParts(ctx.comp.carryParts(fit, String)))
+
+  for (const [what, fit, kind, mass, largest] of [['formation 2 now', compared(ctx, 2, 'original').carry.now, 'fits', 66, 100], ['formation 9 now', compared(ctx, 9, 'original').carry.now, 'oversize', 500, 100]]) {
+    const found = meaning(ctx.comp.CARRY_TEXT, written(fit), `the carry of ${what}`)
+
+    assert.equal(found.kind, kind, `the carry of ${what}`)
+    figureOf(ctx, found.figures.mass, mass, `the mass in the carry of ${what}`, true, UNGROUPED)
+    figureOf(ctx, found.figures.largest, largest, `the largest bay in the carry of ${what}`, true, UNGROUPED)
+  }
+
+  for (const [fit, kind] of [[{ kind: 'no-bays', mass: 5, largest: null }, 'no-bays'], [{ kind: 'unsized', mass: null, largest: 100 }, 'unsized'], [{ kind: 'unknown', mass: 5, largest: null }, 'unknown']]) {
+    assert.equal(meaning(ctx.comp.CARRY_TEXT, written(fit), `the carry that is ${kind}`).kind, kind)
+  }
+})
+
+add('gap-text', 'the table states what is short, over, not known or complete in the words of the module, each with its own count', (ctx) => {
+  for (const [id, expected] of [[1, [{ kind: 'short', n: 1 }, { kind: 'over', n: 1 }]], [9, [{ kind: 'short', n: 2 }, { kind: 'over', n: 1 }]], [7, [{ kind: 'unknown', n: 1 }]], [2, [{ kind: 'complete', n: undefined }]]]) {
+    assert.deepStrictEqual(gapMeaning(ctx, lineOfParts(ctx.comp.gapOf(compared(ctx, id, 'original')).parts), `what the table says of formation ${id}`), expected, `what the table says of formation ${id}`)
+  }
+})
+
+add('comparison-text', 'the reason a comparison is not made and whether the templates differ are said in the words of the module', (ctx) => {
+  for (const [id, which, kind] of [[6, 'original', 'no-elements'], [3, 'original', 'none'], [4, 'original', 'foreign'], [5, 'original', 'empty'], [8, 'original', 'missing'], [8, 'replacement', 'unknown']]) {
+    assert.equal(labelKey(ctx.comp.noComparisonText(compared(ctx, id, which)), ctx.comp.NOT_COMPARED_TEXT), kind, `why formation ${id} on ${which} is not compared`)
+  }
+
+  for (const [id, kind] of [[14, 'same'], [13, 'differ']]) {
+    assert.equal(labelKey(ctx.comp.identityText(compared(ctx, id, 'original')), ctx.comp.IDENTITY_TEXT), kind, `whether the templates of formation ${id} differ`)
+  }
+})
+
 add('view', 'the basis is a view preference of the race, with a default and a stored value that is not offered dropped', (ctx) => {
   const view = ctx.comp.basisView
 
@@ -1086,36 +1122,10 @@ const READS = { 'browser-basis': ['short'], 'browser-gaps': ['short'], 'browser-
 
 // The page as a player uses it: the race is picked, the page opened on the system of the formations of `plan` (the link the table's own rows give), and for each formation its expander is pressed and the screen read on the replacement basis, then on the original basis (the toggle pressed) and back; then the original basis is left set, the page left for another and opened again, and the screen read once more. `parts` (a list of PARTS, or null for every part) narrows the drive to the rows and the restored screen it names: a fault names the parts its checks are caught on (MUTANTS), and the head and the rewrites drive every part. A control that is not there is recorded in `steps` (and the later reads show nothing): the observation goes on, so that the checks say what is missing. Resolves to the record of `observe` (scripts/lib/browser-observe.js) with the value { rows: { [id]: { replacement, original, back } }, initial, restored, steps }, `rows` holding the formations driven and `restored` undefined where it was not.
 const observePage = (browser, url, plan, { timeout = BROWSER_TIMEOUT, viewport = null, shot = null, parts = null } = {}) => observe(browser, async ({ page, step }) => {
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !request.url().endsWith('/stat')
-  let inFlight = 0
-  let last = Date.now()
-
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight++
-      last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight--
-      last = Date.now()
-    }
-  })
-
-  const isBusy = () => inFlight > 0 || Date.now() - last < 1500
-  const settle = async () => {
+  const settle = () => {
     step('waiting for the page to settle')
 
-    const deadline = Date.now() + timeout
-
-    while (isBusy() || await page.evaluate(pageLoading)) {
-      if (Date.now() > deadline) {
-        throw new Error('the page did not settle')
-      }
-
-      await page.waitForTimeout(250)
-    }
+    return settled(page, { limit: timeout, loading: pageLoading })
   }
   const route = `/survey-progress?formations=${plan.system}`
   const go = async (target) => {
@@ -1667,38 +1677,35 @@ const MUTANTS = [
   ['the formations panel has no summary', 'data-summary="Review ground formations', 'data-hint="Review ground formations', SURVEY_FILE, ['browser-panels'], true, []],
   ['the basis toggle is disconnected', 'v-model="formationBasis"', ':value="formationBasis"', SURVEY_FILE, ['browser-basis', 'browser-switch', 'browser-detail'], true, ['short']],
   ['the rows cannot be expanded', 'show-expand single-expand :expanded.sync="formationExpanded"', 'single-expand :expanded.sync="formationExpanded"', SURVEY_FILE, ['browser-got-through', 'browser-detail'], true, ['short']],
-  ['the detail names the other template', ':data-compare-template-id="compareOf(item).template.id"', ':data-compare-template-id="compareOf(item).otherTemplate.id"', SURVEY_FILE, ['browser-detail', 'browser-switch'], true, ['short']],
   ['the table compares with the original template whatever the toggle says', 'compareFormation(node, this.formationBasis, this.troopBays.troops)', "compareFormation(node, 'original', this.troopBays.troops)", SURVEY_FILE, ['browser-gaps', 'browser-detail', 'browser-switch'], true, ['short']],
-  ['every obsolete template is shown as a review', ':data-compare-review="String(compareOf(item).obsolescence.review)"', ':data-compare-review="String(compareOf(item).obsolescence.flag)"', SURVEY_FILE, ['browser-obsolete'], true, ['obsolete']],
-  ['the carry at the intended mass shows the carry now', ':data-compare-fit="compareOf(item).carry.intended.kind"', ':data-compare-fit="compareOf(item).carry.now.kind"', SURVEY_FILE, ['browser-carry'], true, ['short']],
-  ['the column of the units short shows the excess', 'data-compare-cell="short">{{ unitsText(row.deficit) }}', 'data-compare-cell="short">{{ unitsText(row.excess) }}', SURVEY_FILE, ['browser-detail'], true, ['short']],
   ['the column that orders the table orders nothing', 'gapOrder: this.formationCompared.get(row.id).gap.order', 'gapOrder: 0', SURVEY_FILE, ['browser-gaps'], true, ['short']],
+  ['the column of the units short shows the excess', 'data-compare-cell="short">{{ unitsText(row.deficit) }}', 'data-compare-cell="short">{{ unitsText(row.excess) }}', SURVEY_FILE, ['browser-detail'], true, ['short']],
   ['the basis is not kept for the race', 'formationBasis: basisView,', 'formationBasis: { ...basisView, normalise: () => undefined },', SURVEY_FILE, ['browser-restored'], true, ['restored']],
   ['the obsolescence line is drawn with no opacity', 'class="caption" data-compare="obsolete"', 'class="caption" style="opacity:0" data-compare="obsolete"', SURVEY_FILE, ['browser-obsolete'], true, ['short']],
   ['the table of the classes is drawn with no opacity', 'class="mb-2" data-compare-classes>', 'class="mb-2" style="opacity:0" data-compare-classes>', SURVEY_FILE, ['browser-detail'], true, ['short']],
   ['the detail is put in a slot the table does not take', '<template #expanded-item="{ headers, item }">\n                <td :colspan="headers.length" class="py-3" data-compare="detail"', '<template #expanded-itemx="{ headers, item }">\n                <td :colspan="headers.length" class="py-3" data-compare="detail"', SURVEY_FILE, ['browser-detail'], true, ['short']],
   ['the replacement view is labelled as the original template', '{{ basisText(compareOf(item).which) }}', "{{ basisText('original') }}", SURVEY_FILE, ['browser-detail'], true, ['short']],
-  ['the carry text gives a formation too large for the bay the verdict of one that fits', 'CARRY_TEXT[fit.kind], fit, tonnes(count))', "CARRY_TEXT[fit.kind === 'oversize' ? 'fits' : fit.kind], fit, tonnes(count))", COMPOSITION_FILE, ['browser-carry'], true, ['short']],
-  ['the gap writes seven more classes short', "gapPart('short', short)", "gapPart('short', short + 7)", COMPOSITION_FILE, ['browser-gaps'], true, ['short']],
-  ['the gap writes the classes over as short', "over ? gapPart('over', over) : null", "over ? gapPart('short', over) : null", COMPOSITION_FILE, ['browser-gaps'], true, ['short']],
-  ['the obsolescence of a template with an STO class is told as an obsolete template', "obsolescence.review ? OBSOLESCENCE_TEXT[obsolescence.sto === 'actual' ? 'review-actual' : 'review'] : OBSOLESCENCE_TEXT.obsolete", "obsolescence.review ? OBSOLESCENCE_TEXT.obsolete : OBSOLESCENCE_TEXT[obsolescence.sto === 'actual' ? 'review-actual' : 'review']", COMPOSITION_FILE, ['browser-obsolete'], true, ['short']],
-  ['a formation with no elements is told as one with an empty template', "comparison.state === 'no-elements' ? 'no-elements' : comparison.reason]", "comparison.state === 'no-elements' ? 'empty' : comparison.reason]", COMPOSITION_FILE, ['browser-none'], true, ['empty']],
-  ['the templates that differ are told to be the same', 'sameTemplate === true ? IDENTITY_TEXT.same : comparison.identity.sameTemplate === false ? IDENTITY_TEXT.differ', 'sameTemplate === true ? IDENTITY_TEXT.differ : comparison.identity.sameTemplate === false ? IDENTITY_TEXT.same', COMPOSITION_FILE, ['browser-detail'], true, ['short']],
+  ['the carry text gives a formation too large for the bay the verdict of one that fits', 'CARRY_TEXT[fit.kind], fit, tonnes(count))', "CARRY_TEXT[fit.kind === 'oversize' ? 'fits' : fit.kind], fit, tonnes(count))", COMPOSITION_FILE, ['carry-text']],
+  ['the gap writes seven more classes short', "gapPart('short', short)", "gapPart('short', short + 7)", COMPOSITION_FILE, ['gap-text']],
+  ['the gap writes the classes over as short', "over ? gapPart('over', over) : null", "over ? gapPart('short', over) : null", COMPOSITION_FILE, ['gap-text']],
+  ['the obsolescence of a template with an STO class is told as an obsolete template', "obsolescence.review ? OBSOLESCENCE_TEXT[obsolescence.sto === 'actual' ? 'review-actual' : 'review'] : OBSOLESCENCE_TEXT.obsolete", "obsolescence.review ? OBSOLESCENCE_TEXT.obsolete : OBSOLESCENCE_TEXT[obsolescence.sto === 'actual' ? 'review-actual' : 'review']", COMPOSITION_FILE, ['obsolete-sto-source']],
+  ['a formation with no elements is told as one with an empty template', "comparison.state === 'no-elements' ? 'no-elements' : comparison.reason]", "comparison.state === 'no-elements' ? 'empty' : comparison.reason]", COMPOSITION_FILE, ['comparison-text']],
+  ['the templates that differ are told to be the same', 'sameTemplate === true ? IDENTITY_TEXT.same : comparison.identity.sameTemplate === false ? IDENTITY_TEXT.differ', 'sameTemplate === true ? IDENTITY_TEXT.differ : comparison.identity.sameTemplate === false ? IDENTITY_TEXT.same', COMPOSITION_FILE, ['comparison-text']],
   ['the replacement template carries the label of the original one', "text: 'Replacement template' }", "text: 'Original template' }", COMPOSITION_FILE, ['view', 'browser-basis']],
   ['the name of the other template is shown', 'templateOf(compareOf(item).template)', 'templateOf(compareOf(item).otherTemplate)', SURVEY_FILE, ['browser-detail', 'browser-switch'], true, ['short']],
-  ['the carry builder writes the masses in kilograms', '`${count(value)} t`', '`${count(value)} kg`', COMPOSITION_FILE, ['browser-carry'], true, ['short']],
+  ['the carry builder writes the masses in kilograms', '`${count(value)} t`', '`${count(value)} kg`', COMPOSITION_FILE, ['carry-text']],
   ['the union of the classes is the template STO evidence', 'const templateSto = named(stoRows.filter((row) => listed.has(row.classId)))', 'const templateSto = named(stoRows)', COMPOSITION_FILE, ['obsolete-sto-source', 'browser-obsolete']],
   ['an STO class only the formation holds is shown as none', 'const actualOnlySto = named(stoRows.filter((row) => !listed.has(row.classId)))', 'const actualOnlySto = []', COMPOSITION_FILE, ['obsolete-sto-source', 'browser-obsolete']],
   ['the review of an actual-only STO class is worded as that of a template class', "obsolescence.review ? OBSOLESCENCE_TEXT[obsolescence.sto === 'actual' ? 'review-actual' : 'review'] : OBSOLESCENCE_TEXT.obsolete", 'obsolescence.review ? OBSOLESCENCE_TEXT.review : OBSOLESCENCE_TEXT.obsolete', COMPOSITION_FILE, ['obsolete-sto-source', 'browser-obsolete']],
   ['the obsolescence text is drawn by a child with no opacity', '{{ obsolescenceLabel(compareOf(item).obsolescence) }}</div>', '<span style="opacity: 0">{{ obsolescenceLabel(compareOf(item).obsolescence) }}</span></div>', SURVEY_FILE, ['browser-obsolete'], true, ['short']],
   ['the figures of the carry are drawn by a child with no opacity', 'At the intended mass: <span v-for="(part, index) in carryOf(compareOf(item).carry.intended)" :key="index" :data-figure="part.role">{{ part.text }}</span>', 'At the intended mass: <span v-for="(part, index) in carryOf(compareOf(item).carry.intended)" :key="index" :data-figure="part.role"><span :style="{ opacity: part.role ? 0 : 1 }">{{ part.text }}</span></span>', SURVEY_FILE, ['browser-carry'], true, ['short']],
   ['the figure of a mass is drawn by a child with no opacity', 'data-figure="mass-actual">{{ massText(compareOf(item).actualMass.value) }} t</span>', 'data-figure="mass-actual"><span style="opacity: 0">{{ massText(compareOf(item).actualMass.value) }} t</span></span>', SURVEY_FILE, ['browser-detail'], true, ['short']],
-  ['the carry builder swaps the mass and the largest bay under a wording that names the bay first', ["fits: 'Fits one troop bay ({mass}; the largest holds {largest})'", "oversize: 'Fits no troop bay ({mass}; the largest holds {largest})'", 'partsOf(CARRY_TEXT[fit.kind], fit, tonnes(count))'], ["fits: 'Fits one troop bay (the largest holds {largest}; mass {mass})'", "oversize: 'Fits no troop bay (the largest holds {largest}; mass {mass})'", 'partsOf(CARRY_TEXT[fit.kind], { ...fit, mass: fit.largest, largest: fit.mass }, tonnes(count))'], COMPOSITION_FILE, ['browser-carry'], true, ['short']],
-  ['the carry builder writes the mass with the sign U+2212', '`${count(value)} t`', '`\u2212${count(value)} t`', COMPOSITION_FILE, ['browser-carry'], true, ['short']],
-  ['the entry for a carry that fits no bay puts a U+2212 before the mass', "oversize: 'Fits no troop bay ({mass}; the largest holds {largest})'", "oversize: 'Fits no troop bay (\u2212{mass}; the largest holds {largest})'", COMPOSITION_FILE, ['browser-carry'], true, ['short']],
+  ['the carry builder swaps the mass and the largest bay under a wording that names the bay first', ["fits: 'Fits one troop bay ({mass}; the largest holds {largest})'", "oversize: 'Fits no troop bay ({mass}; the largest holds {largest})'", 'partsOf(CARRY_TEXT[fit.kind], fit, tonnes(count))'], ["fits: 'Fits one troop bay (the largest holds {largest}; mass {mass})'", "oversize: 'Fits no troop bay (the largest holds {largest}; mass {mass})'", 'partsOf(CARRY_TEXT[fit.kind], { ...fit, mass: fit.largest, largest: fit.mass }, tonnes(count))'], COMPOSITION_FILE, ['carry-text']],
+  ['the carry builder writes the mass with the sign U+2212', '`${count(value)} t`', '`\u2212${count(value)} t`', COMPOSITION_FILE, ['carry-text']],
+  ['the entry for a carry that fits no bay puts a U+2212 before the mass', "oversize: 'Fits no troop bay ({mass}; the largest holds {largest})'", "oversize: 'Fits no troop bay (\u2212{mass}; the largest holds {largest})'", COMPOSITION_FILE, ['carry-text']],
   ['a class count is written with the sign U+2212', '<td class="text-right" data-compare-cell="actual">{{ unitsText(row.actual) }}</td>', '<td class="text-right" data-compare-cell="actual">\u2212{{ unitsText(row.actual) }}</td>', SURVEY_FILE, ['browser-detail'], true, ['short']],
   ['the caption writes the actual mass as the intended one', 'data-figure="mass-intended">{{ massText(compareOf(item).intendedMass.value) }} t</span>', 'data-figure="mass-intended">{{ massText(compareOf(item).actualMass.value) }} t</span>', SURVEY_FILE, ['browser-detail'], true, ['short']],
-  ['the entry for a carry that fits writes a figure of its own', "fits: 'Fits one troop bay ({mass}; the largest holds {largest})'", "fits: 'Fits one troop bay (12 t; the largest holds {largest})'", COMPOSITION_FILE, ['browser-carry'], true, ['short']],
+  ['the entry for a carry that fits writes a figure of its own', "fits: 'Fits one troop bay ({mass}; the largest holds {largest})'", "fits: 'Fits one troop bay (12 t; the largest holds {largest})'", COMPOSITION_FILE, ['carry-text']],
   ['the review claims an upgrade after a colon', "review: 'The template is marked obsolete and holds STO classes: a replacement review, not a direct upgrade of the STO class.'", "review: 'No replacement review is needed: STO classes can be upgraded directly.'", COMPOSITION_FILE, ['text-policy']],
   ['the review claims an upgrade after an em dash', "review: 'The template is marked obsolete and holds STO classes: a replacement review, not a direct upgrade of the STO class.'", "review: 'No replacement review is needed \u2014 STO classes can be upgraded directly.'", COMPOSITION_FILE, ['text-policy']],
   ['the review claims an upgrade in parentheses', "review: 'The template is marked obsolete and holds STO classes: a replacement review, not a direct upgrade of the STO class.'", "review: 'No replacement review is needed (STO classes can be upgraded directly).'", COMPOSITION_FILE, ['text-policy']],
@@ -1903,14 +1910,14 @@ const setUp = async () => {
   env.plantedRows = plantedRows
   env.list = options.browser ? results : results.filter((item) => !item.id.startsWith('browser-'))
   env.judge = async (ctx, given = env.list) => judged(await runChecks(given, ctx))
-  env.variantOf = ([, from, to, file]) => {
+  env.variantOf = ([, from, to, file], patch = patched) => {
     const given = { ...sources }
 
     for (const [index, one] of [].concat(from).entries()) {
       const target = Array.isArray(file) ? file[index] : file
       const key = target === COMPOSITION_FILE ? 'composition' : target === GROUND_FILE ? 'ground' : 'survey'
 
-      given[key] = patched(target, given[key], one, [].concat(to)[index])
+      given[key] = patch(target, given[key], one, [].concat(to)[index])
     }
 
     return given
@@ -1959,8 +1966,9 @@ const checkHead = async () => {
 }
 
 const checkPlanted = async ([name, from, to, file, caught, browser, parts]) => {
-  const given = ENV.variantOf([name, from, to, file])
-  const failed = await ENV.judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given, parts) : await ENV.baseline()))
+  const given = ENV.variantOf([name, from, to, file], plantedPatch)
+  const seen = browser ? await ENV.observeVariant(given, parts) : caught.some((id) => id.startsWith('browser-')) ? await ENV.baseline() : null
+  const failed = await ENV.judge(await ENV.contextOf(given, seen), ENV.list.filter((item) => caught.includes(item.id)))
   const named = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
 
   check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${named.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'}: ${result.detail.slice(0, 120)})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}${result.threw ? ', threw' : ''}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)

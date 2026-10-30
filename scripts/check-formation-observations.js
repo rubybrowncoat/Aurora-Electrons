@@ -17,10 +17,10 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { patched, plantedPatch } = require('./lib/mutant-source')
 const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const { startPageServer } = require('./lib/page-server')
-const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rounded } = require('./lib/browser-observe')
+const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rounded, settled: pageSettled } = require('./lib/browser-observe')
 const { failure, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 
 const root = path.resolve(__dirname, '..')
@@ -685,15 +685,14 @@ const falryxFiles = () => {
   return files.length === 8 ? files : null
 }
 
-const falryx = (m) => once(m, 'falryx', async () => {
+// The falryx scenarios are each worked out when a check needs it, once for the modules of a check, so that a fault that a check of one scenario catches does not pay for the others. The first campaign goes through the stages of `FALRYX_CHAIN` on one installation, each stage building on the one before; the other scenarios each have an installation of their own.
+const falryxInputs = (m) => once(m, 'falryx-inputs', async () => {
   const files = falryxFiles()
 
   if (!files) {
     return null
   }
 
-  const inst = installation()
-  const rec = (modules, index, options) => record(modules, inst, files[index], options)
   const times = []
   const counts = []
   const keys = []
@@ -704,167 +703,256 @@ const falryx = (m) => once(m, 'falryx', async () => {
     keys.push(await oracleOf(file, FALRYX_GAME, FALRYX_RACE))
   }
 
-  await rec(m, 0)
+  return { files, times, counts, keys }
+})
 
-  const campaignId = inst.campaignId(FALRYX_GAME)
-  const result = { campaignId, times, counts, keys }
+const falryxRestarted = (m) => once(m, 'falryx-restarted', () => m.reload())
+const FALRYX_CHAIN = ['first', 'second', 'fourth', 'rollback', 'fork', 'chain']
 
-  // The campaign never observed, forked at the fifth save.
-  const never = inst.copy()
+const falryxChain = async (m, inputs, upTo) => {
+  const { files, times, counts, keys } = inputs
+  const state = await once(m, 'falryx-chain', async () => ({ inst: installation(), result: { times, counts, keys }, reached: 0 }))
+  const { inst, result } = state
+  const rec = (modules, index, options) => record(modules, inst, files[index], options)
+  const stages = {
+    first: async () => {
+      await rec(m, 0)
 
-  for (const index of [1, 3, 4, 5]) {
-    await record(m, never, files[index])
+      result.campaignId = inst.campaignId(FALRYX_GAME)
+      observe_(m, inst, result.campaignId, FALRYX_RACE)
+      await rec(m, 0)
+      result.optIn = inst.observations(result.campaignId)
+      result.writesAfterOptIn = inst.observationWrites()
+
+      await rec(m, 0)
+      await rec(m, 0)
+      result.writesAfterRepeat = inst.observationWrites()
+    },
+    second: async () => {
+      await rec(await falryxRestarted(m), 1)
+      result.second = inst.observations(result.campaignId)
+    },
+    // The third save is never read: its interval is unobserved.
+    fourth: async () => {
+      await rec(await falryxRestarted(m), 3)
+      result.fourth = inst.observations(result.campaignId)
+    },
+    // A rollback: an older save is read after a newer one.
+    rollback: async () => {
+      await rec(await falryxRestarted(m), 2)
+      result.rollback = inst.observations(result.campaignId)
+    },
+    fork: async () => {
+      const restarted = await falryxRestarted(m)
+      const { campaignId } = result
+
+      // A fork whose parent record this version cannot read is left alone and reported.
+      const damaged = inst.copy()
+
+      damaged.put(`file:campaign-${campaignId}-b1-observations`, { version: 99, races: {} })
+
+      const damagedRun = await record(restarted, damaged, files[4])
+
+      result.damaged = { failed: damagedRun.failed.map(({ stage }) => stage), names: damaged.observationNames(), registry: damaged.registry().campaigns[campaignId], latest: ((damaged.branch(campaignId, 'b2').races[FALRYX_RACE] || { snapshots: [{ t: null }] }).snapshots.slice(-1)[0] || { t: null }).t }
+
+      await rec(restarted, 4)
+      result.afterFork = { registry: inst.registry().campaigns[campaignId], b1: inst.observations(campaignId, 'b1'), b2: inst.observations(campaignId, 'b2') }
+
+      // The parent's record cleared after the fork: the fork keeps what it was given.
+      const cleared = inst.copy()
+
+      cleared.put(`file:campaign-${campaignId}-b1-observations`, { version: 1, races: {} })
+      await record(restarted, cleared, files[5])
+      result.parentCleared = { b1: cleared.observations(campaignId, 'b1'), b2: cleared.observations(campaignId, 'b2') }
+    },
+    chain: async () => {
+      const restarted = await falryxRestarted(m)
+      const { campaignId } = result
+
+      await rec(restarted, 5)
+      await rec(restarted, 6)
+      await rec(restarted, 7)
+      result.chain = { registry: inst.registry().campaigns[campaignId], b1: inst.observations(campaignId, 'b1'), b2: inst.observations(campaignId, 'b2'), b3: inst.observations(campaignId, 'b3'), b4: inst.observations(campaignId, 'b4') }
+    },
   }
 
-  result.never = { names: never.observationNames(), reads: never.observationReads(), registry: never.registry().campaigns[campaignId], settings: never.files.get('settings') || null }
-
-  observe_(m, inst, campaignId, FALRYX_RACE)
-  await rec(m, 0)
-  result.optIn = inst.observations(campaignId)
-  result.writesAfterOptIn = inst.observationWrites()
-
-  await rec(m, 0)
-  await rec(m, 0)
-  result.writesAfterRepeat = inst.observationWrites()
-
-  const restarted = await m.reload()
-
-  await rec(restarted, 1)
-  result.second = inst.observations(campaignId)
-
-  // The third save is never read: its interval is unobserved.
-  await rec(restarted, 3)
-  result.fourth = inst.observations(campaignId)
-
-  // A rollback: an older save is read after a newer one.
-  await rec(restarted, 2)
-  result.rollback = inst.observations(campaignId)
-
-  // A fork whose parent record this version cannot read is left alone and reported.
-  const damaged = inst.copy()
-
-  damaged.put(`file:campaign-${campaignId}-b1-observations`, { version: 99, races: {} })
-
-  const damagedRun = await record(restarted, damaged, files[4])
-
-  result.damaged = { failed: damagedRun.failed.map(({ stage }) => stage), names: damaged.observationNames(), registry: damaged.registry().campaigns[campaignId], latest: ((damaged.branch(campaignId, 'b2').races[FALRYX_RACE] || { snapshots: [{ t: null }] }).snapshots.slice(-1)[0] || { t: null }).t }
-
-  await rec(restarted, 4)
-  result.afterFork = { registry: inst.registry().campaigns[campaignId], b1: inst.observations(campaignId, 'b1'), b2: inst.observations(campaignId, 'b2') }
-
-  // The parent's record cleared after the fork: the fork keeps what it was given.
-  const cleared = inst.copy()
-
-  cleared.put(`file:campaign-${campaignId}-b1-observations`, { version: 1, races: {} })
-  await record(restarted, cleared, files[5])
-  result.parentCleared = { b1: cleared.observations(campaignId, 'b1'), b2: cleared.observations(campaignId, 'b2') }
-
-  await rec(restarted, 5)
-  result.continued = inst.observations(campaignId, 'b2')
-
-  await rec(restarted, 6)
-  await rec(restarted, 7)
-  result.chain = { registry: inst.registry().campaigns[campaignId], b1: inst.observations(campaignId, 'b1'), b2: inst.observations(campaignId, 'b2'), b3: inst.observations(campaignId, 'b3'), b4: inst.observations(campaignId, 'b4') }
-
-  // A fork made while nothing is observed, and the race then chosen on the fork.
-  const late = installation()
-
-  for (const index of [0, 1, 3, 4]) {
-    await record(restarted, late, files[index])
+  while (state.reached <= FALRYX_CHAIN.indexOf(upTo)) {
+    await stages[FALRYX_CHAIN[state.reached]]()
+    state.reached++
   }
-
-  const lateId = late.campaignId(FALRYX_GAME)
-
-  observe_(restarted, late, lateId, FALRYX_RACE)
-  late.put(`file:campaign-${lateId}-b1-observations`, { version: 1, races: { [FALRYX_RACE]: { kinds: { formation: m.obs.mergeCapture(null, { t: times[1], n: counts[1], objects: [...keys[1].keys()].slice(0, 20).map((id) => [id, dg(id)]) }).record } } } })
-  await record(restarted, late, files[5])
-  result.late = { b1: late.observations(lateId, 'b1'), b2: late.observations(lateId, 'b2') }
-
-  // The race chosen, then turned off again: a fork made afterwards is still given the parent's record up to the fork, as the choice is on record.
-  const off = installation()
-
-  await record(restarted, off, files[0])
-
-  const offId = off.campaignId(FALRYX_GAME)
-
-  observe_(restarted, off, offId, FALRYX_RACE)
-  await record(restarted, off, files[1])
-  observe_(restarted, off, offId, FALRYX_RACE, false)
-  await record(restarted, off, files[3])
-  await record(restarted, off, files[4])
-  result.off = { b1: off.observations(offId, 'b1'), b2: off.observations(offId, 'b2'), registry: off.registry().campaigns[offId] }
-
-  // A fork made while nothing was observed, the race chosen, then a save from before the fork read (the resolver gives it to the fork) and a save after it: the fork's first record has no parent to seed it, and still no run of it may begin before the fork.
-  const rewound = installation()
-
-  for (const index of [0, 1, 3, 4]) {
-    await record(restarted, rewound, files[index])
-  }
-
-  const rewoundId = rewound.campaignId(FALRYX_GAME)
-
-  observe_(restarted, rewound, rewoundId, FALRYX_RACE)
-  await record(restarted, rewound, files[0])
-  await record(restarted, rewound, files[5])
-  result.rewound = { b1: rewound.observations(rewoundId, 'b1'), b2: rewound.observations(rewoundId, 'b2'), registry: rewound.registry().campaigns[rewoundId] }
-
-  // A choice held only for a race the save marks as an NPR, an ordinary NPR empire or a special faction the recorder leaves out: that race is never read, so a fork of the campaign opens no observation file.
-  result.nprOnly = {}
-
-  for (const special of [false, true]) {
-    const nprOnly = installation()
-
-    await record(restarted, nprOnly, files[0], { asNpr: FALRYX_RACE, special })
-
-    const nprOnlyId = nprOnly.campaignId(FALRYX_GAME)
-
-    observe_(restarted, nprOnly, nprOnlyId, FALRYX_RACE)
-
-    for (const index of [1, 3, 4, 5]) {
-      await record(restarted, nprOnly, files[index], { asNpr: FALRYX_RACE, special })
-    }
-
-    result.nprOnly[special ? 'special' : 'ordinary'] = { names: nprOnly.observationNames(), reads: nprOnly.observationReads(), marks: Object.values(nprOnly.registry().campaigns[nprOnlyId].branches).map((branch) => branch.observationsSeeded || null), forked: Object.keys(nprOnly.registry().campaigns[nprOnlyId].branches) }
-  }
-
-  // A fork taken before the captures a cap left in the parent: its seed has to stay a file this version reads, the capture after it has to go in, and a backup has to be made.
-  const capped = installation()
-
-  for (const index of [0, 1, 3]) {
-    await record(restarted, capped, files[index])
-  }
-
-  const cappedId = capped.campaignId(FALRYX_GAME)
-  const newest = times[5] + 1000 + CAPPED_CAPTURES
-
-  observe_(restarted, capped, cappedId, FALRYX_RACE)
-  await record(restarted, capped, files[3])
-  capped.put(`file:campaign-${cappedId}-b1-observations`, { version: 1, races: { [FALRYX_RACE]: { kinds: { formation: { captures: Array.from({ length: CAPPED_CAPTURES }, (_, index) => [newest - CAPPED_CAPTURES + 1 + index, index + 1]), objects: { 1: [0, newest, dg(1)], 2: [0, newest, dg(2)] }, cut: times[5] + 999 } } } } })
-  await record(restarted, capped, files[4])
-  await record(restarted, capped, files[5])
-
-  const cappedProblems = [...capped.files].filter(([name]) => name.endsWith('-observations')).map(([name, file]) => [name, m.obs.observationFileProblem(file)])
-  let backupError = null
-
-  try {
-    m.backup.buildBackup(capped.io, { at: 1 })
-  } catch (error) {
-    backupError = error.message
-  }
-
-  result.capped = { problems: cappedProblems, b2: capped.observations(cappedId, 'b2'), marked: capped.registry().campaigns[cappedId].branches.b2.observationsSeeded, backupError }
 
   return result
-})
+}
+
+const FALRYX_SCENARIOS = {
+  // The campaign never observed, forked at the fifth save.
+  never: async (m, { files }) => {
+    const never = installation()
+
+    for (const index of [0, 1, 3, 4, 5]) {
+      await record(m, never, files[index])
+    }
+
+    return { names: never.observationNames(), reads: never.observationReads(), registry: never.registry().campaigns[never.campaignId(FALRYX_GAME)], settings: never.files.get('settings') || null }
+  },
+  // A fork made while nothing is observed, and the race then chosen on the fork.
+  late: async (m, { files, times, counts, keys }) => {
+    const restarted = await falryxRestarted(m)
+    const late = installation()
+
+    for (const index of [0, 1, 3, 4]) {
+      await record(restarted, late, files[index])
+    }
+
+    const lateId = late.campaignId(FALRYX_GAME)
+
+    observe_(restarted, late, lateId, FALRYX_RACE)
+    late.put(`file:campaign-${lateId}-b1-observations`, { version: 1, races: { [FALRYX_RACE]: { kinds: { formation: m.obs.mergeCapture(null, { t: times[1], n: counts[1], objects: [...keys[1].keys()].slice(0, 20).map((id) => [id, dg(id)]) }).record } } } })
+    await record(restarted, late, files[5])
+
+    return { b1: late.observations(lateId, 'b1'), b2: late.observations(lateId, 'b2') }
+  },
+  // The race chosen, then turned off again: a fork made afterwards is still given the parent's record up to the fork, as the choice is on record.
+  off: async (m, { files }) => {
+    const restarted = await falryxRestarted(m)
+    const off = installation()
+
+    await record(restarted, off, files[0])
+
+    const offId = off.campaignId(FALRYX_GAME)
+
+    observe_(restarted, off, offId, FALRYX_RACE)
+    await record(restarted, off, files[1])
+    observe_(restarted, off, offId, FALRYX_RACE, false)
+    await record(restarted, off, files[3])
+    await record(restarted, off, files[4])
+
+    return { b1: off.observations(offId, 'b1'), b2: off.observations(offId, 'b2'), registry: off.registry().campaigns[offId] }
+  },
+  // A fork made while nothing was observed, the race chosen, then a save from before the fork read (the resolver gives it to the fork) and a save after it: the fork's first record has no parent to seed it, and still no run of it may begin before the fork.
+  rewound: async (m, { files }) => {
+    const restarted = await falryxRestarted(m)
+    const rewound = installation()
+
+    for (const index of [0, 1, 3, 4]) {
+      await record(restarted, rewound, files[index])
+    }
+
+    const rewoundId = rewound.campaignId(FALRYX_GAME)
+
+    observe_(restarted, rewound, rewoundId, FALRYX_RACE)
+    await record(restarted, rewound, files[0])
+    await record(restarted, rewound, files[5])
+
+    return { b1: rewound.observations(rewoundId, 'b1'), b2: rewound.observations(rewoundId, 'b2'), registry: rewound.registry().campaigns[rewoundId] }
+  },
+  // A choice held only for a race the save marks as an NPR, an ordinary NPR empire or a special faction the recorder leaves out: that race is never read, so a fork of the campaign opens no observation file.
+  nprOnly: async (m, { files }) => {
+    const restarted = await falryxRestarted(m)
+    const seen = {}
+
+    for (const special of [false, true]) {
+      const nprOnly = installation()
+
+      await record(restarted, nprOnly, files[0], { asNpr: FALRYX_RACE, special })
+
+      const nprOnlyId = nprOnly.campaignId(FALRYX_GAME)
+
+      observe_(restarted, nprOnly, nprOnlyId, FALRYX_RACE)
+
+      for (const index of [1, 3, 4, 5]) {
+        await record(restarted, nprOnly, files[index], { asNpr: FALRYX_RACE, special })
+      }
+
+      seen[special ? 'special' : 'ordinary'] = { names: nprOnly.observationNames(), reads: nprOnly.observationReads(), marks: Object.values(nprOnly.registry().campaigns[nprOnlyId].branches).map((branch) => branch.observationsSeeded || null), forked: Object.keys(nprOnly.registry().campaigns[nprOnlyId].branches) }
+    }
+
+    return seen
+  },
+  // A fork taken before the captures a cap left in the parent: its seed has to stay a file this version reads, the capture after it has to go in, and a backup has to be made.
+  capped: async (m, { files, times }) => {
+    const restarted = await falryxRestarted(m)
+    const capped = installation()
+
+    for (const index of [0, 1, 3]) {
+      await record(restarted, capped, files[index])
+    }
+
+    const cappedId = capped.campaignId(FALRYX_GAME)
+    const newest = times[5] + 1000 + CAPPED_CAPTURES
+
+    observe_(restarted, capped, cappedId, FALRYX_RACE)
+    await record(restarted, capped, files[3])
+    capped.put(`file:campaign-${cappedId}-b1-observations`, { version: 1, races: { [FALRYX_RACE]: { kinds: { formation: { captures: Array.from({ length: CAPPED_CAPTURES }, (_, index) => [newest - CAPPED_CAPTURES + 1 + index, index + 1]), objects: { 1: [0, newest, dg(1)], 2: [0, newest, dg(2)] }, cut: times[5] + 999 } } } } })
+    await record(restarted, capped, files[4])
+    await record(restarted, capped, files[5])
+
+    const cappedProblems = [...capped.files].filter(([name]) => name.endsWith('-observations')).map(([name, file]) => [name, m.obs.observationFileProblem(file)])
+    let backupError = null
+
+    try {
+      m.backup.buildBackup(capped.io, { at: 1 })
+    } catch (error) {
+      backupError = error.message
+    }
+
+    return { problems: cappedProblems, b2: capped.observations(cappedId, 'b2'), marked: capped.registry().campaigns[cappedId].branches.b2.observationsSeeded, backupError }
+  },
+}
+
+// What a check of the falryx saves reads: the saves' own times, ledgers and keys, and the scenario `need` (a stage of the first campaign, or a scenario of its own, under the name of the field the check reads); null when the saves are not here.
+const falryx = async (m, need) => {
+  const inputs = await falryxInputs(m)
+
+  if (!inputs) {
+    return null
+  }
+
+  if (FALRYX_CHAIN.includes(need)) {
+    return falryxChain(m, inputs, need)
+  }
+
+  const { times, counts, keys } = inputs
+
+  return { times, counts, keys, [need]: await once(m, `falryx-${need}`, () => FALRYX_SCENARIOS[need](m, inputs)) }
+}
 
 const runOf = (record) => Object.fromEntries(Object.entries(record.objects).map(([id, object]) => [id, object.slice(0, 2).concat(object.length === 4 ? object[3] : 0)]))
 
 // What a capture at `t` of the saves with keys `now` holds, from the keys of the capture before (`before`, a Map id -> key) and its entries (`entries`, { id: [first, last, moved] }), by the rule written here: an object whose key is the same goes on, one whose key differs or that is new starts at `t`, one that is gone is dropped.
 const expectedAfter = (entries, before, now, t) => Object.fromEntries([...now].map(([id, key]) => [id, before.has(id) && before.get(id) === key && entries[id] ? [entries[id][0], t, entries[id][2]] : [t, t, before.has(id) && entries[id] ? 1 : 0]]))
 
+// The scenario each check of the falryx saves reads (`falryx`), by the start of its name.
+const FALRYX_NEEDS = [
+  ['falryx: the first capture', 'first'],
+  ['falryx: a second save', 'second'],
+  ['falryx: a skipped save', 'fourth'],
+  ['falryx: the third capture', 'fourth'],
+  ['falryx: a rollback', 'rollback'],
+  ['falryx: a fork takes', 'fork'],
+  ['falryx: a span never crosses', 'fork'],
+  ['falryx: the fork\'s own first capture', 'fork'],
+  ['falryx: the branch is marked', 'fork'],
+  ['falryx: the fork keeps its seed', 'fork'],
+  ['falryx: a fork whose parent record', 'fork'],
+  ['falryx: every later fork', 'chain'],
+  ['falryx: a campaign that never', 'never'],
+  ['falryx: a fork made while nothing', 'late'],
+  ['falryx: a race turned off', 'off'],
+  ['falryx: a fork with no parent record', 'rewound'],
+  ['falryx: a choice held only', 'nprOnly'],
+  ['falryx: a fork taken before', 'capped'],
+]
+
 const falryxChecks = (m) => {
   const entry = (name, test) => [name, async () => {
-    const s = await falryx(m)
+    const need = FALRYX_NEEDS.find(([start]) => name.startsWith(start))
+
+    if (!need) {
+      throw new Error(`no scenario is named for the check ${name}`)
+    }
+
+    const s = await falryx(m, need[1])
 
     return s ? test(s, kindOf) : 'the saves of artifacts/falryx-sequential-and-rollback are not here'
   }]
@@ -1035,18 +1123,61 @@ const readObserved = () => {
   }
 }
 
-const BROWSER = { server: null, chrome: null, failure: null, copy: null }
+const BROWSER = { server: null, chrome: null, failure: null, copy: null, base: null, facts: null }
 
-// A copy of the modded save as it is a day later: the ledger and the game time one increment on, the formation `moved` on another ship, the formation `changed` with one more unit in its first element row. Resolves to the file.
+// The formations of the race the browser save keeps: remote ones (on a ship) and ones at a colony, each with elements. The page lists every formation again at each step, so the 3,288 formations of the modded save are cut to as many as the checks need: some on screen with the scope on, some only with it off (the size predicted is for every formation, not for those in view), and the three the later save moves and changes.
+const KEPT_REMOTE = 40
+const KEPT_AT_COLONIES = 20
+
+const openWritable = (file) => new Promise((resolve, reject) => {
+  const handle = new sqlite3.Database(file, sqlite3.OPEN_READWRITE, (error) => (error ? reject(error) : resolve(handle)))
+})
+
+const sqlOn = (database) => ({
+  run: (sql) => new Promise((resolve, reject) => database.run(sql, (error) => (error ? reject(error) : resolve()))),
+  all: (sql) => new Promise((resolve, reject) => database.all(sql, (error, rows) => (error ? reject(error) : resolve(rows)))),
+})
+
+// A copy of the modded save with the race's formations cut to the ones the browser case needs, and what the case is told of it (`facts`): the game time, the StartYear, a ship that carries no formation, the formations on a ship that hold elements, and the formations the race has. The facts are read from the copy itself by SQL, not by the app. Resolves to the file.
+const trimmedSave = async () => {
+  const file = path.join(os.tmpdir(), `ae-observations-base-${process.pid}.db`)
+  const own = `GameID = ${MODDED.GameID} and RaceID = ${MODDED.RaceID}`
+  const held = 'FormationID in (select FormationID from FCT_GroundUnitFormationElement)'
+
+  fs.copyFileSync(path.resolve(root, BROWSER_SAVE.file), file)
+  BROWSER.base = file
+
+  const database = await openWritable(file)
+  const { run, all } = sqlOn(database)
+
+  try {
+    await run(`create temp table kept as select FormationID from (select FormationID from FCT_GroundUnitFormation where ${own} and ShipID > 0 and coalesce(PopulationID, 0) = 0 and ${held} order by FormationID limit ${KEPT_REMOTE}) union select FormationID from (select FormationID from FCT_GroundUnitFormation where ${own} and PopulationID > 0 and PopulationID in (select PopulationID from FCT_Population where RaceID = ${MODDED.RaceID}) and ${held} order by FormationID limit ${KEPT_AT_COLONIES})`)
+    await run(`delete from FCT_GroundUnitFormationElement where FormationID in (select FormationID from FCT_GroundUnitFormation where ${own}) and FormationID not in (select FormationID from kept)`)
+    await run(`delete from FCT_GroundUnitFormation where ${own} and FormationID not in (select FormationID from kept)`)
+
+    const [{ GameTime, StartYear }] = await all(`select GameTime, StartYear from FCT_Game where GameID = ${MODDED.GameID}`)
+    const [ship] = await all(`select s.ShipID from FCT_Ship s where s.GameID = ${MODDED.GameID} and s.RaceID = ${MODDED.RaceID} and s.ShipID not in (select ShipID from FCT_GroundUnitFormation where ${own} and ShipID > 0) order by s.ShipID limit 1`)
+    const onShips = await all(`select distinct FormationID from FCT_GroundUnitFormationElement where FormationID in (select FormationID from FCT_GroundUnitFormation where ${own} and ShipID > 0)`)
+    const [{ n }] = await all(`select count(*) as n from FCT_GroundUnitFormation where ${own}`)
+
+    BROWSER.facts = { t: GameTime, startYear: StartYear, ship: ship.ShipID, withElements: new Set(onShips.map((row) => row.FormationID)), count: n }
+    await run('drop table kept')
+    await run('vacuum')
+  } finally {
+    await new Promise((resolve) => database.close(resolve))
+  }
+
+  return file
+}
+
+// A copy of the trimmed save as it is a day later: the ledger and the game time one increment on, the formation `moved` on another ship, the formation `changed` with one more unit in its first element row. Resolves to the file.
 const laterCopy = async ({ moved, changed, ship }) => {
   const file = path.join(os.tmpdir(), `ae-observations-${process.pid}.db`)
 
-  fs.copyFileSync(path.resolve(root, BROWSER_SAVE.file), file)
+  fs.copyFileSync(BROWSER.base, file)
 
-  const database = await new Promise((resolve, reject) => {
-    const handle = new sqlite3.Database(file, sqlite3.OPEN_READWRITE, (error) => (error ? reject(error) : resolve(handle)))
-  })
-  const run = (sql) => new Promise((resolve, reject) => database.run(sql, (error) => (error ? reject(error) : resolve())))
+  const database = await openWritable(file)
+  const { run } = sqlOn(database)
 
   try {
     await run(`update FCT_GroundUnitFormation set ShipID = ${ship} where FormationID = ${moved} and GameID = ${MODDED.GameID}`)
@@ -1075,48 +1206,14 @@ const STEP_BOUND = 15000
 // The longest a pass of the recorder over the 3,288 formations of the modded save is waited for.
 const PASS_BOUND = 30000
 
-// The case as a player meets it, each step read where it ends; resolves to the record of `observe`. A wait that does not end is a step that did not reach its change (kept in `steps`), never a throw, so that the checks name what is missing; the picking of the game and the arrival of the route are bounded and fail the observation. Each wait is for the thing it follows: the pass of the recorder the switch asked for (its request counted by the store and ended on this copy of the save), the pass the app started for the opened save, the rows or the record the page then draws, and the page's own reads (no call of the database in flight and none of its asynchronous reads updating); nothing is waited for by time. `plan.until` is the last stage a variant needs ('off', 'first', 'detail' or 'second'; none for the whole case): a fault whose named checks all read an earlier stage stops there.
+// The case as a player meets it, each step read where it ends; resolves to the record of `observe`. A wait that does not end is a step that did not reach its change (kept in `steps`), never a throw, so that the checks name what is missing; the picking of the game and the arrival of the route are bounded and fail the observation. Each wait is for the thing it follows: the pass of the recorder the switch asked for (its request counted by the store and ended on this copy of the save), the pass the app started for the opened save, the rows or the record the page then draws, and the page's own reads (`settled` of scripts/lib/browser-observe.js: the page's count of the database calls it has out and none of its asynchronous reads updating); nothing is waited for by time. `plan.until` is the last stage a variant needs ('off', 'first', 'history' or 'detail'; none for the whole case): a fault whose named checks all read an earlier stage stops there, and a stage reads only what the checks it serves read.
 const observeCase = (browser, server, plan) => observe(browser, async ({ page, step }) => {
   const pageLoading = require('./page-loading')
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !request.url().endsWith('/stat')
   const seen = { steps: [] }
-  let inFlight = 0
-
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight++
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight--
-    }
-  })
-  page.on('requestfailed', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight--
-    }
-  })
-
-  // The page is settled when the watchers of the next tick have run and two frames are drawn after them, no call of the database is in flight and no asynchronous read of the page is updating.
-  const settle = async () => {
+  const settle = () => {
     step('waiting for the page to settle')
 
-    const deadline = Date.now() + TIMEOUT
-
-    for (;;) {
-      await page.evaluate(() => new Promise((resolve) => window.$app.$nextTick(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))))
-
-      if (inFlight === 0 && !(await page.evaluate(pageLoading))) {
-        return
-      }
-
-      if (Date.now() > deadline) {
-        throw new Error('the page did not settle')
-      }
-
-      await page.waitForTimeout(50)
-    }
+    return pageSettled(page, { limit: TIMEOUT, loading: pageLoading })
   }
   const go = async (target, ready) => {
     step(`opening ${target}`)
@@ -1173,16 +1270,18 @@ const observeCase = (browser, server, plan) => observe(browser, async ({ page, s
 
   await openApp()
   await go('/survey-progress', '[data-observe="control"]')
-  seen.off = await read()
 
-  // The table's scope is turned off and on again: what the switch says it would store does not follow it.
-  step('turning the scope of the table off')
-  await remoteSwitch()
-  await settle()
-  seen.scope = await read()
-  step('turning the scope of the table on again')
-  await remoteSwitch()
-  await settle()
+  // Only the switch's own checks (the case as a whole and a fault stopped at 'off') read the screen before the switch is turned on and with the table's scope turned off and on again: what the switch says it would store does not follow the scope.
+  if (plan.until === null || stopAt('off')) {
+    seen.off = await read()
+    step('turning the scope of the table off')
+    await remoteSwitch()
+    await settle()
+    seen.scope = await read()
+    step('turning the scope of the table on again')
+    await remoteSwitch()
+    await settle()
+  }
 
   if (stopAt('off')) {
     return seen
@@ -1212,6 +1311,15 @@ const observeCase = (browser, server, plan) => observe(browser, async ({ page, s
   seen.dates = plan.dates
 
   if (picked && !stopAt('first')) {
+    // The History page after the first capture: the captures it holds are the one the driver has made.
+    if (stopAt('history')) {
+      await go('/history', '[data-retention-observations]')
+      seen.history = await read()
+      seen.historyCaptures = 1
+
+      return seen
+    }
+
     await toggle(picked.unchanged, true)
     seen.firstDetail = await read()
     await toggle(picked.unchanged, false)
@@ -1231,13 +1339,9 @@ const observeCase = (browser, server, plan) => observe(browser, async ({ page, s
     seen.secondStayed = await read()
     await toggle(picked.moved, true)
     seen.secondDetail = await read()
-
-    if (stopAt('second')) {
-      return seen
-    }
-
     await go('/history', '[data-retention-observations]')
     seen.history = await read()
+    seen.historyCaptures = 2
   }
 
   return seen
@@ -1245,7 +1349,7 @@ const observeCase = (browser, server, plan) => observe(browser, async ({ page, s
 
 const openBrowser = async () => {
   try {
-    BROWSER.server = await startPageServer({ save: BROWSER_SAVE.file })
+    BROWSER.server = await startPageServer({ save: await trimmedSave() })
     BROWSER.chrome = await require('playwright').chromium.launch()
 
     const warmed = await BROWSER.server.warm(BROWSER.chrome, { routes: ['/survey-progress'] })
@@ -1257,11 +1361,13 @@ const openBrowser = async () => {
 }
 
 const closeBrowser = async () => {
-  const { server, chrome, copy } = BROWSER
+  const { server, chrome, copy, base } = BROWSER
 
   BROWSER.server = null
   BROWSER.chrome = null
   BROWSER.copy = null
+  BROWSER.base = null
+  BROWSER.facts = null
 
   if (chrome) {
     await chrome.close()
@@ -1271,8 +1377,10 @@ const closeBrowser = async () => {
     await server.stop()
   }
 
-  if (copy) {
-    fs.rmSync(copy, { force: true })
+  for (const file of [copy, base]) {
+    if (file) {
+      fs.rmSync(file, { force: true })
+    }
   }
 }
 
@@ -1285,23 +1393,20 @@ const dateOfGameTime = (startYear, seconds) => {
   return new Date(start.getTime() + seconds * 1000).toISOString().slice(0, 10)
 }
 
-// What the browser case is told: the two game times of the saves and the dates the save's StartYear gives them, the choice of the formations to change (the first formation on screen with a ship and a first one with an element row, then one that stays) and the second save, and the last stage a variant needs (`until`).
-const planOf = async (until = null) => {
-  const t = await gameTimeOf(MODDED.file, MODDED.GameID)
-  const [{ StartYear }] = await rowsOf(MODDED.file, `select StartYear from FCT_Game where GameID = ${MODDED.GameID}`)
-  const ships = await rowsOf(MODDED.file, `select s.ShipID from FCT_Ship s where s.GameID = ${MODDED.GameID} and s.RaceID = ${MODDED.RaceID} and s.ShipID not in (select ShipID from FCT_GroundUnitFormation where GameID = ${MODDED.GameID} and RaceID = ${MODDED.RaceID} and ShipID > 0) order by s.ShipID limit 1`)
-  const withElements = new Set((await rowsOf(MODDED.file, `select distinct FormationID from FCT_GroundUnitFormationElement where FormationID in (select FormationID from FCT_GroundUnitFormation where GameID = ${MODDED.GameID} and RaceID = ${MODDED.RaceID} and ShipID > 0)`)).map((row) => row.FormationID))
+// What the browser case is told: the two game times of the saves and the dates the save's StartYear gives them, the choice of the formations to change (the first formation on screen with a ship and a first one with an element row, then one that stays) and the second save, and the last stage a variant needs (`until`). All of it comes from the trimmed copy of the save (`trimmedSave`), by SQL.
+const planOf = (until = null) => {
+  const { t, startYear, ship, withElements } = BROWSER.facts
 
   return {
     until,
     times: [t, t + DAY],
-    dates: [dateOfGameTime(StartYear, t), dateOfGameTime(StartYear, t + DAY)],
+    dates: [dateOfGameTime(startYear, t), dateOfGameTime(startYear, t + DAY)],
     pick: (ids) => {
       const usable = ids.filter((id) => withElements.has(id))
 
       return usable.length >= 3 ? { moved: usable[0], changed: usable[1], unchanged: usable[2] } : null
     },
-    later: (picked) => laterCopy({ moved: picked.moved, changed: picked.changed, ship: ships[0].ShipID }),
+    later: (picked) => laterCopy({ moved: picked.moved, changed: picked.changed, ship }),
   }
 }
 
@@ -1310,7 +1415,7 @@ const observeSource = async (replacements = [], until = null) => {
     return failedObservation(BROWSER.failure || 'the page server was not started for this worker')
   }
 
-  const plan = await planOf(until)
+  const plan = planOf(until)
 
   replacements.forEach(([file, text]) => BROWSER.server.replace(file, text))
 
@@ -1383,7 +1488,7 @@ const browserStatements = (m) => {
       const objects = figuresBefore(text, 'objects?')
       const captures = { held: clauseFigures(text, /\d\s+objects?\b/, 'captures?'), cap: clauseFigures(text, /\bpredicted\b/, 'captures?') }
 
-      return same({ state: (/\b(On|Off)\b/.exec(text) || [])[1] || null, kind: text.includes(m.obs.OBSERVED_KINDS.formation.label.toLowerCase()), objects, captures, measured: /\bmeasured\b/.test(text) }, { state: 'On', kind: true, objects: [screens.oracle], captures: { held: [2], cap: [m.obs.CAPTURES_KEPT] }, measured: true })
+      return same({ state: (/\b(On|Off)\b/.exec(text) || [])[1] || null, kind: text.includes(m.obs.OBSERVED_KINDS.formation.label.toLowerCase()), objects, captures, measured: /\bmeasured\b/.test(text) }, { state: 'On', kind: true, objects: [screens.oracle], captures: { held: [screens.historyCaptures], cap: [m.obs.CAPTURES_KEPT] }, measured: true })
     }],
     ['browser: no page error was raised', (_screens, observation) => (observation.unexpected.length === 0 ? true : short(observation.unexpected))],
   ]
@@ -1401,14 +1506,15 @@ const utilityFile = (name) => path.join(utilitiesDirectory, name)
 const MUTATIONS = [
   { name: 'a save older than the newest capture extends a run', file: 'observations.js', find: 'if (tip && capture.t < tip[0]) {', replace: 'if (false) {', fails: ['units: a save older than the newest', 'falryx: a rollback', 'modded: the save read again'] },
   { name: 'the same game time on another ledger taken as the same timeline', file: 'observations.js', find: 'if (tip && capture.t === tip[0] && capture.n !== tip[1]) {', replace: 'if (false) {', fails: ['units: the same game time on another ledger'] },
-  { name: 'a changed composition does not restart the span', file: 'observations.js', find: 'if (before && before[2] === digest) {', replace: 'if (before) {', fails: ['units: an object whose digest changed', 'units: the same save read again', 'modded: a later save holds', 'falryx: a second save'] },
-  { name: 'an unchanged object restarts at every capture', file: 'observations.js', find: 'objects[id] = [before[0], capture.t, digest, ...(before[3] ? [before[3]] : [])]', replace: 'objects[id] = [capture.t, capture.t, digest]', fails: ['units: an object seen the same', 'modded: every other formation', 'falryx: a second save'] },
-  { name: 'an object not seen at a capture is kept', file: 'observations.js', find: 'record.objects = objects\n', replace: 'record.objects = { ...record.objects, ...objects }\n', fails: ['units: an object missing from one capture', 'modded: a later save holds'] },
+  { name: 'a changed composition does not restart the span', file: 'observations.js', find: 'if (before && before[2] === digest) {', replace: 'if (before) {', fails: ['units: an object whose digest changed', 'units: the same save read again', 'falryx: a second save'] },
+  { name: 'a later capture drops the capture before it', file: 'observations.js', find: 'record.captures.push([capture.t, capture.n])', replace: 'record.captures = [[capture.t, capture.n]]', fails: ['units: an object seen the same', 'units: the same save read again', 'units: a run across a failed capture'] },
+  { name: 'an unchanged object restarts at every capture', file: 'observations.js', find: 'objects[id] = [before[0], capture.t, digest, ...(before[3] ? [before[3]] : [])]', replace: 'objects[id] = [capture.t, capture.t, digest]', fails: ['units: an object seen the same', 'modded: every other formation'] },
+  { name: 'an object not seen at a capture is kept', file: 'observations.js', find: 'record.objects = objects\n', replace: 'record.objects = { ...record.objects, ...objects }\n', fails: ['units: an object missing from one capture'] },
   { name: 'the account of a cut record saying the cap dropped its captures', file: 'observation-view.js', find: 'are no longer kept`)', replace: 'were dropped past 500`)', fails: ['view: the account of a record cut by a clear'] },
-  { name: 'a moved object not marked as moved', file: 'observations.js', find: 'objects[id] = before ? [capture.t, capture.t, digest, MOVED] : [capture.t, capture.t, digest]', replace: 'objects[id] = [capture.t, capture.t, digest]', fails: ['units: an object whose digest changed', 'view: the reason a span began', 'modded: a later save holds'] },
+  { name: 'a moved object not marked as moved', file: 'observations.js', find: 'objects[id] = before ? [capture.t, capture.t, digest, MOVED] : [capture.t, capture.t, digest]', replace: 'objects[id] = [capture.t, capture.t, digest]', fails: ['units: an object whose digest changed', 'view: the reason a span began'] },
   { name: 'the same failure noted twice', file: 'observations.js', find: 'if (last && last.t === Number(t) && last.reason === text) {', replace: 'if (false) {', fails: ['units: the same failure of the same save'] },
   { name: 'the cap on the captures not applied', file: 'observations.js', find: 'if (record.captures.length <= CAPTURES_KEPT) {', replace: 'if (record.captures.length <= CAPTURES_KEPT + 1000) {', fails: ['units: 501 captures'] },
-  { name: 'the time a fork was cut at not kept', file: 'observations.js', find: '...(dropped !== null ? { cut: dropped } : {}), seed: t }', replace: '...(dropped !== null ? { cut: dropped } : {}) }', fails: ['units: the cut a fork takes', 'falryx: a race turned off'] },
+  { name: 'the time a fork was cut at not kept', file: 'observations.js', find: '...(dropped !== null ? { cut: dropped } : {}), seed: t }', replace: '...(dropped !== null ? { cut: dropped } : {}) }', fails: ['units: the cut a fork takes'] },
   { name: 'a span that includes the parent branch not flagged', file: 'observations.js', find: 'inherited: seed !== null && first <= seed,', replace: 'inherited: false,', fails: ['units: a run is inherited', 'view: a failed capture inside a span'] },
   { name: 'an object that appeared told as seen since import', file: 'observations.js', find: "basis: mark === MOVED ? 'moved' : mark === RESTARTED ? 'branch' : cut === null && record.captures.length && first === record.captures[0][0] ? 'import' : 'appeared',", replace: "basis: mark === MOVED ? 'moved' : mark === RESTARTED ? 'branch' : 'import',", fails: ['units: an object not seen before', 'view: a formation that moved', 'view: the reason a span began'] },
   { name: 'a digest that differs from the open save still observed', file: 'observations.js', find: "return { state: span.digest === digest ? 'observed' : 'changed', span }", replace: "return { state: 'observed', span }", fails: ['units: a record whose object digest'] },
@@ -1424,7 +1530,7 @@ const MUTATIONS = [
   { name: 'the branch not marked as seeded', file: 'history.js', find: 'branch.observationsSeeded = true', replace: 'branch.observationsSeeded = false', fails: ['falryx: the branch is marked', 'falryx: every later fork'] },
   { name: 'a pass replaced writes the record', file: 'history.js', find: 'if (merged.changed) {\n                guard()\n                storage.file(observationFileName', replace: 'if (merged.changed) {\n                storage.file(observationFileName', fails: ['modded: a pass superseded'] },
   { name: 'the record written for a capture that changed nothing', file: 'history.js', find: 'if (merged.changed) {\n                guard()', replace: 'if (true) {\n                guard()', fails: ['modded: the pass that records', 'falryx: the first capture'] },
-  { name: 'the reason of a failed read not kept', file: 'history.js', find: 'reason: read.failed.message ? read.failed.message : String(read.failed)', replace: "reason: 'the read failed'", fails: ['modded: a failed read is noted'] },
+  { name: 'the reason of a failed read not kept', file: 'history.js', find: 'reason: failureWords(read.failed)', replace: "reason: 'the read failed'", fails: ['modded: a failed read is noted'] },
   { name: 'clearing a race leaves its observation record', file: 'history.js', find: 'planned(observationStore(campaignId, branchId), observationsFrom),', replace: 'null,', fails: ['units: clearing a race'] },
   { name: 'the elements left out of the signature of a formation', file: 'ground-formations.js', find: "|${(held.get(row.FormationID) || []).join(',')}`", replace: '|`', fails: ['modded: the digests tell', 'modded: a later save holds', 'falryx: the first capture'] },
   { name: 'the ship left out of the signature of a formation', file: 'ground-formations.js', find: '/${orZero(row.ShipID)}/', replace: '/', fails: ['modded: the digests tell'] },
@@ -1456,23 +1562,20 @@ const MUTATIONS = [
 // Faults planted in what the browser is served: the page or a utility the page uses (`file` is a path under the renderer), with the checks each must fail by a value. A utility the recorder runs is served too, so a fault there shows as the screen a player sees.
 const BROWSER_MUTATIONS = [
   { name: 'the Observed column left out', file: SURVEY_FILE, find: "...(this.observationKey ? [{ text: 'Observed', value: 'observedSort' }] : [])", replace: '...[]', fails: ['browser: turning the switch on'], until: 'first' },
-  { name: 'the headline of a cell drawn as the summary', file: SURVEY_FILE, find: '<div class="font-weight-medium" data-observed-headline>{{ item.observed.headline }}</div>\n                  <div class="caption text--secondary" data-observed-summary>', replace: '<div class="font-weight-medium" data-observed-headline>{{ item.observed.summary }}</div>\n                  <div class="caption text--secondary" data-observed-summary>', fails: ['browser: turning the switch on'], until: 'first' },
   { name: 'the switch asking for no pass', file: SURVEY_FILE, find: "if (on) {\n        this.$store.commit('history/capture')", replace: "if (false) {\n        this.$store.commit('history/capture')", fails: ['browser: turning the switch on'], until: 'first' },
-  { name: 'a formation that moved keeps its span', file: utilityFile('observations.js'), find: 'if (before && before[2] === digest) {', replace: 'if (before) {', fails: ['browser: a later save'], until: 'second' },
-  { name: 'a later capture drops the capture before it', file: utilityFile('observations.js'), find: 'record.captures.push([capture.t, capture.n])', replace: 'record.captures = [[capture.t, capture.n]]', fails: ['browser: a later save', 'browser: the History page'] },
-  { name: 'the History page counting no object', file: path.join(pagesDirectory, 'history.vue'), find: "`${this.count(budget.objects, 0)} ${budget.objects === 1 ? 'object' : 'objects'} and", replace: "`${this.count(0, 0)} ${budget.objects === 1 ? 'object' : 'objects'} and", fails: ['browser: the History page'] },
+  { name: 'the History page counting no object', file: path.join(pagesDirectory, 'history.vue'), find: "`${this.count(budget.objects, 0)} ${budget.objects === 1 ? 'object' : 'objects'} and", replace: "`${this.count(0, 0)} ${budget.objects === 1 ? 'object' : 'objects'} and", fails: ['browser: the History page'], until: 'history' },
   { name: 'the block of the switch hidden by an ancestor of the switch', file: SURVEY_FILE, find: '<div v-if="canObserve" class="d-flex align-center flex-wrap mb-2" data-observe="control">', replace: '<div v-if="canObserve" class="d-flex align-center flex-wrap mb-2" style="display: none !important" data-observe="control">', fails: ['browser: before the switch'], until: 'off' },
   { name: 'the headline of a cell hidden by itself', file: SURVEY_FILE, find: '<div class="font-weight-medium" data-observed-headline>{{ item.observed.headline }}</div>\n                  <div class="caption text--secondary" data-observed-summary>', replace: '<div v-show="false" class="font-weight-medium" data-observed-headline>{{ item.observed.headline }}</div>\n                  <div class="caption text--secondary" data-observed-summary>', fails: ['browser: turning the switch on'], until: 'first' },
   { name: 'the cell put in a slot the table does not take', file: SURVEY_FILE, find: '<template #[`item.observedSort`]="{ item }">', replace: '<template #[`item.observedSortx`]="{ item }">', fails: ['browser: turning the switch on'], until: 'first' },
   { name: 'the account of the record hidden by itself', file: SURVEY_FILE, find: '<span data-observe="record">', replace: '<span v-show="false" data-observe="record">', fails: ['browser: the foot of the table'], until: 'first' },
   { name: 'the opened row hidden by an ancestor', file: SURVEY_FILE, find: '<td :colspan="headers.length" class="py-3" data-compare="detail" :data-compare-formation="item.id">', replace: '<td :colspan="headers.length" class="py-3" style="display: none" data-compare="detail" :data-compare-formation="item.id">', fails: ['browser: the opened row'], until: 'detail' },
   { name: 'the opened row put in a slot the table does not take', file: SURVEY_FILE, find: '<template #expanded-item="{ headers, item }">\n                <td :colspan="headers.length" class="py-3" data-compare="detail" :data-compare-formation="item.id">', replace: '<template #expanded-itemx="{ headers, item }">\n                <td :colspan="headers.length" class="py-3" data-compare="detail" :data-compare-formation="item.id">', fails: ['browser: the opened row'], until: 'detail' },
-  { name: 'the dates of the page one day late, its hooks left as they are', file: SURVEY_FILE, find: 'gameDateText(this.StartYear, seconds).slice(0, 10)', replace: 'gameDateText(this.StartYear, seconds + 86400).slice(0, 10)', fails: ['browser: turning the switch on'], until: 'first' },
+  { name: 'the dates of the page one day late, its hooks left as they are', file: SURVEY_FILE, find: 'gameDateText(this.StartYear, seconds).slice(0, 10)', replace: 'gameDateText(this.StartYear, seconds + 86400).slice(0, 10)', fails: ['browser: turning the switch on', 'browser: a later save'] },
   { name: 'the size predicted for the formations in view, not for every formation of the race', file: SURVEY_FILE, find: 'observationEstimate({ objects: this.formationAll.length })', replace: 'observationEstimate({ objects: this.formationList.length })', fails: ['browser: before the switch'], until: 'off' },
-  { name: 'the captures held and the captures a full list holds said each in the other\'s place', edits: [[path.join(pagesDirectory, 'history.vue'), "and ${this.count(budget.captures, 0)} ${budget.captures === 1 ? 'capture' : 'captures'} kept`", 'and ${this.count(CAPTURES_KEPT, 0)} captures kept`'], [path.join(pagesDirectory, 'history.vue'), 'predicted once ${this.count(CAPTURES_KEPT, 0)} captures are held', 'predicted once ${this.count(budget.captures, 0)} captures are held']], fails: ['browser: the History page'] },
+  { name: 'the captures held and the captures a full list holds said each in the other\'s place', edits: [[path.join(pagesDirectory, 'history.vue'), "and ${this.count(budget.captures, 0)} ${budget.captures === 1 ? 'capture' : 'captures'} kept`", 'and ${this.count(CAPTURES_KEPT, 0)} captures kept`'], [path.join(pagesDirectory, 'history.vue'), 'predicted once ${this.count(CAPTURES_KEPT, 0)} captures are held', 'predicted once ${this.count(budget.captures, 0)} captures are held']], fails: ['browser: the History page'], until: 'history' },
 ]
 
-// One rewrite of each family that draws the same screen and records the same file: each must fail no check.
+// One rewrite of each family of the utilities that draws the same screen and records the same file, made together and loaded once (`stackedSources`): no check may fail.
 const BENIGN = [
   { name: 'a parenthesised test of a merge', file: 'observations.js', find: 'const again = Boolean(tip) && capture.t === tip[0]', replace: 'const again = (tip !== null) && (capture.t === tip[0])' },
   { name: 'the choice of an NPR written the other way round', file: 'history.js', find: 'const kinds = npr ? [] : observationWanted(observe, GameID, RaceID)', replace: 'const kinds = !npr ? observationWanted(observe, GameID, RaceID) : []' },
@@ -1511,7 +1614,7 @@ const stemOf = (file) => path.basename(file, '.js')
 
 const MUTANTS = [
   ...MUTATIONS.map((mutation, index) => ({ kind: 'utility', id: `utility:${index}`, ...mutation })),
-  ...BENIGN.map((rewrite, index) => ({ kind: 'benign', id: `benign:${index}`, ...rewrite })),
+  { kind: 'benign', id: 'benign:0', name: 'the equivalent forms of each family in the utilities', rewrites: BENIGN },
   ...BROWSER_MUTATIONS.map((mutation, index) => ({ kind: 'browser', id: `browser:${index}`, ...mutation })),
   ...BROWSER_BENIGN.map((rewrite, index) => ({ kind: 'browser-benign', id: `browser-benign:${index}`, ...rewrite })),
 ]
@@ -1525,15 +1628,27 @@ const faultVerdict = async (named, { name, fails, throws = false }, began) => {
   return [absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail by a value: ${missed.join('; ')}` : true, `credited by ${creditOf(failed)}, ${((Date.now() - began) / 1000).toFixed(1)} s`]
 }
 
+// The sources of the utilities after every edit of `edits` ({ file, find, replace }), made in order and served together: `{ stem: text }` for `loadAll`.
+const stackedSources = (edits) => {
+  const sources = {}
+
+  for (const { file, find, replace } of edits) {
+    const stem = stemOf(file)
+    const target = utilityFile(file)
+
+    sources[stem] = patched(target, stem in sources ? sources[stem] : fs.readFileSync(target, 'utf8'), find, replace)
+  }
+
+  return sources
+}
+
 const checkUtilityMutation = async (mutant) => {
-  const { kind, name, file, find, replace, fails } = mutant
+  const { kind, name, file, find, replace, fails, rewrites } = mutant
   const began = Date.now()
   const benign = kind === 'benign'
 
   try {
-    const target = utilityFile(file)
-    const text = patched(target, fs.readFileSync(target, 'utf8'), find, replace)
-    const m = await loadAll({ [stemOf(file)]: text })
+    const m = await loadAll(benign ? stackedSources(rewrites) : { [stemOf(file)]: plantedPatch(utilityFile(file), fs.readFileSync(utilityFile(file), 'utf8'), find, replace) })
 
     if (benign) {
       const results = await runChecks(asChecks(GROUPS(m)), {})
@@ -1557,11 +1672,11 @@ const checkUtilityMutation = async (mutant) => {
   }
 }
 
-// What a browser variant serves: [file, text] for each file its edits change, the edits made in order (`edits`, [file, find, replace]; a variant with one change gives `file`, `find` and `replace`).
-const servedBy = ({ edits, file, find, replace }) => {
+// What a browser variant serves: [file, text] for each file its edits change, the edits made in order (`edits`, [file, find, replace]; a variant with one change gives `file`, `find` and `replace`). A fault is planted through `plantedPatch` (refused in a quick run), a rewrite through `patched`.
+const servedBy = ({ edits, file, find, replace }, patch) => {
   const texts = new Map()
 
-  ;(edits || [[file, find, replace]]).forEach(([target, from, to]) => texts.set(target, patched(target, texts.has(target) ? texts.get(target) : fs.readFileSync(target, 'utf8'), from, to)))
+  ;(edits || [[file, find, replace]]).forEach(([target, from, to]) => texts.set(target, patch(target, texts.has(target) ? texts.get(target) : fs.readFileSync(target, 'utf8'), from, to)))
 
   return [...texts]
 }
@@ -1571,13 +1686,13 @@ const checkBrowserVariant = async (mutant, real) => {
   const { kind, name, fails = [], throws = false, until = null } = mutant
   const began = Date.now()
   const fault = kind === 'browser'
-  const observation = await observeSource(servedBy(mutant), fault ? until : null)
+  const observation = await observeSource(servedBy(mutant, fault ? plantedPatch : patched), fault ? until : null)
 
   if (unobserved(observation)) {
     throw new HarnessError(`the app with the fault "${name}" did not get through: ${observation.error}`)
   }
 
-  const oracle = await formationCount()
+  const oracle = formationCount()
   const checks = browserChecks(real, oracle)
   const results = await runChecks(fault ? checks.filter(({ id }) => fails.some((start) => id.startsWith(start))) : checks, { observation })
   const failed = judged(results, `the ${fault ? 'fault' : 'rewrite'} "${name}"`)
@@ -1592,7 +1707,7 @@ const checkBrowserVariant = async (mutant, real) => {
   }
 }
 
-const formationCount = async () => (await rowsOf(MODDED.file, `select count(*) as n from FCT_GroundUnitFormation where GameID = ${MODDED.GameID} and RaceID = ${MODDED.RaceID}`))[0].n
+const formationCount = () => (BROWSER.facts ? BROWSER.facts.count : 0)
 
 const runPart = async (part) => {
   const mutant = MUTANTS.find(({ id }) => id === part)
@@ -1610,7 +1725,7 @@ const runPart = async (part) => {
   } else if (part === 'browser') {
     const observation = await observeSource()
 
-    printResults(await runChecks(browserChecks(real, await formationCount()), { observation }))
+    printResults(await runChecks(browserChecks(real, formationCount()), { observation }))
   } else if (mutant) {
     await checkBrowserVariant(mutant, real)
   } else {
@@ -1661,7 +1776,7 @@ const main = async () => {
       }
     },
     close: closeBrowser,
-    control: options.mutations ? { fault: 'browser:6', head: 'browser', heading: '\nThe control of the warm page server' } : null,
+    control: options.mutations ? { fault: 'browser:3', head: 'browser', heading: '\nThe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 

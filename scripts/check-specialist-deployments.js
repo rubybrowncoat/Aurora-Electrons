@@ -20,12 +20,12 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const rawAssert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { patched, plantedPatch } = require('./lib/mutant-source')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { startPageServer } = require('./lib/page-server')
-const { observe, validate, failedObservation, completedObservation, failureLine, report, HarnessError, installScreen, readFigure, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, completedObservation, failureLine, report, HarnessError, installScreen, readFigure, rolesRead, pairedBy, labelKey, settled } = require('./lib/browser-observe')
 const { assert, through, harnessOwn, boundary, subjectModule, runChecks, judged, caughtBy, infrastructureFailure } = require('./lib/fault-credit')
-const { runChild, lastJson } = require('./lib/check-pool')
+const { runChild } = require('./lib/check-pool')
 const { runSuite, step: sayStep } = require('./lib/suite-runner')
 const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
 const pageLoading = require('./page-loading')
@@ -322,7 +322,8 @@ const oracle = async (database, GameID, RaceID) => {
   const geoSum = ['a', 'b', 'c', 'd'].map((slot) => sum(slot, 'Geosurvey')).join(' + ')
   const ratings = await q(`select p.PopulationID as pop, sum(case when ${geoSum} > 0 then e.Units else 0 end) as units, sum(e.Units * (${geoSum})) as base from FCT_GroundUnitFormation f join FCT_Population p on p.PopulationID = f.PopulationID join FCT_GroundUnitFormationElement e on e.FormationID = f.FormationID join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID left join DIM_GroundComponentType a on a.ComponentTypeID = k.ComponentA left join DIM_GroundComponentType b on b.ComponentTypeID = k.ComponentB left join DIM_GroundComponentType c on c.ComponentTypeID = k.ComponentC left join DIM_GroundComponentType d on d.ComponentTypeID = k.ComponentD where f.GameID = ${GameID} and f.RaceID = ${RaceID} and p.RaceID = ${RaceID} group by p.PopulationID`)
   // What the game's multiplier of a formation's commander rests on, per formation: the commanders, the Survey bonus of the first, the size of its own elements and the largest headquarters capacity of their classes.
-  const commands = await q(`select f.FormationID as id, f.ParentFormationID as parent, f.PopulationID as pop, (select count(*) from FCT_Commander m where m.CommandID = f.FormationID and m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID}) as commanders, (select cb.BonusValue from FCT_Commander m join FCT_CommanderBonuses cb on cb.CommanderID = m.CommanderID and cb.BonusID = 2 where m.CommandID = f.FormationID and m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID} order by m.CommanderID limit 1) as bonus, (select coalesce(sum(e.Units * k.Size), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as size, (select coalesce(max(k.HQCapacity), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as capacity from FCT_GroundUnitFormation f where f.GameID = ${GameID} and f.RaceID = ${RaceID}`)
+  // The commanders are read in one pass each: a subquery per formation scans the commander table once for each of them, and the modded save holds thousands of formations.
+  const commands = await q(`with commanding as (select m.CommandID as id, count(*) as commanders from FCT_Commander m where m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID} group by m.CommandID), bonuses as (select m.CommandID as id, cb.BonusValue as bonus, row_number() over (partition by m.CommandID order by m.CommanderID) as place from FCT_Commander m join FCT_CommanderBonuses cb on cb.CommanderID = m.CommanderID and cb.BonusID = 2 where m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID}) select f.FormationID as id, f.ParentFormationID as parent, f.PopulationID as pop, coalesce(commanding.commanders, 0) as commanders, bonuses.bonus as bonus, (select coalesce(sum(e.Units * k.Size), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as size, (select coalesce(max(k.HQCapacity), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as capacity from FCT_GroundUnitFormation f left join commanding on commanding.id = f.FormationID left join bonuses on bonuses.id = f.FormationID and bonuses.place = 1 where f.GameID = ${GameID} and f.RaceID = ${RaceID}`)
   const commandOf = new Map(commands.map((row) => [row.id, { ...row, size: Math.trunc(row.size) }]))
   const totalSize = (id) => commandOf.get(id).size + commands.filter((row) => row.parent === id && row.id !== id).reduce((all, row) => all + totalSize(row.id), 0)
   // The headquarters capacity against the whole size, an integer division as in the game: 0 beyond the capacity, 1 within it.
@@ -981,10 +982,8 @@ const judge = async (ctx, list = results) => judged(await runChecks(list, ctx))
 const BROWSER_SAVE = 2
 const BROWSER_NAMES = { game: 'EggSample', race: 'EggSample' }
 const CAPABILITIES_FILE = path.join(utilitiesDirectory, 'capabilities.js')
-const RESULT = 'RESULT '
 const WITHHELD_TIMEOUT = 15000
-const UNREAD_LIMIT = 420000
-// The bounds of the other children the controls of the harness start (`checkControls`): a quick case or a probe of `finish`, which prints and ends before it starts a page server (a second or two), and the run of this script on the records of the page (`--only`, 7 s measured), each over five times its measured time, a minute for the quick ones and two for the run.
+// The bounds of the children the controls of the harness start (`checkControls`): a probe of `finish`, which prints and ends before it starts a page server (a second or two), and the run of this script on the records of the page (`--only`, 7 s measured), each over five times its measured time, a minute for the probes and two for the run.
 const QUICK_LIMIT = 60000
 const NESTED_LIMIT = 120000
 
@@ -1021,41 +1020,11 @@ const readScreen = () => {
 }
 
 // The page of the browser's save as a player uses it: the race is picked, the page opened, each role chip, each state chip and the switch are clicked (and clicked back) and the screen is read after each; then the two filters and the switch are left set, the page is left for another and opened again, and the screen is read once more. Resolves to the record of `observe` (scripts/lib/browser-observe.js: the page errors, the console errors, the failed requests and the phase are in it whether the page went through or not) with the value { initial, geoOff, ..., combined, restored }. With `unread` the page is read once, after the capability check has answered, and the value is { initial, capability }: the status of the page's report and the inputs it names as missing and degraded; a page that is not drawn is read as it is, after a short wait.
-const observePage = (browser, url, { unread = false, withheld = false, timeout = BROWSER_TIMEOUT } = {}) => observe(browser, async ({ page, step }) => {
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !request.url().endsWith('/stat')
-  let inFlight = 0
-  let last = Date.now()
-
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight++
-      last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      inFlight--
-      last = Date.now()
-    }
-  })
-
-  // `inFlight` and `last` are updated by the request listeners above.
-  const isBusy = () => inFlight > 0 || Date.now() - last < 1500
-  const waitWhile = async (busy) => {
-    const deadline = Date.now() + timeout
-
-    while (await busy()) {
-      if (Date.now() > deadline) {
-        throw new Error('the page did not settle')
-      }
-
-      await page.waitForTimeout(250)
-    }
-  }
-  const settle = () => {
+const observePage = (browser, url, { unread = false, withheld = false, timeout = BROWSER_TIMEOUT, until = null } = {}) => observe(browser, async ({ page, step }) => {
+  const settle = (loading = pageLoading) => {
     step('waiting for the page to settle')
 
-    return waitWhile(async () => isBusy() || await page.evaluate(pageLoading))
+    return settled(page, { limit: timeout, loading })
   }
   const go = async (route) => {
     step(`opening ${route}`)
@@ -1103,7 +1072,7 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
     // A page may not be drawn at all (a save without a table makes the landing page unsupported, and the registry with the input required withholds this one), so the pages are never waited for as loading: only the database calls are, and the chips are waited for until they are drawn or the layout shows, in place of the page, the capability state of a page the report says is unsupported.
     step('waiting for the capability report')
     await page.waitForFunction(() => Boolean(window.$app.$store.getters['capabilities/report']('/survey-progress')), null, { timeout })
-    await waitWhile(async () => isBusy())
+    await settle(() => false)
     step('opening /survey-progress')
     await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/survey-progress')
 
@@ -1115,7 +1084,7 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
 
     const drawn = await page.evaluate(() => document.querySelector('[data-deploy="panel"] [data-deploy-chip]') !== null)
 
-    await waitWhile(async () => isBusy() || (drawn && await page.evaluate(pageLoading)))
+    await settle(drawn ? pageLoading : () => false)
 
     const capability = await page.evaluate(() => {
       const report = window.$app.$store.getters['capabilities/report']('/survey-progress')
@@ -1130,6 +1099,10 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
   await go('/survey-progress')
 
   const seen = { initial: await read() }
+
+  if (until === 'initial') {
+    return seen
+  }
 
   for (const [name, group, value] of [['geo', 'roles', 'geo'], ['xeno', 'roles', 'xeno'], ['busy', 'states', 'busy'], ['idle', 'states', 'idle']]) {
     await press(chip(group, value))
@@ -1448,10 +1421,27 @@ const MUTANTS = [
   ['the label of each state is drawn at opacity 0', '<span class="text-no-wrap" data-deploy-state-label>', '<span class="text-no-wrap" style="opacity: 0" data-deploy-state-label>', SURVEY_FILE, ['browser-rows'], true],
 ]
 
-// Rewrites that change nothing the checks observe: each must leave every check passing.
+// Rewrites that change nothing the checks observe: each must leave every check passing. The rewrites of the page the browser draws are served as one (a family each, the chip group registered under its PascalCase name first, since the later ones are made inside it).
 const BENIGN = [
-  ['an explicit prop and event instead of v-model on the roles', 'v-model="deployRoles"', ':value="deployRoles" @change="deployRoles = $event"', SURVEY_FILE, [], true],
-  ['a panel heading reworded', '<span>Specialist deployments</span>', '<span>Specialist placements</span>', SURVEY_FILE, [], true],
+  ['the equivalent forms of the page, each family once', [
+    '<v-chip-group v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">',
+    '</v-chip-group>\n            <v-chip-group v-model="deployStates"',
+    'v-model="deployRoles"',
+    '<span>Specialist deployments</span>',
+    ':data-count="deployTotals[choice.value]" filter',
+    '{{ choice.text }} ({{ count(deployTotals[choice.value]) }})',
+    '{{ item.stateLabel }}',
+    '<span class="text-no-wrap" data-deploy-state-label>',
+  ], [
+    '<VChipGroup v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">',
+    '</VChipGroup>\n            <v-chip-group v-model="deployStates"',
+    ':value="deployRoles" @change="deployRoles = $event"',
+    '<span>Specialist placements</span>',
+    ':data-count="deployTotals[choice.value]" @click.native="void 0" filter',
+    '{{ choice.text }} ({{ count(deployTotals[choice.value], 0) }})',
+    '{{ stateChoices.find((choice) => choice.value === item.state).text }}',
+    '<span class="text-no-wrap" style="opacity: 1" data-deploy-state-label>',
+  ], SURVEY_FILE, [], true],
   ['v-on longhand for a click', 'no-data-text="No formation matches the roles and states chosen" @click:row="toggleRow"', 'no-data-text="No formation matches the roles and states chosen" v-on:click:row="toggleRow"', SURVEY_FILE],
   ['a qualifier moved from the front to the back in a sentence', 'No troop bay holds it (the largest takes ${count(lift.largest)} t)', 'Held by no troop bay (the largest takes ${count(lift.largest)} t)', SPEC_FILE],
   ['a synonym in generated prose', "'Location not resolved'", "'Place not resolved'", SPEC_FILE],
@@ -1460,11 +1450,6 @@ const BENIGN = [
   ['the share of the capacity written as a comparison with the capacity first', 'size > capacity ? 0 : 1', 'capacity >= size ? 1 : 0', SURVEY_UTILITY_FILE],
   ['the own size cut with floor, as the size is never negative', 'Math.trunc(row.Size)', 'Math.floor(row.Size)', SURVEY_UTILITY_FILE],
   ['a superior of another colony told apart with a parenthesised condition', '!(parent.PopulationID > 0) || parent.PopulationID !== row.PopulationID || !parent.HasCommander', '(!(parent.PopulationID > 0)) || (parent.PopulationID !== row.PopulationID) || (!parent.HasCommander)', SURVEY_UTILITY_FILE],
-  ['the roles chip group registered under its PascalCase name', '<v-chip-group v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">\n              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>\n            </v-chip-group>', '<VChipGroup v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">\n              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>\n            </VChipGroup>', SURVEY_FILE, [], true],
-  ['a native listener that does nothing on each role chip', ':data-count="deployTotals[choice.value]" filter', ':data-count="deployTotals[choice.value]" @click.native="void 0" filter', SURVEY_FILE, [], true],
-  ['the figure of each role chip written with its places named', '{{ choice.text }} ({{ count(deployTotals[choice.value]) }})', '{{ choice.text }} ({{ count(deployTotals[choice.value], 0) }})', SURVEY_FILE, [], true],
-  ['the label of each state looked up in the table of states', '{{ item.stateLabel }}', '{{ stateChoices.find((choice) => choice.value === item.state).text }}', SURVEY_FILE, [], true],
-  ['the label of each state drawn at opacity 1', '<span class="text-no-wrap" data-deploy-state-label>', '<span class="text-no-wrap" style="opacity: 1" data-deploy-state-label>', SURVEY_FILE, [], true],
 ]
 
 /* eslint-enable no-template-curly-in-string */
@@ -1538,81 +1523,41 @@ const flagOf = (name) => {
   return given ? given.slice(name.length + 3) : null
 }
 
-// The page in a browser on the copy `file` of one case (`UNREAD`), in a process of its own since the page server is one for each process: the page as the registry has it and with that input made required. Prints RESULT {real, fault}, the whole record of each observation, and ends with status 0 once everything is closed; any other end (the watchdog's 3, a cleanup that failed, a crash) makes the case fail, whatever it printed.
-// The controls of the check use three flags: `--limit=ms` (the watchdog), `--timeout=ms` (the browser's waits once the page is open) and `--control=`: `late-exit` and `late-hang` print a valid result and then end with status 5 or never end; `cleanup:reject` and `cleanup:resolve` print one and then close with a cleanup that fails or one that does not; `bad-json` prints a result that is not JSON, `bad-envelope` one that is JSON but not two whole observations; `page-failure:<marker file>` serves a renderer module that throws, on the first start only (the marker file is made then), and a later start of the case is the plain one; `fault-half:throw` and `fault-half:quiet` serve a renderer module that raises an uncaught error, or does nothing, after the page has been read as the registry has it.
-const unreadChild = async (kind, file) => {
-  const entry = UNREAD.find((item) => item.kind === kind)
-
-  if (!entry || !file) {
-    throw new Error(`no such case: ${kind} ${file}`)
-  }
-
-  const limit = Number(flagOf('limit')) || UNREAD_LIMIT
-  const timeout = Number(flagOf('timeout')) || BROWSER_TIMEOUT
-  const control = flagOf('control') || ''
-  let step = 'starting the page server'
-
-  setTimeout(() => {
-    console.error(`the case ${kind} did not finish in ${limit / 1000} s, at: ${step}`)
-    process.exit(3)
-  }, limit)
-
-  if (['late-exit', 'late-hang', 'cleanup:reject', 'cleanup:resolve', 'bad-json', 'bad-envelope'].includes(control)) {
-    fs.writeSync(1, `${RESULT}${control === 'bad-json' ? '{' : control === 'bad-envelope' ? '{"real":{}}' : JSON.stringify({ real: completedObservation({}), fault: completedObservation({}) })}\n`)
-    step = 'closing'
-
-    if (control === 'late-exit') {
-      process.exit(5)
-    }
-
-    if (control === 'late-hang') {
-      await new Promise(() => {})
-    }
-
-    plantCleanups(control === 'cleanup:reject')
-    await finish(0)
-  }
-
-  const server = await startPageServer({ save: file })
-
-  cleanups.push(() => server.stop())
-  step = 'launching the browser'
-
-  const chrome = await require('playwright').chromium.launch()
-
-  cleanups.push(() => chrome.close())
-  step = 'warming the page server'
-  // The first load of the app is the slow one (Vite transforms every module of it): it is made once here, retried within half the watchdog's time, before the case is read, so that the case's own waits meet a warm server.
-  await server.warm(chrome, { routes: ['/survey-progress'], limit: limit / 2 })
-  step = 'reading the page'
-
-  const marker = control.startsWith('page-failure:') ? control.slice('page-failure:'.length) : null
-  const failing = marker !== null && !fs.existsSync(marker)
+// The page on the copy `file` of one case (`UNREAD`), read on the worker's own page server and browser: the page as the registry has it (`real`) and with that input made required (`fault`), each the whole record of an observation. The server is put back as it started afterwards (`reset`), the file of the registry and the copy of the save included. `control`, for the controls of the harness only: `page-failure` serves a renderer module that throws for the first start of the case only, the count of the starts being kept in `trial` outside the case so that a second start of the same case (a retry that hides the first failure) serves the healthy page and the control sees it; `fault-half:throw` serves one that raises an uncaught error for the second half after the page has been read as the registry has it.
+const readUnread = async (server, chrome, entry, file, { control = '', trial = { starts: 0 }, timeout = BROWSER_TIMEOUT } = {}) => {
   const plant = (code) => server.replace(EMPIRE_LIST_FILE, patched(EMPIRE_LIST_FILE, fs.readFileSync(EMPIRE_LIST_FILE, 'utf8'), '<script>', `<script>\n${code}`))
 
-  if (failing) {
-    fs.writeFileSync(marker, 'the first start')
-    plant("throw new Error('a failure planted for the first start only')")
-  }
+  try {
+    await server.useSave(file)
 
-  const real = await observePage(chrome, server.url, { unread: true, timeout })
+    if (control === 'page-failure') {
+      trial.starts += 1
 
-  if (failing) {
+      if (trial.starts === 1) {
+        plant("throw new Error('a failure planted for the first start only')")
+      }
+    }
+
+    const real = await observePage(chrome, server.url, { unread: true, timeout })
+
     server.replace(EMPIRE_LIST_FILE, null)
+    server.replace(CAPABILITIES_FILE, patched(CAPABILITIES_FILE, fs.readFileSync(CAPABILITIES_FILE, 'utf8'), entry.from, entry.to))
+
+    if (control.startsWith('fault-half:')) {
+      plant(`setTimeout(() => { ${control === 'fault-half:throw' ? "throw new Error('a failure planted for the second half only')" : 'void 0'} }, 0)`)
+    }
+
+    const fault = await observePage(chrome, server.url, { unread: true, withheld: true, timeout })
+
+    return { real, fault }
+  } finally {
+    try {
+      server.replace(EMPIRE_LIST_FILE, null)
+      server.replace(CAPABILITIES_FILE, null)
+    } finally {
+      await server.reset()
+    }
   }
-
-  step = 'reading the page with the input required'
-  server.replace(CAPABILITIES_FILE, patched(CAPABILITIES_FILE, fs.readFileSync(CAPABILITIES_FILE, 'utf8'), entry.from, entry.to))
-
-  if (control.startsWith('fault-half:')) {
-    plant(`setTimeout(() => { ${control === 'fault-half:throw' ? "throw new Error('a failure planted for the second half only')" : 'void 0'} }, 0)`)
-  }
-
-  const fault = await observePage(chrome, server.url, { unread: true, withheld: true, timeout })
-
-  step = 'closing'
-  fs.writeSync(1, `${RESULT}${JSON.stringify({ real, fault })}\n`)
-  await finish(0)
 }
 
 // What a worker sets up once before its first variant (`setUp`, run by the runner): the utility and the page as they are, the saves and what no planted fault reaches in them, the small database, the copies of the browser's save for the optional reads, the page in a browser (one page server over a copy of the browser's save, warmed, one Chromium, a new context for each variant of the page), and what every variant is judged against, read once for the page as it is (`baseline`): the page, the cases of the optional reads and the screen expected. A fault in the template is served to the browser in place of the page's file. The setup reads the baseline before the first variant, whichever variant that is (a fresh worker's, a resumed run's, one `--variants` names), so that no variant waits for the cases, each a child under a watchdog of minutes, within a deadline set for its own work.
@@ -1698,7 +1643,7 @@ const setUp = async () => {
     }
   }
 
-  const observeVariant = async (text) => {
+  const observeVariant = async (text, { until = null } = {}) => {
     if (startFailure) {
       return failedObservation(startFailure)
     }
@@ -1706,7 +1651,7 @@ const setUp = async () => {
     server.replace(SURVEY_FILE, text === sources.survey ? null : text)
 
     try {
-      const seen = await observePage(chrome, server.url)
+      const seen = await observePage(chrome, server.url, { until })
 
       report(text === sources.survey ? 'the page' : 'a variant of the page', seen)
 
@@ -1798,7 +1743,7 @@ const setUp = async () => {
     return ctx
   }
 
-  // The copies of the browser's save for the optional reads, and each case in a process of its own: {real, fault}, the whole record of each observation (scripts/lib/browser-observe.js). A case is never run twice: a child that ends with a status other than 0 (the watchdog's 3 and a cleanup that failed included) or a browser that did not get through, or that saw the page raise an error, is a failed case, with what it reported (`report`).
+  // The copies of the browser's save for the optional reads, and each case on the worker's own page server (`readUnread`): {real, fault}, the whole record of each observation (scripts/lib/browser-observe.js). A case is never run twice: a browser that did not get through, or that saw the page raise an error, is a failed case, with what it reported (`report`).
   for (const name of ['moved', ...UNREAD.map((entry) => entry.kind)]) {
     unreadFiles[name] = await unreadCopy(name)
     unreadDatabases[name] = await openSave(unreadFiles[name])
@@ -1806,32 +1751,25 @@ const setUp = async () => {
 
   cleanups.push(() => Promise.all(Object.values(unreadDatabases).filter(Boolean).map((database) => database.close())))
 
-  const unreadCase = async (entry, extra = [], quiet = false) => {
+  const unreadCase = async (entry, { control = '', quiet = false, trial = { starts: 0 } } = {}) => {
     let seen
 
-    if (records && extra.length === 0) {
+    if (records && !control) {
       seen = records.unread[entry.kind]
     } else if (startFailure) {
       seen = { real: failedObservation(startFailure), fault: failedObservation(startFailure) }
     } else {
       try {
-        sayStep(`the case ${entry.kind} of the optional reads, in a child${extra.length ? ` (${extra.join(' ')})` : ''}`)
-
-        const result = await runChild(__filename, ['--unread', entry.kind, unreadFiles[entry.kind], ...extra])
-
-        if (result.code !== 0) {
-          throw new Error(`the child ended with status ${result.code}${result.stderr.trim() ? `: ${result.stderr.trim().slice(-1500)}` : ''}`)
-        }
-
-        seen = lastJson(result, RESULT)
+        sayStep(`the case ${entry.kind} of the optional reads${control ? ` (${control})` : ''}`)
+        seen = await readUnread(server, chrome, entry, unreadFiles[entry.kind], { control, trial, timeout: control === 'page-failure' ? 10000 : BROWSER_TIMEOUT })
       } catch (error) {
         const message = String(error.message).slice(0, 4000)
 
-        seen = { real: failedObservation(message, 'the child'), fault: failedObservation(message, 'the child') }
+        seen = { real: failedObservation(message, 'the case'), fault: failedObservation(message, 'the case') }
       }
     }
 
-    // A record that is not whole is a defect of the harness (a child that printed one included), and stops the run.
+    // A record that is not whole is a defect of the harness and stops the run.
     const halves = halvesOf(seen, entry.kind)
 
     if (!quiet) {
@@ -1845,7 +1783,7 @@ const setUp = async () => {
     return seen
   }
 
-  // What every variant is judged against, worked out from the page as it is: the page, the cases of the optional reads and the screen expected. The setup reads it before the first variant; the head reads the page again on the worker's server each time it runs, so that the head run after a fault (the control of the warm page server) reads the page anew. The cases of the optional reads are each read on a page server of their own, never the worker's, and are kept.
+  // What every variant is judged against, worked out from the page as it is: the page, the cases of the optional reads and the screen expected. The setup reads it before the first variant; the head reads the page again on the worker's server each time it runs, so that the head run after a fault (the control of the warm page server) reads the page anew. The cases of the optional reads are each read on the worker's server too, one after another, and are kept.
   env.baseline = async () => {
     env.baselineSeen = records ? records.seen : await observeVariant(sources.survey)
 
@@ -1860,6 +1798,8 @@ const setUp = async () => {
       baselineContext.expected = expected
     }
 
+    env.baselineContext = baselineContext
+
     return baselineContext
   }
 
@@ -1873,12 +1813,14 @@ const setUp = async () => {
   // The records with the cases of one input changed, the others as they are.
   env.adapted = (input, change) => Object.fromEntries(UNREAD.map((entry) => [entry.kind, entry.input === input ? change(env.baselineUnread[entry.kind]) : env.baselineUnread[entry.kind]]))
   env.withCase = (kind, seen) => ({ ...env.baselineUnread, [kind]: seen })
-  // The sources with the one change of a fault or a rewrite ([name, from, to, file, ...]).
-  env.variantOf = ([, from, to, file]) => {
+  // The sources with the changes of a fault or a rewrite ([name, from, to, file, ...]; `from` and `to` are lists for the rewrites served as one, applied in turn); a fault is planted through `plantedPatch`, a rewrite of a head check's own through `patched`.
+  env.variantOf = ([, from, to, file], patch = patched) => {
     const given = { ...sources }
     const key = file === SPEC_FILE ? 'spec' : file === SURVEY_UTILITY_FILE ? 'utility' : 'survey'
 
-    given[key] = patched(file, sources[key], from, to)
+    for (const [index, one] of [].concat(from).entries()) {
+      given[key] = patch(file, given[key], one, [].concat(to)[index])
+    }
 
     return given
   }
@@ -1904,10 +1846,16 @@ const checkHead = async () => {
   check('every save check ran', baseline.filter((result) => result.id.startsWith('save-')).length === FIXTURES.length * 8)
 }
 
+// The context of a variant. A rewrite of the template of the page changes nothing the page's script, the utility or the saves give, so a variant served to the browser takes the context of the page as it is with what the browser drew of the variant, and does not read the saves again. `until: 'initial'` ends the drive of the page after its first screen, for a fault that only checks reading that screen name.
+const variantContext = async (given, browser, until = null) => (browser ? { ...ENV.baselineContext, browser: await ENV.observeVariant(given.survey, { until }) } : ENV.contextOf(given, ENV.baselineSeen))
+
+const FIRST_SCREEN_CHECKS = ['browser-panels', 'browser-rows']
+
 const checkPlanted = async ([name, from, to, file, caught, browser, { throws = false } = {}]) => {
-  const given = ENV.variantOf([name, from, to, file])
-  const failed = await judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given.survey) : ENV.baselineSeen))
-  const credited = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
+  const given = ENV.variantOf([name, from, to, file], plantedPatch)
+  const named = results.filter((item) => caught.includes(item.id))
+  const failed = await judge(await variantContext(given, browser, caught.every((id) => FIRST_SCREEN_CHECKS.includes(id)) ? 'initial' : null), named)
+  const credited = failed.filter((result) => result.kind === 'assertion')
 
   check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${credited.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name, throws }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
 
@@ -1929,15 +1877,8 @@ const checkRequired = async (input) => {
 const checkControls = async () => {
   const { sources, contextOf, variantOf, outcome, adapted, withCase, unreadCase, baselineSeen, baselineUnread } = ENV
   const construct = UNREAD.find((item) => item.kind === 'construct-table')
-  // Every child the controls start, each with its bound (ms): a case under its own watchdog (`--limit`), a run of this script under the limit of startChild. The deadline of the controls is built from the bounds of the children they start (CONTROL_BOUNDS), which the last control holds them to, so that a child that ends within its bound never runs the controls past their deadline.
-  let bounds = 0
-  const caseOf = (extra, limit) => {
-    bounds += limit
-
-    return unreadCase(construct, [`--limit=${limit}`, ...extra], true)
-  }
+  // The runs of this script in a child (the probes of `finish` and the run on the records of this one), each under the limit given to startChild.
   const childOf = (args, limit) => {
-    bounds += limit
     sayStep(`a run of this script in a child (${args.join(' ')})`)
 
     return runChild(__filename, args, { limit })
@@ -1981,7 +1922,7 @@ const checkControls = async () => {
 
   // A lookup of the harness that is wrong, and a callback of the harness that throws, are the harness's: on a fault that is credited otherwise, they stop the run.
   const busyMutant = MUTANTS.find(([name]) => name === 'a formation is busy wherever it stands')
-  const busyContext = await contextOf(variantOf(busyMutant))
+  const busyContext = await contextOf(variantOf(busyMutant, plantedPatch))
   const lookups = (name) => [{ id: 'states', name: 'states', run: async (ctx) => { await surveyView(ctx).runAsync(name) } }]
   const lookedUp = await judge(busyContext, lookups('absent')).then(() => null, (error) => error)
   const lookedUpRight = await judge(busyContext, lookups('game')).then((failed) => failed.length, (error) => error)
@@ -2016,7 +1957,7 @@ const checkControls = async () => {
   // A normaliser of a view that throws is a failure of the page's contract, caught by views; one rewritten in an equivalent way, and the code as it is, pass.
   const normaliser = (name, to) => [name, '(stored) => (Array.isArray(stored) ?', to, SPEC_FILE]
   const viewChecks = results.filter((item) => item.id === 'views')
-  const throwing = await judge(await contextOf(variantOf(normaliser('a normaliser that throws', "(stored) => (Array.isArray(stored) && (() => { throw new TypeError('planted') })() ?"))), viewChecks)
+  const throwing = await judge(await contextOf(variantOf(normaliser('a normaliser that throws', "(stored) => (Array.isArray(stored) && (() => { throw new TypeError('planted') })() ?"), plantedPatch)), viewChecks)
   const rewritten = await judge(await contextOf(variantOf(normaliser('a normaliser written the other way round', '(stored) => (!Array.isArray(stored) ? undefined : Array.isArray(stored) ?'))), viewChecks)
   const unchanged = await judge(await contextOf(sources), viewChecks)
 
@@ -2027,7 +1968,7 @@ const checkControls = async () => {
   const selectChecks = results.filter((item) => item.id === 'select')
 
   for (const [what, entry, faulty] of [['the code as it is', null, false], ['a benign rewrite', BENIGN.find(([name]) => name === 'a parenthesised condition'), false], ['a fault', MUTANTS.find(([name]) => name === 'the state filter is ignored'), true]]) {
-    const ctx = await contextOf(entry ? variantOf(entry) : sources)
+    const ctx = await contextOf(entry ? variantOf(entry, faulty ? plantedPatch : patched) : sources)
     const intact = await judge(ctx, selectChecks)
 
     check(`control: ${what}, with nothing planted in the harness, ${faulty ? 'fails the check of the fault on an assertion' : 'passes the check'}`, faulty ? intact.length === 1 && intact[0].kind === 'assertion' : intact.length === 0, JSON.stringify(intact))
@@ -2052,28 +1993,12 @@ const checkControls = async () => {
     check(`control: the substitution of the records of ${input} that keeps both halves leaves browser-unread passing`, neutral.ok, `${neutral.kind}: ${neutral.detail}`)
   }
 
-  const marker = path.join(os.tmpdir(), `ae-unread-${process.pid}-once`)
-
-  cleanups.push(async () => fs.rmSync(marker, { force: true }))
-
-  const once = await caseOf(['--timeout=10000', `--control=page-failure:${marker}`], UNREAD_LIMIT)
+  const trial = { starts: 0 }
+  const once = await unreadCase(construct, { control: 'page-failure', quiet: true, trial })
   const onceOutcome = await outcome(withCase(construct.kind, once))
 
-  check('control: a page failure on the first start only, which a second start would not show, leaves browser-unread failed', fs.existsSync(marker) && !onceOutcome.ok && /did not get through construct-table real at picking the game/.test(onceOutcome.detail), `${fs.existsSync(marker)} ${onceOutcome.detail}`)
-  check('control: the failed observation keeps its phase, the whole message and what the page and the browser reported', Boolean(once.real.error) && once.real.phase === 'picking the game' && once.real.errors.length + once.real.console.length + once.real.failed.length > 0, JSON.stringify(once.real).slice(0, 600))
-
-  for (const [control, extra, limit, expectedText] of [['exits with a status other than 0', ['--control=late-exit'], QUICK_LIMIT, /status 5/], ['does not end', ['--control=late-hang'], 4000, /status 3[\s\S]*did not finish in 4 s/]]) {
-    const seen = await caseOf(extra, limit)
-    const failed = await outcome(withCase(construct.kind, seen))
-
-    check(`control: a child that prints a valid result and then ${control} fails the case and browser-unread`, expectedText.test(seen.real.error) && !failed.ok, JSON.stringify({ seen: seen.real.error, failed: failed.detail }))
-  }
-
-  const rejecting = await caseOf(['--control=cleanup:reject'], QUICK_LIMIT)
-  const resolving = await caseOf(['--control=cleanup:resolve'], QUICK_LIMIT)
-
-  check('control: a child that prints a valid result and then closes with a cleanup that fails fails the case, with the cleanup named', /status 4/.test(rejecting.real.error) && String(rejecting.real.error).includes(CLEANUP_PLANTED), String(rejecting.real.error))
-  check('control: the same child with a cleanup that resolves gives a case that went through', resolving.real.error === null && resolving.fault.error === null, `${resolving.real.error} ${resolving.fault.error}`)
+  check('control: a page failure in the half read as the registry has it, planted for the first start only, leaves browser-unread failed, the case is attempted once and not again, and the server is as it started for the next case', trial.starts === 1 && !onceOutcome.ok && /did not get through construct-table real at picking the game/.test(onceOutcome.detail), `${trial.starts} starts: ${onceOutcome.detail}`)
+  check('control: the failed observation of that first start keeps its phase, the whole message and what the page and the browser reported', Boolean(once.real.error) && once.real.phase === 'picking the game' && once.real.errors.length + once.real.console.length + once.real.failed.length > 0, JSON.stringify(once.real).slice(0, 600))
 
   for (const failing of [true, false]) {
     const result = await childOf(['--finish-probe', failing ? 'reject' : 'resolve'], QUICK_LIMIT)
@@ -2088,13 +2013,10 @@ const checkControls = async () => {
   check('control: a process that ends with a status of its own keeps it when a cleanup fails too, runs the cleanup after it and says that the cleanup also failed', kept.code === 7 && kept.stdout.includes(CLEANUP_RAN) && kept.stderr.includes(CLEANUP_PLANTED) && kept.stderr.includes('also failed'), `${kept.code} ${kept.stderr.trim().slice(-300)}`)
   check('control: the same status with every cleanup resolved is kept, and nothing is said of a cleanup', plain.code === 7 && plain.stdout.includes(CLEANUP_RAN) && !plain.stderr.includes('also failed'), `${plain.code} ${plain.stderr.trim().slice(-300)}`)
 
-  const raising = await caseOf(['--control=fault-half:throw'], UNREAD_LIMIT)
-  const quiet = await caseOf(['--control=fault-half:quiet'], UNREAD_LIMIT)
+  const raising = await unreadCase(construct, { control: 'fault-half:throw', quiet: true })
   const raisingOutcome = await outcome(withCase(construct.kind, raising))
-  const quietOutcome = await outcome(withCase(construct.kind, quiet))
 
   check('control: an uncaught error raised only in the half read with the input required fails browser-unread, and the error is kept', raising.real.error === null && raising.fault.errors.some((text) => text.includes('second half')) && !raisingOutcome.ok && /construct-table fault/.test(raisingOutcome.detail), `${raising.real.error} ${raising.fault.errors} ${raisingOutcome.detail}`)
-  check('control: the same half with a script that does nothing is a case that went through', quiet.real.error === null && quiet.fault.error === null && quiet.fault.errors.length === 0 && quietOutcome.ok, `${quiet.fault.error} ${quietOutcome.detail}`)
 
   const whole = baselineUnread[construct.kind]
   const complete = await outcome(withCase(construct.kind, { real: whole.real, fault: whole.fault }))
@@ -2106,14 +2028,6 @@ const checkControls = async () => {
 
     check(`control: ${what} stops the run as a defect of the harness, and is never a fault that was caught`, stopped instanceof HarnessError, String(stopped))
   }
-
-  // The two ways a result can be unusable are not the same: one that cannot be read at all is a failed case, as a child that ended badly is; one that reads as JSON but is not two whole observations is a defect of the harness, as every other record that is not whole.
-  const unreadable = await caseOf(['--control=bad-json'], QUICK_LIMIT)
-  const unreadableOutcome = await outcome(withCase(construct.kind, unreadable))
-  const malformed = await caseOf(['--control=bad-envelope'], QUICK_LIMIT).then(() => null, (error) => error)
-
-  check('control: a result that is not JSON is a failed case with the phase of the child, and fails browser-unread without stopping the run', unreadable.real.error !== null && unreadable.real.phase === 'the child' && unreadable.fault.error !== null && !unreadableOutcome.ok, `${unreadable.real.error} ${unreadable.real.phase} ${unreadableOutcome.detail}`)
-  check('control: a result that is JSON but not two whole observations stops the run as a defect of the harness', malformed instanceof HarnessError, String(malformed))
 
   // The names a run is told to select are the ones it runs, the required-input faults included: a child of its own (a run of scripts/lib/suite-runner.js, its record removed after it) runs the head, judging the records of the page this run made (`--records`), and the fault of one input, and passes.
   const recordsOut = path.join(os.tmpdir(), `ae-specialist-records-${process.pid}.json`)
@@ -2134,19 +2048,18 @@ const checkControls = async () => {
   const navigations = [await observePage(pretendBrowser(), 'http://pretend.test/'), await observePage(pretendBrowser(), 'http://pretend.test/', { unread: true })]
 
   check('control: an observation whose navigation does not end, read whole or read once after the capability report, names the step of that navigation (a step is said before the call it names), so the deadline of the runner names it too', navigations.every((seen) => seen.error === NAVIGATION_FAILED && seen.phase === 'opening /survey-progress'), JSON.stringify(navigations.map((seen) => ({ error: seen.error, phase: seen.phase }))))
-  check('control: the bounds of the children the controls started add up to no more than the deadline of the controls holds for them', bounds <= CONTROL_BOUNDS, `${bounds / 1000} s of bounds against the ${CONTROL_BOUNDS / 1000} s of the deadline of ${DEADLINES.controls} s`)
 }
 
 const checkBenign = async ([name, from, to, file, , browser]) => {
   const given = ENV.variantOf([name, from, to, file])
-  const failed = (await judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given.survey) : ENV.baselineSeen))).map((result) => result.id)
+  const failed = (await judge(await variantContext(given, browser))).map((result) => result.id)
 
   check(`benign: ${name}: no check fails`, failed.length === 0, failed.join(', '))
 }
 
-// The deadlines, in seconds. A variant's own work: five times the slowest time measured (the head 13 s, a variant served to the browser 18 s, one in memory 2 s), at least two minutes, and for what the browser reads at least a minute past its longest step (BROWSER_TIMEOUT, 120 s for a click or a wait of the page), so that a step that does not end is named by its own timeout first. The controls of the harness start children one after another, and their deadline is the sum of the children's bounds and the time measured (81 s), so that a child that ends within its bound never runs them past it: the three cases read on a page under UNREAD_LIMIT, the six quick cases and the four probes of `finish` under QUICK_LIMIT (the case that does not end under 4 s of its own) and the run of this script on the head's records under NESTED_LIMIT (CONTROL_BOUNDS). The setup opens the saves, makes the copies of the browser's save and starts and warms the page server, the one cold start of the run (900 s), and reads what every variant is judged against (`baseline`): the page (a minute past its longest step, 180 s) and the four cases of the optional reads, each a child under UNREAD_LIMIT; a run given the records of another (`--records`) reads neither. Between two variants and in its close a worker has the runner's 900 s.
-const CONTROL_BOUNDS = 3 * UNREAD_LIMIT + 10 * QUICK_LIMIT + NESTED_LIMIT
-const DEADLINES = { head: 180, browser: 180, memory: 120, controls: CONTROL_BOUNDS / 1000 + 81, setup: 900 + (flagOf('records') ? 0 : 180 + UNREAD.length * UNREAD_LIMIT / 1000) }
+// The deadlines, in seconds. A variant's own work: five times the slowest time measured (the head 13 s, a variant served to the browser 18 s, one in memory 2 s), at least two minutes, and for what the browser reads at least a minute past its longest step (BROWSER_TIMEOUT, 120 s for a click or a wait of the page), so that a step that does not end is named by its own timeout first. The controls of the harness start children one after another, the four probes of `finish` under QUICK_LIMIT and the run of this script on the head's records under NESTED_LIMIT (CONTROL_BOUNDS), and read four cases of the optional reads on the worker's server, each within the 180 s of a variant of the browser; their deadline is the sum of those bounds and the time measured (81 s). The setup opens the saves, makes the copies of the browser's save and starts and warms the page server, the one cold start of the run (900 s), and reads what every variant is judged against (`baseline`): the page and the cases of the optional reads, each within the 180 s of a variant of the browser; a run given the records of another (`--records`) reads neither. Between two variants and in its close a worker has the runner's 900 s.
+const CONTROL_BOUNDS = 4 * QUICK_LIMIT + NESTED_LIMIT
+const DEADLINES = { head: 180, browser: 180, memory: 120, controls: CONTROL_BOUNDS / 1000 + 4 * 180 + 81, setup: 900 + (flagOf('records') ? 0 : (1 + UNREAD.length) * 180) }
 // The planted fault the control runs before the head: one the head's reading of the page catches.
 const CONTROL_FAULT = 'the figure of each role chip is drawn one higher, its count hook left as it is'
 
@@ -2159,12 +2072,7 @@ const variantsOf = () => [
 ]
 
 const main = async () => {
-  const unreadAt = process.argv.indexOf('--unread')
   const probeAt = process.argv.indexOf('--finish-probe')
-
-  if (unreadAt !== -1) {
-    return unreadChild(process.argv[unreadAt + 1], process.argv[unreadAt + 2])
-  }
 
   if (probeAt !== -1) {
     // `reject`, `resolve`, `reject-after:<status>` and `resolve-after:<status>`: the cleanups fail or not, and the process ends with the status given (0 when there is none).
