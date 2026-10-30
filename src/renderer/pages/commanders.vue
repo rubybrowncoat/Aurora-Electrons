@@ -281,6 +281,7 @@
           <div class="panel-head">
             <span>Command structure</span>
             <span class="d-flex align-center flex-wrap controls">
+              <v-chip x-small label color="warning" class="mr-2" data-wip-chip>WIP</v-chip>
               <v-switch v-if="structureView === 'naval'" v-model="shippingLines" label="Shipping lines" dense hide-details class="mt-0 mr-4" data-structure-shipping-lines />
               <v-btn-toggle v-model="structureView" mandatory dense>
                 <v-btn v-for="view in structureViews" :key="view.value" :value="view.value" small>{{ view.text }}</v-btn>
@@ -289,6 +290,7 @@
               <v-btn small text :disabled="!structureExportable" aria-label="Download the command structure as Markdown" data-structure-markdown @click="downloadStructure('markdown')"><v-icon small left>mdi-download</v-icon>Markdown</v-btn>
             </span>
           </div>
+          <wip-notice title="The command structure" panel />
           <load-state :failed="structureState.failed" :error="structureState.error" :loading="structureState.loading" class="px-6" @retry="retryStructure" />
           <div v-if="structureNotice" class="panel-body caption text--secondary" data-structure-notice>{{ structureNotice }}</div>
           <template v-if="structureExportable">
@@ -323,6 +325,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import WipNotice from '../components/page/WipNotice.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -385,7 +388,7 @@ const validBound = (value) => value === null || (typeof value === 'number' && Nu
 
 export default {
   name: 'CommandersPage',
-  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { LoadState, PageLink, ProvenanceMark, StatTiles, WipNotice },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
