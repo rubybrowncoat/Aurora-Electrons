@@ -1,4 +1,4 @@
-// The local glossary and the learning links behind each page's help (components/page/HelpPanel.vue). A term is defined here in full, so the help reads the same with no network; a link is only a pointer to public material the definitions do not copy, with its own reviewed date, the game release it was written for and whether it could be reached at the review.
+// The local glossary and the learning links behind each page's help (components/page/HelpPanel.vue). A term is defined here in full, so the help reads the same with no network; a link is only a pointer to public material the definitions do not copy, with a title and a line on what it covers.
 //
 // Links and provenance stay apart. A link explains a term or a workflow; it is never a source for a calculated figure, and no rule registered in utilities/provenance.js cites one. How far a figure holds is stated by its mark (components/page/ProvenanceMark.vue), never by a link. scripts/check-glossary.js enforces both.
 
@@ -7,20 +7,8 @@ import { PAGES } from './navigation'
 // The game release the definitions were reviewed against; a rule registered for '2.7.x' (utilities/provenance.js) matches it.
 export const GAME_VERSION = '2.7.x'
 
-// When the entries below were last read against the pages that show them and the reachable links last opened.
+// When the entries below were last read against the pages that show them.
 export const REVIEWED = '2026-10-13'
-
-// A version status says how a link stands against GAME_VERSION: 'older' (written for an earlier release, so rules and menus may differ) or 'current' (written for it, or tied to no release).
-export const VERSION_STATUS = Object.freeze({ OLDER: 'older', CURRENT: 'current' })
-
-// How a status reads beside a link.
-export const VERSION_STATUS_TEXT = Object.freeze({
-  [VERSION_STATUS.OLDER]: 'Written for an older release: rules and menus may differ',
-  [VERSION_STATUS.CURRENT]: 'Not tied to an older release',
-})
-
-// Nothing written before this month can describe a 2.7 release, so a link dated earlier must be marked older.
-export const OLDER_THAN_GAME_BEFORE = '2024-01'
 
 const term = (id, name, definition, units = '', reviewed = REVIEWED) => Object.freeze({ id, term: name, units, definition, versions: GAME_VERSION, reviewed })
 
@@ -86,11 +74,9 @@ export const TERMS = Object.freeze([
   term('electronic-hardening', 'Hardening and ECCM', 'Protection a sensor or fire control is built with. Hardening sets its Uridium and ECCM adds Corbomite on top, each from the level of its tech and each changing the BP. ECCM lowers the jammer a sensor meets, so a higher level keeps more of its range against a jamming target.', 'BP'),
 ])
 
-const link = (fields) => Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })
-
-// `title` and `covers` say what the pointer is and what it deals with, in the words of this app, never as a verification. `written` is the month the material was written (null for a living site), `gameVersion` the release it describes in its own words, `status` how that stands against GAME_VERSION and `reached` the date the address answered at the review.
+// `title` and `covers` say what the pointer is and what it deals with, in the words of this app, never as a verification.
 export const LINKS = Object.freeze([
-  link({ id: 'community-forum', title: 'Aurora 4X community forum', source: 'Aurora 4X community', url: 'https://aurora4x.com/', covers: 'Discussion of the game and its releases, and the place to ask for help.', gameVersion: 'Live discussion, not tied to one release', status: VERSION_STATUS.CURRENT }),
+  Object.freeze({ id: 'community-forum', title: 'Aurora 4X community forum', url: 'https://aurora4x.com/', covers: 'Discussion of the game and its releases, and the place to ask for help.' }),
 ])
 
 const RESOURCES = ['community-forum']

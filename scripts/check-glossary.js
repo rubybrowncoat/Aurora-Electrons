@@ -4,12 +4,12 @@
   What it holds the glossary to:
   - every page of the registry that belongs to a section has a help entry with terms and links, every entry names terms and links that exist, and none stands unused or for a page that is gone;
   - the unit and estimate terms the planning pages need (cost, runway, maintenance, estimated outputs) are mapped to the pages that show them;
-  - every term has a local definition of its own, a reviewed date and a game version label, and every link a title, a note on what it covers, an https address, a reviewed date, a version label and a version status, with material written before any 2.7 release marked older;
+  - every term has a local definition of its own, a reviewed date and a game version label, and every link a title, a note on what it covers and an https address;
   - the help speaks in the impersonal voice, and a definition is short, original text with no address in it;
   - links and provenance stay apart: no glossary entry names a rule or a verification, no link's text claims to verify a figure, and no registered rule cites a glossary link;
   - the figures a definition states hold in the app's own rules: the shortage and the hauling shortfall of a colony, the runway of a mineral and of a maintenance location, the RP left and the time left of research, and the climb of maintenance life are run on small made-up rows and held to what the definitions say (no source text is matched).
 
-  Then each mutation (an entry dropped, a date or version label removed, a link made http or left undated, an older link marked current, a first-person phrase, a link cited as a rule's source, or an expression of one of those rules changed) must make at least one check fail.
+  Then each mutation (an entry dropped, a date or version label removed, a link made http or left without its note, a first-person phrase, a link cited as a rule's source, or an expression of one of those rules changed) must make at least one check fail.
 
   Usage: node scripts/check-glossary.js
 */
@@ -136,14 +136,13 @@ const loadModules = (directory, ruleModules) => loadUtilities([...new Set([...MO
 
 // The checks that need no save, over the modules `m` ({ glossary, navigation }) and the renderer folder `tree` they and the component sources were read from: [[name, async () => true or a message]]. Run on the real sources and again on each mutated copy, where one at least must fail.
 const synthetic = (m, tree) => {
-  const { TERMS, LINKS, PAGE_HELP, GAME_VERSION, VERSION_STATUS, VERSION_STATUS_TEXT, OLDER_THAN_GAME_BEFORE, helpFor, helpRoutes } = m.glossary
+  const { TERMS, LINKS, PAGE_HELP, GAME_VERSION, helpFor, helpRoutes } = m.glossary
   const read = (file) => fs.readFileSync(path.join(tree, file), 'utf8')
   const panel = () => read(HELP_PANEL)
   const { provenance, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime, colonies } = m
   const definitionOf = (id) => (TERMS.find((item) => item.id === id) || { definition: '' }).definition
   const says = (id, ...phrases) => phrases.map((phrase) => [`${id} definition`, definitionOf(id).includes(phrase) ? '' : `does not say "${phrase}"`])
   const planners = helpRoutes()
-  const statuses = Object.values(VERSION_STATUS)
 
   return [
     ['the registry has planner routes to cover', async () => (planners.length >= 20 ? true : `${planners.length} routes`)],
@@ -201,13 +200,9 @@ const synthetic = (m, tree) => {
       ['addresses', new Set(LINKS.map((item) => item.url)).size === LINKS.length ? '' : 'an address is repeated'],
     ])],
 
-    ['every link has a title, a source, a note on what it covers, a reviewed date and a version label', async () => firstProblem(LINKS.flatMap((item) => [
+    ['every link has a title and a note on what it covers', async () => firstProblem(LINKS.flatMap((item) => [
       [`${item.id} title`, text(item.title) ? '' : 'missing'],
-      [`${item.id} source`, text(item.source) ? '' : 'missing'],
       [`${item.id} covers`, text(item.covers) ? (item.covers.length > MAX_COVERS ? `${item.covers.length} characters` : '') : 'missing'],
-      [`${item.id} reviewed`, validDate(item.reviewed) ? '' : `not a past date: ${phraseOf(item.reviewed)}`],
-      [`${item.id} gameVersion`, text(item.gameVersion) ? '' : 'missing'],
-      [`${item.id} status`, statuses.includes(item.status) ? '' : `unknown status ${phraseOf(item.status)}`],
     ]))],
 
     ['every link address is https', async () => firstProblem(LINKS.map((item) => {
@@ -220,32 +215,16 @@ const synthetic = (m, tree) => {
       }
     }))],
 
-    ['the date a link was reached is a past date no later than its review', async () => firstProblem(LINKS.map((item) => [item.id, (validDate(item.reached) && item.reached <= item.reviewed) ? '' : `reached ${phraseOf(item.reached)}`]))],
-
-    ['a link has a written month or none, and material written before any 2.7 release is marked older', async () => firstProblem(LINKS.map((item) => {
-      if (item.written !== null && !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(phraseOf(item.written))) {
-        return [item.id, `written ${phraseOf(item.written)} is not a month`]
-      }
-
-      return [item.id, item.written !== null && item.written < OLDER_THAN_GAME_BEFORE && item.status !== VERSION_STATUS.OLDER ? `written ${item.written} but not marked older` : '']
-    }))],
-
-    ['the older status reads as older on screen and every status has its words', async () => firstProblem([
-      ...statuses.map((status) => [`status ${status}`, text(VERSION_STATUS_TEXT[status]) ? '' : 'no words']),
-      ['older words', /older/i.test(VERSION_STATUS_TEXT[VERSION_STATUS.OLDER] || '') ? '' : 'do not say older'],
-    ])],
-
     ['the help speaks in the impersonal voice', async () => firstProblem([
       ...TERMS.flatMap((item) => [item.term, item.units, item.definition].map((value) => [`term ${item.id}`, voiceProblem(value)])),
       ...Object.entries(PAGE_HELP).flatMap(([route, entry]) => [entry.overview, ...entry.usage].map((value) => [`help ${route}`, voiceProblem(value)])),
-      ...LINKS.flatMap((item) => [item.title, item.source, item.covers, item.gameVersion].map((value) => [`link ${item.id}`, voiceProblem(value)])),
-      ...Object.values(VERSION_STATUS_TEXT).map((value) => ['status words', voiceProblem(value)]),
+      ...LINKS.flatMap((item) => [item.title, item.covers].map((value) => [`link ${item.id}`, voiceProblem(value)])),
       ...templateText(panel()).map((value) => ['card', voiceProblem(value)]),
     ])],
 
     ['no entry names a rule or a verification, and no link text claims to verify a figure', async () => firstProblem([
       ...[...TERMS, ...LINKS].flatMap((item) => FORBIDDEN_FIELDS.map((field) => [`${item.id}`, Object.prototype.hasOwnProperty.call(item, field) ? `has a ${field} field` : ''])),
-      ...LINKS.flatMap((item) => [item.title, item.covers, item.gameVersion].map((value) => [`link ${item.id}`, VERIFICATION_CLAIM.test(value) ? `says "${VERIFICATION_CLAIM.exec(value)[0]}"` : ''])),
+      ...LINKS.flatMap((item) => [item.title, item.covers].map((value) => [`link ${item.id}`, VERIFICATION_CLAIM.test(value) ? `says "${VERIFICATION_CLAIM.exec(value)[0]}"` : ''])),
     ])],
 
     ['no registered rule cites a glossary link', async () => {
@@ -506,11 +485,9 @@ const MUTATIONS = [
   ['a definition speaks in the first person', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'The mass unit of my ships, cargo and minerals;', ['the help speaks in the impersonal voice']],
   ['a definition speaks to the reader', GLOSSARY, 'A ship that houses population aboard.', 'A ship that houses your population aboard.', ['the help speaks in the impersonal voice']],
   ['a link is http', GLOSSARY, '\'https://aurora4x.com/\'', '\'http://aurora4x.com/\'', ['every link address is https']],
-  ['a link loses its reviewed date', GLOSSARY, 'Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })', 'Object.freeze({ reached: REVIEWED, written: null, ...fields })', ['every link has a title']],
-  ['a link loses its version label', GLOSSARY, 'gameVersion: \'Live discussion, not tied to one release\', ', '', ['every link has a title']],
-  ['the older words stop saying older', GLOSSARY, 'Written for an older release: rules and menus may differ', 'Rules and menus may differ', ['the older status reads as older']],
+  ['a link loses its note on what it covers', GLOSSARY, ' covers: \'Discussion of the game and its releases, and the place to ask for help.\'', ' covers: \'\'', ['every link has a title']],
   ['a link claims to verify a formula', GLOSSARY, 'Discussion of the game and its releases,', 'Verifies the formulas; discussion of the game and its releases,', ['no link text claims to verify a figure']],
-  ['a link names a rule', GLOSSARY, 'link({ id: \'community-forum\', ', 'link({ rule: \'finances.treasury\', id: \'community-forum\', ', ['no entry names a rule or a verification']],
+  ['a link names a rule', GLOSSARY, 'Object.freeze({ id: \'community-forum\', ', 'Object.freeze({ rule: \'finances.treasury\', id: \'community-forum\', ', ['no entry names a rule or a verification']],
   ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a missing site input named by its saved column', path.join('utilities', 'minerals.js'), "const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']", "const DEPOSIT_INPUTS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']", ['no unavailable result names a table or column']],
