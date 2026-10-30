@@ -69,7 +69,7 @@ export default {
 <style lang="scss" scoped>
 .empire-list__game {
   padding: 12px 10px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   font-weight: 500;
   letter-spacing: .04em;
   color: var(--ae-muted);
@@ -105,6 +105,12 @@ export default {
   background: var(--sc-soft);
 }
 
+// The kind chip of the player's race is outlined in the focus colour, whose text is under 4.5:1 on the wash of the active race in Light and in Dark (the neutral accent over the surface): its text takes the ink and its outline stays in the focus colour.
+.empire-list__race .v-chip--outlined {
+  color: var(--ae-ink) !important;
+  border-color: var(--ae-primary) !important;
+}
+
 .empire-list__avatar {
   grid-row: span 2;
   align-self: start;
@@ -112,13 +118,13 @@ export default {
 
 .empire-list__title {
   min-width: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   font-weight: 500;
 }
 
 .empire-list__details {
   grid-column: 2 / 4;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   line-height: 1.4;
   color: var(--ae-muted);
 }

@@ -50,7 +50,7 @@ const peopleRoom = (route) => Math.max(route.capacity, route.plan ? route.plan.c
 
 const settleNow = (route, extra = '') => `Costs ${number(route.cost, 2)} for ${route.species}${extra}, which is ${perMillion(route.infrastructure)}${route.lowGravity ? ' (low gravity doubles it)' : ''}. It holds ${people(route.capacity)}.`
 
-// The table. `when` decides, `text` says it for one body with its numbers, `rule` says it in general. `target` is whether the state can be ranked as a place to settle next. `group` orders the legend.
+// The table. `when` decides, `text` says it for one body with its numbers, `rule` says it in general. `target` is whether the state can be ranked as a place to settle next. `group` orders the legend. `color` is a tone: a severity name or a key of the appearance's `plan` roles (`toneColor` in appearance.js).
 export const PLAN_STATES = [
   {
     id: 'colony',
@@ -104,7 +104,7 @@ export const PLAN_STATES = [
     id: 'mining',
     label: 'Mining colony',
     group: 'Mining',
-    color: 'amber darken-3',
+    color: 'mining',
     icon: 'mdi-pickaxe',
     target: true,
     rule: `Deposits worth ${RICH_DEPOSIT_VALUE} or more (the game's own threshold for seeding a mining colony) on a body too small to hold the colony worth planning for (see "Smallest colony" in Ranking). Plan it for the mines, not the people.`,
@@ -116,7 +116,7 @@ export const PLAN_STATES = [
     id: 'terraform-free',
     label: 'Terraform to free',
     group: 'Terraform first',
-    color: 'purple',
+    color: 'terraformFree',
     icon: 'mdi-earth-arrow-right',
     target: true,
     rule: 'The best route is to terraform first, and the plan makes the colony cost 0 at every point of the orbit, so it needs no infrastructure afterwards.',
@@ -128,7 +128,7 @@ export const PLAN_STATES = [
     id: 'terraform-partial',
     label: 'Terraform, part free',
     group: 'Terraform first',
-    color: 'indigo',
+    color: 'terraformPartial',
     icon: 'mdi-earth-arrow-right',
     target: true,
     rule: 'The best route is to terraform first, but the plan frees the colony at part of an eccentric orbit only, so some of the year it still costs infrastructure.',
@@ -140,7 +140,7 @@ export const PLAN_STATES = [
     id: 'terraform-cheaper',
     label: 'Terraform to cheaper',
     group: 'Terraform first',
-    color: 'blue-grey',
+    color: 'terraformCheaper',
     icon: 'mdi-earth-arrow-right',
     target: true,
     rule: 'The best route is to terraform first: the plan lowers the colony cost, but not to 0.',
@@ -164,7 +164,7 @@ export const PLAN_STATES = [
     id: 'cheap',
     label: 'Cheap',
     group: 'Settle now',
-    color: 'teal',
+    color: 'cheap',
     icon: 'mdi-home-plus',
     target: true,
     rule: `Colony cost under ${COST_BANDS.cheap} before the race's colonisation tech (the game's blue band). Settle it as it is and build the infrastructure it needs.`,
@@ -176,7 +176,7 @@ export const PLAN_STATES = [
     id: 'moderate',
     label: 'Moderate',
     group: 'Settle now',
-    color: 'light-blue darken-1',
+    color: 'moderate',
     icon: 'mdi-home-plus',
     target: true,
     rule: `Colony cost ${COST_BANDS.cheap} to ${COST_BANDS.moderate} before the race's colonisation tech (the game's cyan band). The usual price of a breathable-gas or dry world: settle it and build the infrastructure.`,
@@ -188,7 +188,7 @@ export const PLAN_STATES = [
     id: 'costly',
     label: 'Costly',
     group: 'Settle now',
-    color: 'orange darken-2',
+    color: 'costly',
     icon: 'mdi-home-alert',
     target: true,
     rule: `Colony cost ${COST_BANDS.moderate} to ${COST_BANDS.costly} before the race's colonisation tech (the game's brown band). Possible, but each million people needs a lot of infrastructure.`,
@@ -200,7 +200,7 @@ export const PLAN_STATES = [
     id: 'severe',
     label: 'Severe',
     group: 'Settle now',
-    color: 'deep-orange darken-3',
+    color: 'severe',
     icon: 'mdi-home-alert',
     target: true,
     rule: `Colony cost ${COST_BANDS.costly} or more before the race's colonisation tech. Hostile: only a very large body or a rich deposit makes it worth the infrastructure.`,

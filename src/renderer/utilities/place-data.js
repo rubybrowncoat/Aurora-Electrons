@@ -1,6 +1,7 @@
 // The reads behind the places Route Finder offers (utilities/places.js has the ones its page already holds). Every one is limited to the systems the race knows, and returns places with the `text` a search matches. The game lets a fleet move to a charted jump point, a Lagrange point, a body (planet, moon, asteroid or comet), a survey location, a wreck or life pod, one of the race's own waypoints, a colony, a fleet, or a contact the race holds now, each at a position the save stores. Aether gates are only ordered by the game's non-player races, but their place is stored too, so they are read as well.
 
 import { systemBodyName } from './aurora'
+import { HELD_CONTACT } from './contacts'
 import { place } from './deep-links'
 import { groupIcon } from './places'
 
@@ -16,8 +17,8 @@ const BODY_GROUPS = { 1: 'planet', 2: 'moon', 3: 'asteroid', 5: 'comet' }
 const BODY_TYPES = { 1: 'Asteroid', 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: 'Super-Jovian', 7: 'Small moon', 8: 'Moon', 9: 'Large moon', 10: 'Small terrestrial moon', 11: 'Terrestrial moon', 14: 'Comet' }
 const CONTACT_TYPES = { 1: 'Ship', 3: 'Missile salvo', 4: 'Population', 9: 'Packet', 12: 'Ground forces', 14: 'STO ground forces', 16: 'Shipyard', 22: 'Waypoint' }
 // FCT_Waypoint.WaypointType values the game names with a prefix when the waypoint has no name of its own; a waypoint marked for deletion (4) is gone at the next increment.
-const WAYPOINT_NAMES = { 0: 'Waypoint', 1: 'Point of Interest', 2: 'Urgent POI', 3: 'Transit POI', 5: 'Training Waypoint', 6: 'Rendezvous Waypoint', 8: 'Temporary' }
-const MARKED_FOR_DELETION = 4
+export const WAYPOINT_NAMES = { 0: 'Waypoint', 1: 'Point of Interest', 2: 'Urgent POI', 3: 'Transit POI', 5: 'Training Waypoint', 6: 'Rendezvous Waypoint', 8: 'Temporary' }
+export const MARKED_FOR_DELETION = 4
 
 // How many bodies of each kind and survey locations the known systems hold, so the picker can say what it will list before it reads them: { planet, moon, asteroid, comet, survey }.
 export const countLargePlaces = async (database, context) => {
@@ -153,7 +154,7 @@ order by FCT_ShipClass.Size desc`)).map((row) => {
     kind: 'wreck',
     group: 'wreck',
     name,
-    subtitle: `${count((row.Size || 0) * 50)} t wreck in ${row.SystemName}`,
+    subtitle: `${Number.isFinite(row.Size) ? `${count(row.Size * 50)} t wreck` : 'Wreck of unknown size'} in ${row.SystemName}`,
     icon: groupIcon('wreck'),
     SystemID: row.SystemID,
     Xcor: row.Xcor,
@@ -162,22 +163,30 @@ order by FCT_ShipClass.Size desc`)).map((row) => {
   }
 })
 
-const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_RaceSysSurvey.Name as SystemName
+// The game lists every life pod of a system, whoever's it was: the race's own by ship name and survivors, another's by the class name its intelligence holds and the pod's id. The name and the crew of a foreign pod are never read.
+const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, (FCT_Lifepods.RaceID = ${context.RaceID}) as Own, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Lifepods
 ${known('FCT_Lifepods', context)}
+left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID and FCT_AlienClass.ViewRaceID = ${context.RaceID} and FCT_AlienClass.GameID = FCT_Lifepods.GameID
 where FCT_Lifepods.GameID = ${context.GameID}
-order by FCT_Lifepods.ShipName`)).map((row) => ({
-  key: place.lifepod(row.LifepodID),
-  kind: 'lifepod',
-  group: 'lifepod',
-  name: `Life pods: ${row.ShipName}`,
-  subtitle: `${row.Crew} ${row.Crew === 1 ? 'survivor' : 'survivors'} in ${row.SystemName}`,
-  icon: groupIcon('lifepod'),
-  SystemID: row.SystemID,
-  Xcor: row.Xcor,
-  Ycor: row.Ycor,
-  text: textOf('life pods', row.ShipName, row.SystemName),
-}))
+group by FCT_Lifepods.LifepodID
+order by OwnShipName, FCT_Lifepods.LifepodID`)).map((row) => {
+  const own = row.Own === 1
+  const name = `Life pods: ${own ? row.OwnShipName : `${row.AlienClassName || 'unknown class'} #${row.LifepodID}`}`
+
+  return {
+    key: place.lifepod(row.LifepodID),
+    kind: 'lifepod',
+    group: 'lifepod',
+    name,
+    subtitle: `${own ? (Number.isFinite(row.OwnCrew) ? `${row.OwnCrew} ${row.OwnCrew === 1 ? 'survivor' : 'survivors'}` : 'Survivors not recorded') : 'Alien life pods'} in ${row.SystemName}`,
+    icon: groupIcon('lifepod'),
+    SystemID: row.SystemID,
+    Xcor: row.Xcor,
+    Ycor: row.Ycor,
+    text: textOf(name, row.SystemName),
+  }
+})
 
 const loadAetherGates = async (database, context) => (await rows(database, `select FCT_AetherGates.AetherGateID, FCT_AetherGates.SystemID, FCT_AetherGates.Xcor, FCT_AetherGates.Ycor, FCT_RaceSysSurvey.Name as SystemName
 from FCT_AetherGates
@@ -197,12 +206,12 @@ order by FCT_AetherGates.AetherGateID`)).map((row) => ({
 }))
 
 // What the race holds now, as the game lists it: contacts last updated this increment, other races' only. A contact is stored once for each way it was detected, so the rows of one contact collapse into a place that answers to each row's `UniqueID` (`aliases`, the other place keys), the one a move order names.
-const loadContacts = async (database, context) => (await rows(database, `select max(FCT_Contacts.UniqueID) as UniqueID, group_concat(FCT_Contacts.UniqueID) as UniqueIDs, FCT_Contacts.ContactType, FCT_Contacts.SystemID, FCT_Contacts.ContactName, FCT_Contacts.Xcor, FCT_Contacts.Ycor, FCT_AlienRace.AlienRaceName, FCT_RaceSysSurvey.Name as SystemName
+const loadContacts = async (database, context) => (await rows(database, `select max(FCT_Contacts.UniqueID) as UniqueID, group_concat(FCT_Contacts.UniqueID) as UniqueIDs, FCT_Contacts.ContactType, FCT_Contacts.SystemID, FCT_Contacts.ContactName, FCT_Contacts.Xcor, FCT_Contacts.Ycor, max(FCT_Contacts.LastUpdate) as LastUpdate, FCT_AlienRace.AlienRaceName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Contacts
 inner join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID
 ${known('FCT_Contacts', context)}
 left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Contacts.GameID and FCT_AlienRace.ViewRaceID = ${context.RaceID} and FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID
-where FCT_Contacts.GameID = ${context.GameID} and FCT_Contacts.DetectRaceID = ${context.RaceID} and FCT_Contacts.ContactRaceID != ${context.RaceID} and FCT_Contacts.LastUpdate = FCT_Game.GameTime
+where FCT_Contacts.GameID = ${context.GameID} and FCT_Contacts.DetectRaceID = ${context.RaceID} and FCT_Contacts.ContactRaceID != ${context.RaceID} and ${HELD_CONTACT}
 group by FCT_Contacts.ContactType, FCT_Contacts.ContactID
 order by FCT_Contacts.ContactName`)).map((row) => ({
   key: place.contact(row.UniqueID),
@@ -215,6 +224,7 @@ order by FCT_Contacts.ContactName`)).map((row) => ({
   SystemID: row.SystemID,
   Xcor: row.Xcor,
   Ycor: row.Ycor,
+  lastUpdate: row.LastUpdate,
   text: textOf(row.ContactName, row.AlienRaceName, row.SystemName),
 }))
 

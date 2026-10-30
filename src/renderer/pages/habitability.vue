@@ -1,9 +1,9 @@
 <template>
   <div>
-    <v-container fluid class="planner-page">
+    <v-container fluid class="planner-page" :style="sectionColors">
       <div class="toolbar">
         <div class="tool tool--species">
-          <div class="tool__label caption text--secondary">Species</div>
+          <div class="tool__label caption text--secondary">Species<provenance-mark v-if="speciesPopulationGap" :result="speciesPopulationGap" /></div>
           <v-select v-model="selectedSpeciesId" :items="speciesItems" item-text="text" item-value="value" aria-label="Species" dense outlined hide-details />
         </div>
         <div class="tool">
@@ -18,7 +18,7 @@
           </v-btn-toggle>
         </div>
         <div class="tool tool--terraformers">
-          <div class="tool__label caption text--secondary">Terraformers</div>
+          <div class="tool__label caption text--secondary">Terraformers<provenance-mark :result="terraformResult" /></div>
           <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto">
             <template #append>
               <v-tooltip bottom max-width="260">
@@ -79,7 +79,7 @@
               <template #activator="{ on, attrs }">
                 <v-btn outlined aria-label="Ranking" v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon><span class="tool__btn-label">Ranking</span></v-btn>
               </template>
-              <v-card class="pa-4 planner-menu">
+              <v-card class="pa-4 planner-menu" :style="sectionColors">
                 <div class="subtitle-2 mb-1">How targets are ranked</div>
                 <div class="caption text--secondary mb-3">
                   A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before the race's colonisation tech, so the scale means the same for every race), years of terraforming, and AU from the nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
@@ -98,21 +98,59 @@
                 <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
               </v-card>
             </v-menu>
+            <v-menu offset-y left :close-on-content-click="false" max-width="520">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Transit" v-bind="attrs" v-on="on"><v-icon small left>mdi-transit-connection-variant</v-icon><span class="tool__btn-label">Transit</span></v-btn>
+              </template>
+              <v-card class="pa-4 planner-menu" :style="sectionColors">
+                <div class="subtitle-2 mb-1">How transit is estimated<provenance-mark rule="habitability.transitSpeed" /></div>
+                <div class="caption text--secondary mb-3">
+                  The Transit column estimates one representative ship flying one way from the nearest colony with people to a body, by the shortest route over the jump points the race has explored. The speed and the drive are chosen here and never reveal a system or a jump point the race has not found. Planets, moons and the colonies on them keep moving, so every leg inside a system is as saved. Military restriction, danger and alien systems are not applied.
+                </div>
+                <v-row dense>
+                  <v-col cols="12" sm="6">
+                    <v-text-field :value="transitSpeed" type="number" min="0" label="Speed (km/s)" hint="Blank: no time, only jumps and distance" persistent-hint :rules="[rules.speed]" dense outlined @change="setTransitSpeed" />
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-select :value="pickedClass" :items="transitClassItems" item-text="text" item-value="id" label="Take from a ship class" :hint="transitClassItems.length ? 'Its top speed and whether its own jump drive carries it' : 'The race has no ship that moves'" persistent-hint :disabled="!transitClassItems.length" dense outlined @change="takeClass" />
+                  </v-col>
+                </v-row>
+                <div class="tool__label caption text--secondary mt-2">Crossing jump points</div>
+                <v-btn-toggle v-model="transitDrive" mandatory dense>
+                  <v-tooltip v-for="option in drives" :key="option.id" bottom max-width="300">
+                    <template #activator="{ on }">
+                      <v-btn :value="option.id" small v-on="on">{{ option.label }}</v-btn>
+                    </template>
+                    <span>{{ option.hint }}</span>
+                  </v-tooltip>
+                </v-btn-toggle>
+                <v-switch v-model="transitLagrange" label="Jump between Lagrange points when shorter" dense hide-details class="mt-3" />
+                <div class="tool__label caption text--secondary mt-2">Sort the Transit column by</div>
+                <v-btn-toggle v-model="transitSort" mandatory dense>
+                  <v-tooltip v-for="option in transitSorts" :key="option.id" bottom max-width="300">
+                    <template #activator="{ on }">
+                      <v-btn :value="option.id" small v-on="on">{{ option.label }}</v-btn>
+                    </template>
+                    <span>{{ option.hint }}</span>
+                  </v-tooltip>
+                </v-btn-toggle>
+              </v-card>
+            </v-menu>
             <v-menu offset-y left :close-on-content-click="false" max-width="640">
               <template #activator="{ on, attrs }">
                 <v-btn outlined aria-label="Plan states" v-bind="attrs" v-on="on"><v-icon small left>mdi-help-circle-outline</v-icon><span class="tool__btn-label">Plan states</span></v-btn>
               </template>
-              <v-card class="pa-4 planner-menu">
-                <div class="subtitle-2 mb-1">What each plan state means</div>
+              <v-card class="pa-4 planner-menu" :style="sectionColors">
+                <div class="subtitle-2 mb-1">What each plan state means<provenance-mark :result="countsResult" /></div>
                 <div class="caption text--secondary mb-3">
-                  The Plan column says what it takes to settle a body. Colony cost bands are read before the race's colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what the race actually pays. Click a state to show only those bodies.
+                  The Plan column says what it takes to settle a body. Colony cost bands are read before the race's colonisation tech{{ skillNote }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what the race actually pays. Click a state to show only those bodies.
                 </div>
                 <div v-for="group in stateGroups" :key="group.group" class="mb-2">
                   <div class="overline">{{ group.group }}</div>
                   <div v-for="state in group.states" :key="state.id" class="legend-row" :class="{ 'legend-row--on': stateFilter.includes(state.id) }" @click="toggleStateFilter(state.id)">
-                    <v-chip small label :color="state.color" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
+                    <v-chip small label :color="tone(state.color)" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
                     <span class="legend-rule">{{ state.rule }}</span>
-                    <span class="legend-count">{{ separatedNumber(stateCounts[state.id] || 0, separator) }}</span>
+                    <span class="legend-count">{{ countOf(stateCounts, state.id) }}</span>
                   </div>
                 </div>
                 <v-btn v-if="stateFilter.length" text small @click="stateFilter = []">Show all states</v-btn>
@@ -127,23 +165,24 @@
           <v-btn-toggle v-model="view" mandatory dense class="mr-4">
             <v-tooltip v-for="option in viewOptions" :key="option.id" bottom max-width="300">
               <template #activator="{ on }">
-                <v-btn :value="option.id" small v-on="on">{{ option.label }}<span class="view-count">{{ separatedNumber(viewCounts[option.id], separator) }}</span></v-btn>
+                <v-btn :value="option.id" small v-on="on">{{ option.label }}<span class="view-count">{{ countOf(viewCounts, option.id) }}</span></v-btn>
               </template>
               <span>{{ option.hint }}</span>
             </v-tooltip>
           </v-btn-toggle>
+          <provenance-mark :result="countsResult" class="mr-3" />
           <span class="tool__label caption text--secondary mr-3">Show</span>
           <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on">
             <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
           </v-chip-group>
-          <v-chip v-for="id in stateFilter" :key="id" small label close :color="stateById[id].color" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
+          <v-chip v-for="id in stateFilter" :key="id" small label close :color="tone(stateById[id].color)" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
           <v-spacer />
           <span class="caption text--secondary summary-line">{{ summaryLine }}</span>
         </v-col>
         <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
           <v-row dense>
             <v-col cols="auto">
-              <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
+              <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? tone('selected') : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
               <v-btn :to="linkTo.minerals({ bodies: selectedBodies })" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
               <v-btn class="d-block mt-4" style="width: 100%" small outlined @click="clearSelection">Clear Selection</v-btn>
             </v-col>
@@ -157,11 +196,13 @@
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready || !rows" class="mt-3" @retry="retryFailedInputs" />
       <v-alert v-if="ready && rows && !speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
+      <colony-worksheet v-if="ready && rows && speciesRows.length && selectedBodies.length" :selection="selectedBodies" :rows="rows" :species="speciesRows" :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" />
+
       <v-card v-if="ready && rows && speciesRows.length" class="mt-3" elevation="2">
-        <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="table.sortBy" :sort-desc.sync="table.sortDesc" :items-per-page.sync="table.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+        <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :custom-sort="sortItems" :sort-by.sync="table.sortBy" :sort-desc.sync="table.sortDesc" :items-per-page.sync="table.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
             <td class="text-no-wrap">
-              <v-btn v-if="isSelected(item.body)" color="red" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
+              <v-btn v-if="isSelected(item.body)" :color="tone('selected')" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
               <v-btn v-else icon small @click.stop="select(item.body)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
               <v-btn icon small @click.stop="expand(!isExpanded)"><v-icon>{{ isExpanded ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon></v-btn>
             </td>
@@ -171,7 +212,9 @@
             <div v-if="item.row.rank" class="rank-cell">
               <span class="rank-number">{{ item.row.rank }}</span>
               <span class="score-meter" :title="`Worth ${roundToDecimal(item.row.score, 0)}% of the best target`"><i :style="{ width: `${item.row.score}%` }" /></span>
+              <provenance-mark :result="provenanceOf(item.row).score" />
             </div>
+            <span v-else-if="item.row.unknown.length" class="caption text--secondary">—<provenance-mark :result="provenanceOf(item.row).score" /></span>
             <span v-else class="caption text--secondary">{{ item.row.settled ? 'Colony' : '' }}</span>
           </template>
 
@@ -192,14 +235,19 @@
           <template #[`item.stateOrder`]="{ item }">
             <v-tooltip top max-width="360">
               <template #activator="{ on }">
-                <v-chip small label :color="item.row.state.color" :dark="item.row.state.target" :outlined="!item.row.state.target" class="plan-chip" v-on="on"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.chip(item.row.facts) }}</v-chip>
+                <v-chip small label :color="tone(item.row.state.color)" :dark="item.row.state.target" :outlined="!item.row.state.target" class="plan-chip" v-on="on"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.chip(item.row.facts) }}</v-chip>
               </template>
               <span>{{ stateTooltip(item.row) }}</span>
             </v-tooltip>
+            <provenance-mark v-if="item.row.unknown.length" :result="provenanceOf(item.row).score" />
+            <provenance-mark v-else-if="showsInfrastructure(item.row)" :result="provenanceOf(item.row).infrastructure" />
           </template>
 
           <template #[`item.costValue`]="{ item }">
-            <template v-if="item.best.strategy !== 'none'">
+            <template v-if="item.best.missing.length">
+              <span class="text--secondary">—</span><provenance-mark :result="provenanceOf(item.row).cost" />
+            </template>
+            <template v-else-if="item.best.strategy !== 'none'">
               <v-tooltip top>
                 <template #activator="{ on }">
                   <span class="text-no-wrap" v-on="on">
@@ -208,12 +256,18 @@
                 </template>
                 <span>{{ costTooltip(item.best) }}</span>
               </v-tooltip>
+              <provenance-mark :result="provenanceOf(item.row).cost" />
             </template>
-            <span v-else class="text--secondary">N/A</span>
+            <span v-else class="text--secondary" :title="item.best.assessment.cost.reason">N/A</span>
           </template>
 
           <template #[`item.capacityValue`]="{ item }">
-            <span v-if="item.best.strategy !== 'none'" class="text-no-wrap">{{ people(item.best.capacity) }}</span>
+            <template v-if="item.best.missing.length">
+              <span class="text--secondary">—</span><provenance-mark :result="provenanceOf(item.row).capacity" />
+            </template>
+            <template v-else-if="item.best.strategy !== 'none'">
+              <span class="text-no-wrap">{{ people(item.best.capacity) }}</span><provenance-mark :result="provenanceOf(item.row).capacity" />
+            </template>
             <span v-else class="text--secondary">-</span>
           </template>
 
@@ -221,36 +275,57 @@
             <div v-if="item.row.minerals.surveyed" class="text-no-wrap">
               <v-tooltip v-if="item.row.minerals.deposits" top max-width="360">
                 <template #activator="{ on }">
-                  <span class="mineral-score" :class="{ 'mineral-high': item.row.minerals.rich }" v-on="on">{{ roundToDecimal(item.row.minerals.value, 1) }}</span>
+                  <span class="mineral-score" :class="{ 'mineral-high': item.row.minerals.rich }" v-on="on">{{ item.row.minerals.value === null ? '—' : roundToDecimal(item.row.minerals.value, 1) }}</span>
                 </template>
                 <span>{{ mineralTooltip(item.row) }}</span>
               </v-tooltip>
               <span v-else class="text--secondary">None</span>
-              <v-chip v-if="item.row.minerals.rich" x-small label color="amber darken-3" dark class="ml-1 px-1">Rich</v-chip>
+              <provenance-mark v-if="item.row.minerals.deposits" :result="provenanceOf(item.row).minerals" />
+              <v-chip v-if="item.row.minerals.rich" x-small label :color="tone('rich')" dark class="ml-1">Rich</v-chip>
               <v-tooltip v-if="item.row.minerals.cmc.length" top max-width="340">
                 <template #activator="{ on }">
-                  <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
+                  <v-chip x-small label outlined class="ml-1" v-on="on">CMC</v-chip>
                 </template>
                 <span>Qualifies for a civilian mining complex with {{ item.row.minerals.cmc.join(', ') }}. {{ cmcNote(item.row) }}</span>
               </v-tooltip>
-              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block mineral-note">{{ compactTons(item.row.minerals.total) }}<template v-if="scarceNames(item.row)"> · short of {{ scarceNames(item.row) }}</template></span>
+              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block mineral-note">{{ item.row.minerals.total === null ? '—' : compactTons(item.row.minerals.total) }}<template v-if="scarceNames(item.row)"> · short of {{ scarceNames(item.row) }}</template></span>
             </div>
             <v-tooltip v-else top>
               <template #activator="{ on }">
-                <span class="orange--text" v-on="on">Unsurveyed</span>
+                <span :style="{ color: tone('unsurveyed') }" v-on="on">Unsurveyed</span>
               </template>
               <span>{{ groundSurveyText(item.body) }}</span>
             </v-tooltip>
           </template>
 
           <template #[`item.distanceValue`]="{ item }">
-            <v-tooltip v-if="item.row.distance" top max-width="320">
-              <template #activator="{ on }">
-                <span class="text-no-wrap" v-on="on">{{ roundToDecimal(item.row.distance.au, 1) }} AU<span class="caption text--secondary d-block">{{ item.row.distance.jumps }} {{ item.row.distance.jumps === 1 ? 'jump' : 'jumps' }}</span></span>
-              </template>
-              <span>{{ distanceTooltip(item.row) }}</span>
-            </v-tooltip>
-            <span v-else class="text--secondary">No route</span>
+            <div v-if="item.row.distance" class="d-flex align-start">
+              <v-tooltip top max-width="320">
+                <template #activator="{ on }">
+                  <span class="text-no-wrap" v-on="on">{{ roundToDecimal(item.row.distance.au, 1) }} AU<span class="caption text--secondary d-block">{{ item.row.distance.jumps }} {{ item.row.distance.jumps === 1 ? 'jump' : 'jumps' }}</span></span>
+                </template>
+                <span>{{ distanceTooltip(item.row) }}</span>
+              </v-tooltip>
+              <provenance-mark :result="provenanceOf(item.row).distance" />
+            </div>
+            <template v-else>
+              <span class="text--secondary">—</span><provenance-mark :result="provenanceOf(item.row).distance" />
+            </template>
+          </template>
+
+          <template #[`item.transitValue`]="{ item }">
+            <div class="d-flex align-start">
+              <v-tooltip top max-width="360">
+                <template #activator="{ on }">
+                  <span class="text-no-wrap" v-on="on">
+                    <template v-if="item.transit.state === 'routed'"><span v-if="item.transit.days === null" class="text--secondary">No speed</span><template v-else>{{ flyTime(item.transit.days) }}</template><span class="caption text--secondary d-block">{{ transitCaption(item.transit) }}<provenance-mark :result="item.transit.results.route" /></span></template>
+                    <template v-else>—<span class="caption text--secondary d-block">{{ transitStateText[item.transit.state] }}</span></template>
+                  </span>
+                </template>
+                <span>{{ transitTooltip(item.transit) }}</span>
+              </v-tooltip>
+              <provenance-mark :result="item.transit.results.time" />
+            </div>
           </template>
 
           <template #[`header.sortRank`]="{ header }">
@@ -262,9 +337,19 @@
             </v-tooltip>
           </template>
 
+          <template #[`header.transitValue`]="{ header }">
+            <v-tooltip top max-width="340">
+              <template #activator="{ on }">
+                <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
+              </template>
+              <span>One representative ship flying one way from the nearest colony with people ({{ transitBasisText }}). Sorting this column orders by {{ transitSortLabel }}. A body with no explored route the ship can fly, or with no speed set for the time, is unknown and sorts last. Set the basis under Transit.</span>
+            </v-tooltip>
+          </template>
+
           <template #expanded-item="{ item }">
             <td :colspan="headers.length + 1" class="px-4 py-3 planner-detail">
-              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :rules="raceRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
+              <v-alert v-if="terraformResult.status === 'unavailable'" type="warning" outlined dense class="mb-3">Terraforming time cannot be worked out: {{ terraformResult.inputs.missing.join(', ') }} missing. The years and installation counts below do not apply.</v-alert>
+              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :gases="gases" :terraform-sources="terraformSources" :naval-admins="navalAdmins" :rules="detailRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
             </td>
           </template>
         </v-data-table>
@@ -277,24 +362,35 @@
 import Vue from 'vue'
 import { mapGetters } from 'vuex'
 
+import { sectionStyle } from '../components/navigation/section-style'
 import LoadState from '../components/page/LoadState.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
+import ColonyWorksheet from '../components/planner/ColonyWorksheet.vue'
+import capabilityGates from '../mixins/capability-gates'
+import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance, toneColor } from '../utilities/appearance'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
-import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies } from '../utilities/colonization'
-import { loadBodies, loadCmcRules, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
+import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies, rowProvenance, terraformCapacityResult, UNKNOWN_STATE } from '../utilities/colonization'
+import { loadBodies, loadCmcRules, loadGases, loadLagrangePoints, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies, loadTransitClasses, NO_RACE_RULES, speciesPopulationResult } from '../utilities/colonization-data'
 import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-links'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
+import { DEFAULT_BASIS, DRIVES, DRIVE_IDS, SORT_IDS, TRANSIT_SORTS, TRANSIT_STATE_TEXT, basisText, driveOfClass, normaliseSpeed, sortTableItems, transitEstimator, transitSortValues, transitText } from '../utilities/colony-transit'
+import { evaluationOf } from '../utilities/colony-worksheet'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
-import { ENTRY_BYTES, derive, estimateBytes } from '../utilities/query-cache'
+import { derive } from '../utilities/query-cache'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
-import { terraformCapacity } from '../utilities/terraforming'
+import { loadNavalAdmins } from '../utilities/naval-admins'
+import { sectionById } from '../utilities/navigation'
+import { combine, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
+import { NO_TERRAFORM_SOURCES, loadTerraformSources } from '../utilities/terraform-capacity'
 
 const INPUT_LABELS = {
   bodies: 'the bodies of known systems',
@@ -303,7 +399,11 @@ const INPUT_LABELS = {
   cmcRules: 'the civilian mining rules',
   gases: 'the gases',
   routes: 'the jump routes',
+  lagrangePoints: 'the Lagrange points',
+  transitClasses: 'the ship classes',
   outlook: 'the mineral outlook',
+  terraformSources: 'the terraforming capacity',
+  navalAdmins: 'the naval admin commands',
 }
 
 const BODY_CLASS_NAMES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
@@ -312,7 +412,11 @@ const NO_RANK = 1e12
 // Rows per page before the user picks one: 10 fit a 1080 px window, 15 a window of 1200 px or more.
 const DEFAULT_ROWS = 10
 const PAGE_SIZES = [10, 15, 30, 50, 100]
-const DEFAULT_RULES = () => ({ ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
+// The plan states the page can show: the table's and the one for a body whose figures are missing. Only the table's are kept between visits.
+const STATES_BY_ID = { ...STATE_BY_ID, [UNKNOWN_STATE.id]: UNKNOWN_STATE }
+// The states whose chip shows the infrastructure per million people.
+const INFRASTRUCTURE_STATES = ['mining', 'cheap', 'moderate', 'costly', 'severe']
+const COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
 // The filters the page keeps, by the data field and the config key that carry them.
 const FILTERS = [
@@ -338,7 +442,7 @@ const VIEWS = [
   { id: 'best', label: 'Best targets', hint: `Places to settle next that are worth at least ${BEST_TARGET_SCORE}% of the best one`, has: (row) => !!row.rank && row.score >= BEST_TARGET_SCORE },
   { id: 'ranked', label: 'All ranked', hint: 'Every ranked place to settle, from the best down', has: (row) => !!row.rank },
   { id: 'colonies', label: 'Colonies', hint: 'Bodies where the race already has a colony or outpost', has: (row) => row.settled },
-  { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, and bodies too small or poor to be worth the trip', has: (row) => !row.rank && !row.settled },
+  { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, bodies too small or poor to be worth the trip, and bodies whose state is unknown for lack of figures', has: (row) => !row.rank && !row.settled },
 ]
 
 // System IDs are numbers; Vuetify's general selection search scans every item for every selected system.
@@ -358,15 +462,14 @@ const SystemSelect = {
   },
 }
 
-// The page's reads and what it works out of them stay with the save (query-cache.js `derive`) until the save or an input changes. Each `inputs` entry is what the result depends on.
+// The page's reads and what it works out of them stay with the save (query-cache.js `derive`) until the save or an input changes. Each `inputs` entry is what the result depends on; `derive` keeps nothing whose result and inputs together pass its cap, so a huge save's assessment and ranking are worked out but not kept.
 const kept = (vm, slot, inputs, compute) => derive(vm.database, `planner.${slot}`, inputs, compute)
 
-// What is worked out of the bodies is kept only while the bodies themselves fit the cap a read does (query-cache.js `ENTRY_BYTES`): assessing and ranking a huge save costs several times its bodies' heap.
-const keptFromBodies = (vm, bodies, slot, inputs, compute) => (estimateBytes(bodies) > ENTRY_BYTES ? compute() : kept(vm, slot, inputs, compute))
-
 export default {
-  components: { BodyDetail, LoadState, SystemSelect },
+  components: { BodyDetail, ColonyWorksheet, LoadState, ProvenanceMark, SystemSelect },
   mixins: [
+    capabilityGates,
+    countFormat,
     deepLink,
     loadState(INPUT_LABELS),
     persistedView({
@@ -378,6 +481,10 @@ export default {
       ...Object.fromEntries(FILTERS.map((filter) => [filter.field, { key: filter.config, default: false, normalise: Boolean }])),
       bodyClasses: { key: 'habitabilityBodyClasses', default: [1, 2, 3, 5], normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => BODY_CLASS_NAMES[value]) : undefined) },
       systems: { key: 'habitabilitySystems', default: [] },
+      transitSpeed: { key: 'habitabilityTransitSpeed', default: DEFAULT_BASIS.speed, scope: 'race', normalise: normaliseSpeed },
+      transitDrive: { key: 'habitabilityTransitDrive', default: DEFAULT_BASIS.drive, scope: 'race', valid: oneOf(DRIVE_IDS) },
+      transitLagrange: { key: 'habitabilityTransitLagrange', default: DEFAULT_BASIS.lagrange, scope: 'race', normalise: (stored) => (typeof stored === 'boolean' ? stored : undefined) },
+      transitSort: { key: 'habitabilityTransitSort', default: 'time', scope: 'race', valid: oneOf(SORT_IDS) },
       table: tableView('habitabilityTable', { sortBy: ['sortRank'], sortDesc: [false], itemsPerPage: DEFAULT_ROWS, itemsPerPageOptions: PAGE_SIZES }),
     }),
   ],
@@ -394,18 +501,26 @@ export default {
       rules: {
         required: (value) => !!value || 'Required.',
         positive: (value) => value > 0 || 'Must be positive.',
+        speed: (value) => value === '' || value === null || value === undefined || value > 0 || 'Must be above 0, or blank.',
       },
 
       linkTo,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'racePrefix']),
+
+    appearance() {
+      return activeAppearance()
+    },
+
+    sectionColors() {
+      return sectionStyle(this.appearance, sectionById.colonies)
+    },
 
     goals: () => GOALS,
     viewOptions: () => VIEWS,
-    stateGroups: () => STATE_GROUPS,
-    stateById: () => STATE_BY_ID,
+    stateById: () => STATES_BY_ID,
     bestScore: () => BEST_TARGET_SCORE,
     minerals: () => MINERALS,
     filterOptions: () => FILTERS,
@@ -423,7 +538,7 @@ export default {
     },
 
     rankingKey() {
-      return `game.${this.GameID}.race.${this.RaceID}.targetWeights`
+      return this.racePrefix ? `${this.racePrefix}.targetWeights` : null
     },
 
     activeFilterCount() {
@@ -434,19 +549,47 @@ export default {
       return this.ready ? this.species : []
     },
     speciesItems() {
-      return [{ text: 'Best of all species', value: null }, ...this.speciesRows.map((species) => ({ text: `${species.SpeciesName} (${separatedNumber(roundToDecimal(species.TotalPopulation, 2), this.separator)} M)`, value: species.SpeciesID }))]
+      return [{ text: 'Best of all species', value: null }, ...this.speciesRows.map((species) => {
+        const population = valueOrNull(speciesPopulationResult(species))
+
+        return { text: `${species.SpeciesName} (${population === null ? '—' : separatedNumber(roundToDecimal(population, 2), this.separator)} M)`, value: species.SpeciesID }
+      })]
+    },
+    // The species whose population the save does not give, as one unavailable result, or null when every species has one.
+    speciesPopulationGap() {
+      const gaps = this.speciesRows.filter((species) => !isAvailable(speciesPopulationResult(species)))
+
+      return gaps.length ? unavailable({ rule: 'habitability.speciesPopulation', missing: gaps.map((species) => `${species.SpeciesName} population`) }) : null
     },
     // The chosen species, or null (best of all) when it isn't one of the race's any more.
     activeSpeciesId() {
       return this.speciesRows.some((species) => species.SpeciesID === this.selectedSpeciesId) ? this.selectedSpeciesId : null
     },
+    // What the terraformers can move in a year, or why that is unknown. The ranking reads the result; the detail panel still takes a number, 0 while this is unavailable (see the alert above it).
+    terraformResult() {
+      return terraformCapacityResult(this.raceRules, this.terraformers)
+    },
     terraformCapacityPerYear() {
-      return terraformCapacity(this.raceRules, this.terraformers > 0 ? this.terraformers : 0)
+      return valueOrNull(this.terraformResult) ?? 0
     },
     terraformerHint() {
       const { TerraformingRate, TerraformingSpeed } = this.raceRules
 
+      if (!Number.isFinite(TerraformingRate) || !Number.isFinite(TerraformingSpeed)) {
+        return 'the race rate or the game speed setting is not in the save'
+      }
+
       return `${TerraformingRate} atm a year each${TerraformingSpeed === 100 ? '' : `, at ${TerraformingSpeed}% game speed`}`
+    },
+    // What the colonisation skill is for the legend: nothing at 1, the figure otherwise, and the assumption when the race row has none.
+    skillNote() {
+      const skill = this.raceRules.ColonizationSkill
+
+      return !Number.isFinite(skill) ? ' (a skill of 1 is assumed: the race row has none)' : skill !== 1 ? ` (×${skill} here)` : ''
+    },
+    // The race rules as the detail panel reads them: the skill the ranking used (1 when the race row has none). The rate and the speed stay as they are, null when unknown.
+    detailRules() {
+      return { ...this.raceRules, ColonizationSkill: Number.isFinite(this.raceRules.ColonizationSkill) ? this.raceRules.ColonizationSkill : 1 }
     },
 
     // Travel is measured from the nearest sizeable colony (the capital among them), and from the capital alone.
@@ -455,6 +598,39 @@ export default {
     },
     capitalDistanceOf() {
       return buildDistanceMap(this.routes.jumpPoints, this.routes.capital ? [this.routes.capital] : [])
+    },
+
+    drives: () => DRIVES,
+    transitSorts: () => TRANSIT_SORTS,
+    transitStateText: () => TRANSIT_STATE_TEXT,
+
+    // The representative ship's basis as the Transit menu sets it.
+    transitBasis() {
+      return { speed: this.transitSpeed, drive: this.transitDrive, lagrange: this.transitLagrange }
+    },
+    transitBasisText() {
+      return basisText(this.transitBasis, this.count)
+    },
+    transitSortLabel() {
+      return TRANSIT_SORTS.find((option) => option.id === this.transitSort).label.toLowerCase()
+    },
+    // The estimate of a body's trip: a new one whenever the speed, the drive or Lagrange routing changes. It searches only the jump points the race has charted and explored, whatever the basis.
+    transitOf() {
+      return transitEstimator(this.routes, this.lagrangePoints, this.transitBasis)
+    },
+    systemNameById() {
+      return new Map(this.systemNames.map((system) => [system.SystemID, system.SystemName]))
+    },
+    transitClassItems() {
+      const drives = { drive: 'its own jump drive carries it', gates: 'no jump drive that carries it' }
+
+      return this.transitClasses.map((shipClass) => ({ id: shipClass.ShipClassID, text: `${shipClass.ClassName}: ${this.count(shipClass.MaxSpeed)} km/s, ${drives[driveOfClass(shipClass)] || 'jump drive not known'}` }))
+    },
+    // The ship class whose speed and drive are the ones set, or null when they match none (a figure typed in, or an edit after the pick).
+    pickedClass() {
+      const found = this.transitClasses.find((shipClass) => normaliseSpeed(shipClass.MaxSpeed) === this.transitSpeed && [null, this.transitDrive].includes(driveOfClass(shipClass)))
+
+      return found ? found.ShipClassID : null
     },
 
     systemNames() {
@@ -515,10 +691,18 @@ export default {
 
       return (this.rows || []).filter((row) => (scope ? scope.has(row.body.SystemBodyID) : systems.has(row.body.SystemID) && classes.has(row.body.BodyClass)))
     },
+    // Every figure below that counts rows waits for the rows: while they load, or after a read failed, the count is unknown, not 0.
+    loaded() {
+      return this.ready && !!this.rows
+    },
     viewCounts() {
-      return Object.fromEntries(VIEWS.map((view) => [view.id, this.scopedRows.filter(view.has).length]))
+      return this.loaded ? Object.fromEntries(VIEWS.map((view) => [view.id, this.scopedRows.filter(view.has).length])) : null
     },
     stateCounts() {
+      if (!this.loaded) {
+        return null
+      }
+
       const counts = {}
 
       this.scopedRows.forEach((row) => {
@@ -526,6 +710,20 @@ export default {
       })
 
       return counts
+    },
+    stateGroups() {
+      return this.stateCounts && this.stateCounts[UNKNOWN_STATE.id] ? [...STATE_GROUPS, { group: UNKNOWN_STATE.group, states: [UNKNOWN_STATE] }] : STATE_GROUPS
+    },
+    // What the counts rest on: counting is exact, but which view or state a body falls in follows its rank and colony cost, so they take those statuses.
+    countsResult() {
+      if (!this.loaded) {
+        return unavailable({ rule: 'habitability.filterCount', missing: this.failedInputs.length ? this.failedInputs.map((key) => INPUT_LABELS[key]) : ['the ranked bodies'] })
+      }
+
+      const total = this.scopedRows.length
+      const unknown = this.scopedRows.filter((row) => row.state === UNKNOWN_STATE).length
+
+      return combine({ rule: 'habitability.filterCount', parts: { ranking: ofRule({ rule: 'habitability.score', value: total }), colonyCost: ofRule({ rule: 'habitability.colonyCost', value: total }) }, compute: () => total, inputs: { present: ['the loaded bodies'] }, assumptions: unknown ? [`${unknown} bodies are in no ranked view or state because figures are missing`] : [] })
     },
 
     filteredRows() {
@@ -537,44 +735,59 @@ export default {
         const { body, best } = row
         const alienPopulation = body.AlienPopulations.reduce((total, population) => total + population.PopulationAmount, 0)
 
-        return (filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) && !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) && !(filters.withoutMinerals && !(row.minerals.total > 0)) && !(filters.ownPopulations && body.OwnPopulations.length) && !(filters.otherPopulations && body.AlienPopulations.length) && !(filters.doneTerraforming && !best.assessment.plan) && !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
+        return (filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) && !(filters.nonTerraformable && !best.missing.length && (best.strategy === 'none' || best.assessment.outcome === 'no')) && !(filters.withoutMinerals && !(row.minerals.total > 0 || row.minerals.missing.length)) && !(filters.ownPopulations && body.OwnPopulations.length) && !(filters.otherPopulations && body.AlienPopulations.length) && !(filters.doneTerraforming && !best.missing.length && !best.assessment.plan) && !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
       })
     },
 
     summaryLine() {
+      if (!this.loaded) {
+        return '—'
+      }
+
       const count = (value, one, many) => `${separatedNumber(value, this.separator)} ${value === 1 ? one : many}`
 
       return `${count(this.bodies.length, 'body', 'bodies')} in ${count(this.systemNames.length, 'system', 'systems')} · ${separatedNumber(this.filteredRows.length, this.separator)} shown`
     },
 
-    // Flat items for the table: the columns sort on plain fields.
+    // Flat items for the table: the columns sort on plain fields. A figure that does not exist (N/A, unknown, unsurveyed, no route) is null and sorts last whichever way the column is sorted (`sortItems`), never as 0.
     tableItems() {
-      return this.filteredRows.map((row) => ({
-        id: row.body.SystemBodyID,
-        row,
-        body: row.body,
-        best: row.best,
-        sortRank: row.rank || NO_RANK - (row.best.strategy === 'none' ? 0 : row.best.capacity),
-        stateOrder: PLAN_STATES.indexOf(row.state),
-        bodyOrder: `${row.body.SystemName} ${row.body.SystemBodyOrder}`,
-        speciesName: row.best.strategy === 'none' ? '' : row.best.species.SpeciesName,
-        costValue: row.best.strategy === 'none' ? NO_RANK : row.best.cost,
-        capacityValue: row.best.strategy === 'none' ? 0 : row.best.capacity,
-        mineralValue: row.minerals.surveyed ? row.minerals.value : -1,
-        distanceValue: row.distance ? row.distance.au : NO_RANK,
-      }))
+      const { transitOf, transitSort } = this
+
+      return this.filteredRows.map((row) => {
+        const transit = transitOf(row.body)
+        const { value, tie } = transitSortValues(transit, transitSort)
+
+        return {
+          id: row.body.SystemBodyID,
+          row,
+          body: row.body,
+          best: row.best,
+          sortRank: row.rank || (row.unknown.length || row.best.missing.length ? null : NO_RANK - (row.best.strategy === 'none' ? 0 : row.best.capacity)),
+          stateOrder: row.state === UNKNOWN_STATE ? null : PLAN_STATES.indexOf(row.state),
+          bodyOrder: `${row.body.SystemName} ${row.body.SystemBodyOrder}`,
+          speciesName: row.best.strategy === 'none' ? null : row.best.species.SpeciesName,
+          costValue: row.best.strategy === 'none' ? null : row.best.cost,
+          capacityValue: row.best.strategy === 'none' ? null : row.best.capacity,
+          mineralValue: row.minerals.surveyed ? row.minerals.value : null,
+          distanceValue: row.distance ? row.distance.au : null,
+          transit,
+          transitValue: value,
+          transitTie: tie,
+        }
+      })
     },
 
     headers() {
       return [
         { text: '#', value: 'sortRank', divider: true },
-        { text: 'Body', value: 'bodyOrder', divider: true, sort: new Intl.Collator('en', { numeric: true, sensitivity: 'base' }).compare },
+        { text: 'Body', value: 'bodyOrder', divider: true },
         { text: 'Species', value: 'speciesName', divider: true },
         { text: 'Plan', value: 'stateOrder', divider: true },
         { text: 'Colony Cost', value: 'costValue', divider: true },
         { text: 'Holds', value: 'capacityValue', divider: true },
         { text: 'Minerals', value: 'mineralValue', divider: true },
-        { text: 'Distance', value: 'distanceValue' },
+        { text: 'Distance', value: 'distanceValue', divider: true },
+        { text: 'Transit', value: 'transitValue' },
       ]
     },
   },
@@ -590,7 +803,12 @@ export default {
     rankingKey: {
       immediate: true,
       handler() {
-        this.ranking = normaliseRanking(this.GameID && this.RaceID ? this.config.get(this.rankingKey) : null)
+        // While no campaign is settled the ranking on screen stays as it is; it is stored under a key again once one settles.
+        if (!this.rankingKey) {
+          return
+        }
+
+        this.ranking = normaliseRanking(this.config.get(this.rankingKey))
       },
     },
     RaceID(_newRaceID, oldRaceID) {
@@ -601,11 +819,18 @@ export default {
     },
   },
   created() {
+    this.provenanceCache = new WeakMap()
+
     if (this.config.get('habitabilityTable') === undefined) {
       this.setUnsaved('table', { ...this.table, itemsPerPage: this.rowsToFit() })
     }
   },
   methods: {
+    // The colour of a plan state's or outcome's tone under the appearance in force.
+    tone(name) {
+      return toneColor(this.appearance, name)
+    },
+
     applyLink(query) {
       const bodies = queryBodies(query.bodies)
 
@@ -647,15 +872,21 @@ export default {
 
     setRanking(key, value) {
       this.ranking = normaliseRanking({ ...this.ranking, [key]: value === '' ? null : Number(value) })
-      this.config.set(this.rankingKey, this.ranking)
+      this.storeRanking(this.ranking)
     },
     setWeight(id, value) {
       this.ranking = normaliseRanking({ ...this.ranking, weights: { ...this.ranking.weights, [id]: value === '' ? null : Number(value) } })
-      this.config.set(this.rankingKey, this.ranking)
+      this.storeRanking(this.ranking)
     },
     resetRanking() {
       this.ranking = normaliseRanking(null)
-      this.config.set(this.rankingKey, null)
+      this.storeRanking(null)
+    },
+    // The ranking is kept with the campaign's settings, so it waits for the recorder to settle which campaign the save belongs to and is only shown, not kept, until it has.
+    storeRanking(value) {
+      if (this.rankingKey) {
+        this.config.set(this.rankingKey, value)
+      }
     },
 
     isSelected(body) {
@@ -674,9 +905,7 @@ export default {
 
     // The evaluation the detail panel shows: the species picked there, else the row's best.
     shownEvaluation(item) {
-      const picked = this.detailSpecies[item.id]
-
-      return (picked && item.row.evaluations.find((evaluation) => evaluation.species.SpeciesID === picked)) || item.best
+      return evaluationOf(item.row, this.detailSpecies[item.id])
     },
     speciesChoices(item) {
       return item.row.evaluations
@@ -707,13 +936,35 @@ export default {
     mineralTooltip(row) {
       const lines = row.minerals.lines.filter((line) => line.value > 0).slice(0, 5).map((line) => `${line.name} ${roundToDecimal(line.value, 1)}${line.scarcity.factor > 1 ? ` (x${line.scarcity.factor}, ${line.scarcity.label.toLowerCase()})` : ''}`)
 
-      return `Deposit value ${roundToDecimal(row.minerals.value, 1)}, rich from 6: ${lines.join(', ') || 'no deposit worth counting'}.`
+      return `Deposit value ${row.minerals.value === null ? 'unknown' : roundToDecimal(row.minerals.value, 1)}, rich from 6: ${lines.join(', ') || 'no deposit worth counting'}.`
     },
     distanceTooltip(row) {
       const { distance, capitalDistance } = row
       const capital = capitalDistance && distance.from && !distance.from.Capital ? ` The capital is ${roundToDecimal(capitalDistance.au, 1)} AU and ${capitalDistance.jumps} ${capitalDistance.jumps === 1 ? 'jump' : 'jumps'} away.` : ''
 
       return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'the nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
+    },
+    setTransitSpeed(value) {
+      this.transitSpeed = normaliseSpeed(value)
+    },
+    // Takes the speed and the drive of a ship class; a class whose drive is not known leaves the drive as set.
+    takeClass(id) {
+      const found = this.transitClasses.find((shipClass) => shipClass.ShipClassID === id)
+
+      if (found) {
+        this.transitSpeed = normaliseSpeed(found.MaxSpeed)
+        this.transitDrive = driveOfClass(found) || this.transitDrive
+      }
+    },
+    // The transit time in the unit that reads best; a real 0 is 0 h.
+    flyTime(days) {
+      return days === 0 ? '0 h' : this.duration(days)
+    },
+    transitCaption(transit) {
+      return `${transit.jumps} ${transit.jumps === 1 ? 'jump' : 'jumps'} · ${this.count(transit.au, 1)} AU`
+    },
+    transitTooltip(transit) {
+      return transitText(transit, { systemName: (systemId) => this.systemNameById.get(systemId) || `System #${systemId}`, count: this.count })
     },
     scarcityHint(id) {
       const mineral = this.outlook.minerals[id]
@@ -722,10 +973,37 @@ export default {
         return 'No ledger in this save'
       }
 
+      if (mineral && !mineral.scarcity) {
+        return mineral.stock === null ? 'Unknown: the stock or the cargo in transit is not recorded' : 'Unknown: a ledger amount is not recorded'
+      }
+
       return mineral && mineral.scarcity.factor > 1 ? `x${mineral.scarcity.factor}: ${mineral.scarcity.label.toLowerCase()}, ${this.years(mineral.runway)}` : 'Not short'
     },
     costText(value) {
       return value === null || value === undefined ? 'N/A' : roundToDecimal(value, 2).toString()
+    },
+    // A count for display: the figure, or a dash while the rows are not loaded.
+    countOf(counts, key) {
+      return counts ? separatedNumber(counts[key] || 0, this.separator) : '—'
+    },
+    // The results behind a row's figures, worked out once for a row.
+    provenanceOf(row) {
+      let results = this.provenanceCache.get(row)
+
+      if (!results) {
+        results = rowProvenance(row)
+        this.provenanceCache.set(row, results)
+      }
+
+      return results
+    },
+    // Whether the row's state chip shows an infrastructure figure.
+    showsInfrastructure(row) {
+      return INFRASTRUCTURE_STATES.includes(row.state.id)
+    },
+    // The column's sort, with a figure that does not exist last whichever way it is sorted.
+    sortItems(items, sortBy, sortDesc) {
+      return sortTableItems(items, sortBy, sortDesc, COLLATOR.compare)
     },
     costTooltip(evaluation) {
       const { cost } = evaluation.assessment
@@ -757,7 +1035,7 @@ export default {
 
         const [bodies, species, raceRules, gases] = inputs()
 
-        return keptFromBodies(this, bodies, 'assessed', [bodies, species, raceRules, gases], async () => {
+        return kept(this, 'assessed', [bodies, species, raceRules, gases], async () => {
           const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
 
           return Object.freeze(await assessBodies(bodies, species, raceRules, (id) => gasById.get(id)))
@@ -767,14 +1045,13 @@ export default {
     },
     rows: {
       async get() {
-        const { assessed, activeSpeciesId, goal, ranking, raceRules, routes, cmcRules, outlook } = this
-        const terraformers = this.terraformers > 0 ? this.terraformers : 0
+        const { assessed, activeSpeciesId, goal, ranking, raceRules, routes, cmcRules, outlook, terraformers } = this
 
         if (!assessed) {
           return null
         }
 
-        return keptFromBodies(this, this.bodies, 'rows', [assessed, activeSpeciesId, goal, JSON.stringify(ranking), raceRules, terraformers, routes, cmcRules, outlook], async () => Object.freeze(await rankBodies(assessed, { speciesId: activeSpeciesId, goal, ranking, rules: raceRules, terraformers, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules, outlook })))
+        return kept(this, 'rows', [assessed, activeSpeciesId, goal, JSON.stringify(ranking), raceRules, terraformers, routes, cmcRules, outlook], async () => Object.freeze(await rankBodies(assessed, { speciesId: activeSpeciesId, goal, ranking, rules: raceRules, terraformers, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, origins: { colonies: routes.colonies.length, capital: !!routes.capital }, cmcRules, outlook })))
       },
       default: null,
     },
@@ -801,12 +1078,12 @@ export default {
     raceRules: {
       get: tracked('raceRules', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return DEFAULT_RULES()
+          return NO_RACE_RULES
         }
 
         return kept(this, 'raceRules', [this.GameID, this.RaceID], () => loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
-      default: DEFAULT_RULES(),
+      default: NO_RACE_RULES,
     },
     cmcRules: {
       get: tracked('cmcRules', async function () {
@@ -834,15 +1111,61 @@ export default {
       }),
       default: { jumpPoints: [], capital: null, colonies: [] },
     },
+    lagrangePoints: {
+      get: tracked('lagrangePoints', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return kept(this, 'lagrangePoints', [this.GameID, this.RaceID], () => loadLagrangePoints(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
+      }),
+      default: [],
+    },
+    transitClasses: {
+      get: tracked('transitClasses', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return kept(this, 'transitClasses', [this.GameID, this.RaceID], () => loadTransitClasses(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
+      }),
+      default: [],
+    },
     outlook: {
       get: tracked('outlook', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return NO_OUTLOOK
         }
 
-        return kept(this, 'outlook', [this.GameID, this.RaceID], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
+        const { ranks, blocked } = await this.capabilityGates('/habitability')
+
+        return kept(this, 'outlook', [this.GameID, this.RaceID, ranks, [...blocked].sort().join()], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID, ranks, blocked }).then(Object.freeze))
       }),
       default: NO_OUTLOOK,
+    },
+    terraformSources: {
+      get: tracked('terraformSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_TERRAFORM_SOURCES
+        }
+
+        const { blocked } = await this.capabilityGates('/habitability')
+
+        return kept(this, 'terraformSources', [this.GameID, this.RaceID, [...blocked].sort().join()], () => loadTerraformSources(this.database, { GameID: this.GameID, RaceID: this.RaceID, blocked }))
+      }),
+      default: NO_TERRAFORM_SOURCES,
+    },
+    navalAdmins: {
+      get: tracked('navalAdmins', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        const { ranks, blocked } = await this.capabilityGates('/habitability')
+
+        return kept(this, 'navalAdmins', [this.GameID, this.RaceID, ranks, [...blocked].sort().join()], () => loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 9, share: 'Industrial', ranks, blocked }))
+      }),
+      default: {},
     },
   },
 }
@@ -863,8 +1186,8 @@ export default {
   }
 
   .tool__label {
-    height: 18px;
-    line-height: 18px;
+    height: calc(18px * var(--ae-font-scale));
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
@@ -932,7 +1255,7 @@ export default {
     i {
       display: block;
       height: 100%;
-      background: var(--sc, #1baf7a);
+      background: var(--sc);
     }
   }
 
@@ -946,7 +1269,7 @@ export default {
   }
 
   .mineral-high {
-    color: var(--sc, #1baf7a);
+    color: var(--sc-text);
   }
 
   .view-count {
@@ -956,7 +1279,7 @@ export default {
   }
 
   .class-chip-on {
-    background: var(--sc-soft, rgba(27, 175, 122, 0.15));
+    background: var(--sc-soft);
   }
 
   tr.v-data-table__expanded__content {
@@ -983,18 +1306,18 @@ export default {
   }
 
   .legend-row--on {
-    background: var(--sc-soft, rgba(27, 175, 122, 0.15));
+    background: var(--sc-soft);
   }
 
   .legend-rule {
-    font-size: 13px;
-    line-height: 20px;
+    font-size: calc(13px * var(--ae-font-scale));
+    line-height: calc(20px * var(--ae-font-scale));
   }
 
   .legend-count {
     text-align: right;
     font-variant-numeric: tabular-nums;
-    line-height: 24px;
+    line-height: calc(24px * var(--ae-font-scale));
   }
 }
 </style>

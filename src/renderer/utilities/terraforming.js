@@ -16,14 +16,14 @@ const GAS_AESTUSIUM = 20
 const GAS_FRIGUSIUM = 22
 const GAS_NITROGEN = 7
 
-// How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists.
+// How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists. `color` is a tone (`toneColor` in appearance.js).
 export const OUTCOMES = {
   done: { label: 'Done', description: 'Already liveable for this species; nothing to terraform.', color: 'success' },
   yes: { label: 'Yes', description: 'Terraforming makes it free to colonise.', color: 'success' },
   partial: { label: 'Partial', description: 'Free to colonise at part of its orbit.', color: 'info' },
-  near: { label: 'Near', description: 'Ends under 2: cheap, but not free.', color: 'teal' },
+  near: { label: 'Near', description: 'Ends under 2: cheap, but not free.', color: 'cheap' },
   limited: { label: 'Limited', description: 'Ends under 4.', color: 'warning' },
-  insufficient: { label: 'Insufficient', description: 'Terraforming helps, but the colony stays expensive.', color: 'deep-orange' },
+  insufficient: { label: 'Insufficient', description: 'Terraforming helps, but the colony stays expensive.', color: 'insufficient' },
   no: { label: 'No', description: 'Can not be terraformed to suit this species.', color: 'error' },
 }
 
@@ -96,7 +96,7 @@ const summariseAtmosphere = (body, species) => {
   return summary
 }
 
-const hydrosphereState = (temperature, pressure) => {
+export const hydrosphereState = (temperature, pressure) => {
   if (!Number.isFinite(pressure) || pressure <= 0 || (pressure < 0.006 && temperature > 245)) {
     return HYDROSPHERE.NONE
   }
@@ -129,7 +129,7 @@ const targetHydroExtent = (current, hydrosphere) => {
 const equilibriumVapour = (hydrosphere, extent, pressure) => (hydrosphere === HYDROSPHERE.LIQUID && Number.isFinite(extent) && extent >= 0 ? Math.max(pressure, 0) * (extent / 100) * HUMIDITY : 0)
 
 // The ice sheet reflects more than bare rock: changing between the two moves the albedo.
-const albedoForHydrosphere = (baseAlbedo, was, now, extent) => {
+export const albedoForHydrosphere = (baseAlbedo, was, now, extent) => {
   if (now === was) {
     return baseAlbedo
   }
@@ -428,28 +428,55 @@ export const planTerraforming = (body, species) => {
   }
 }
 
+// The gases a plan ends the atmosphere with, as [id, atm, the body's own row of the gas or undefined]; the gases it removes are not in it.
+const planAdditions = (species, plan) => {
+  const { target, gases } = plan
+
+  return [
+    [species.BreatheID, target.breathable, gases.breathable],
+    [GAS.WATER_VAPOUR, target.water, gases.waterVapour],
+    [gases.greenhouse.id, target.greenhouse - target.sideGreenhouse],
+    ...gases.greenhouseSide.map((gas) => [gas.AtmosGasID, gas.GasAtm, gas]),
+    [gases.anti.id, target.antiGreenhouse - target.sideAnti],
+    ...gases.antiSide.map((gas) => [gas.AtmosGasID, gas.GasAtm, gas]),
+    [gases.neutral.id, target.neutral - target.sideNeutral],
+    ...gases.neutralSide.map((gas) => [gas.AtmosGasID, gas.GasAtm, gas]),
+  ]
+}
+
+const addedGas = (id, amount) => Number.isFinite(amount) && amount > 0 && id
+
+const GAS_FIELDS = ['BoilingPoint', 'GHGas', 'AntiGHGas', 'Dangerous', 'DangerousLevel']
+
+// The DIM_Gases rows (`gasInfo(id)`) a plan needs to price its end state that the save lacks, or holds no figure of, by name: only gases the plan adds (an amount above 0) that the body has no row of itself.
+export const planGasGaps = (species, plan, gasInfo) => {
+  const ids = planAdditions(species, plan).filter(([id, amount, existing]) => {
+    if (!addedGas(id, amount) || existing) {
+      return false
+    }
+
+    const info = gasInfo(id)
+
+    return !info || !GAS_FIELDS.every((field) => Number.isFinite(info[field]))
+  }).map(([id]) => id)
+
+  return [...new Set(ids)].map((id) => `the properties of gas ${id}`)
+}
+
 // The atmosphere a plan ends with, as a body would hold it, for pricing the colony after terraforming.
 export const terraformedBody = (body, species, plan, gasInfo) => {
-  const { target, gases } = plan
+  const { target } = plan
   const atmosphere = []
-  const add = (id, amount, existing) => {
-    if (!Number.isFinite(amount) || amount <= 0 || !id) {
+
+  planAdditions(species, plan).forEach(([id, amount, existing]) => {
+    if (!addedGas(id, amount)) {
       return
     }
 
     const info = existing || gasInfo(id) || {}
 
     atmosphere.push({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, AtmosGasAmount: amount, BoilingPoint: info.BoilingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, Dangerous: info.Dangerous || 0, DangerousLevel: info.DangerousLevel || 0, FrozenOut: false })
-  }
-
-  add(species.BreatheID, target.breathable, gases.breathable)
-  add(GAS.WATER_VAPOUR, target.water, gases.waterVapour)
-  add(gases.greenhouse.id, target.greenhouse - target.sideGreenhouse)
-  gases.greenhouseSide.forEach((gas) => add(gas.AtmosGasID, gas.GasAtm, gas))
-  add(gases.anti.id, target.antiGreenhouse - target.sideAnti)
-  gases.antiSide.forEach((gas) => add(gas.AtmosGasID, gas.GasAtm, gas))
-  add(gases.neutral.id, target.neutral - target.sideNeutral)
-  gases.neutralSide.forEach((gas) => add(gas.AtmosGasID, gas.GasAtm, gas))
+  })
 
   let greenhouse = 0
   let anti = 0
@@ -475,7 +502,7 @@ const isLiveable = (body, species) => {
 
 const equalCosts = (a, b) => Math.abs(a.current - b.current) < 0.01 && Math.abs(a.periapsis - b.periapsis) < 0.01 && Math.abs(a.apoapsis - b.apoapsis) < 0.01
 
-// Everything to know about terraforming one body for one species, whatever the colony's capacity: the plan, its work, the cost after it and the outcome. `gasInfo(id)` is the DIM_Gases row of a gas.
+// Everything to know about terraforming one body for one species, whatever the colony's capacity: the plan, its work, the cost after it and the outcome. `gasInfo(id)` is the DIM_Gases row of a gas. When the plan introduces a gas the table holds no figures of, the result has `missing` (the rows, by name) and no outcome of the plan: the plan cannot be priced, so it is not known to be worse or better.
 export const assessTerraforming = (body, species, skill, gasInfo) => {
   const cost = colonyCost(body, species, skill)
   const lowGravity = body.Gravity < species.MinimumGravity
@@ -497,6 +524,13 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
 
   if (!plan) {
     return { ...base, reason: 'No atmosphere suits the species' }
+  }
+
+  const missing = planGasGaps(species, plan, gasInfo)
+
+  // Pricing the end state needs the figures of every gas the plan introduces; without them the plan is neither worse nor better, it is unknown.
+  if (missing.length) {
+    return { ...base, missing }
   }
 
   const target = terraformedBody(body, species, plan, gasInfo)

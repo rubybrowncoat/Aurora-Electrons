@@ -1,23 +1,99 @@
 import { populationName, systemBodyName } from '../aurora'
-import { roundToDecimal, separatedNumber } from '../math'
+import { UNKNOWN_TEXT, countText, isKnownNumber } from '../math'
+import { HAUL_ORDER_ACTIONS, ORBITAL_MINING_MODULE, assessMiningSites, missingNeeds, unknownNeeds } from '../mining-sites'
+import { registerRule, unavailable } from '../provenance'
+import { loadFormulaVersion } from '../capabilities'
 
 // Shared by the check modules of the Warnings page. A check is
 //
-//   { key, group, severity, title(count, options), rule, columns, options?, clock?, read(ctx) }
+//   { key, group, severity, title(count, options), rule, provenance, columns, options?, clock?, material?, read(ctx) }
 //
-// `key` is stable and kebab-case; `severity` one of SEVERITIES (index.js); `title` the heading over the check's rows;
-// `rule` one sentence saying when the check fires; `columns` the table's `{ key, text, align? }`, the first holding the
-// row's name; `options` the page options `read` depends on (so only those re-read the check when they change);
-// `clock` that it depends on the game time. `read(ctx)` returns rows
+// `key` is stable and kebab-case; `severity` one of SEVERITIES (index.js); `title` the heading over the check's rows; `rule` one sentence saying when the check fires; `provenance` the id of the registered rule behind it (`warnings.<camelCased key>`, put there by `checksOf`); `columns` the table's `{ key, text, align? }`, the first holding the row's name; `options` the page options `read` depends on (so only those re-read the check when they change); `clock` that it depends on the game time. `read(ctx)` returns rows
 //
-//   { id, cells, caption?, link? }
+//   { id, cells, caption?, link?, unevaluated?, signature? }
 //
-// `id` is stable and unique within the check, `cells` hold a column's text or `{ text, tone }` (`tone` being
-// 'success', 'warning' or 'error'), `caption` the line under the first cell and `link` a `linkTo` location.
+// `id` is stable and unique within the check, `cells` hold a column's text or `{ text, tone?, result? }` (`tone` being 'success', 'warning' or 'error'; `result` an unavailable provenance result naming the input a dash stands for), `caption` the line under the first cell and `link` a `linkTo` location. A row with `unevaluated` (an unavailable result naming the missing inputs) is one whose condition could not be decided because a stored value is missing: it is no warning, and the page lists it apart.
 //
-// `ctx` is { database, GameID, RaceID, RaceNPR, separator, count(value, decimals), options, GameTime? }.
+// `material` (on the 24 checks of the classes B, C and K of the snooze evidence, none on the 20 of class P) says in a few words what a material change of a row is, and is what lets a snooze be set "until it changes materially"; each row of such a check carries `signature`, the declared banded or categorical fields of its condition as text (`signatureOf`), or null while one of them is not known. A signature is never built from a shown figure that grows by itself, a name, a sort position or a stored float compared exactly: a band is the interval between the threshold the check applies and one quarter-step beyond it (`QUARTER`), a category is the reason the row is listed.
+//
+// `ctx` is { database, GameID, RaceID, RaceNPR, separator, count(value, decimals), options, GameTime?, unknown(missing) }; `unknown` is put there by `checksOf`.
 
-export const counter = (separator) => (value, decimals = 0) => separatedNumber(roundToDecimal(value || 0, decimals), separator)
+const WARNING_VERSIONS = ['2.7.x']
+
+const ruleName = (key) => key.replace(/-(\w)/g, (_match, letter) => letter.toUpperCase())
+
+const UNKNOWN_INPUT = 'an input the check reads'
+
+// The words of the line the Warnings page draws over the rows of a check it lists apart, after the number of them, by why they are apart.
+export const SEPARATOR_WORDS = Object.freeze({ snoozed: 'snoozed: out of the tiles until the snooze ends', unevaluated: 'not evaluated: a stored value the condition needs is missing' })
+
+// Registers the rule behind each check of a module (`evidence` on the check: { verification, structure, note, assumptions? }) and gives the check its `provenance` id; its `read` gets `ctx.unknown(missing)`, an unavailable result of that rule naming `missing` (a list of the inputs a figure or a verdict lacks).
+export const checksOf = (checks) => checks.map(({ evidence, read, ...check }) => {
+  const provenance = `warnings.${ruleName(check.key)}`
+
+  registerRule({ id: provenance, versions: WARNING_VERSIONS, units: 'rows', verification: evidence.verification, structure: evidence.structure, note: evidence.note, assumptions: evidence.assumptions })
+
+  return { ...check, provenance, read: (ctx) => read({ ...ctx, unknown: (missing = []) => unavailable({ rule: provenance, missing: missing.length ? missing : [UNKNOWN_INPUT], units: 'rows' }) }) }
+})
+
+registerRule({
+  id: 'warnings.summary',
+  versions: WARNING_VERSIONS,
+  units: 'rows, checks',
+  verification: 'confirmed',
+  structure: ['the rows each check returns', 'the muted rows and checks of the race', 'the snoozes of the race on the open branch'],
+  note: 'Counts of the rows the checks return, by severity, less the muted and the snoozed rows and the muted checks. A snoozed row is counted apart, and a permanent mute outranks a snooze. A row whose condition could not be decided because a stored value is missing, and a check that could not be read, are counted apart and are in none of the warning counts.',
+})
+
+// A dash for a value that is not known (null, undefined, NaN), never 0.
+export const counter = (separator) => (value, decimals = 0) => countText(value, decimals, separator)
+
+const isMissing = (value) => value === null || value === undefined || (typeof value === 'number' && Number.isNaN(value))
+
+// The names of the inputs a row lacks: `inputs` maps a column of the row to the words that name it.
+export const lacking = (row, inputs) => Object.entries(inputs).filter(([column]) => isMissing(row[column])).map(([, name]) => name)
+
+// Kleene logic over verdicts (1, 0, null for not known): `allOf` is 0 as soon as one is, else null when one is, else 1; `anyOf` is 1 as soon as one is, else null when one is, else 0. `false` and `true` count as 0 and 1.
+const asVerdict = (value) => (value === null || value === undefined ? null : Number(Boolean(value)))
+
+export const allOf = (...verdicts) => {
+  const decided = verdicts.map(asVerdict)
+
+  return decided.includes(0) ? 0 : decided.includes(null) ? null : 1
+}
+
+export const anyOf = (...verdicts) => {
+  const decided = verdicts.map(asVerdict)
+
+  return decided.includes(1) ? 1 : decided.includes(null) ? null : 0
+}
+
+// The rows a query kept with `Verdict` (the check's condition as the query evaluates it: 1, 0, or null while a stored value it needs is missing, SQLite's own three-valued logic): a 1 is a warning, a null a row that could not be evaluated, which `missing(item)` names, and a 0 is none. `build(item)` makes the row.
+export const verdictRows = (ctx, items, { missing, build, verdict = (item) => item.Verdict }) => items.flatMap((item) => {
+  const decided = verdict(item)
+
+  if (decided === 0 || decided === false) {
+    return []
+  }
+
+  const row = build(item)
+
+  return [decided === null || decided === undefined ? { ...row, unevaluated: ctx.unknown(missing(item)) } : row]
+})
+
+// A dash standing for a figure that is not known, with the unavailable result naming the inputs (`names`, a list) it lacks.
+export const unknownCell = (ctx, names) => ({ text: UNKNOWN_TEXT, result: ctx.unknown(names) })
+
+// A figure as a cell: its text from `format` (by default a count), or a dash with the unavailable result naming `name` (one input, or a list) when the value is missing. `tone` gives the known figure its tone.
+export const figure = (ctx, value, name, format = (known) => ctx.count(known), tone = null) => {
+  if (!isKnownNumber(value)) {
+    return unknownCell(ctx, [].concat(name))
+  }
+
+  const known = Number(value)
+
+  return tone ? { text: format(known), tone: tone(known) } : format(known)
+}
 
 export const rowsOf = async (ctx, sql) => {
   const [rows] = await ctx.database.query(sql)
@@ -25,13 +101,54 @@ export const rowsOf = async (ctx, sql) => {
   return rows
 }
 
+// One quarter of a 0 to 1 level: how far beyond a check's threshold a band runs.
+export const QUARTER = 0.25
+
+// The band of a figure: how many of the ascending `edges` it has reached, or null while the figure is not known (never band 0).
+export const bandOf = (value, edges) => (isKnownNumber(value) ? edges.filter((edge) => Number(value) >= edge).length : null)
+
+// The categories a row falls in as text, in a fixed order, or null while the list itself is not known.
+export const categoriesOf = (list) => (Array.isArray(list) ? [...new Set(list.map(String))].sort().join(',') : null)
+
+// A row's signature: its tokens joined, or null as soon as one is not known (a null, an undefined or an empty token), so an unknown input is never read as a band or a category.
+export const signatureOf = (...tokens) => (tokens.some((token) => token === null || token === undefined || token === '') ? null : tokens.map(String).join('|'))
+
+// How a signature is told in words on the Snoozed group, so the captured condition can be read: a check declares `captured`, one reader per token of its signature (`bandWords` for a band, `listWords` or `countWords` for a category list, `tokenWords` for a fixed word, `needWords` for the prerequisites of a mining site). A reader gives text only for a token it knows; anything else shows as the token itself, never as a guess.
+export const bandWords = (...words) => (token) => words[Number(token)]
+
+export const listWords = (token) => token.split(',').join(', ')
+
+export const countWords = (one, many) => (token) => `${token.split(',').length} ${token.split(',').length === 1 ? one : many}`
+
+export const tokenWords = (words) => (token) => words[token]
+
+const NEED_WORDS = { deposit: 'no mineral deposit on the body', mineProduction: 'no mine production', drivers: 'no mass driver at the colony', destination: 'no mass driver destination', receiver: 'no mass driver at the destination colony', radiation: 'radiation stopping all mine output', staffing: 'no workforce for the manned mines', colony: 'no colony of the race on the body', assignment: 'assigned to another colony', diameter: 'body wider than the orbital mining limit', modules: 'every mining module damaged', crew: 'no crew aboard' }
+
+export const needWords = (token) => token.split(',').map((need) => NEED_WORDS[need.slice(need.indexOf(':') + 1)] || need).join(', ')
+
+// The words for a signature of a check: its tokens read by the readers of `captured`, or the signature itself where the check declares none or a reader knows no such token.
+export const describeSignature = (check, signature) => {
+  if (typeof signature !== 'string' || signature === '') {
+    return null
+  }
+
+  const readers = check.captured || []
+
+  return signature.split('|').map((token, index) => (readers[index] && readers[index](token)) || token).join(', ')
+}
+
 // `1 damaged ship`, `3 damaged ships`.
 export const amount = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
-// A colony row's name as plain text: its system and body, then its own name.
-export const colonyText = (row) => populationName(row).replace(/&mdash;/g, '—')
+const UNKNOWN_SYSTEM = 'an unknown system'
 
-export const bodyText = (row) => systemBodyName(row, { Name: row.SystemName })
+// A system's name as plain text, never a bare `null`.
+export const systemText = (row) => row.SystemName || UNKNOWN_SYSTEM
+
+// A colony row's name as plain text: its system and body, then its own name.
+export const colonyText = (row) => populationName({ ...row, SystemName: systemText(row), PopName: row.PopName || 'Unnamed colony' }).replace(/&mdash;/g, '—')
+
+export const bodyText = (row) => systemBodyName(row, { Name: systemText(row) })
 
 // How far a 0 to 1 level is from fine: above 85% good, under 30% bad.
 export const levelTone = (level) => (level > 0.85 ? 'success' : level < 0.3 ? 'error' : 'warning')
@@ -41,20 +158,87 @@ export const COLONY_COLUMNS = 'FCT_RaceSysSurvey.Name as SystemName, FCT_SystemB
 
 export const COLONY_JOINS = 'left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID'
 
-// Rows as the page keeps them: frozen, so Vue doesn't observe each cell, with the text a search looks in, and with an id made unique where a query returned one twice.
-export const normalizeRows = (rows) => {
+// Rows as the page keeps them: frozen, so Vue doesn't observe each cell, with the text a search looks in, and with an id made unique where a query returned one twice. `raw` is the id the query gave, and `ambiguous` is true for every row of an id that came back more than once: such a row cannot be told apart from its twin across reads, so a snooze never holds it per item. A cell of a column the check shows that is missing (null or undefined) becomes a dash with an unavailable result naming the column, so no blank cell passes for a known empty one.
+export const normalizeRows = (rows, check) => {
   const seen = new Map()
+  const totals = rows.reduce((counts, row) => counts.set(row.id, (counts.get(row.id) || 0) + 1), new Map())
 
   return rows.map((row) => {
     const times = seen.get(row.id) || 0
-    const cells = Object.values(row.cells).map((cell) => (cell !== null && typeof cell === 'object' ? cell.text : cell))
+    const cells = Object.fromEntries(check.columns.map((column) => [column.key, isMissing(row.cells[column.key]) ? { text: UNKNOWN_TEXT, result: unavailable({ rule: check.provenance, missing: [`the stored value behind the ${column.text} column`], units: 'rows' }) } : row.cells[column.key]]))
+    const texts = Object.values(cells).map((cell) => (cell !== null && typeof cell === 'object' ? cell.text : cell))
 
     seen.set(row.id, times + 1)
 
     return Object.freeze({
       ...row,
+      cells,
+      raw: row.id,
+      ambiguous: totals.get(row.id) > 1,
       id: times ? `${row.id}#${times + 1}` : row.id,
-      text: [...cells, row.caption].filter((text) => text !== undefined && text !== null).join(' ').toLowerCase(),
+      text: [...texts, row.caption].filter((text) => text !== undefined && text !== null).join(' ').toLowerCase(),
     })
   })
 }
+
+// A ship class's name as plain text, never a bare `null`.
+export const classText = (row) => (row.ClassName ? `${row.ClassName} Class` : 'An unnamed class')
+
+// The installation totals of each colony, from a query over `FCT_PopulationInstallations`: the capacity of its manned (workers), automated and civilian mining installations (amount times mining value), its mass drivers, its factories and the names of its mines, each with how many installation rows it could not be read from (a type that is not stored, or an amount or value that decides the kind). A kind with no readable row is 0 only when its gap count is 0.
+const installationTotals = (GameID) => `select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.MiningProductionValue > 0 and DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Manned, sum(case when DIM_PlanetaryInstallation.MiningProductionValue > 0 and DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automated, sum(case when DIM_PlanetaryInstallation.MiningProductionValue > 0 and DIM_PlanetaryInstallation.CivilianInstallation = 1 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Civilian, sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue else 0 end) as Drivers, sum(case when (DIM_PlanetaryInstallation.ConstructionValue > 0 or DIM_PlanetaryInstallation.OrdnanceProductionValue > 0 or DIM_PlanetaryInstallation.FighterProductionValue > 0) and FCT_PopulationInstallations.Amount > 0 then 1 else 0 end) as Factories, sum(case when DIM_PlanetaryInstallation.PlanetaryInstallationID is null or DIM_PlanetaryInstallation.MiningProductionValue is null or (DIM_PlanetaryInstallation.MiningProductionValue > 0 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.Workers is null or DIM_PlanetaryInstallation.CivilianInstallation is null)) then 1 else 0 end) as MineGaps, sum(case when DIM_PlanetaryInstallation.PlanetaryInstallationID is null or DIM_PlanetaryInstallation.MassDriverValue is null or (DIM_PlanetaryInstallation.MassDriverValue > 0 and FCT_PopulationInstallations.Amount is null) then 1 else 0 end) as DriverGaps, sum(case when DIM_PlanetaryInstallation.PlanetaryInstallationID is null or DIM_PlanetaryInstallation.ConstructionValue is null or DIM_PlanetaryInstallation.OrdnanceProductionValue is null or DIM_PlanetaryInstallation.FighterProductionValue is null or ((DIM_PlanetaryInstallation.ConstructionValue > 0 or DIM_PlanetaryInstallation.OrdnanceProductionValue > 0 or DIM_PlanetaryInstallation.FighterProductionValue > 0) and FCT_PopulationInstallations.Amount is null) then 1 else 0 end) as FactoryGaps, group_concat(case when DIM_PlanetaryInstallation.MiningProductionValue > 0 and FCT_PopulationInstallations.Amount is not null then FCT_PopulationInstallations.Amount || 'x ' || DIM_PlanetaryInstallation.Name end, ', ') as MineNames from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID`
+
+// How many deposit rows of a body (`body`, a column expression) hold an amount above 0, hold none, or are exhausted at 0 or less, and whether the race has surveyed the body: the columns `depositState` (mining-sites.js) reads.
+const depositColumns = (body, game, race) => `(select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = ${body} and FCT_MineralDeposit.GameID = ${game} and FCT_MineralDeposit.Amount > 0) as Deposits, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = ${body} and FCT_MineralDeposit.GameID = ${game} and FCT_MineralDeposit.Amount is null) as DepositGaps, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = ${body} and FCT_MineralDeposit.GameID = ${game} and FCT_MineralDeposit.Amount <= 0) as Depleted, (select count(*) > 0 from FCT_SystemBodySurveys where FCT_SystemBodySurveys.SystemBodyID = ${body} and FCT_SystemBodySurveys.RaceID = ${race} and FCT_SystemBodySurveys.GameID = ${game}) as Surveyed`
+
+const miningColoniesQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.Capital, FCT_Population.MassDriverDest, FCT_Race.MineProduction, FCT_SystemBody.RadiationLevel, ${depositColumns('FCT_Population.SystemBodyID', 'FCT_Population.GameID', 'FCT_Population.RaceID')}, coalesce(VIR_Own.Manned, 0) as Manned, coalesce(VIR_Own.Automated, 0) as Automated, coalesce(VIR_Own.Civilian, 0) as Civilian, coalesce(VIR_Own.MineGaps, 0) as MineGaps, VIR_Own.MineNames, coalesce(VIR_Own.Drivers, 0) as Drivers, coalesce(VIR_Own.DriverGaps, 0) as DriverGaps, coalesce(VIR_Own.Factories, 0) as Factories, coalesce(VIR_Own.FactoryGaps, 0) as FactoryGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID, coalesce(VIR_DestinationOwn.Drivers, 0) as DestinationDrivers, coalesce(VIR_DestinationOwn.DriverGaps, 0) as DestinationGaps, (select count(*) from FCT_Population as VIR_Other where VIR_Other.SystemID = FCT_Population.SystemID and VIR_Other.RaceID = FCT_Population.RaceID and VIR_Other.GameID = FCT_Population.GameID and VIR_Other.PopulationID <> FCT_Population.PopulationID) as OtherColonies, (select count(*) from FCT_MoveOrders where FCT_MoveOrders.PopulationID = FCT_Population.PopulationID and FCT_MoveOrders.GameID = FCT_Population.GameID and FCT_MoveOrders.MoveActionID in (${HAUL_ORDER_ACTIONS.join(', ')})) as HaulOrders, ${COLONY_COLUMNS} from FCT_Population ${COLONY_JOINS} inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID and FCT_Race.GameID = FCT_Population.GameID left join (${installationTotals(GameID)}) as VIR_Own on VIR_Own.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 left join (${installationTotals(GameID)}) as VIR_DestinationOwn on VIR_DestinationOwn.PopID = VIR_Destination.PopulationID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} order by FCT_Population.PopName`
+
+// The undamaged orbital mining modules of a ship: its class's component lines of that type, less the ship's damaged ones. Null while a component line has no stored type or count, the class has no line of that type, or a damaged count is not stored; a ship with no damage row has none damaged.
+export const WORKING_MODULES = `(case when exists (select 1 from FCT_ClassComponent left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID is null) then null when not exists (select 1 from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = ${ORBITAL_MINING_MODULE} where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID) then null when exists (select 1 from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = ${ORBITAL_MINING_MODULE} left join FCT_DamagedComponent on FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and (FCT_ClassComponent.NumComponent is null or (FCT_DamagedComponent.ComponentID is not null and FCT_DamagedComponent.Number is null))) then null else (select sum(max(FCT_ClassComponent.NumComponent - coalesce((select sum(FCT_DamagedComponent.Number) from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID), 0), 0)) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = ${ORBITAL_MINING_MODULE} where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID) end)`
+
+// Whether a fleet sits under a Training admin command (`TRAINING_JOINS` bring in the command and its type): 1 or 0, 0 for a fleet under no command, null while its command or the type of it is not stored.
+export const TRAINING_COMMAND = '(case when FCT_Fleet.ParentCommandID is null then null when FCT_Fleet.ParentCommandID = 0 then 0 else (DIM_NavalAdminCommandType.Description = \'Training\') end)'
+
+export const TRAINING_JOINS = 'left join FCT_NavalAdminCommand on FCT_Fleet.ParentCommandID = FCT_NavalAdminCommand.NavalAdminCommandID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID'
+
+const miningFleetsQuery = ({ GameID, RaceID }) => `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.AssignedPopulationID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Radius * 2 as Diameter, FCT_Race.MaximumOrbitalMiningDiameter as MaximumDiameter, FCT_Race.MineProduction, ${depositColumns('FCT_Fleet.OrbitBodyID', 'FCT_Fleet.GameID', 'FCT_Fleet.RaceID')}, VIR_Colony.PopulationID as ColonyID, VIR_Colony.PopName as ColonyName, VIR_Assigned.PopulationID as AssignedID, VIR_Assigned.PopName as AssignedName, FCT_Ship.ShipID, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MiningModules as Modules, (select count(*) from FCT_ClassComponent where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID) as ClassLines, ${WORKING_MODULES} as WorkingModules from FCT_Fleet inner join FCT_Race on FCT_Race.RaceID = FCT_Fleet.RaceID and FCT_Race.GameID = FCT_Fleet.GameID inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and (FCT_ShipClass.MiningModules > 0 or FCT_ShipClass.MiningModules is null) inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join FCT_Population as VIR_Colony on VIR_Colony.PopulationID = (select min(VIR_Own.PopulationID) from FCT_Population as VIR_Own where VIR_Own.SystemBodyID = FCT_Fleet.OrbitBodyID and VIR_Own.RaceID = FCT_Fleet.RaceID and VIR_Own.GameID = FCT_Fleet.GameID) left join FCT_Population as VIR_Assigned on VIR_Assigned.PopulationID = FCT_Fleet.AssignedPopulationID and VIR_Assigned.PopulationID > 0 and VIR_Assigned.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.OrbitBodyID > 0 and FCT_Ship.MothershipID = 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) order by FCT_Fleet.FleetName, FCT_Ship.ShipID`
+
+// The mines of each colony of the race by installation count (the amounts, not the mining value): manned mines (workers above 0) and automated ones (none), civilian complexes left out. A colony with no mining row has no entry; the colony rows' `MineGaps` say whether an installation row could not be read.
+export const mineCountsQuery = ({ GameID, RaceID }) => `select FCT_PopulationInstallations.PopID as PopulationID, sum(case when DIM_PlanetaryInstallation.MiningProductionValue > 0 and DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount else 0 end) as MannedMines, sum(case when DIM_PlanetaryInstallation.MiningProductionValue > 0 and DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount else 0 end) as AutomatedMines from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} and FCT_PopulationInstallations.PopID in (select FCT_Population.PopulationID from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}) group by FCT_PopulationInstallations.PopID`
+
+// The stored speed of each fleet of the race that sits at a body, which the orbital miners' relocation reads.
+export const fleetSpeedQuery = ({ GameID, RaceID }) => `select FCT_Fleet.FleetID, FCT_Fleet.Speed from FCT_Fleet where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.OrbitBodyID > 0`
+
+// The race's mining sites (mining-sites.js `assessMiningSites`): its colonies with mines or assigned orbital miners and its orbital mining fleets without orders, each with the prerequisites it lacks. The mining checks read the same sites; the colony rows carry the mine counts (`MannedMines`, `AutomatedMines`).
+export const readMiningSites = async (ctx) => {
+  const [colonies, fleets, mines, version] = await Promise.all([rowsOf(ctx, miningColoniesQuery(ctx)), rowsOf(ctx, miningFleetsQuery(ctx)), rowsOf(ctx, mineCountsQuery(ctx)), loadFormulaVersion(ctx.database)])
+  const minesOf = new Map(mines.map((row) => [row.PopulationID, row]))
+
+  return assessMiningSites({ colonies: colonies.map((row) => ({ ...row, MannedMines: minesOf.has(row.PopulationID) ? minesOf.get(row.PopulationID).MannedMines : 0, AutomatedMines: minesOf.has(row.PopulationID) ? minesOf.get(row.PopulationID).AutomatedMines : 0 })), fleets }, { RaceID: ctx.RaceID, version, count: ctx.count })
+}
+
+// The mining sites with each fleet's stored `Speed` on its row, for the redeployment queue only. A save without the column gives every fleet a null speed (the queue then lists the speed as an input it lacks), and the other mining checks never read it.
+export const readRedeploymentSites = async (ctx) => {
+  const [columns] = await ctx.database.query('select name from pragma_table_info(\'FCT_Fleet\')')
+  const [sites, speeds] = await Promise.all([readMiningSites(ctx), columns.some((column) => column.name === 'Speed') ? rowsOf(ctx, fleetSpeedQuery(ctx)) : []])
+  const speedOf = new Map(speeds.map((row) => [row.FleetID, row.Speed]))
+
+  return { ...sites, fleets: sites.fleets.map((site) => ({ ...site, row: { ...site.row, Speed: speedOf.has(site.id) ? speedOf.get(site.id) : null } })) }
+}
+
+// The inputs a site's undecided prerequisites and unknown capacity wait on: what `verdictRows` lists as missing for a site not evaluated.
+export const needInputs = (site, options) => [...new Set(unknownNeeds(site, options).flatMap((need) => need.inputs)), ...(site.capacityInputs || [])]
+
+// The cell naming each prerequisite a site lacks, then those not known; when none is lacking, the unknown cell of what is undecided.
+export const needsCell = (ctx, site, options) => {
+  const absent = missingNeeds(site, options)
+  const undecided = unknownNeeds(site, options)
+
+  if (!absent.length) {
+    return unknownCell(ctx, needInputs(site, options))
+  }
+
+  return { text: [...absent, ...undecided].map((need) => need.text).join('; '), tone: 'warning', ...(undecided.length ? { result: ctx.unknown(needInputs(site, options)) } : {}) }
+}
+
+// The signature of a mining site: the prerequisites it lacks, each by its owner and key, or null while one is undecided (a prerequisite not known is neither lacking nor met, so it is never read as either).
+export const needsSignature = (site, options) => (unknownNeeds(site, options).length ? null : signatureOf(categoriesOf(missingNeeds(site, options).map((need) => `${need.owner}:${need.key}`))))

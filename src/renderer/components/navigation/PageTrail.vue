@@ -16,6 +16,7 @@
 <script>
 import { mapActions, mapGetters } from 'vuex'
 
+import { activeAppearance } from '../../utilities/appearance'
 import { sectionById, pageByRoute } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
 
@@ -32,7 +33,7 @@ export default {
 
     // The trail's pages, each with its section's colours.
     steps () {
-      return this.trail.map((step) => ({ ...step, page: pageByRoute[step.path.split('?')[0]] })).filter(({ page }) => page).map((step) => ({ ...step, style: sectionStyle(this.$vuetify.theme.dark, sectionById[step.page.section]) }))
+      return this.trail.map((step) => ({ ...step, page: pageByRoute[step.path.split('?')[0]] })).filter(({ page }) => page).map((step) => ({ ...step, style: sectionStyle(activeAppearance(), sectionById[step.page.section]) }))
     },
   },
   watch: {
@@ -117,7 +118,7 @@ export default {
   padding-inline: 8px;
   border: 1px solid var(--ae-border);
   border-radius: 11px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -126,6 +127,11 @@ export default {
 
   &:hover {
     border-color: var(--sc);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
   }
 }
 
@@ -141,7 +147,7 @@ export default {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 14px;
+  line-height: calc(14px * var(--ae-font-scale));
 }
 
 .trail__step--now {

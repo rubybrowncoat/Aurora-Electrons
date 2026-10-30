@@ -6,8 +6,8 @@ import * as research from './research'
 import * as ships from './ships'
 import * as space from './space'
 
-export { IDLE_FLEETS_KEY } from './fleets'
-export { normalizeRows } from './common'
+export { IDLE_FLEETS_KEY, PARKED_PLACES } from './fleets'
+export { SEPARATOR_WORDS, describeSignature, normalizeRows } from './common'
 
 const MODULES = [fleets, ships, industry, colonies, research, administration, space]
 

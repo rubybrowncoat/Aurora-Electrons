@@ -16,6 +16,10 @@
           <div class="tool__label caption text--secondary">Borders</div>
           <v-select v-model="borders" :items="borderOptions" aria-label="Draw borders round" dense outlined hide-details />
         </div>
+        <div class="tool tool--tags">
+          <div class="tool__label caption text--secondary">Tag</div>
+          <v-select :value="tagFilterValue" :items="tagItems" aria-label="Show the systems that hold a body with a tag" dense outlined hide-details @change="chooseTag" />
+        </div>
         <div class="tool tool--actions">
           <v-menu v-model="arrangeMenu" offset-y left :close-on-content-click="false" max-width="400">
             <template #activator="{ on, attrs }">
@@ -62,11 +66,12 @@
               <v-btn outlined :disabled="!!busy || !links.list.length" v-bind="attrs" v-on="on"><v-icon small left>mdi-vector-polyline</v-icon>Free layout</v-btn>
             </template>
             <v-card class="pa-4">
-              <div class="subtitle-2">Let the links pull the systems into place</div>
+              <div class="subtitle-2">Link length</div>
               <v-radio-group v-model="linkLength" dense hide-details class="mt-2">
                 <v-radio v-for="option in linkLengths" :key="option.value" :value="option.value" :label="option.text" />
               </v-radio-group>
-              <div class="caption text--secondary mt-2">{{ linkLengthHint }}</div>
+              <div class="caption text--secondary mt-2">{{ linkLengthHint }}<provenance-mark v-if="linkLengthRule" :rule="linkLengthRule" /></div>
+              <div v-if="linkLengthGaps" class="caption text--secondary mt-2">{{ linkLengthGaps }}</div>
               <div class="free-actions">
                 <v-btn outlined small :disabled="linkLength === 'galactic'" title="A force-directed layout that keeps linked systems close" @click="applyForces">Forces</v-btn>
                 <v-btn outlined small title="Shakes the map loose and separates the systems" @click="scramble">Scramble</v-btn>
@@ -75,18 +80,19 @@
             </v-card>
           </v-menu>
           <v-btn outlined :disabled="!!busy || !movedIds.length" title="Put every system back where the save has it" @click="revertPositions"><v-icon small left>mdi-undo</v-icon>Revert</v-btn>
+          <v-btn outlined :disabled="!!busy || !systemRows.length" title="The life pods and wrecks in the known systems, with a status for each" data-recovery-open @click="openRecovery"><v-icon small left>mdi-lifebuoy</v-icon>Recovery</v-btn>
           <v-btn outlined color="primary" :disabled="!!busy || !movedIds.length" @click="saveDialog = true"><v-icon small left>mdi-content-save-outline</v-icon>Save positions<span v-if="movedIds.length">&nbsp;({{ movedIds.length }})</span></v-btn>
         </div>
       </div>
 
-      <v-card class="panel map-card" elevation="1">
+      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks." elevation="1">
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
               <span v-for="(item, position) in row" :key="`${position}-${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading', 'text--secondary': item.kind === 'note' }" :title="item.title">
                 <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid', borderWidth: item.width && `${item.width}px` }" />
                 <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
-                <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
+                <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color, height: item.thickness && `${item.thickness}px` }" />
                 <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
                 <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :text="item.text" :color="item.color" :hollow="item.hollow" :offset="item.offset" :surface="colors.surface" />
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
@@ -96,16 +102,17 @@
                     <span>{{ discoveryAsOf.text }}</span>
                     <span class="discovery-text__widest" aria-hidden="true">{{ discoveryAsOf.widest }}</span>
                   </span>
+                  <provenance-mark :result="discoveryEra" />
                 </template>
-                <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
-                <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
-                {{ item.label }}
+                <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color, clipPath: item.clip, borderRadius: item.clip && '0' }" /></span>
+                <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color, clipPath: item.clip, borderRadius: item.clip && '0' }" />
+                {{ item.label }}<provenance-mark v-if="item.rule || item.result" :rule="item.rule || ''" :result="item.result || null" />
               </span>
             </span>
           </span>
         </div>
         <div class="map-body">
-          <div ref="stage" class="map-stage" @wheel.capture="shiftWheel">
+          <div ref="stage" class="map-stage" :style="stageStyle" @wheel.capture="shiftWheel">
             <canvas ref="borders" class="map-borders" />
             <div ref="canvas" class="map-canvas" aria-label="Galactic map of the known systems and their jump links" />
             <div ref="minimap" class="map-minimap" @pointerdown="fitted = false" />
@@ -121,14 +128,14 @@
                 <v-progress-linear class="busy-bar" :value="progress * 100" :indeterminate="busy !== 'arrange'" height="4" rounded />
                 <v-btn x-small text color="primary" @click="stopBusy">Stop</v-btn>
               </template>
-              <span v-else>{{ qualityText }}</span>
+              <span v-else>{{ qualityText }}<provenance-mark :result="straightResult" /></span>
             </div>
             <div v-if="!systemRows.length" class="map-empty text--secondary">The race knows no systems yet.</div>
           </div>
           <aside v-if="panelSystem" class="map-side">
             <div class="side-head">
               <div class="min-width-0">
-                <div class="subtitle-1 font-weight-medium text-truncate">{{ panelSystem.Name }}</div>
+                <div class="subtitle-1 font-weight-medium text-truncate" data-map-system-name>{{ panelSystem.Name }}</div>
                 <div class="caption text--secondary">{{ panelSubtitle }}</div>
               </div>
               <v-btn icon small aria-label="Close" title="Close" @click="clearSelection"><v-icon small>mdi-close</v-icon></v-btn>
@@ -139,19 +146,33 @@
                 <dd :key="`${fact.label}-value`">
                   <a v-if="fact.action" :title="fact.title" @click="fact.action">{{ fact.value }}</a>
                   <template v-else>{{ fact.value }}</template>
+                  <provenance-mark v-if="fact.result" :result="fact.result" />
                 </dd>
               </template>
             </dl>
+            <div v-if="selectedPoint" class="selected-point" data-map-point>
+              <div class="caption text--secondary mt-3 mb-1">Selected jump point</div>
+              <div class="body-2 font-weight-medium" data-map-point-name><span data-map-point-label>{{ selectedPoint.label }}</span>: <span data-map-point-far>{{ selectedPoint.far }}</span><span data-map-point-mark>{{ selectedPoint.mark }}</span></div>
+              <div class="caption text--secondary" data-map-point-detail>{{ selectedPoint.subtitle }}</div>
+              <div class="side-actions">
+                <v-btn small outlined @click="openSystemView(panelSystem.id)">Show in System view</v-btn>
+                <v-btn small outlined :to="linkTo.lagrange(panelSystem.SystemID)">Jump point infrastructure</v-btn>
+                <v-btn small text data-map-point-clear @click="pointId = null">Clear</v-btn>
+              </div>
+            </div>
             <template v-if="panelNeighbours.length">
               <div class="caption text--secondary mt-3 mb-1">Linked systems</div>
               <div class="chips">
                 <v-chip v-for="neighbour in panelNeighbours" :key="neighbour.id" small outlined @click="focusSystem(neighbour.id)">{{ neighbour.Name }}</v-chip>
               </div>
             </template>
+            <div class="caption text--secondary mt-3 mb-1">Body tags</div>
+            <world-tags compact :entries="panelTags" :choices="tagChoices" :suggestions="tagSuggestions" :hint="tagHint" :problem="tagProblem" :message="tagMessage" :message-type="tagMessageType" :busy="tagBusy" :scope-key="tagScopeKey" :start-year="StartYear" empty="No body of this system is tagged." :expect="tagExpect" :save="tagSave" :retag="tagRetag" :clear="tagClear" />
             <div class="side-actions">
               <v-btn small outlined :to="mineralsLink([panelSystem.id])">Minerals</v-btn>
               <v-btn small outlined :to="plannerLink([panelSystem.id])">Colonization Planner</v-btn>
               <v-btn small outlined :to="linkTo.survey(panelSystem.SystemID)">Survey progress</v-btn>
+              <v-btn v-if="remoteBySystem[panelSystem.id]" small outlined :to="linkTo.formations(panelSystem.SystemID)">Ground formations</v-btn>
               <v-btn small outlined :to="linkTo.lagrange(panelSystem.SystemID)">Lagrange points</v-btn>
               <v-btn small outlined :to="linkTo.routes({ to: place.system(panelSystem.SystemID) })">Route here</v-btn>
               <v-btn small outlined :to="linkTo.log({ system: panelSystem.SystemID })">Game log</v-btn>
@@ -179,7 +200,7 @@
         </div>
         <div class="panel-foot caption text--secondary">
           <span class="panel-foot__text">
-            Positions are the game's galactic map, in its units; markers grow with the people living there. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
+            Use it to see the race's reach, plan where to go next and lay the map out. Positions are the game's galactic map, in its units; markers grow with the people living there<provenance-mark rule="map.markerSize" />. Counts in brackets are systems on the map<provenance-mark rule="map.legendCount" />. Shift-click or shift-drag to select several systems; right-click one for a quick menu. A tag can be put on any body of a known system, surveyed or not (the ruins and constructs marked here also need the body surveyed). It stays on that body, never moves to another by its name, and never changes a cluster or a border.
             <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until the map is saved.</template>
           </span>
           <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a list to turn them on and off. -->
@@ -200,10 +221,23 @@
                     <map-glyph class="ml-3" v-bind="markDiscs[mark.value]" :surface="colors.surface" />
                   </v-list-item>
                 </template>
+                <template v-if="remoteModel">
+                  <v-subheader>Remote ground formations by role</v-subheader>
+                  <v-list-item v-for="option in remoteRoleOptions" :key="option.value" role="menuitemcheckbox" :aria-checked="String(remoteRoles.includes(option.value))" @click="toggleRole(option.value)">
+                    <v-icon class="mr-3" :color="remoteRoles.includes(option.value) ? 'primary' : undefined">{{ remoteRoles.includes(option.value) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
+                    <v-list-item-title>{{ option.text }} ({{ count(remoteTotals[option.value]) }})</v-list-item-title>
+                  </v-list-item>
+                </template>
                 <v-divider />
                 <v-list-item role="menuitemcheckbox" :aria-checked="String(dimUnmarked)" :disabled="!marks.length" @click="toggleDim">
                   <v-icon class="mr-3" :color="dimUnmarked ? 'primary' : undefined">{{ dimUnmarked ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
                   <v-list-item-title>Dim systems with none of these</v-list-item-title>
+                </v-list-item>
+                <v-divider />
+                <v-subheader>Hierarchy</v-subheader>
+                <v-list-item v-for="level in hierarchyLevels" :key="level.value" role="menuitemradio" :aria-checked="String(hierarchy === level.value)" :title="level.hint" @click="hierarchy = level.value">
+                  <v-icon class="mr-3" :color="hierarchy === level.value ? 'primary' : undefined">{{ hierarchy === level.value ? 'mdi-radiobox-marked' : 'mdi-radiobox-blank' }}</v-icon>
+                  <v-list-item-title>{{ level.text }}</v-list-item-title>
                 </v-list-item>
               </v-list>
             </v-card>
@@ -233,10 +267,24 @@
           <v-btn icon dark aria-label="Close" @click="systemDialog = false">
             <v-icon>mdi-close</v-icon>
           </v-btn>
-          <v-toolbar-title>{{ systemDialogTitle }}</v-toolbar-title>
+          <v-toolbar-title data-system-title><span data-system-name>{{ systemDialogName }}</span><template v-if="viewedPoint"> · <span data-system-point-label>{{ viewedPoint.label }}</span>: <span data-system-point-far>{{ viewedPoint.far }}</span><span data-system-point-mark>{{ viewedPoint.mark }}</span></template></v-toolbar-title>
         </v-toolbar>
         <v-card-text v-if="systemDialog">
-          <system-view v-if="systemViewId" :system-id="systemViewId" @jump="(id) => (systemViewId = String(id))" />
+          <system-view v-if="systemViewId" :system-id="systemViewId" :hierarchy="hierarchy" :jump-point-id="viewedPoint ? viewedPoint.jumpPoint.WarpPointID : null" @jump="(id) => (systemViewId = String(id))" />
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="recoveryDialog" fullscreen hide-overlay transition="dialog-bottom-transition">
+      <v-card>
+        <v-toolbar dark color="primary">
+          <v-btn icon dark aria-label="Close" data-recovery-close @click="recoveryDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title data-recovery-title>Recovery ledger</v-toolbar-title>
+        </v-toolbar>
+        <v-card-text v-if="recoveryDialog">
+          <recovery-ledger :state="recoveryState" :view="recoveryView" :repository="recoveryRepository" :repository-error="recoveryRepositoryError" :scope="recoveryScope" :context="recoveryContext" :game-time="GameTime" :start-year="StartYear" :place.sync="recoveryPlace" :owner.sync="recoveryOwner" :status-filter.sync="recoveryStatusFilter" :observable="recoveryObservable" :can-observe="recoveryCanObserve" :observation-gaps="recoveryObservationGaps" :observe-choice="recoveryObserveChoice" :observe-message="recoveryObserveMessage" :observation-note="recoveryObservationNote" :purpose="recoveryPurpose" :observation-rule="recoveryRule" @retry="retryRecovery" @changed="recoveryChanged" @observe="setRecoveryObserve" @show-system="showRecoverySystem" />
         </v-card-text>
       </v-card>
     </v-dialog>
@@ -251,24 +299,41 @@ import cxtmenu from 'cytoscape-cxtmenu'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
 
-import { chartTheme } from '../components/charts/theme'
+import { chartTheme, mapFont, markerPoints, seriesIdentity } from '../components/charts/theme'
 import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import SystemView from '../components/SystemView.vue'
+import RecoveryLedger from '../components/map/RecoveryLedger.vue'
+import WorldTags from '../components/notebook/WorldTags.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
-import { gameTime } from '../utilities/aurora'
+import recoveryLedger, { RECOVERY_INPUTS, RECOVERY_LABELS } from '../mixins/recovery-ledger'
+import worldTags, { tagFilterView } from '../mixins/world-tags'
+import { activeAppearance, MAP_MENU } from '../utilities/appearance'
+import { fontRoles, whenFontsReady } from '../utilities/appearance-font'
+import { glyphFace } from '../utilities/glyph-faces'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
-import { buildDistanceMap, loadJumpPoints } from '../utilities/jump-graph'
-import { tracked } from '../utilities/load-tracking'
+import { loadJumpPoints } from '../utilities/jump-graph'
+import { allLoaded, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
-import { COLONY_COST_BANDS, CONTACT_ORDER, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
+import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { loadGroundFormations, roleTotals } from '../utilities/ground-formations'
+import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
+import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, linkStyle } from '../utilities/map-hierarchy'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
-import { scaleValue } from '../utilities/math'
+import { savePositions } from '../utilities/map-positions'
+import { jumpPointPlaces } from '../utilities/places'
+import { failureWords, fieldList, isAvailable, valueOrNull } from '../utilities/provenance'
+import { OBSERVATION_PURPOSE, OBSERVATION_RULE } from '../utilities/recovery-ledger'
+import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
+import { ALL_TAGS } from '../utilities/world-tags'
+import { loadFormulaVersion } from '../utilities/capabilities'
 
 cytoscape.use(cxtmenu)
 cytoscape.use(cola)
@@ -280,7 +345,12 @@ const INPUT_LABELS = {
   sectors: 'the sectors',
   aliens: 'the known alien races',
   features: 'what the map can mark',
+  groundFormations: 'the ground formations',
+  formulaVersion: 'the save\'s schema',
+  ...RECOVERY_LABELS,
 }
+// The reads behind the recovery ledger feed the ledger alone.
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !RECOVERY_INPUTS.includes(key))
 
 const LAYERS = [
   { value: 'geological', text: 'Geological survey' },
@@ -373,14 +443,26 @@ const SKULL_CROSSBONES_PATH = 'M15.8,18.5L21.8,20.1L21.4,22L12,19.5L2.6,22L2.1,2
 const ALERT_PATH = 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16'
 const CALENDAR_PATH = 'M12 12H17V17H12V12M19 3H18V1H16V3H8V1H6V3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3M19 5V7H5V5H19M5 19V9H19V19H5Z'
 const EARTH_PATH = 'M17.9,17.39C17.64,16.59 16.89,16 16,16H15V13A1,1 0 0,0 14,12H8V10H10A1,1 0 0,0 11,9V7H13A2,2 0 0,0 15,5V4.59C17.93,5.77 20,8.64 20,12C20,14.08 19.2,15.97 17.9,17.39M11,19.93C7.05,19.44 4,16.08 4,12C4,11.38 4.08,10.78 4.21,10.21L9,15V16A2,2 0 0,0 11,18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z'
+const SHIELD_PATH = 'M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1Z'
 const ROCKET_PATH = 'M20 22L16.14 20.45C16.84 18.92 17.34 17.34 17.65 15.73L20 22M7.86 20.45L4 22L6.35 15.73C6.66 17.34 7.16 18.92 7.86 20.45M12 2C12 2 17 4 17 12C17 15.1 16.25 17.75 15.33 19.83C15 20.55 14.29 21 13.5 21H10.5C9.71 21 9 20.55 8.67 19.83C7.76 17.75 7 15.1 7 12C7 4 12 2 12 2M12 12C13.1 12 14 11.1 14 10C14 8.9 13.1 8 12 8C10.9 8 10 8.9 10 10C10 11.1 10.9 12 12 12Z'
 const CRANE_PATH = 'M20,6V5A1,1 0 0,0 19,4H9V3H6V4H5V6H6V15H5V13H3V15H2V17H3V21H5V17H10V21H12V19.92L12,17H13V15H12V13H10V15H9V6H17V10.62C16.53,10.79 16.19,11.23 16.19,11.76C16.19,12.2 16.43,12.6 16.8,12.82V14H17.42C17.76,14 18.03,14.28 18.03,14.62C18.03,14.96 17.76,15.24 17.42,15.24C17.2,15.24 17,15.12 16.89,14.93C16.71,14.64 16.34,14.54 16.05,14.71C15.75,14.87 15.65,15.25 15.82,15.55C16.15,16.11 16.76,16.47 17.42,16.47C18.43,16.47 19.26,15.64 19.26,14.62C19.26,13.84 18.76,13.14 18.03,12.88V12.82C18.41,12.6 18.65,12.2 18.65,11.76C18.65,11.3 18.38,10.91 18,10.7V6H20M8,13.66L7,14.66V13.24L8,12.24V13.66M8,10.71L7,11.71V10.29L8,9.29V10.71M7,8.71V7.29L8,6.29V7.71L7,8.71Z'
 const MAP_MARKER_PATH = 'M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z'
 const RADAR_PATH = 'M19.07,4.93L17.66,6.34C19.1,7.79 20,9.79 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12C4,7.92 7.05,4.56 11,4.07V6.09C8.16,6.57 6,9.03 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12C18,10.34 17.33,8.84 16.24,7.76L14.83,9.17C15.55,9.9 16,10.9 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12C8,10.14 9.28,8.59 11,8.14V10.28C10.4,10.63 10,11.26 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12C14,11.26 13.6,10.62 13,10.28V2H12A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12C22,9.24 20.88,6.74 19.07,4.93Z'
 const FLAG_PATH = 'M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'
+const TAG_PATH = 'M3,3H11L21,13L13,21L3,11ZM7.5,6A1.5,1.5 0 1,0 7.5,9A1.5,1.5 0 1,0 7.5,6Z'
 // MDI draws these two off the middle of their square, the crane to the left and the flag to the lower right.
 const CRANE_OFFSET = [1, 0]
 const FLAG_OFFSET = [-0.5, -0.5]
+
+// How the race regards an alien contact, as a shape inside the contact's disc besides its colour: a cross for hostile, a question mark for a race not yet identified, a bar for neutral, a tick for friendly, a star for allied, a dot for civilian. They are drawn on the map and in its legend, so the relationships tell apart without colour.
+const CONTACT_PATHS = {
+  hostile: 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z',
+  unknown: 'M10,19H13V22H10V19M12,2C17.35,2.22 19.68,7.62 16.5,11.67C15.67,12.67 14.33,13.33 13.67,14.17C13,15 13,16 13,17H10C10,15.33 10,13.92 10.67,12.92C11.33,11.92 12.67,11.33 13.5,10.67C15.92,8.43 15.32,5.26 12,5A3,3 0 0,0 9,8H6A6,6 0 0,1 12,2Z',
+  neutral: 'M19,13H5V11H19V13Z',
+  friendly: 'M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z',
+  allied: 'M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.63L12,2L9.19,8.63L2,9.24L7.45,13.97L5.82,21L12,17.27Z',
+  civilian: 'M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z',
+}
 
 // What Show adds to the map: glyphs round a system's marker, or lines under its name. `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for the lines under the name; `offset` centres an icon MDI draws off the middle of its square (see MapGlyph).
 const MARKS = [
@@ -392,8 +474,10 @@ const MARKS = [
   { value: 'ships', text: 'Ships', short: 'ships', place: 'glyph', path: ROCKET_PATH, color: 'yours' },
   { value: 'shipyards', text: 'Shipyards', short: 'shipyards', place: 'glyph', path: CRANE_PATH, color: 'yours', offset: CRANE_OFFSET },
   { value: 'waypoints', text: 'Waypoints', short: 'waypoints', place: 'glyph', path: MAP_MARKER_PATH, color: 'yours' },
+  { value: 'remote', text: 'Remote ground formations', short: 'remote formations', place: 'glyph', path: SHIELD_PATH, color: 'yours' },
   { value: 'contacts', text: 'Alien contacts now', short: 'contacts', place: 'glyph', path: RADAR_PATH, color: 'danger' },
   { value: 'flags', text: 'System flags', short: 'flags', place: 'glyph', path: FLAG_PATH, color: 'ring', offset: FLAG_OFFSET },
+  { value: 'tags', text: 'Tagged bodies', short: 'tagged bodies', place: 'glyph', path: TAG_PATH, color: 'yours' },
   { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', path: ALERT_PATH, offset: [0, 0.5] },
   { value: 'discovered', text: 'Discovery date', short: 'discovery', place: 'line', path: CALENDAR_PATH, offset: [0, 1] },
 ]
@@ -401,6 +485,9 @@ const MARKS = [
 const MARK_HEADERS = { glyph: 'Round the marker', line: 'Under the name' }
 
 const MARK_GROUPS = Object.keys(MARK_HEADERS).map((place) => ({ place, header: MARK_HEADERS[place], marks: MARKS.filter((mark) => mark.place === place) }))
+
+// The rule behind what a mark shows, for the marks that work a figure out (utilities/map-figures.js, map-features.js); the others show stored rows as they are.
+const MARK_RULES = { habitable: 'map.bodiesByCost', ruins: 'map.ruinState', danger: 'map.dangerFlag', discovered: 'map.discoveredDate' }
 
 const PHASES = {
   stress: 'Spreading the systems out',
@@ -416,8 +503,11 @@ const GLYPH_RADIUS = 8
 const GLYPH_RING = 10
 const MARK_ROOM = 20
 // Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the left first, then over the top and down the right, clear of the name below; only a system with every kind takes the last, at the lower left. The count of habitable worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
-const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210]
+const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210, 150, 180]
 const BADGE_ANGLE = 30
+// The name sits 5 units under the marker, where the last place of GLYPH_ANGLES (180 degrees, straight down) puts a glyph: a system that uses that place moves its name below the glyph.
+const LABEL_GAP = 5
+const labelGapOf = (glyphs, unit) => (glyphs.filter((glyph) => glyph.angle === undefined).length >= GLYPH_ANGLES.length ? LABEL_GAP + Math.ceil((GLYPH_RING + GLYPH_RADIUS) * unit) - 3 : LABEL_GAP)
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes in a hidden or minimised window, so an Arrange carries on there.
 const nextTask = () => new Promise((resolve) => {
@@ -427,7 +517,7 @@ const nextTask = () => new Promise((resolve) => {
   channel.port2.postMessage(null)
 })
 
-// The map as the player left it, per game and race: places with any unsaved moves, the view and the selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
+// The map as the player left it, per campaign and race: places with any unsaved moves, the view and the selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
 const keptMaps = new Map()
 
 const samePlace = (a, b) => Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y)
@@ -443,40 +533,7 @@ const blend = (hex, background, alpha) => {
 
 const rgba = (hex, alpha) => `rgba(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')}, ${alpha})`
 
-// Jumps from `origin` to every system an explored route reaches, over the page's `neighbours`.
-const hopsFrom = (origin, neighbours) => {
-  const hops = { [origin]: 0 }
-  const queue = [origin]
-
-  for (let i = 0; i < queue.length; i += 1) {
-    (neighbours[queue[i]] || []).forEach((other) => {
-      if (hops[other] === undefined) {
-        hops[other] = hops[queue[i]] + 1
-        queue.push(other)
-      }
-    })
-  }
-
-  return hops
-}
-
-const MARKER_BASE_SIZE = 44
-const COLONY_FULL_MILLIONS = 10
-
-// 44 units across for a system with nobody in it, growing towards 104 with colonies and people.
-const markerSize = (colonies, population) => {
-  if (!colonies) {
-    return MARKER_BASE_SIZE
-  }
-
-  const count = Math.log1p(colonies) / Math.log1p(100)
-  const people = Math.log1p(Math.max(0, population)) / Math.log1p(10000)
-  const blended = Math.exp(0.3 * Math.log(Math.max(1e-9, count)) + 0.7 * Math.log(Math.max(1e-9, people)))
-
-  return Math.round(MARKER_BASE_SIZE + 60 * (blended / (1 + blended)))
-}
-
-// The broken rings round empty systems (dots) and comets-only ones (dashes). Cytoscape's own dotted border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out. These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least `least` of them round a system.
+// The broken rings round empty systems (dots), and comets-only ones or those whose state the layer can't tell (dashes). Cytoscape's own dotted border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out. These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least `least` of them round a system.
 const RING_DOTS = { dash: 0, gap: 6, least: 8 }
 const RING_DASHES = { dash: 7, gap: 4, least: 6 }
 
@@ -509,20 +566,32 @@ const ringPattern = (size, scale, { dash, gap, least }) => {
 }
 
 const markerImages = new Map()
+// The text size, family and face the images in `markerImages` were drawn for. Each image with a count carries the whole face, so the images of a typeface or size no longer in force are dropped when another is drawn.
+let markerKind = null
 
 // A clear pixel, for a marker with nothing over its fill. Cytoscape restyles a node without an image each time it draws it, which throws away the picture of the whole map it keeps for panning and zooming, so every frame would draw each system and link again.
 const CLEAR_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
 // What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points, or bodies with ground survey potential), a lock on a pinned system, and `glyphs` round the outside (`{ key, path, offset, color, hollow }`, or a count as `text` at its own `angle`), which the image then has MARK_ROOM for on every side.
-const markerImage = (size, spots, color, pinned, glyphs, surface) => {
+// `type` is `{ family, scale, face }`: the CSS family list the glyphs' counts are written in (the `svg` role of utilities/appearance-font.js), the text size, which scales a glyph with its disc, ring and room, and the data URI of the bold face a bundled family brings (null for a system family, which the image finds by its name).
+const markerImage = (size, spots, color, pinned, glyphs, surface, type) => {
   if (!spots && !pinned && !glyphs.length) {
     return CLEAR_IMAGE
   }
 
-  const key = `${size}|${spots}|${color}|${pinned}|${glyphs.map((glyph) => glyph.key).join(',')}|${surface}`
+  const kind = `${type.scale}|${type.family}|${type.face ? 'face' : ''}`
+
+  if (kind !== markerKind) {
+    markerImages.clear()
+    markerKind = kind
+  }
+
+  const key = `${size}|${spots}|${color}|${pinned}|${glyphs.map((glyph) => glyph.key).join(',')}|${surface}|${glyphs.length ? `${type.scale}|${glyphs.some((glyph) => glyph.text) ? `${type.family}|${type.face ? 'face' : ''}` : ''}` : ''}`
 
   if (!markerImages.has(key)) {
-    const room = glyphs.length ? MARK_ROOM : 0
+    const unit = type.scale
+    const room = glyphs.length ? MARK_ROOM * unit : 0
+    const radius = GLYPH_RADIUS * unit
     const centre = size / 2 + room
     const width = size + 2 * room
     let content = ''
@@ -540,6 +609,7 @@ const markerImage = (size, spots, color, pinned, glyphs, surface) => {
       content += `<g transform="translate(${centre - lock / 2}, ${centre - lock / 2}) scale(${lock / 24})"><path fill="black" stroke="black" stroke-width="3" d="${LOCK_PATH}" /><path fill="white" d="${LOCK_PATH}" /></g>`
     }
 
+    const stack = (type.face ? `ae-glyph, ${type.family}` : type.family).replace(/"/g, "'")
     let next = 0
 
     glyphs.forEach((glyph) => {
@@ -550,18 +620,18 @@ const markerImage = (size, spots, color, pinned, glyphs, surface) => {
       }
 
       const angle = (degrees * Math.PI) / 180
-      const x = centre + (size / 2 + GLYPH_RING) * Math.sin(angle)
-      const y = centre - (size / 2 + GLYPH_RING) * Math.cos(angle)
-      const icon = GLYPH_RADIUS - 2
+      const x = centre + (size / 2 + GLYPH_RING * unit) * Math.sin(angle)
+      const y = centre - (size / 2 + GLYPH_RING * unit) * Math.cos(angle)
+      const icon = radius - 2 * unit
       const scale = (2 * icon) / 24
       const [dx, dy] = glyph.offset || [0, 0]
       const ink = glyph.hollow ? glyph.color : surface
 
-      content += `<circle cx="${x}" cy="${y}" r="${GLYPH_RADIUS}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="1.5" />`
-      content += glyph.text ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Roboto, Arial, sans-serif" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1]}" fill="${ink}">${glyph.text}</text>` : `<path transform="translate(${x - icon + dx * scale}, ${y - icon + dy * scale}) scale(${scale})" fill="${ink}" d="${glyph.path}" />`
+      content += `<circle cx="${x}" cy="${y}" r="${radius}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="${1.5 * unit}" />`
+      content += glyph.text ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="${stack}" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1] * unit}" fill="${ink}">${glyph.text}</text>` : `<path transform="translate(${x - icon + dx * scale}, ${y - icon + dy * scale}) scale(${scale})" fill="${ink}" d="${glyph.path}" />`
     })
 
-    markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${content}</svg>`)}`)
+    markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${type.face && glyphs.some((glyph) => glyph.text) ? `<style>@font-face{font-family:ae-glyph;font-weight:700;src:url(${type.face}) format('woff2')}</style>` : ''}${content}</svg>`)}`)
   }
 
   return markerImages.get(key)
@@ -581,7 +651,7 @@ const ARRANGE_DEFAULTS = { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT
 
 export default {
   name: 'MapPage',
-  components: { LoadState, MapGlyph, SystemView },
+  components: { LoadState, MapGlyph, ProvenanceMark, RecoveryLedger, SystemView, WorldTags },
   mixins: [
     countFormat,
     deepLink,
@@ -606,7 +676,19 @@ export default {
       marks: { key: 'mapMarks', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => MARKS.some((mark) => mark.value === value)) : undefined) },
       // Show can leave the systems it marks nothing at faint.
       dimUnmarked: { key: 'mapDim', default: false, scope: 'race' },
+      // How strongly the secondary marks are drawn (utilities/map-hierarchy.js), shared with the system view and the charts.
+      hierarchy: hierarchyView,
+      // The roles of the remote ground formations the map marks (utilities/remote-formations.js), shared with Survey Progress.
+      remoteRoles: rolesView,
+      // The tag the map is filtered to (mixins/world-tags.js), shared with the Notebook's tags but kept under a key of its own.
+      tagFilter: tagFilterView('mapTagFilter'),
+      // The choices of the recovery ledger's lists.
+      recoveryPlace: { key: 'mapRecoveryPlace', default: 'all', scope: 'race', valid: oneOf(['all', 'lifepod', 'wreck']) },
+      recoveryOwner: { key: 'mapRecoveryOwner', default: 'all', scope: 'race', valid: oneOf(['all', 'own', 'foreign']) },
+      recoveryStatusFilter: { key: 'mapRecoveryStatus', default: 'all', scope: 'race', valid: oneOf(['all', 'pending', 'acknowledged', 'personal']) },
     }),
+    worldTags,
+    recoveryLedger,
   ],
   data() {
     return {
@@ -621,6 +703,8 @@ export default {
       selectedIds: [],
       // The SystemID, as a string, of the system a link names, selected once the map has built it.
       pendingFocus: null,
+      // The WarpPointID of the jump point a link selected in the system of the panel, or null; it counts only once the panel's system has that point charted (`selectedPoint`).
+      pointId: null,
       arrangeMenu: false,
 
       busy: null,
@@ -635,6 +719,9 @@ export default {
       systemDialog: false,
       systemViewId: null,
 
+      // The bold face of the bundled family in force as a data URI, for the counts drawn in marker images: `{ family, uri }`, or null for a family the images find by its name.
+      glyphFace: null,
+
       layers: LAYERS,
       borderOptions: BORDER_OPTIONS,
       linkLengths: LINK_LENGTHS,
@@ -642,6 +729,11 @@ export default {
       spacings: SPACINGS,
       keepTogetherOptions: KEEP_TOGETHER,
       markGroups: MARK_GROUPS,
+      hierarchyLevels: HIERARCHY_LEVELS,
+
+      recoveryDialog: false,
+      recoveryPurpose: OBSERVATION_PURPOSE,
+      recoveryRule: OBSERVATION_RULE,
 
       linkTo,
       place,
@@ -651,6 +743,15 @@ export default {
     ...mapGetters(['database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
     ...mapState('empires', ['games']),
 
+    // The reads behind the ledger feed the ledger alone: the page never waits for them, and a failure of one is shown in the ledger.
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
+
     // The selected race's title, from the empire list the rail and Settings read it from.
     raceTitle() {
       const game = this.games.find((entry) => entry.GameID === this.GameID)
@@ -659,20 +760,50 @@ export default {
       return race ? race.RaceTitle : ''
     },
 
+    // The appearance in force: a switch of preset, light to dark or between two darks, restyles the graph (the `appearance.key` watcher).
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
+    },
+
+    // The typeface and text size in force (utilities/appearance-font.js): the labels of the graph, the names beside the borders and the counts in the glyphs follow them.
+    roles() {
+      return fontRoles()
+    },
+
+    typeface() {
+      return mapFont(this.roles)
+    },
+
+    // The links' colour and width at the level of the hierarchy.
+    linkLook() {
+      return linkStyle(this.hierarchy, this.theme)
+    },
+
+    // The dots of the stage's grid at the level of the hierarchy, as the PNG's grid is drawn.
+    stageStyle() {
+      return { '--map-grid': gridDotColor(this.hierarchy, { border: this.appearance.surfaces.border, background: this.appearance.surfaces.background }) }
+    },
+
+    // What the PNG takes from the screen's state besides the picture of the graph: the hierarchy, background, grid, names and legend (utilities/map-export.js).
+    composition() {
+      return exportComposition({ hierarchy: this.hierarchy, appearance: this.appearance, theme: this.theme, legendRows: this.legendRows, asOf: this.discoveryAsOf && this.discoveryAsOf.text, iconPaths: { 'mdi-lock': LOCK_PATH } })
     },
 
     colors() {
       const { categorical, inkMuted, surface, ink, primary } = this.theme
+      const { contacts, survey, habitability } = this.appearance
       const [blue, orange, green, amber, pink, , violet, red] = categorical
       const outpost = blend(blue, surface, 0.35)
 
       return {
-        done: this.layer === 'colonies' ? blue : green,
-        left: this.layer === 'colonies' ? outpost : orange,
-        ground: pink,
-        unexplored: amber,
+        done: this.layer === 'colonies' ? blue : survey.done,
+        left: this.layer === 'colonies' ? outpost : survey.left,
+        ground: survey.ground,
+        unexplored: survey.unexplored,
         colony: blue,
         outpost,
         none: blend(inkMuted, surface, 0.3),
@@ -680,7 +811,7 @@ export default {
         ink,
         surface,
         primary,
-        link: blend(inkMuted, surface, 0.6),
+        link: this.linkLook.color,
         gate: violet,
         danger: red,
         ruins: amber,
@@ -689,15 +820,16 @@ export default {
         discovery: orange,
         yours: violet,
         // Alien contacts by how the race regards their race.
-        contacts: { hostile: red, unknown: red, neutral: amber, friendly: green, allied: blue, civilian: inkMuted },
+        contacts,
         // Habitability's shades, the best band first.
-        bands: [blue, blend(blue, surface, 0.55), blend(blue, surface, 0.25)],
+        bands: [habitability.band, blend(habitability.band, surface, 0.55), blend(habitability.band, surface, 0.25)],
         stars: { hole: violet, giant: green, hot: blue, yellow: amber, orange, red, white: blend(blue, '#ffffff', 0.35), brown: blend(orange, '#000000', 0.6) },
       }
     },
 
+    // The key of the race's own values and of the kept map: the campaign the open save belongs to and the race. Null until the recorder has settled the save to a campaign (and again while the next copy of the save is read), so nothing is kept or restored then.
     settingsPrefix() {
-      return `game.${this.GameID}.race.${this.RaceID}`
+      return this.$store.getters.racePrefix
     },
 
     systemRows() {
@@ -709,9 +841,9 @@ export default {
         Ycor: system.Ycor,
         SectorID: system.SectorID || null,
         ControlRaceID: system.ControlRaceID || null,
-        DiscoveredTime: system.DiscoveredTime,
-        // Light years, scaled as the old map did so a free layout's links stay on screen.
-        galactic: system.X === null || system.X === undefined ? null : { x: system.X * 18, y: system.Y * 18, z: system.Z * 18 },
+        // The game time the race found it, null where the save has none: unknown, not the game's start.
+        DiscoveredTime: Number.isFinite(system.DiscoveredTime) ? system.DiscoveredTime : null,
+        galactic: galacticPosition(system),
         bodies: system.Bodies || 0,
         surveyedBodies: system.SurveyedBodies || 0,
         cometsOnly: system.Bodies > 0 && !system.Planets && system.Comets === system.Bodies,
@@ -719,14 +851,16 @@ export default {
         locations: system.Locations || 0,
         surveyedLocations: system.SurveyedLocations || 0,
         colonies: system.Colonies || 0,
-        population: system.Population || 0,
+        // Millions of people, null where a colony there has no stored population.
+        population: colonyPopulation(system),
         capital: Boolean(system.Capital),
-        danger: system.DangerRating || 0,
+        // Null where the save has no danger rating: unknown, not no danger.
+        danger: Number.isFinite(system.DangerRating) ? system.DangerRating : null,
         stars: system.Stars || 0,
         starGroup: starGroup(system.SpectralClass, system.SizeText),
         star: starText(system),
         flags: [system.NoAutoRoute && 'Auto-routing blocked', system.MilitaryRestrictedSystem && 'Military restricted', system.MineralSearchFlag && 'Mineral search flagged'].filter(Boolean),
-        size: markerSize(system.Colonies || 0, system.Population || 0),
+        size: markerSize(system.Colonies || 0, colonyPopulation(system)),
       }))
     },
 
@@ -767,7 +901,7 @@ export default {
         const key = from < to ? `${from}-${to}` : `${to}-${from}`
 
         if (!links.has(key)) {
-          links.set(key, { id: `link-${key}`, source: from, target: to, gateSource: false, gateTarget: false, km: 0 })
+          links.set(key, { id: `link-${key}`, source: from, target: to, gateSource: false, gateTarget: false, points: [] })
         }
 
         const link = links.get(key)
@@ -776,19 +910,20 @@ export default {
           link[link.source === from ? 'gateSource' : 'gateTarget'] = true
         }
 
-        link.km += Math.hypot(jumpPoint.Xcor, jumpPoint.Ycor)
+        link.points.push(jumpPoint)
       })
 
-      const list = [...links.values()].map((link) => {
-        const a = rowById[link.source].galactic
-        const b = rowById[link.target].galactic
+      const list = [...links.values()].map(({ points, ...link }) => {
+        const distance = linkDistance(points)
+        const galactic = galacticDistance(rowById[link.source].galactic, rowById[link.target].galactic)
 
         return {
           ...link,
           gate: link.gateSource && link.gateTarget ? 'both' : link.gateSource ? 'source' : link.gateTarget ? 'target' : 'none',
-          // From star to star through the jump point, in billions of km, as the free layouts want it.
-          travel: scaleValue(link.km / 1e9),
-          galactic: a && b ? Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) : null,
+          distance,
+          // From star to star through the jump point, in billions of km, as the free layouts want it; null where a jump point has no stored position.
+          travel: travelLength(distance),
+          galactic: valueOrNull(galactic),
         }
       })
 
@@ -816,7 +951,7 @@ export default {
     },
 
     hops() {
-      return this.capitalId ? hopsFrom(this.capitalId, this.neighbours) : {}
+      return this.capitalId ? jumpsFromOrigin(this.capitalId, this.neighbours) : {}
     },
 
     // The one system selected, else the capital: where Jumps and Travel measure from, and what the centre button centres on.
@@ -835,37 +970,25 @@ export default {
         return {}
       }
 
-      return originId === this.capitalId ? this.hops : hopsFrom(originId, this.neighbours)
+      return originId === this.capitalId ? this.hops : jumpsFromOrigin(originId, this.neighbours)
     },
 
+    // The most jumps to a system from the origin, or null when no other system is reached.
     farthestHop() {
-      return Math.max(1, ...Object.values(this.originHops))
+      return farthestOf(this.originHops)
     },
 
-    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's galactic map measures distance.
+    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's galactic map measures distance: { km, left }, `left` the explored jump points with no stored position, which no route uses.
+    originDistances() {
+      return kmFromOrigin(this.jumpPoints, this.systemRows, this.originId)
+    },
+
     originKm() {
-      const { originId } = this
-      const km = {}
-
-      if (!originId) {
-        return km
-      }
-
-      const distanceTo = buildDistanceMap(this.jumpPoints, [{ SystemID: Number(originId), Xcor: 0, Ycor: 0 }])
-
-      this.systemRows.forEach((row) => {
-        const found = distanceTo({ SystemID: row.SystemID, Xcor: 0, Ycor: 0 })
-
-        if (found) {
-          km[row.id] = found.km
-        }
-      })
-
-      return km
+      return this.originDistances.km
     },
 
     farthestKm() {
-      return Math.max(1, ...Object.values(this.originKm))
+      return farthestOf(this.originKm)
     },
 
     // Colony costs are worked out only while the map shows them: every body of a large galaxy takes a while.
@@ -895,6 +1018,20 @@ export default {
       }
 
       return this.currentHabitability.species ? null : 'No species of the race to work out colony costs for'
+    },
+
+    // What the colony costs lack, as a missing input names it, or null once they are worked out.
+    habitabilityGap() {
+      if (this.currentHabitability) {
+        return this.currentHabitability.species ? null : 'a species of the race to work out colony costs for'
+      }
+
+      return this.loadErrors.habitability ? 'the colony costs, which couldn\'t be worked out' : 'the colony costs, not worked out yet'
+    },
+
+    // How many systems have each colony cost band as their best: unavailable until the costs are worked out, when every system's band is unknown rather than none.
+    habitabilityCounts() {
+      return legendCounts(this.currentHabitability, this.systemRows, { reason: this.habitabilityGap, version: this.formulaVersion })
     },
 
     // Each system's count of bodies per band of COLONY_COST_BANDS, for systems with any.
@@ -1066,6 +1203,7 @@ export default {
         'ruins-identified': { path: PILLAR_PATH, color: colors.ruins, label: 'Ruins, their builders identified' },
         'ruins-found': { path: PILLAR_PATH, color: colors.ruins, hollow: true, label: 'Ruins, builders unknown' },
         'ruins-used': { path: PILLAR_PATH, color: colors.ring, hollow: true, label: 'Ruins with nothing left to recover' },
+        'ruins-unknown': { path: PILLAR_PATH, color: colors.ring, label: 'Ruins, installations left not stored' },
         'constructs-active': { path: PYRAMID_PATH, color: colors.construct, label: 'Active ancient construct' },
         'constructs-dormant': { path: PYRAMID_PATH, color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
         rifts: { path: HURRICANE_PATH, color: colors.rift, label: 'Aether rift' },
@@ -1074,42 +1212,71 @@ export default {
         'ships-commercial': { path: ROCKET_PATH, color: colors.yours, hollow: true, label: 'Commercial ships only' },
         shipyards: { path: CRANE_PATH, offset: CRANE_OFFSET, color: colors.yours, label: 'Shipyards' },
         waypoints: { path: MAP_MARKER_PATH, color: colors.yours, label: 'Waypoints' },
+        remote: { path: SHIELD_PATH, color: colors.yours, label: 'Systems with remote ground formations' },
         // The most threatening contacts there decide the glyph; a race not yet identified is drawn hollow.
         ...Object.fromEntries(CONTACT_ORDER.map((status) => [`contacts-${status}`, {
-          path: RADAR_PATH,
+          path: CONTACT_PATHS[status],
           color: colors.contacts[status],
           hollow: status === 'unknown',
           label: status === 'unknown' ? 'Alien contacts now, of a race not yet identified' : `${status.charAt(0).toUpperCase()}${status.slice(1)} alien contacts now`,
         }])),
         flags: { path: FLAG_PATH, offset: FLAG_OFFSET, color: colors.ring, label: 'Flagged system' },
+        tags: { path: TAG_PATH, color: colors.yours, label: 'Systems with tagged bodies' },
+        'tags-stale': { path: TAG_PATH, color: colors.yours, hollow: true, label: 'Systems whose tagged bodies are all gone' },
       }
+    },
+
+    // The race's ground formations as one model while the map marks them, else null (also null for a save without what the model reads: `groundFormations.supported` is then false).
+    remoteModel() {
+      return this.groundFormations && this.groundFormations.supported ? this.groundFormations : null
+    },
+
+    // The systems that hold remote formations of the selected roles, and the ones with no known system (`remoteSystems`).
+    remoteGrouping() {
+      return this.remoteModel ? remoteSystems(this.remoteModel, this.remoteRoles) : null
+    },
+
+    remoteBySystem() {
+      return this.remoteGrouping ? this.remoteGrouping.systems : {}
+    },
+
+    // The remote formations of the race by role, whatever roles are selected.
+    remoteTotals() {
+      return this.remoteModel ? roleTotals(this.remoteModel, (_node, place) => place.remote === true) : null
+    },
+
+    remoteRoleOptions() {
+      return ROLE_OPTIONS.filter((option) => option.value !== 'unknown' || this.remoteTotals.unknown > 0)
     },
 
     // The first and last time the race found a system after the game began, in seconds of game time.
     discoveryRange() {
-      const times = this.systemRows.map((row) => row.DiscoveredTime).filter((time) => time > 0)
-
-      return times.length ? { first: Math.min(...times), last: Math.max(...times) } : null
+      return discoveryRange(this.systemRows)
     },
 
-    // The Discovery era's As of slider, from the game's start to the year the last system was found: the year chosen and the game time its end comes at, which the systems found from then on fade behind.
-    discoveryAsOf() {
-      const range = this.discoveryRange
+    // The game's start date as a result: unavailable while the start year is not read, when no date the map shows can be known.
+    gameStart() {
+      return discoveredDate(this.StartYear, 0)
+    },
 
-      if (!range) {
+    // The Discovery era's As of as a result (null when the race found no system after the game began), unavailable without the game's start year.
+    discoveryEra() {
+      return discoveryAsOf(this.systemRows, this.discoveryRange, this.StartYear, this.discoveryYear)
+    },
+
+    // The Discovery era's As of slider, from the game's start to the year the last system was found: the year chosen and the game time its end comes at, which the systems found from then on fade behind. Systems with no stored discovery time count in neither the known nor the total, and the text says how many there are.
+    discoveryAsOf() {
+      const era = this.discoveryEra
+
+      if (!isAvailable(era)) {
         return null
       }
 
-      const start = gameTime(this.StartYear, 0)
-      const min = start.year()
-      const max = gameTime(this.StartYear, range.last).year()
-      const year = this.discoveryYear === null ? max : Math.min(max, Math.max(min, this.discoveryYear))
-      const cutoff = year < max ? start.set('year', year + 1).diff(start, 'second') : null
-      const known = cutoff === null ? this.systemRows.length : this.systemRows.filter((row) => !(row.DiscoveredTime >= cutoff)).length
+      const { min, max, year, cutoff, known, dated, undated } = era.value
+      const unknown = undated ? `, ${this.count(undated)} with no date stored` : ''
+      const text = (shown, systems) => `As of ${discoveryYearText(this.StartYear, shown)}: ${this.count(systems)} of ${this.count(dated)} systems known${unknown}`
 
-      const text = (shown, systems) => `As of ${start.set('year', shown).format('YYYY')}: ${this.count(systems)} of ${this.count(this.systemRows.length)} systems known`
-
-      return { min, max, year, cutoff, text: text(year, known), widest: text(max, this.systemRows.length) }
+      return { min, max, year, cutoff, text: text(year, known), widest: text(max, dated) }
     },
 
     discoveryCutoff() {
@@ -1126,23 +1293,38 @@ export default {
       }))
 
       MARKS.filter((mark) => this.marksSet.has(mark.value)).forEach((mark) => {
+        const rule = MARK_RULES[mark.value]
+
         if (mark.value === 'habitable' && this.habitabilityNote) {
-          items.push({ kind: 'note', label: `${mark.text}: ${this.habitabilityNote.charAt(0).toLowerCase()}${this.habitabilityNote.slice(1)}` })
+          items.push({ kind: 'note', label: `${mark.text}: ${this.habitabilityNote.charAt(0).toLowerCase()}${this.habitabilityNote.slice(1)}`, result: this.habitabilityCounts })
+        } else if (mark.value === 'discovered' && !isAvailable(this.gameStart)) {
+          items.push({ kind: 'note', label: `${mark.text}: unknown, the game's start year is not read`, result: this.gameStart })
+        } else if (mark.value === 'remote' && !this.remoteModel) {
+          items.push({ kind: 'note', label: this.groundFormations ? `${mark.text}: unknown, the save lacks ${fieldList(this.groundFormations.missing)}` : `${mark.text}: reading the ground formations` })
         } else if (mark.place === 'glyph') {
           const names = Object.keys(this.glyphStyles).filter((name) => name === mark.value || name.startsWith(`${mark.value}-`))
           const shown = names.filter((name) => counts[name])
 
-          shown.forEach((name) => items.push({ kind: 'glyph', ...this.glyphStyles[name], label: `${this.glyphStyles[name].label} (${counts[name]})` }))
+          shown.forEach((name) => items.push({ kind: 'glyph', ...this.glyphStyles[name], label: `${this.glyphStyles[name].label} (${counts[name]})`, rule }))
 
           if (!shown.length) {
             items.push({ kind: 'note', label: `${mark.text}: none known` })
+          }
+
+          if (mark.value === 'remote') {
+            const { unplaced } = this.remoteGrouping
+
+            items.push({ kind: 'note', label: `${REMOTE_LEGEND}${unplaced.length ? `; ${this.count(unplaced.length)} remote ${unplaced.length === 1 ? 'formation has' : 'formations have'} no known system and no mark` : ''}` })
           }
         } else {
           const systems = this.systemRows.filter((row) => this.markText(mark.value, row)).length
           const sample = { danger: '40 / 25', discovered: 'Date' }[mark.value]
           const label = { danger: 'Danger / protection, ⚠ where it falls short', discovered: 'Date found after the game began' }[mark.value]
+          // Systems whose line can't be fully known: a danger line whose protection is not stored (shown with a dash, and among the systems with a line), and systems with no danger rating or no discovery time stored, which have no line.
+          const unknown = mark.value === 'danger' ? [[this.systemRows.filter((row) => row.danger > 0 && !isAvailable(this.dangerOf(row))).length, 'with the protection there unknown'], [this.systemRows.filter((row) => row.danger === null).length, 'with no danger rating stored']] : [[this.systemRows.filter((row) => discoveryUnknown(row.DiscoveredTime)).length, 'with no date stored']]
+          const unknownText = unknown.filter(([systems]) => systems).map(([systems, text]) => `, ${systems} ${text}`).join('')
 
-          items.push(systems ? { kind: 'sample', sample, label: `${label} (${systems})` } : { kind: 'note', label: `${mark.text}: none known` })
+          items.push(systems || unknownText ? { kind: 'sample', sample, label: `${label} (${systems}${unknownText})`, rule } : { kind: 'note', label: `${mark.text}: none known` })
         }
       })
 
@@ -1300,8 +1482,52 @@ export default {
       return this.selectedRows.length === 1 ? this.selectedRows[0] : null
     },
 
+    // The system whose bodies the tag form offers: the one in the panel.
+    tagSystemId() {
+      return this.panelSystem ? this.panelSystem.SystemID : null
+    },
+
+    // The tags of the body in the panel's system, whatever the filter says.
+    panelTags() {
+      const there = this.panelSystem ? this.tagAllSystems[this.panelSystem.id] : null
+
+      return there ? there.entries : []
+    },
+
+    // The tag filter's choices with the number of bodies each holds.
+    tagItems() {
+      return this.tagOptions.map((option) => ({ text: `${option.text} (${option.count})`, value: option.value }))
+    },
+
+    // What the markers show of the tags: the systems the filter lets through and whether each holds only stale tags, which is all the map redraws for.
+    tagSignature() {
+      return JSON.stringify([this.tagFilterValue, Object.entries(this.tagSystems).map(([id, there]) => [id, there.stale])])
+    },
+
     linkQuery() {
-      return this.pendingFocus ? null : linkTo.map(this.panelSystem ? this.panelSystem.SystemID : null).query
+      return this.pendingFocus ? null : linkTo.map(this.panelSystem ? this.panelSystem.SystemID : null, this.ready ? (this.selectedPoint ? this.selectedPoint.jumpPoint.WarpPointID : null) : this.pointId).query
+    },
+
+    // The race's charted jump points as the game names them (JP2: Alpha), for the one a link selects.
+    pointPlaces() {
+      return jumpPointPlaces(this.jumpPoints, (id) => (this.rowById[id] || {}).Name || `System #${id}`)
+    },
+
+    // The jump point the link selected: one of the panel's system that the race has charted, as a place of utilities/places.js, or null.
+    selectedPoint() {
+      const system = this.panelSystem
+
+      return system && this.pointId !== null ? this.pointPlaces.find((entry) => entry.jumpPoint.WarpPointID === this.pointId && entry.jumpPoint.SystemID === system.SystemID) || null : null
+    },
+
+    // The selected point while the System view shows its system, so it is drawn there.
+    viewedPoint() {
+      return this.selectedPoint && this.systemDialog && String(this.systemViewId) === String(this.selectedPoint.jumpPoint.SystemID) ? this.selectedPoint : null
+    },
+
+    // A point a link named that the settled map cannot show: the map has applied the link's system (`pendingFocus` is done) and has its jump points, and the panel's system, if any, does not have that point charted.
+    pointRejected() {
+      return this.ready && !this.pendingFocus && this.pointId !== null && !this.selectedPoint
     },
 
     linkLabel() {
@@ -1332,28 +1558,39 @@ export default {
       const hops = this.hops[system.id]
       const group = this.groupOf[system.id]
       const features = this.features[system.id] || NO_FEATURES
-      const bands = this.habitableBands[system.id]
+      const people = system.colonies ? populationText(system.population, this.count) : null
+      const geological = system.bodies ? surveyShare(system.surveyedBodies, system.bodies) : null
+      const gravitational = system.locations ? surveyShare(system.surveyedLocations, system.locations) : null
+      const discovered = discoveredDate(this.StartYear, system.DiscoveredTime)
+      const costs = bodiesByCost(this.currentHabitability, system.id, { reason: this.habitabilityGap, version: this.formulaVersion })
+      const ruins = features.ruins.map((ruin) => ({ ruin, state: ruinState(ruin) }))
+      const constructs = features.constructs.map((construct) => ({ construct, bonus: construct.active ? constructBonus(construct) : null }))
+      const bonuses = constructs.map((entry) => entry.bonus).filter(Boolean)
+      const danger = system.danger === 0 ? null : this.dangerOf(system)
       const facts = [
-        { label: 'From the capital', value: hops === undefined ? 'No explored route' : hops === 0 ? 'Capital' : `${hops} ${hops === 1 ? 'jump' : 'jumps'}` },
+        { label: 'From the capital', value: hops === undefined ? 'No explored route' : hops === 0 ? 'Capital' : `${hops} ${hops === 1 ? 'jump' : 'jumps'}`, result: jumpsTo(this.hops, system.id) },
         { label: 'Held by', value: this.controllerName(system) },
-        { label: 'Colonies', value: system.colonies ? `${system.colonies}, ${this.count(system.population, system.population < 10 ? 2 : 0)} m people` : 'None' },
-        { label: 'Geological', value: system.bodies ? `${this.count(system.surveyedBodies)} of ${this.count(system.bodies)} bodies surveyed${system.groundSurveys ? `, ${system.groundSurveys} with ground survey potential` : ''}` : 'No bodies' },
-        { label: 'Gravitational', value: system.locations ? `${system.surveyedLocations} of ${system.locations} survey locations` : 'No survey locations' },
+        { label: 'Colonies', value: people ? `${system.colonies}, ${isAvailable(people) ? people.value : 'population not stored'}` : 'None', result: people },
+        { label: 'Geological', value: system.bodies ? `${this.count(system.surveyedBodies)} of ${this.count(system.bodies)} bodies surveyed (${geological.value}%)${system.groundSurveys ? `, ${system.groundSurveys} with ground survey potential` : ''}` : 'No bodies', result: geological },
+        { label: 'Gravitational', value: system.locations ? `${system.surveyedLocations} of ${system.locations} survey locations (${gravitational.value}%)` : 'No survey locations', result: gravitational },
         { label: 'Jump points', value: this.jumpPointSummary(system) },
-        { label: 'Discovered', value: gameTime(this.StartYear, system.DiscoveredTime || 0).format('YYYY-MM-DD') },
+        { label: 'Discovered', value: isAvailable(discovered) ? discovered.value : '—', result: discovered },
         // What Show can mark, wherever the system has any, shown or not.
         system.star && { label: system.stars > 1 ? 'Stars' : 'Star', value: system.star },
-        // Each band counts the bodies not already in a lower one.
-        bands && { label: 'Bodies by colony cost', value: COLONY_COST_BANDS.map((limit, band) => ({ limit, bodies: bands[band] })).filter((part) => part.bodies).map((part, index) => `${part.bodies} ${index ? 'more ' : ''}under ${part.limit}`).join(', ') },
-        features.ruins.length && { label: 'Ruins', value: features.ruins.map((ruin) => `${ruin.body}: ${ruin.ruin}${ruin.race ? ` built by ${ruin.race}` : ''}, ${ruin.factories ? `${this.count(ruin.factories)} installations left` : 'nothing left'}`).join('; ') },
+        // Each band counts the bodies not already in a lower one. Unknown while the costs are not worked out, which the map does only while it shows them.
+        (isAvailable(costs) || this.needsHabitability) && { label: 'Bodies by colony cost', value: isAvailable(costs) ? costs.value || `None under ${COLONY_COST_BANDS[COLONY_COST_BANDS.length - 1]}` : '—', result: costs },
+        ruins.length && { label: 'Ruins', value: ruins.map(({ ruin, state }) => `${ruin.body}: ${ruin.ruin}${ruin.race ? ` built by ${ruin.race}` : ''}, ${!isAvailable(state) ? 'installations left not stored' : ruin.factories > 0 ? `${this.count(ruin.factories)} installations left` : 'nothing left'}`).join('; '), result: weakestResult(ruins.map((entry) => entry.state)) },
         // As the game shows them, a dormant construct keeps its field and bonus hidden.
-        features.constructs.length && { label: 'Ancient constructs', value: features.constructs.map((construct) => `${construct.body}: ${construct.active ? `${construct.field} research +${Math.round((construct.bonus - 1) * 100)}%` : 'dormant'}`).join('; ') },
-        features.wrecks && { label: 'Wrecks', value: this.count(features.wrecks) },
+        constructs.length && { label: 'Ancient constructs', value: constructs.map(({ construct, bonus }) => `${construct.body}: ${!bonus ? 'dormant' : isAvailable(bonus) ? `${construct.field} research +${bonus.value}%` : `${construct.field} research, bonus not stored`}`).join('; '), result: bonuses.length ? weakestResult(bonuses) : null },
+        features.ownWrecks && { label: 'Own wrecks', value: this.count(features.ownWrecks) },
+        features.wrecks - (features.ownWrecks || 0) > 0 && { label: 'Foreign wrecks', value: this.count(features.wrecks - (features.ownWrecks || 0)) },
         features.rifts && { label: 'Aether rifts', value: this.count(features.rifts) },
-        system.danger > 0 && { label: 'Danger', value: `${this.count(system.danger)}, protection ${this.count(features.protection)}` },
+        // A system with no danger rating stored shows a dash; one whose ships' protection is not stored shows the rating and a dash for the protection, with no ⚠.
+        danger && { label: 'Danger', value: system.danger === null ? '—' : `${this.count(system.danger)}, protection ${Number.isFinite(features.protection) ? this.count(features.protection) : '—'}${danger.value ? ' ⚠' : ''}`, result: danger },
         features.ships && { label: 'Ships', value: `${this.count(features.ships)}${features.military ? `, ${this.count(features.military)} of them military` : ''}` },
         features.shipyards && { label: 'Shipyards', value: this.count(features.shipyards) },
         features.waypoints && { label: 'Waypoints', value: this.count(features.waypoints) },
+        this.remoteBySystem[system.id] && { label: 'Remote ground formations', value: systemText(this.remoteBySystem[system.id], this.count), title: 'Open them in Survey Progress', action: () => this.$router.push(linkTo.formations(system.SystemID)) },
         features.contacts.length && { label: 'Alien contacts now', value: features.contacts.map((contact) => `${this.count(contact.count)} ${contact.status === 'unknown' ? 'unidentified' : contact.status}`).join(', ') },
         system.flags.length && { label: 'Flags', value: system.flags.join(', ') },
       ].filter(Boolean)
@@ -1377,15 +1614,17 @@ export default {
       // Borders round the groups the layer colours by: those entries show the border's swatch too.
       const merged = this.borders === this.layer && (this.layer === 'sectors' || this.layer === 'control' || this.layer === 'groups')
       const shaped = new Set(this.borderLegend.map((entry) => entry.owner))
-      const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, label })
+      const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, clip: this.clipOf(owner.color), tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, clip: this.clipOf(owner.color), label })
       const systemsWhere = (test) => this.systemRows.filter(test).length
       const systemsText = (systems) => `${systems} ${systems === 1 ? 'system' : 'systems'}`
+      // A system whose state the layer can't tell is drawn hollow with a dashed ring.
+      const unknown = (label, extra = {}) => ({ kind: 'ring', color: colors.ring, style: 'dashed', label, ...extra })
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
         const geological = this.layer === 'geological'
 
         items.push(
-          { kind: 'dot', color: colors.done, label: geological ? 'Bodies surveyed' : 'Locations surveyed' },
+          { kind: 'dot', color: colors.done, label: geological ? 'Bodies surveyed' : 'Locations surveyed', rule: 'map.surveyShare' },
           { kind: 'dot', color: colors.left, label: 'Left to survey' },
           { kind: 'ring', color: colors.ring, style: 'dotted', label: `${geological ? 'No bodies' : 'No survey locations'} (${systemsWhere((row) => !(geological ? row.bodies : row.locations))})` }
         )
@@ -1399,12 +1638,18 @@ export default {
           items.push({ kind: 'spot', color: colors.unexplored, label: `Unexplored jump point (in ${systemsText(systemsWhere((row) => this.links.unexplored[row.id]))})` })
         }
       } else if (this.layer === 'colonies') {
+        const unstored = systemsWhere((row) => row.colonies && row.population === null)
+
         items.push(
           { kind: 'ring', color: colors.ink, label: 'Capital' },
-          { kind: 'dot', color: colors.colony, label: `People, full at ${COLONY_FULL_MILLIONS} M (${systemsWhere((row) => row.colonies && row.population > 0)})` },
-          { kind: 'dot', color: colors.outpost, label: `Zero people (${systemsWhere((row) => row.colonies && !(row.population > 0))}) / unfilled` },
+          { kind: 'dot', color: colors.colony, label: `People, full at ${COLONY_FULL_MILLIONS} M (${systemsWhere((row) => row.colonies && row.population > 0)})`, rule: 'map.colonyFill' },
+          { kind: 'dot', color: colors.outpost, label: `Zero people (${systemsWhere((row) => row.colonies && row.population !== null && !(row.population > 0))}) / unfilled` },
           { kind: 'dot', color: colors.none, label: `No colony (${systemsWhere((row) => !row.colonies)})` }
         )
+
+        if (unstored) {
+          items.push(unknown(`Population not stored (${unstored})`, { color: colors.colony }))
+        }
       } else if (this.layer === 'sectors') {
         this.sectors.forEach((sector) => items.push(group(this.sectorById[sector.SectorCommandID], `${sector.SectorName} (${systemsWhere((row) => row.SectorID === sector.SectorCommandID)})`)))
         items.push({ kind: 'dot', color: colors.none, label: `In no sector (${systemsWhere((row) => !this.sectorById[row.SectorID])})` })
@@ -1416,29 +1661,43 @@ export default {
         items.push({ kind: 'dot', color: colors.none, label: `In no cluster (${systemsWhere((row) => this.groupOf[row.id] === undefined)})` })
       } else if (this.layer === 'discovery') {
         const range = this.discoveryRange
-        const year = (time) => gameTime(this.StartYear, time).format('YYYY')
+        const year = (time) => {
+          const date = discoveredDate(this.StartYear, time)
 
-        items.push({ kind: 'ring', color: colors.ink, label: 'Capital' }, { kind: 'dot', color: this.discoveryColor(0), label: `Known from the start (${systemsWhere((row) => !(row.DiscoveredTime > 0))})` })
+          return isAvailable(date) ? date.value.slice(0, 4) : 'year unknown'
+        }
+        const undated = systemsWhere((row) => discoveryUnknown(row.DiscoveredTime))
+
+        items.push({ kind: 'ring', color: colors.ink, label: 'Capital' }, { kind: 'dot', color: this.discoveryColor(0), label: `Known from the start (${systemsWhere((row) => discoveredAtStart(row.DiscoveredTime))})` })
 
         if (range) {
-          items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})` })
+          items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})`, rule: 'map.discoveryShade' })
 
-          if (this.discoveryAsOf.max > this.discoveryAsOf.min) {
+          if (this.discoveryAsOf && this.discoveryAsOf.max > this.discoveryAsOf.min) {
             items.push({ kind: 'slider', label: '' })
           }
         }
+
+        if (undated) {
+          items.push(unknown(`Date found not stored (${undated})`))
+        }
+
+        if (!isAvailable(this.gameStart)) {
+          items.push({ kind: 'note', label: 'Dates unknown: the game\'s start year is not read', result: this.gameStart })
+        }
       } else if (this.layer === 'habitability') {
-        if (this.habitabilityNote) {
-          items.push({ kind: 'note', label: this.habitabilityNote })
+        const counts = this.habitabilityCounts
+
+        if (this.habitabilityNote || !isAvailable(counts)) {
+          items.push({ kind: 'note', label: this.habitabilityNote || 'Colony costs unknown' }, unknown(`Colony costs unknown (${this.systemRows.length})`, { result: counts }))
         } else {
-          const best = this.systemRows.map((row) => this.bestBand(row))
-          const systems = (band) => best.filter((value) => value === band).length
           const last = COLONY_COST_BANDS[COLONY_COST_BANDS.length - 1]
 
           items.push(
-            ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${systems(band)})` })),
-            { kind: 'dot', color: colors.none, label: `None under ${last} (${systems(-1)})` },
-            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds` }
+            ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${counts.value.bands[band]})`, rule: band ? '' : 'map.bestBand' })),
+            { kind: 'dot', color: colors.none, label: `None under ${last} (${counts.value.none})` },
+            ...(counts.value.unknown ? [unknown(`Colony costs unknown, a body's stored value is missing (${counts.value.unknown})`, { result: counts })] : []),
+            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds`, result: counts }
           )
         }
       } else if (this.layer === 'stars') {
@@ -1455,20 +1714,31 @@ export default {
         }
       } else {
         const origin = this.rowById[this.originId]
-        const far = this.layer === 'travel' ? `${this.count(this.farthestKm / 1e9, 1)} billion km` : `${this.farthestHop} ${this.farthestHop === 1 ? 'jump' : 'jumps'}`
-        const distances = this.layer === 'travel' ? this.originKm : this.originHops
+        const travel = this.layer === 'travel'
+        const farthest = travel ? this.farthestKm : this.farthestHop
+        const far = farthest === null ? 'no other system reached' : travel ? `${this.count(farthest / 1e9, 1)} billion km` : `${farthest} ${farthest === 1 ? 'jump' : 'jumps'}`
+        const distances = travel ? this.originKm : this.originHops
+        const { left } = this.originDistances
 
         items.push(
           { kind: 'ring', color: colors.ink, label: origin ? `From ${origin.Name}${origin.id === this.capitalId ? ', the capital' : ''}` : 'From the capital' },
           { kind: 'dot', color: colors.colony, label: 'Near' },
-          { kind: 'dot', color: blend(colors.colony, colors.surface, 0.25), label: `Far (${far})` },
+          { kind: 'dot', color: blend(colors.colony, colors.surface, 0.25), label: `Far (${far})`, rule: travel ? 'map.kmFromOrigin' : 'map.jumpsFromOrigin' },
           { kind: 'dot', color: colors.none, label: `No explored route (${systemsWhere((row) => distances[row.id] === undefined)})` },
           { kind: 'note', label: this.panelSystem ? 'Clear the selection to measure from the capital' : 'Select a system to measure from it' }
         )
+
+        if (travel && left) {
+          items.push({ kind: 'note', label: `${left} charted jump ${left === 1 ? 'point has' : 'points have'} no stored position; routes leave ${left === 1 ? 'it' : 'them'} out` })
+        }
       }
 
       const both = this.links.list.filter((link) => link.gate === 'both').length
       const oneEnd = this.links.list.filter((link) => link.gate === 'source' || link.gate === 'target').length
+
+      if (this.links.list.length > both + oneEnd) {
+        items.push({ kind: 'line', color: colors.link, thickness: this.linkLook.width, label: 'Jump link' })
+      }
 
       if (both) {
         items.push({ kind: 'line', color: colors.gate, label: `Stabilised at both ends (${both})` })
@@ -1519,6 +1789,20 @@ export default {
       return LINK_LENGTHS.find((option) => option.value === this.linkLength).hint
     },
 
+    // The rule behind the link lengths the free layouts take from the save, or '' for a fixed length.
+    linkLengthRule() {
+      return { travel: 'map.linkDistance', galactic: 'map.galacticDistance' }[this.linkLength] || ''
+    },
+
+    // The links whose length the save can't give for the chosen measure: they take the standard length.
+    linkLengthGaps() {
+      const key = { travel: 'travel', galactic: 'galactic' }[this.linkLength]
+      const missing = key ? this.links.list.filter((link) => link[key] === null).length : 0
+      const why = key === 'travel' ? 'a jump point with no stored position' : 'a star with no stored place in the galaxy'
+
+      return missing ? `${missing} ${missing === 1 ? 'link has' : 'links have'} ${why}, so its length is unknown and the layout gives it ${LINK_LENGTHS.find((option) => option.value === 'standard').length} units.` : ''
+    },
+
     busyLabel() {
       if (this.busy === 'arrange') {
         return `${PHASES[this.phase] || 'Arranging'}, ${Math.round(this.progress * 100)}%`
@@ -1527,8 +1811,17 @@ export default {
       return 'Moving the systems'
     },
 
+    // The share of links straight or at 45° on the current layout, unavailable with no links rather than a full score.
+    straightResult() {
+      return straightShare(this.quality)
+    },
+
     qualityText() {
-      const straight = (quality) => `${quality.links ? Math.round((100 * (quality.straight + quality.diagonal)) / quality.links) : 100}%`
+      const straight = (quality) => {
+        const share = straightShare(quality)
+
+        return isAvailable(share) ? `${share.value}%` : '—'
+      }
       const part = (label, value) => (this.before ? `${label} ${value(this.before)} → ${value(this.quality)}` : `${label} ${value(this.quality)}`)
 
       return [
@@ -1538,7 +1831,7 @@ export default {
       ].join(' · ')
     },
 
-    systemDialogTitle() {
+    systemDialogName() {
       return (this.rowById[this.systemViewId] || {}).Name || 'System'
     },
 
@@ -1547,7 +1840,7 @@ export default {
     },
   },
   watch: {
-    // The map's settings are kept per game and race; another race starts a fresh map.
+    // The map's settings are kept per campaign and race; another race starts a fresh map.
     RaceID: {
       immediate: true,
       handler() {
@@ -1555,6 +1848,20 @@ export default {
         this.discoveryYear = null
         this.resetGraph()
       },
+    },
+
+    // A campaign that settles after the race is picked (a new save, or a campaign answered on the History page) moves the map to its key. The prefix going null while the same save is read again changes nothing, and the same prefix settling again is the map already shown.
+    settingsPrefix(prefix) {
+      if (prefix !== null && prefix !== this.mapKey) {
+        this.retargetKept()
+      }
+    },
+
+    // A point stays selected only while the panel shows its system: once the link has settled and the panel's system does not hold it charted, the point goes, so it cannot reappear when that system is selected later.
+    pointRejected(rejected) {
+      if (rejected) {
+        this.pointId = null
+      }
     },
 
     ready(value) {
@@ -1596,6 +1903,10 @@ export default {
       this.restyle()
     },
 
+    tagSignature() {
+      this.restyle()
+    },
+
     // Dim and As of change only what is faint, so they skip rebuilding the markers: As of follows its slider as it moves.
     dimUnmarked() {
       this.refade()
@@ -1608,6 +1919,14 @@ export default {
     },
 
     features() {
+      this.restyle()
+    },
+
+    remoteRoles() {
+      this.restyle()
+    },
+
+    groundFormations() {
       this.restyle()
     },
 
@@ -1630,11 +1949,56 @@ export default {
       }
     },
 
-    '$vuetify.theme.dark'() {
+    // The counts in the marker images are drawn in the bundled face of the family in force, which the image carries.
+    'roles.family'(family) {
+      this.glyphFace = null
+      this.glyphReady = this.loadGlyphFace(family)
+    },
+
+    glyphFace() {
+      this.restyle()
+    },
+
+    // A change of typeface or text size restyles the graph and measures the names again. Cytoscape keeps the size of a label under a key made of the font's name and size, which a face that loads afterwards leaves as it was, so the keys are dropped first.
+    typeface() {
+      if (this.graph) {
+        this.labelPlaces = null
+        this.graph.elements().forEach((element) => {
+          element._private.rscratch.prefixedLabelDimsKey = null
+        })
+        this.graph.style(this.stylesheet())
+        this.restyle()
+        this.paintBorders()
+
+        if (this.minimap) {
+          this.minimap.refresh()
+        }
+      }
+    },
+
+    'appearance.key'() {
       if (this.graph) {
         this.graph.style(this.stylesheet())
         this.createMenu()
         this.restyle()
+        this.paintBorders()
+
+        if (this.minimap) {
+          this.minimap.refresh()
+        }
+      }
+    },
+
+    // A level of the hierarchy restyles the links and the names, redraws the borders' names and the minimap.
+    hierarchy() {
+      if (this.graph) {
+        this.graph.style(this.stylesheet())
+        this.restyle()
+        this.paintBorders()
+
+        if (this.minimap) {
+          this.minimap.refresh()
+        }
       }
     },
   },
@@ -1656,6 +2020,14 @@ export default {
     this.zoomStyleTimer = null
     this.settleTimer = null
     this.settling = false
+    // The graph measures the names of the systems when it is built, so it is built once the faces are ready.
+    this.facesReady = false
+    whenFontsReady().then(() => {
+      this.facesReady = true
+      this.scheduleSync()
+    })
+    // Settles when the face of the family in force has been looked up, which a capture of the map waits for.
+    this.glyphReady = this.loadGlyphFace(this.roles.family)
   },
   beforeDestroy() {
     this.keepMap()
@@ -1686,8 +2058,32 @@ export default {
   methods: {
     ...mapActions('snackbar', ['activateSnackbar']),
 
+    // The recovery ledger opens over the map; the reads behind it start when it does.
+    openRecovery() {
+      this.recoveryDialog = true
+    },
+
+    // A system picked in the ledger is shown on the map, which the ledger leaves.
+    showRecoverySystem(systemId) {
+      this.recoveryDialog = false
+      this.applyLink(linkTo.map(systemId).query)
+    },
+
     toggleMark(value) {
       this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]
+    },
+
+    // The tag filter: a tag picked also turns the tagged bodies' mark on, so the systems it finds show.
+    chooseTag(value) {
+      this.tagFilter = value
+
+      if (value !== ALL_TAGS && !this.marksSet.has('tags')) {
+        this.toggleMark('tags')
+      }
+    },
+
+    toggleRole(value) {
+      this.remoteRoles = this.remoteRoles.includes(value) ? this.remoteRoles.filter((role) => role !== value) : [...this.remoteRoles, value]
     },
 
     toggleDim() {
@@ -1754,6 +2150,8 @@ export default {
             width: 'data(size)',
             height: 'data(size)',
             'background-color': 'data(fill)',
+            shape: (node) => node.data('shape'),
+            'shape-polygon-points': (node) => node.data('polygon'),
             'border-color': 'data(border)',
             'border-width': 'data(borderWidth)',
             'border-style': 'data(borderStyle)',
@@ -1771,16 +2169,16 @@ export default {
             'bounds-expansion': (node) => Math.max(8, Math.ceil((node.data('size') * (node.data('imageScale') - 1)) / 2)),
             label: 'data(label)',
             'text-wrap': 'wrap',
-            color: theme.ink,
-            'font-family': 'Roboto, sans-serif',
-            'font-size': 14,
+            color: 'data(labelInk)',
+            'font-family': this.typeface.family,
+            'font-size': this.typeface.size(14),
             'text-valign': 'bottom',
-            'text-margin-y': 5,
+            'text-margin-y': (node) => node.data('labelGap'),
             'text-background-color': theme.surface,
             'text-background-opacity': 0.8,
             'text-background-padding': 2,
             'text-background-shape': 'round-rectangle',
-            'min-zoomed-font-size': 9,
+            'min-zoomed-font-size': 'data(labelMinPx)',
           },
         },
         // Rings follow the zoom; `setZoomStyle` restyles them.
@@ -1814,12 +2212,14 @@ export default {
             'border-width': 5,
             'border-style': 'solid',
             'font-weight': 'bold',
+            color: theme.ink,
+            'min-zoomed-font-size': 9,
           },
         },
         {
           selector: 'edge',
           style: {
-            width: 3,
+            width: this.linkLook.width,
             'line-color': colors.link,
             'curve-style': 'straight',
           },
@@ -1834,6 +2234,7 @@ export default {
         {
           selector: 'edge[gate = "source"]',
           style: {
+            width: 3,
             'line-color': colors.gate,
             'line-style': 'dashed',
             'target-arrow-shape': 'triangle',
@@ -1844,6 +2245,7 @@ export default {
         {
           selector: 'edge[gate = "target"]',
           style: {
+            width: 3,
             'line-color': colors.gate,
             'line-style': 'dashed',
             'source-arrow-shape': 'triangle',
@@ -1860,6 +2262,7 @@ export default {
         {
           selector: 'edge.hover, edge:selected',
           style: {
+            width: (edge) => (edge.data('gate') === 'both' ? 5 : 3),
             'line-color': colors.primary,
             'source-arrow-color': colors.primary,
             'target-arrow-color': colors.primary,
@@ -1869,29 +2272,47 @@ export default {
       ]
     },
 
-    // A system's fill, border, pie and overlay for the layer shown.
+    // What a categorical colour is drawn as besides its fill, a node's `shape` and `polygon` (the slot's marker, as in the charts; a circle for any other colour).
+    shapeOf(color) {
+      const identity = color ? seriesIdentity(this.appearance, color) : null
+      const polygon = identity ? markerPoints(identity.marker) : null
+
+      return polygon ? { shape: 'polygon', polygon } : { shape: 'ellipse', polygon: '-1 -1 1 -1 1 1 -1 1' }
+    },
+
+    // The same marker as a CSS `clip-path` for a legend dot; undefined for a circle.
+    clipOf(color) {
+      const { shape, polygon } = this.shapeOf(color)
+      const percent = (value) => `${+(((Number(value) + 1) / 2) * 100).toFixed(1)}%`
+
+      return shape === 'polygon' ? `polygon(${polygon.match(/\S+ \S+/g).map((pair) => pair.split(' ').map(percent).join(' ')).join(', ')})` : undefined
+    },
+
+    // A system's fill, border, pie and overlay for the layer shown. A system whose state the layer can't tell is hollow, with a dashed ring.
     markerData(row) {
       const { colors } = this
-      let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, pieDoneColor: colors.done, pieLeftColor: colors.left, spots: 0, spotColor: null }
+      let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, pieDoneColor: colors.done, pieLeftColor: colors.left, spots: 0, spotColor: null, ...this.shapeOf(null) }
+      const unknown = { fill: colors.surface, borderStyle: 'dashed', pieDone: 0, pieLeft: 0 }
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
         const geological = this.layer === 'geological'
         const total = geological ? row.bodies : row.locations
         const done = geological ? row.surveyedBodies : row.surveyedLocations
-        const share = total ? Math.round((100 * done) / total) : 0
+        // No share where there is nothing to survey: the dotted ring says so, not an empty pie.
+        const share = surveyPercent(done, total)
 
         marker = {
           ...marker,
           fill: total ? colors.surface : colors.none,
           border: total && share === 100 ? colors.done : colors.ring,
           borderStyle: !total ? 'dotted' : geological && row.cometsOnly ? 'dashed' : 'solid',
-          pieDone: share,
-          pieLeft: total ? 100 - share : 0,
+          pieDone: share || 0,
+          pieLeft: share === null ? 0 : 100 - share,
           spots: geological ? row.groundSurveys : this.links.unexplored[row.id] || 0,
           spotColor: geological ? colors.ground : colors.unexplored,
         }
       } else if (this.layer === 'colonies') {
-        const share = row.colonies ? Math.min(100, (100 * Math.max(0, row.population)) / COLONY_FULL_MILLIONS) : 0
+        const share = colonyFillPercent(row.colonies, row.population)
 
         marker = {
           ...marker,
@@ -1900,24 +2321,29 @@ export default {
           borderWidth: row.capital ? 4 : 2,
           pieDone: share,
           pieLeft: row.colonies ? 100 - share : 0,
+          // Colonies with no stored population: not an empty pie.
+          ...(share === null ? unknown : {}),
         }
       } else if (this.layer === 'sectors') {
-        marker.fill = (this.sectorById[row.SectorID] || {}).color || colors.none
+        marker = { ...marker, ...this.shapeOf((this.sectorById[row.SectorID] || {}).color), fill: (this.sectorById[row.SectorID] || {}).color || colors.none }
       } else if (this.layer === 'control') {
-        marker.fill = row.ControlRaceID === this.RaceID ? colors.primary : (this.controllerById[row.ControlRaceID] || {}).color || colors.none
+        marker = row.ControlRaceID === this.RaceID ? { ...marker, fill: colors.primary } : { ...marker, ...this.shapeOf((this.controllerById[row.ControlRaceID] || {}).color), fill: (this.controllerById[row.ControlRaceID] || {}).color || colors.none }
       } else if (this.layer === 'groups') {
-        marker.fill = (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none
+        marker = { ...marker, ...this.shapeOf((this.groupOwners[this.groupOf[row.id]] || {}).color), fill: (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none }
       } else if (this.layer === 'discovery') {
+        const shade = discoveryShade(row.DiscoveredTime, this.discoveryRange)
+
         marker = {
           ...marker,
-          fill: this.discoveryColor(row.DiscoveredTime),
+          fill: shade === null ? colors.surface : blend(colors.discovery, colors.surface, shade),
           border: row.capital ? colors.ink : colors.ring,
           borderWidth: row.capital ? 4 : 2,
+          ...(shade === null ? unknown : {}),
         }
       } else if (this.layer === 'habitability') {
-        const band = this.bestBand(row)
+        const band = isAvailable(this.habitabilityCounts) ? bestBandIndex(this.currentHabitability, row.id) : null
 
-        marker.fill = band < 0 ? colors.none : colors.bands[band]
+        marker = band === null ? { ...marker, ...unknown } : { ...marker, fill: band < 0 ? colors.none : colors.bands[band] }
       } else if (this.layer === 'stars') {
         marker = {
           ...marker,
@@ -1927,11 +2353,12 @@ export default {
       } else {
         const travel = this.layer === 'travel'
         const distance = travel ? this.originKm[row.id] : this.originHops[row.id]
+        const farthest = travel ? this.farthestKm : this.farthestHop
         const origin = row.id === this.originId
 
         marker = {
           ...marker,
-          fill: distance === undefined ? colors.none : blend(colors.colony, colors.surface, 1 - (0.75 * distance) / (travel ? this.farthestKm : this.farthestHop)),
+          fill: distance === undefined ? colors.none : blend(colors.colony, colors.surface, 1 - (farthest ? (0.75 * distance) / farthest : 0)),
           border: origin ? colors.ink : colors.ring,
           borderWidth: origin ? 4 : 2,
         }
@@ -1943,11 +2370,15 @@ export default {
       // Show marks the system where it has a glyph or a line under its name.
       const marked = glyphs.length > 0 || label !== row.Name
 
+      // A system Show marks keeps its name at full strength at either level of the hierarchy: only the names of systems with nothing to report recede.
       return {
         ...data,
         label,
-        imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM) / row.size : 1,
-        image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface),
+        labelInk: labelInk(this.hierarchy, this.theme, marked),
+        labelMinPx: labelMinPx(this.hierarchy, marked),
+        labelGap: labelGapOf(glyphs, this.roles.scale),
+        imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM * this.roles.scale) / row.size : 1,
+        image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface, { family: this.roles.svg, scale: this.roles.scale, face: this.glyphFace && this.glyphFace.family === this.roles.family ? this.glyphFace.uri : null }),
         marked,
         dim: this.fades(row, marked),
       }
@@ -1955,27 +2386,17 @@ export default {
 
     // Whether a system is faint: Dim is on and Show marks nothing there, or the Discovery era's As of is set to a year before the race found it.
     fades(row, marked) {
-      return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
+      return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.tagFilterValue !== ALL_TAGS && !this.tagSystems[row.id]) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
     },
 
-    // The fill for a system found at `time`: palest for those known from the start, then from the first found after it to the last, the strongest.
+    // The fill for a system found at `time` (not null): palest for those known from the start, then from the first found after it to the last, the strongest.
     discoveryColor(time) {
-      const range = this.discoveryRange
-
-      if (!(time > 0) || !range) {
-        return blend(this.colors.discovery, this.colors.surface, 0.15)
-      }
-
-      const share = range.last > range.first ? (time - range.first) / (range.last - range.first) : 1
-
-      return blend(this.colors.discovery, this.colors.surface, 0.35 + 0.65 * share)
+      return blend(this.colors.discovery, this.colors.surface, discoveryShade(time, this.discoveryRange))
     },
 
-    // The best colony cost band a system has a body in, as an index of COLONY_COST_BANDS, or -1.
-    bestBand(row) {
-      const counts = this.habitableBands[row.id]
-
-      return counts ? counts.findIndex(Boolean) : -1
+    // The race's ships against a system's danger, a result of 'map.dangerFlag'.
+    dangerOf(row) {
+      return dangerFlag(row.danger, (this.features[row.id] || NO_FEATURES).protection)
     },
 
     // The glyphs Show puts round a system's marker, in the order they take their places: each `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`; the habitable worlds' badge has their count as `text`, at its own `angle`.
@@ -1985,9 +2406,10 @@ export default {
       const names = []
 
       if (marks.has('ruins') && features.ruins.length) {
-        const states = new Set(features.ruins.map(ruinState))
+        const states = new Set(features.ruins.map((ruin) => valueOrNull(ruinState(ruin)) || 'unknown'))
 
-        names.push(`ruins-${['identified', 'found', 'used'].find((state) => states.has(state))}`)
+        // A ruin whose installations left are not stored could still have some, so it outranks one with none left.
+        names.push(`ruins-${['identified', 'found', 'unknown', 'used'].find((state) => states.has(state))}`)
       }
 
       if (marks.has('constructs') && features.constructs.length) {
@@ -2014,12 +2436,20 @@ export default {
         names.push('waypoints')
       }
 
+      if (marks.has('remote') && this.remoteBySystem[row.id]) {
+        names.push('remote')
+      }
+
       if (marks.has('contacts') && features.contacts.length) {
         names.push(`contacts-${features.contacts[0].status}`)
       }
 
       if (marks.has('flags') && row.flags.length) {
         names.push('flags')
+      }
+
+      if (marks.has('tags') && this.tagSystems[row.id]) {
+        names.push(this.tagSystems[row.id].stale ? 'tags-stale' : 'tags')
       }
 
       const glyphs = names.map((name) => {
@@ -2043,14 +2473,15 @@ export default {
       const features = this.features[row.id] || NO_FEATURES
 
       if (mark === 'danger') {
-        // The game reds its danger line where the protection of the ships there falls short of the danger.
-        const protection = Math.round(features.protection)
+        // The game reds its danger line where the protection of the ships there falls short of the danger. A protection that is not stored shows a dash and no ⚠.
+        const flag = this.dangerOf(row)
+        const protection = features.protection
 
-        return row.danger > 0 ? `${protection < row.danger ? '⚠ ' : ''}${this.count(row.danger)} / ${this.count(protection)}` : ''
+        return row.danger > 0 ? `${flag.value ? '⚠ ' : ''}${this.count(row.danger)} / ${Number.isFinite(protection) ? this.count(Math.round(protection)) : '—'}` : ''
       }
 
       if (mark === 'discovered') {
-        return row.DiscoveredTime > 0 ? gameTime(this.StartYear, row.DiscoveredTime).format('YYYY-MM-DD') : ''
+        return row.DiscoveredTime > 0 ? valueOrNull(discoveredDate(this.StartYear, row.DiscoveredTime)) || '' : ''
       }
 
       return ''
@@ -2186,6 +2617,7 @@ export default {
       if (!this.labelPlaces) {
         this.labelPlaces = placeLabels(this.$refs.borders.getContext('2d'), this.borderParts, {
           ...this.borderGeometry(),
+          type: this.typeface,
           systems: this.systemRows.map((row) => row.id),
           links: this.links.list,
           nameOf: (id) => this.labelOf(this.rowById[id]),
@@ -2225,7 +2657,7 @@ export default {
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * pan.x, ratio * pan.y)
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface, places: showsLabels(zoom) ? this.borderLabels() : null })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.composition.names.ink, halo: this.composition.names.halo, places: showsLabels(zoom, this.typeface) ? this.borderLabels() : null, type: this.typeface })
     },
 
     // The overview: the borders, links and systems, without names. A system is a dot in the colour it shows most: the larger share of its pie, else its fill.
@@ -2256,7 +2688,7 @@ export default {
       })
     },
 
-    // The right-click menu: Minerals and the Colonization Planner for the selection, pin or unpin, and the System View for a single system.
+    // The right-click menu: Minerals and the Colonization Planner for the selection, pin or unpin, and the System View for a single system. Its icons take the ink the preset sets for a surface filled with a named colour (`inks.onColor`), as the wedge is the primary colour and the active one a categorical slot; the menu's own white is under 3:1 on a light primary.
     createMenu() {
       if (this.menu) {
         this.menu.destroy()
@@ -2267,8 +2699,9 @@ export default {
       this.menu = this.graph.cxtmenu({
         menuRadius: 100,
         selector: 'node',
-        fillColor: rgba(this.theme.primary, 0.88),
-        activeFillColor: rgba(this.theme.categorical[2], 0.9),
+        fillColor: rgba(this.theme.primary, MAP_MENU.fillAlpha),
+        activeFillColor: rgba(this.theme.categorical[MAP_MENU.activeSlot], MAP_MENU.activeAlpha),
+        itemColor: this.appearance.inks.onColor,
         indicatorSize: 36,
         maxSpotlightRadius: 100,
         commands: (node) => {
@@ -2305,7 +2738,7 @@ export default {
       }
 
       this.mapKey = this.settingsPrefix
-      this.kept = keptMaps.get(this.mapKey) || null
+      this.kept = this.mapKey ? keptMaps.get(this.mapKey) || null : null
       this.syncedStart = null
       this.fitPending = true
       // The view shows the whole map and the user hasn't moved it since, so a resize fits it again.
@@ -2316,9 +2749,42 @@ export default {
       this.quality = null
     },
 
+    // The map moves to another key of what the player left (a campaign settled after the race was picked, or another one): the race's own data is the same, so no read is run again and the graph is not cleared. What was kept under the new key (places, view, selection) is picked up and the graph is drawn again; with nothing kept under it after another campaign, the selection and the places moved belonged to that campaign and go.
+    retargetKept() {
+      const left = this.mapKey
+
+      this.keepMap()
+      this.mapKey = this.settingsPrefix
+      this.kept = keptMaps.get(this.mapKey) || null
+
+      if (this.kept) {
+        this.fitted = this.kept.fitted
+        this.before = this.kept.before
+        this.selectedIds = [...this.kept.selectedIds]
+      } else if (left) {
+        this.fitted = true
+        this.before = null
+        this.selectedIds = []
+      }
+
+      this.movedIds = []
+      this.syncedStart = null
+      this.fitPending = true
+      this.scheduleSync()
+    },
+
+    // Loads the bold face of a bundled family for the marker images; a system family has none, and a face that fails to load leaves the images with the family's name alone.
+    async loadGlyphFace(family) {
+      const uri = await glyphFace(family)
+
+      if (uri && this.roles.family === family) {
+        this.glyphFace = { family, uri }
+      }
+    },
+
     // Remembers the map as it is, for `resetGraph` to pick up when the player comes back to it.
     keepMap() {
-      if (this.graph && this.syncedStart) {
+      if (this.mapKey && this.graph && this.syncedStart) {
         keptMaps.set(this.mapKey, {
           positions: this.graphPositions(),
           syncedStart: this.syncedStart,
@@ -2356,6 +2822,10 @@ export default {
       }
 
       if (!this.graph) {
+        if (!this.facesReady) {
+          return
+        }
+
         this.createGraph()
       }
 
@@ -2445,6 +2915,28 @@ export default {
       })
     },
 
+    // Settles when the marker images carry the face of the family in force and the graph has loaded every one of them, so a capture shows the counts as the screen does.
+    async markersReady() {
+      let ready
+
+      do {
+        ready = this.glyphReady
+        await ready
+      } while (ready !== this.glyphReady)
+
+      await this.$nextTick()
+
+      if (!this.graph) {
+        return
+      }
+
+      this.restyle()
+      const renderer = this.graph.renderer()
+      const images = new Set(this.graph.nodes().map((node) => node.data('image')).filter(Boolean))
+
+      await Promise.all([...images].map((url) => renderer.getCachedImage(url, null, () => undefined).decode().catch(() => undefined)))
+    },
+
     // Sets only which systems and links are faint, from the marks each marker already has.
     refade() {
       if (!this.graph) {
@@ -2515,6 +3007,7 @@ export default {
       }
 
       this.selectedIds = []
+      this.pointId = null
       this.foundId = null
     },
 
@@ -2532,9 +3025,11 @@ export default {
       this.graph.animate({ center: { eles: node }, zoom: Math.max(this.graph.zoom(), 1) }, { duration: 400 })
     },
 
-    // The map shows the system the link names, or none.
+    // The map shows the system the link names, or none, and selects the jump point it names in that system.
     applyLink(query) {
       const id = queryId(query.system)
+
+      this.pointId = id === null ? null : queryId(query.point)
 
       if (id === null) {
         this.pendingFocus = null
@@ -2802,18 +3297,16 @@ export default {
       this.saving = true
 
       try {
-        await this.database.transaction(async (transaction) => {
-          for (const id of ids) {
-            await this.database.query(`update FCT_RaceSysSurvey set Xcor = ${Math.round(positions[id].x)}, Ycor = ${Math.round(positions[id].y)} where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.SystemID = ${Number(id)}`, { transaction })
-          }
-        })
+        // The database is taken once: a reload or a switch while the map is open replaces `this.database`.
+        await savePositions(this.database, { GameID: this.GameID, RaceID: this.RaceID, ids, positions })
 
         this.saveDialog = false
         this.before = null
         this.activateSnackbar({ color: 'success', text: `Saved the positions of ${ids.length} ${ids.length === 1 ? 'system' : 'systems'}` })
         this.$asyncComputed.systems.update()
       } catch (error) {
-        this.activateSnackbar({ color: 'error', text: `Couldn't save the positions: ${error.message}` })
+        console.error("Couldn't save the positions", error)
+        this.activateSnackbar({ color: 'error', text: `Couldn't save the positions: ${failureWords(error)}` })
       } finally {
         this.saving = false
       }
@@ -2822,9 +3315,14 @@ export default {
     // The whole map with its borders. Keep both canvases within a bounded size;
     // oversized canvases produce an empty data URL that Image.decode() rejects.
     async exportPng() {
+      // Names are measured and drawn in the typeface in force, and the counts in the markers in its bundled face, so both are ready first.
+      await whenFontsReady()
+      await this.markersReady()
+
       const graph = this.graph
       const requestedScale = 2 * (window.devicePixelRatio || 1)
       const geometry = this.borderGeometry()
+      const composition = this.composition
 
       try {
         const image = new Image()
@@ -2835,6 +3333,7 @@ export default {
         let width
         let height
         let scale
+        let legend
 
         // Export with the rings as zoom 1 draws them, and put the screen's back before the next frame.
         this.setZoomStyle(1)
@@ -2848,7 +3347,13 @@ export default {
           y1 = Math.min(systems.y1, borders.y1) - 20
           width = Math.ceil(Math.max(systems.x2, borders.x2) + 20 - x1)
           height = Math.ceil(Math.max(systems.y2, borders.y2) + 20 - y1)
-          scale = Math.min(requestedScale, 8192 / width, 8192 / height, Math.sqrt((32 * 1024 * 1024) / (width * height)))
+          // The picture is at least as wide as the legend needs, with the map centred, and the legend's band is under it.
+          const wide = Math.max(width, LEGEND_MIN_WIDTH)
+
+          x1 -= (wide - width) / 2
+          width = wide
+          legend = legendLayout(document.createElement('canvas').getContext('2d'), composition.legend.rows, { width, type: this.typeface })
+          scale = Math.min(requestedScale, 8192 / width, 8192 / (height + legend.height), Math.sqrt((32 * 1024 * 1024) / (width * (height + legend.height))))
           // max dimensions use output pixels, independently of display DPI. They also keep the graph raster at the same scale as the border canvas.
           image.src = graph.png({ full: true, maxWidth: Math.ceil(systems.w) * scale, maxHeight: Math.ceil(systems.h) * scale })
         } finally {
@@ -2858,19 +3363,23 @@ export default {
         const canvas = document.createElement('canvas')
 
         canvas.width = Math.max(1, Math.floor(width * scale))
-        canvas.height = Math.max(1, Math.floor(height * scale))
+        canvas.height = Math.max(1, Math.floor((height + legend.height) * scale))
         const context = canvas.getContext('2d')
 
         await image.decode()
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
-        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
-        context.setTransform(1, 0, 0, 1, 0, 0)
-        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour, not transparency or the card surface.
+        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: composition.names.ink, halo: composition.names.halo, places, type: this.typeface })
+        context.setTransform(scale, 0, 0, scale, 0, 0)
+        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour (the appearance's page background, as the stage draws it), not transparency or the card surface. The page's dots lie on that colour, as the stage draws them, and the legend's band is drawn under the map, from the same state as the legend on screen.
         context.globalCompositeOperation = 'destination-over'
-        context.fillStyle = window.getComputedStyle(this.$refs.stage).backgroundColor
-        context.fillRect(0, 0, canvas.width, canvas.height)
+        drawGrid(context, { width, height }, composition.grid)
+        context.fillStyle = composition.background
+        context.fillRect(0, 0, width, height)
         context.globalCompositeOperation = 'source-over'
+        context.setTransform(1, 0, 0, 1, 0, 0)
         context.drawImage(image, Math.round((systems.x1 - x1) * scale), Math.round((systems.y1 - y1) * scale))
+        context.setTransform(scale, 0, 0, scale, 0, 0)
+        drawLegend(context, legend, composition.legend, { top: height, width, type: this.typeface })
 
         const result = await ipcRenderer.invoke('save-png', canvas.toDataURL('image/png').split(',')[1], `map-${this.GameID}-${this.RaceID}-${this.GameTime}.png`)
 
@@ -2890,7 +3399,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.MineralSearchFlag, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SpectralNumber, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.Component = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.MineralSearchFlag, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.PopulationReported, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SpectralNumber, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, count(FCT_Population.Population) as PopulationReported, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.Component = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
       }),
       default: [],
     },
@@ -2933,6 +3442,28 @@ export default {
         return await loadMapFeatures(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: {},
+    },
+    // The race's ground formations, read only while the map marks the remote ones (`loadGroundFormations`): the model, or { supported: false, missing } for a save without what it reads.
+    groundFormations: {
+      get: tracked('groundFormations', async function () {
+        if (!this.database || !this.GameID || !this.RaceID || !this.marksSet.has('remote')) {
+          return null
+        }
+
+        return Object.freeze(await loadGroundFormations(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a save that has the formula columns, null for a save without them. The colony costs are checked for that version only.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
     // Loaded the first time the map shows habitability for the race, and kept for it until the save changes.
     habitability: {
@@ -2987,8 +3518,8 @@ export default {
   }
 
   .tool__label {
-    height: 18px;
-    line-height: 18px;
+    height: calc(18px * var(--ae-font-scale));
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   .tool--find {
@@ -3005,6 +3536,11 @@ export default {
   .tool--borders {
     flex: 0 1 140px;
     min-width: 120px;
+  }
+
+  .tool--tags {
+    flex: 0 1 170px;
+    min-width: 140px;
   }
 
   .tool--actions {
@@ -3090,8 +3626,8 @@ export default {
     margin-right: 6px;
 
     .dot {
-      width: 6px;
-      height: 6px;
+      width: 8px;
+      height: 8px;
       margin: 0;
     }
   }
@@ -3203,7 +3739,7 @@ export default {
     min-width: 0;
     overflow: hidden;
     background-color: var(--ae-bg);
-    background-image: radial-gradient(var(--ae-border) 1px, transparent 0);
+    background-image: radial-gradient(var(--map-grid, var(--ae-border)) 1px, transparent 0);
     background-size: 20px 20px;
   }
 
@@ -3281,7 +3817,7 @@ export default {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 4px 12px;
-    font-size: 13px;
+    font-size: calc(13px * var(--ae-font-scale));
 
     dd {
       margin: 0;

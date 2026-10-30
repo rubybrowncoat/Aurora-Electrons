@@ -2,7 +2,10 @@
 
 import { CARGO_POINTS } from './hauling'
 import { routeLegs, searchRoutes } from './jump-graph'
-import { hasGate, roundTrip } from './transport'
+import { CLASS_ONLY } from './handling-bonuses'
+import { hasGate, colonyEndpoint, roundTrip } from './transport'
+import { cutOffOf, detourOf } from './safe-routes'
+import { registerRule } from './provenance'
 
 // Less than a tonne is rounding.
 const TONNE = 1
@@ -35,8 +38,9 @@ export const spareOf = (mineral) => {
 // How many jump points a route crosses that aren't stabilised on both sides: a freighter without a jump drive needs a jump-capable ship with it there.
 const ungatedJumps = (route) => routeLegs(route).filter((leg) => leg.kind === 'jump' && !(hasGate(leg.from) && hasGate(leg.to))).length
 
-// The hauls that cover the shortfalls. Queue shortfalls come before reserve ones and the larger before the smaller; each draws on the colony with spare stock nearest on the charted route, then the next nearest, until it is covered, and every spare tonne is given once. `colonies`: [{ colony, minerals }], each colony with its PopulationID and place (SystemID, Xcor, Ycor); `jumpPoints`: the race's charted jump points. Returns `hauls`, one per pair of colonies, { key, from, to, km, jumps, ungated, minerals: [{ id, name, queue, reserve, tonnes }], tonnes, queue }, and `unmet`, what no colony on a charted route can cover, { key, colony, mineral, reason, tonnes }.
-export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
+// The hauls that cover the shortfalls. Queue shortfalls come before reserve ones and the larger before the smaller; each draws on the colony with spare stock nearest on the charted route, then the next nearest, until it is covered, and every spare tonne is given once. `colonies`: [{ colony, minerals }], each colony with its PopulationID and place (SystemID, Xcor, Ycor); `jumpPoints`: the race's charted jump points; `avoid`: safe-routes.js `avoidRules`' result or null. With an avoid setting on, each haul is searched the way it sails, from the colony that gives to the one that is short, and a route may not enter a barred system: the giving colony's own system is left freely, the short colony's system is tested like any other the route enters. A haul whose way round costs more than the nearest route carries `detour`, and an `unmet` entry carries `cut` ([{ colony, tonnes, cutOff }]: the colonies with spare of the mineral that the settings cut off, with the barred systems on the way). With nothing on, the output is the same as without `avoid`. Returns `hauls`, one per pair of colonies, { key, from, to, km, jumps, ungated, minerals: [{ id, name, queue, reserve, tonnes }], tonnes, queue }, and `unmet`, what no colony on a charted route can cover, { key, colony, mineral, reason, tonnes }.
+export const planHauls = (colonies, { jumpPoints, reserves = true, avoid = null }) => {
+  const guarded = Boolean(avoid && avoid.active)
   const spare = new Map()
   const shortfalls = []
 
@@ -55,13 +59,26 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
 
   shortfalls.sort((a, b) => HAUL_REASONS[a.reason].order - HAUL_REASONS[b.reason].order || b.tonnes - a.tonnes)
 
-  // The other colonies on a charted route from one colony, nearest first; one search per colony that is short of something.
+  // The other colonies on a charted route from one colony, nearest first; one search per colony that is short of something. With an avoid setting on, a haul is searched the way it sails, from the colony that gives to the one that is short: the giving colony's own system is left freely and the short colony's system is tested like any other the route enters.
   const sources = new Map()
+  const searches = new Map()
+  const searchFrom = (colony, limited) => {
+    const key = `${colony.PopulationID}:${limited}`
+
+    if (!searches.has(key)) {
+      searches.set(key, searchRoutes(jumpPoints, [placeOf(colony)], limited ? { order: 'km', canEnter: avoid.canEnter } : { order: 'km' }))
+    }
+
+    return searches.get(key)
+  }
   const sourcesFor = (colony) => {
     if (!sources.has(colony.PopulationID)) {
-      const search = searchRoutes(jumpPoints, [placeOf(colony)], { order: 'km' })
+      const others = colonies.filter((other) => other.colony.PopulationID !== colony.PopulationID).map((other) => (guarded ? { colony: other.colony, route: searchFrom(other.colony, true).toPlace(placeOf(colony)), openRoute: searchFrom(other.colony, false).toPlace(placeOf(colony)) } : { colony: other.colony, route: searchFrom(colony, false).toPlace(placeOf(other.colony)), openRoute: null }))
 
-      sources.set(colony.PopulationID, colonies.filter((other) => other.colony.PopulationID !== colony.PopulationID).map((other) => ({ colony: other.colony, route: search.toPlace(placeOf(other.colony)) })).filter(({ route }) => route).sort((a, b) => a.route.km - b.route.km))
+      sources.set(colony.PopulationID, {
+        reached: others.filter(({ route }) => route).map((source) => (guarded ? { ...source, detour: detourOf(source.openRoute, source.route, avoid) } : source)).sort((a, b) => a.route.km - b.route.km),
+        cut: others.filter(({ route, openRoute }) => !route && openRoute),
+      })
     }
 
     return sources.get(colony.PopulationID)
@@ -73,7 +90,7 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
   shortfalls.forEach(({ colony, mineral, reason, tonnes }) => {
     let left = tonnes
 
-    for (const source of sourcesFor(colony)) {
+    for (const source of sourcesFor(colony).reached) {
       const spareKey = `${source.colony.PopulationID}:${mineral.id}`
       const moved = Math.min(left, spare.get(spareKey) || 0)
 
@@ -84,7 +101,7 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
       const key = `${source.colony.PopulationID}-${colony.PopulationID}`
 
       if (!hauls.has(key)) {
-        hauls.set(key, { key, from: source.colony, to: colony, km: source.route.km, jumps: source.route.jumps, ungated: ungatedJumps(source.route), minerals: new Map(), tonnes: 0, queue: 0 })
+        hauls.set(key, { key, from: source.colony, to: colony, km: source.route.km, jumps: source.route.jumps, ungated: ungatedJumps(source.route), minerals: new Map(), tonnes: 0, queue: 0, ...(guarded ? { detour: source.detour } : {}) })
       }
 
       const haul = hauls.get(key)
@@ -108,7 +125,13 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
     }
 
     if (left >= TONNE) {
-      unmet.push({ key: `${colony.PopulationID}:${mineral.id}:${reason}`, colony, mineral, reason, tonnes: left })
+      const entry = { key: `${colony.PopulationID}:${mineral.id}:${reason}`, colony, mineral, reason, tonnes: left }
+
+      if (guarded) {
+        entry.cut = sourcesFor(colony).cut.filter((source) => (spare.get(`${source.colony.PopulationID}:${mineral.id}`) || 0) >= TONNE).map((source) => ({ colony: source.colony, tonnes: spare.get(`${source.colony.PopulationID}:${mineral.id}`), cutOff: cutOffOf({ jumpPoints, origin: placeOf(source.colony), destination: placeOf(colony), avoid, baseline: source.openRoute }) }))
+      }
+
+      unmet.push(entry)
     }
   })
 
@@ -118,11 +141,32 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
   }
 }
 
-// What one freighter class takes to carry a haul: the holds its cargo fills (a tonne of mineral takes two cargo points, `CARGO_POINTS.minerals`, so a hold carries half its capacity in minerals), a round trip as Transport times one (both ways at top speed, loading at the source and unloading at the destination, cargo alone, with each colony's spaceport or cargo shuttle station from its `Station`; `status` and `problems` as roundTrip gives them), the days one ship of the class takes, and the days its `Ships` take together. The ships are taken as fully crewed. `shipClass` carries the class figures roundTrip reads.
-export const haulByClass = (haul, shipClass, shuttleTechnology) => {
-  const trip = roundTrip([{ ...shipClass, CurrentCrew: shipClass.ClassCrew }], haul.km, { origin: Boolean(haul.from.Station), destination: Boolean(haul.to.Station) }, shuttleTechnology, { colonists: false })
-  const holds = Math.ceil((haul.tonnes * CARGO_POINTS.minerals) / shipClass.CargoCapacity)
-  const tripDays = trip.tripSeconds / SECONDS_PER_DAY
+// What one freighter class takes to carry a haul: the holds its cargo fills (a tonne of mineral takes two cargo points, `CARGO_POINTS.minerals`, so a hold carries half its capacity in minerals; `cargo` = 'installations' counts the haul in tonnes of installations, one cargo point each), a round trip as Transport times one (both ways at top speed, loading at the source and unloading at the destination, cargo alone, with each colony's spaceports and cargo shuttle stations from its `ShuttleCapacity` and `ServiceNames`; `status` and `problems` as roundTrip gives them), the days one ship of the class takes, and the days its `Ships` take together. The ships are taken as fully crewed and undamaged, so the loading strength is the class's `ShuttleStrength` as designed, and a class has no officers, so each Logistics factor is 1 by assumption (`CLASS_ONLY`). `shipClass` carries the class figures roundTrip reads. `version` is the formula version (`loadFormulaVersion`). A trip that can't be timed has no days (null).
+export const haulByClass = (haul, shipClass, shuttleTechnology, version = null, cargo = 'minerals') => {
+  const trip = roundTrip([{ ...shipClass, CurrentCrew: shipClass.ClassCrew }], haul.km, { origin: colonyEndpoint(haul.from), destination: colonyEndpoint(haul.to) }, shuttleTechnology, { colonists: false, version, support: CLASS_ONLY, jumps: haul.jumps })
+  const holds = Math.ceil((haul.tonnes * CARGO_POINTS[cargo]) / shipClass.CargoCapacity)
+  const tripDays = trip.tripSeconds === null ? null : trip.tripSeconds / SECONDS_PER_DAY
 
-  return { ...trip, shipClass, holds, tripDays, oneShipDays: holds * tripDays, classDays: Math.ceil(holds / Math.max(1, shipClass.Ships)) * tripDays }
+  return { ...trip, shipClass, holds, tripDays, oneShipDays: tripDays === null ? null : holds * tripDays, classDays: tripDays === null ? null : Math.ceil(holds / Math.max(1, shipClass.Ships)) * tripDays }
 }
+
+// The rules this module implements, registered once (utilities/provenance.js). The days a class takes lean on the loading and round-trip rules in utilities/transport.js. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
+registerRule({
+  id: 'hauling.planTonnes',
+  versions: ['2.7.x'],
+  units: 't',
+  verification: 'estimated',
+  structure: ['FCT_Population mineral stock and reserve', 'FCT_IndustrialProjects and shipyard tasks', 'FCT_MassDriverPackets'],
+  note: 'A colony is short of a mineral by what its build queue needs beyond its stock and the packets on their way, and by its reserve when that is asked for; it gives what it holds above its reserve and its own queue. Which colony covers which shortfall (the nearest with stock to spare first) is the planner\'s choice, not a game rule.',
+  assumptions: ['the queue\'s needs are what the build queue asks for now', 'the nearest colony with stock to spare supplies first', 'minerals already in a freighter\'s hold are not counted'],
+})
+
+registerRule({
+  id: 'hauling.haulDays',
+  versions: ['2.7.x'],
+  units: 'days',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.CargoCapacity, MaxSpeed'],
+  note: 'Holds a class needs for the haul times its round trip (cargo only), for one ship and for all the class\'s ships. The ships are taken as fully crewed and undamaged.',
+  assumptions: ['full holds', 'fully crewed, undamaged ships', 'top speed both ways'],
+})

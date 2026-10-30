@@ -1,7 +1,10 @@
 // Web mode stand-in for src/renderer/utilities/database.js.
 // Same surface the pages use (`query` and `models.X.find*`), backed by the dev server's database middleware instead of an in-process Sequelize.
 
+import { DatabaseRetired } from '../../../src/renderer/utilities/retired'
+
 import { databaseRequest } from './database-request'
+import { webError } from './web-error'
 
 const modelStubs = new WeakSet()
 
@@ -35,6 +38,15 @@ const encode = (value) => {
   return encoded
 }
 
+// The server no longer has the copy this page opened and the page did not release it (it was pushed out, or the server restarted). Unlike a released copy, this is the page's current copy being lost: the app opens the save again (plugins/database.js listens for `aurora:database-lost`). Callers that see it drop their answer like any retired one.
+class DatabaseExpired extends DatabaseRetired {
+  constructor () {
+    super()
+    this.name = 'DatabaseExpired'
+    this.expired = true
+  }
+}
+
 const request = async (route, payload) => {
   const response = await databaseRequest(route, {
     method: 'POST',
@@ -44,7 +56,14 @@ const request = async (route, payload) => {
   const body = await response.json()
 
   if (!response.ok) {
-    throw new Error(`[web] ${route}: ${body && body.error}`)
+    // The server closed or replaced the copy this page opened: the same refusal as a replaced database in the app.
+    if (body && body.superseded) {
+      throw new DatabaseRetired()
+    } else if (body && body.expired) {
+      throw new DatabaseExpired()
+    }
+
+    throw webError(route, body)
   }
 
   return body
@@ -73,13 +92,13 @@ const hydrate = (value) => {
   return value
 }
 
-const makeModel = (ready, name, scopes = []) => {
-  const call = (method) => (...args) => ready.then(() => request('/model', { model: name, scopes, method, args: encode(args) })).then(hydrate)
+const makeModel = (ready, guard, name, scopes = []) => {
+  const call = (method) => (...args) => guard(ready.then(({ token }) => request('/model', { token, model: name, scopes, method, args: encode(args) }))).then(hydrate)
 
   const model = {
     name,
     scopes,
-    scope: (...names) => makeModel(ready, name, names.flat()),
+    scope: (...names) => makeModel(ready, guard, name, names.flat()),
     findAll: call('findAll'),
     findOne: call('findOne'),
     findByPk: call('findByPk'),
@@ -92,19 +111,48 @@ const makeModel = (ready, name, scopes = []) => {
   return model
 }
 
-// The dev server owns the real database, and keeps it across saves.
-export const retireDatabase = async () => {}
+// The copy each database of this page stands for, by its token at the dev server, and the tokens of the copies this page has open: they are released when the page goes away, so a closed tab never holds a connection (and never pushes out a live tab's).
+const opened = new WeakMap()
+const live = new Set()
+
+window.addEventListener('pagehide', () => {
+  live.forEach((token) => {
+    databaseRequest('/release', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).catch(() => {})
+  })
+})
+
+// Closes the copy at the dev server (nothing else of the page or of another tab reads it).
+export const retireDatabase = async (database) => {
+  const ready = database && opened.get(database)
+
+  if (ready) {
+    await ready.then(({ token }) => {
+      live.delete(token)
+
+      return request('/release', { token })
+    }).catch(() => {})
+  }
+}
 
 export const resetDatabase = (storagePath) => {
   console.log('## [web] RESETTING ON', storagePath)
 
-  const ready = request('/reset', {})
+  const ready = request('/reset', { storagePath })
   const models = {}
+  const guard = (promise) => promise.catch((error) => {
+    if (error.expired) {
+      window.dispatchEvent(new CustomEvent('aurora:database-lost', { detail: { database } }))
+    }
 
-  return {
-    // The middleware shares one connection, so a transaction is only a pass-through here: reads in it aren't a single snapshot, and the `transaction` option never goes over the wire.
-    transaction: (callback) => callback({}),
-    query: (sql, { transaction, ...options } = {}) => ready.then(() => request('/query', { sql, options: encode(options) })),
+    throw error
+  })
+
+  ready.then(({ token }) => live.add(token), () => {})
+
+  const database = {
+    // A transaction is only a pass-through here: reads in it aren't a single snapshot, and the `transaction` option never goes over the wire.
+    transaction: (work) => work({}),
+    query: (sql, { transaction: _transaction, ...options } = {}) => guard(ready.then(({ token }) => request('/query', { token, sql, options: encode(options) }))),
     models: new Proxy(models, {
       get: (cache, name) => {
         if (typeof name !== 'string') {
@@ -112,11 +160,15 @@ export const resetDatabase = (storagePath) => {
         }
 
         if (!cache[name]) {
-          cache[name] = makeModel(ready, name)
+          cache[name] = makeModel(ready, guard, name)
         }
 
         return cache[name]
       },
     }),
   }
+
+  opened.set(database, ready)
+
+  return database
 }

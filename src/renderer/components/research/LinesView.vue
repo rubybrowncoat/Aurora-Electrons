@@ -8,14 +8,14 @@
     </div>
     <div class="caption text--secondary mb-4">A line is one kind of upgrade: each square is a level, cheapest first. A slim square comes free with the level before it.</div>
 
-    <v-card v-for="group in groups" :key="group.field.ResearchFieldID" class="panel" data-summary="The upgrade lines of one research field, level by level, with the next technology of each. Use it to see how far each line has advanced and what to research next." elevation="1">
+    <v-card v-for="group in groups" :key="group.field.ResearchFieldID" class="panel" data-summary="The upgrade lines of one research field, level by level, with the next technology of each." elevation="1">
       <div class="panel-head">
         <span><span class="abbreviation mr-2">{{ group.field.Abbreviation }}</span>{{ group.field.FieldName }}</span>
         <span class="caption text--secondary">{{ group.lines.length }} {{ group.lines.length === 1 ? 'line' : 'lines' }}</span>
       </div>
       <div v-for="line in group.lines" :key="line.typeId" class="line">
         <div class="line-name">
-          <div class="font-weight-medium">{{ line.name }}</div>
+          <div class="font-weight-medium">{{ line.name }}<page-link v-if="techViews[line.typeId]" class="ml-1" :to="linkTo.shipyards({ view: techViews[line.typeId] })" :name="line.name" /></div>
           <div class="caption text--secondary">{{ line.done }} of {{ line.total }}<span v-if="line.best"> · now {{ line.best.name }}</span></div>
         </div>
         <div class="pips">
@@ -24,7 +24,7 @@
         <div class="line-next caption">
           <template v-if="line.next">
             <a class="tech-link font-weight-medium" @click="$emit('select-tech', line.next.id)">{{ line.next.name }}</a>
-            <div class="text--secondary">{{ nextNote(line.next) }}</div>
+            <div class="text--secondary">{{ nextNote(line.next) }}<provenance-mark v-if="nextResult(line.next)" :result="nextResult(line.next)" /></div>
           </template>
           <span v-else class="text--secondary">Every level researched</span>
         </div>
@@ -36,15 +36,24 @@
 
 <script>
 import countFormat from '../../mixins/count-format'
-import { ACTIVE, AVAILABLE, BLOCKED, DONE, LOCKED, QUEUED, STATUS_LABELS } from '../../utilities/research'
+import { linkTo } from '../../utilities/deep-links'
+import { isKnownNumber } from '../../utilities/math'
+import { ACTIVE, AVAILABLE, BLOCKED, DONE, LOCKED, pathRpResult, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import { SHIPYARD_TECH_VIEWS } from '../../utilities/shipyard-growth'
+import PageLink from '../page/PageLink.vue'
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 export default {
   name: 'LinesView',
+  components: { PageLink, ProvenanceMark },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
     search: { type: String, default: '' },
     hideFinished: { type: Boolean, default: true },
+  },
+  data() {
+    return { linkTo, techViews: SHIPYARD_TECH_VIEWS }
   },
   computed: {
     legend() {
@@ -61,24 +70,40 @@ export default {
     },
   },
   methods: {
+    // RP as the page prints it, or a plain statement that the save does not give it.
+    rp(value) {
+      return isKnownNumber(value) ? `${this.count(value)} RP` : 'RP not known'
+    },
+
     pipTitle(tech) {
       const entry = this.research.info.get(tech.id)
 
-      return `${tech.name}: ${STATUS_LABELS[entry.status].toLowerCase()}, ${this.count(tech.cost)} RP`
+      return `${tech.name}: ${STATUS_LABELS[entry.status].toLowerCase()}, ${isKnownNumber(tech.cost) ? this.rp(tech.cost) : 'cost not known'}`
     },
 
     nextNote(tech) {
       const entry = this.research.info.get(tech.id)
 
       if (entry.status === ACTIVE) {
-        return `Running, ${this.count(entry.remaining)} RP left`
+        return isKnownNumber(entry.remaining) ? `Running, ${this.rp(entry.remaining)} left` : 'Running, RP left not known'
       } else if (entry.status === QUEUED) {
-        return `Queued, ${this.count(entry.remaining)} RP`
+        return `Queued, ${this.rp(entry.remaining)}`
       } else if (entry.status === LOCKED) {
-        return `${this.count(entry.pathRp)} RP in all, ${entry.missing.length + 1} steps`
+        return `${isKnownNumber(entry.pathRp) ? `${this.rp(entry.pathRp)} in all` : 'RP in all not known'}, ${entry.missing.length + 1} steps`
       }
 
-      return `${this.count(entry.remaining)} RP, available now`
+      return `${this.rp(entry.remaining)}, available now`
+    },
+
+    // The result behind the figure of the next note: the path RP of a locked level (an estimate while known), the RP left of an available one when that is not known.
+    nextResult(tech) {
+      const entry = this.research.info.get(tech.id)
+
+      if (entry.status === LOCKED) {
+        return pathRpResult(entry)
+      }
+
+      return isKnownNumber(entry.remaining) ? null : remainingResult(entry)
     },
   },
 }
@@ -97,7 +122,7 @@ export default {
   }
 
   .abbreviation {
-    font-size: 11px;
+    font-size: calc(11px * var(--ae-font-scale));
     font-weight: 700;
     letter-spacing: 0.04em;
     padding: 1px 5px;

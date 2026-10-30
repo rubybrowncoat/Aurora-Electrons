@@ -1,19 +1,25 @@
 <template>
-  <nav v-show="visible" class="section-nav" :style="frame" aria-label="Sections">
-    <div class="section-nav__ticks" @mouseleave="show(null)">
-      <button v-for="(section, index) in sections" :key="section.key" type="button" class="section-nav__tick" :class="{ 'section-nav__tick--active': index === active, 'section-nav__tick--shown': index === shown }" :aria-label="section.title" :aria-current="index === active ? 'location' : null" @mouseenter="show(index, $event)" @focus="show(index, $event)" @blur="show(null)" @click="go(index)" />
-    </div>
+  <div class="section-nav-root">
+    <nav v-show="visible" ref="strip" class="section-nav" :style="frame" aria-label="Sections">
+      <div class="section-nav__ticks" @mouseleave="show(null)">
+        <button v-for="(section, index) in sections" :key="section.key" type="button" class="section-nav__tick" :class="{ 'section-nav__tick--active': index === active, 'section-nav__tick--shown': index === shown }" :aria-label="section.title" :aria-current="index === active ? 'location' : null" @mouseenter="show(index, $event)" @focus="show(index, $event)" @blur="show(null)" @click="go(index)" />
+      </div>
 
-    <div v-if="card" ref="card" class="section-nav__card" :style="{ top: `${cardTop}px` }" aria-hidden="true">
-      <div class="section-nav__title">{{ card.title }}</div>
-      <div v-if="card.meta" class="section-nav__meta">{{ card.meta }}</div>
-      <div v-if="card.summary" class="section-nav__summary">{{ card.summary }}</div>
-    </div>
-  </nav>
+      <div v-if="card" ref="card" class="section-nav__card" :style="{ top: `${cardTop}px` }" aria-hidden="true">
+        <div class="section-nav__title">{{ card.title }}</div>
+        <div v-if="card.meta" class="section-nav__meta">{{ card.meta }}</div>
+        <div v-if="card.summary" class="section-nav__summary">{{ card.summary }}</div>
+      </div>
+    </nav>
+
+    <help-panel />
+  </div>
 </template>
 
 <script>
-// A column of ticks at the right edge of the window, one for each section of the page, that scrolls to a section when one is clicked and shows its title, figures and summary when one is hovered. A section is a `.panel` with a `.panel-head` (styles/page-chrome.scss): its title is the text of the head's first element, its figures the chips and secondary notes in the head and the size of its table, and its summary the panel's `data-summary` attribute, shown in full. The ticks show once a page has two sections and is too long for the window.
+import HelpPanel from './HelpPanel.vue'
+
+// A column of ticks at the right edge of the window, one for each section of the page, that scrolls to a section when one is clicked and shows its title, figures and summary when one is hovered. A section is a `.panel` with a `.panel-head` (styles/page-chrome.scss): its title is the text of the head's first element, its figures the chips and secondary notes in the head and the size of its table, and its summary the panel's `data-summary` attribute, shown in full. The ticks show once a page has two sections and is too long for the window. The page's help (HelpPanel) is mounted beside them, so every page of the navigation gets one, whatever its sections.
 
 const SCAN_DELAY = 200
 
@@ -79,6 +85,7 @@ const describe = (panel) => {
 }
 
 export default {
+  components: { HelpPanel },
   data () {
     return {
       sections: [],
@@ -252,7 +259,7 @@ export default {
         const tick = event.currentTarget.getBoundingClientRect()
 
         this.$nextTick(() => {
-          const strip = this.$el.getBoundingClientRect()
+          const strip = this.$refs.strip.getBoundingClientRect()
           const height = this.$refs.card.offsetHeight
           const centre = tick.top + tick.height / 2 - strip.top
 
@@ -265,6 +272,10 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.section-nav-root {
+  display: contents;
+}
+
 .section-nav {
   position: fixed;
   z-index: 4;
@@ -310,6 +321,9 @@ export default {
   }
 
   &:focus-visible::after {
+    width: 16px;
+    background: var(--ae-ink);
+    opacity: 1;
     outline: 2px solid var(--ae-primary);
     outline-offset: 2px;
   }
@@ -341,9 +355,9 @@ export default {
 
 .section-nav__title {
   overflow: hidden;
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   font-weight: 600;
-  line-height: 20px;
+  line-height: calc(20px * var(--ae-font-scale));
   color: var(--ae-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -353,8 +367,8 @@ export default {
   display: -webkit-box;
   overflow: hidden;
   margin-top: 2px;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(12px * var(--ae-font-scale));
+  line-height: calc(17px * var(--ae-font-scale));
   color: var(--ae-ink);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -362,8 +376,8 @@ export default {
 
 .section-nav__summary {
   margin-top: 4px;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(12px * var(--ae-font-scale));
+  line-height: calc(17px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 

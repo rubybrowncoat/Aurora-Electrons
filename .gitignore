@@ -4,9 +4,12 @@ out
 build/*
 !build/icons
 node_modules
+.vite-web/
 .DS_Store
 AuroraDB*.db
 docs/
 CLAUDE.md
 artifacts/
+saves/
 __pycache__/
+.check-runs/

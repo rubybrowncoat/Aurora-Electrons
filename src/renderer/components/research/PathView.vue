@@ -19,7 +19,7 @@
         <div class="d-flex align-center flex-wrap mb-1">
           <span class="text-h6 mr-3">{{ tech.name }}</span>
           <span class="status-chip mr-3"><v-icon small :color="colors[entry.status]">{{ icons[entry.status] }}</v-icon> {{ labels[entry.status] }}</span>
-          <span class="caption text--secondary">{{ fieldName }} · {{ tech.typeName }}</span>
+          <span class="caption text--secondary">{{ fieldName }} · {{ tech.typeName }}</span><page-link v-if="techViews[tech.typeId]" class="ml-1" :to="linkTo.shipyards({ view: techViews[tech.typeId] })" :name="tech.typeName" />
         </div>
         <div v-if="tech.description" class="description mb-3">{{ tech.description }}</div>
         <div v-if="entry.status === 'blocked'" class="text--secondary mb-3">{{ blockText }}</div>
@@ -27,14 +27,14 @@
         <v-row dense>
           <v-col v-for="fact in facts" :key="fact.label" cols="6" sm="3">
             <div class="caption text--secondary">{{ fact.label }}</div>
-            <div class="fact-value">{{ fact.value }}</div>
+            <div class="fact-value">{{ fact.value }}<provenance-mark v-if="fact.result" :result="fact.result" /><provenance-mark v-else-if="fact.status" :status="fact.status" /></div>
             <div v-if="fact.note" class="caption text--secondary">{{ fact.note }}</div>
           </v-col>
         </v-row>
       </div>
     </v-card>
 
-    <v-card v-if="tech" class="panel" data-summary="The chain of technologies leading to the selected one, coloured by status. Use it to see which the race already holds and which are still missing." elevation="1">
+    <v-card v-if="tech" class="panel" data-summary="The chain of technologies leading to the selected one, coloured by status." elevation="1">
       <div class="panel-head">
         <span>Prerequisites</span>
         <span class="legend">
@@ -48,7 +48,7 @@
 
     <v-row v-if="tech">
       <v-col cols="12" md="6">
-        <v-card class="panel" data-summary="The technologies the race still needs before this one, in an order that reaches it, with the research points each has left. Click one to open its own path." elevation="1">
+        <v-card class="panel" data-summary="The technologies the race still needs before this one, in the order that reaches it." elevation="1">
           <div class="panel-head"><span>{{ order.length > 1 ? 'Research in this order' : 'Nothing else needed' }}</span></div>
           <div class="panel-body">
             <div v-if="entry.status === 'done'" class="empty">Already researched.</div>
@@ -57,14 +57,14 @@
               <li v-for="step in order" :key="step.id" class="step">
                 <v-icon small :color="colors[step.status]">{{ icons[step.status] }}</v-icon>
                 <a class="tech-link" @click="$emit('select-tech', step.id)">{{ step.name }}</a>
-                <span class="caption text--secondary ml-auto text-no-wrap">{{ count(step.remaining) }} RP</span>
+                <span class="caption text--secondary ml-auto text-no-wrap"><template v-if="step.remaining === null">—<provenance-mark :result="step.result" /></template><template v-else>{{ count(step.remaining) }} RP</template></span>
               </li>
             </ol>
           </div>
         </v-card>
       </v-col>
       <v-col cols="12" md="6">
-        <v-card class="panel" data-summary="The technologies that this one unlocks. Use it to see what researching it makes possible next." elevation="1">
+        <v-card class="panel" data-summary="The technologies that the selected one unlocks." elevation="1">
           <div class="panel-head"><span>Opens</span></div>
           <div class="panel-body">
             <div v-if="!opens.length" class="empty">Nothing waits on this technology.</div>
@@ -86,8 +86,14 @@
 import cytoscape from 'cytoscape'
 
 import countFormat from '../../mixins/count-format'
-import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, prerequisiteChain, QUEUED, STATUS_LABELS } from '../../utilities/research'
-import { chartTheme, withAlpha } from '../charts/theme'
+import { activeAppearance } from '../../utilities/appearance'
+import { linkTo } from '../../utilities/deep-links'
+import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
+import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, prerequisiteChain, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import { SHIPYARD_TECH_VIEWS } from '../../utilities/shipyard-growth'
+import { chartTheme, mapFont, withAlpha } from '../charts/theme'
+import PageLink from '../page/PageLink.vue'
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
 
@@ -100,6 +106,7 @@ const truncate = (text, length) => (text.length > length ? `${text.slice(0, leng
 
 export default {
   name: 'PathView',
+  components: { PageLink, ProvenanceMark },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
@@ -107,14 +114,26 @@ export default {
   },
   data() {
     return {
+      linkTo,
+      techViews: SHIPYARD_TECH_VIEWS,
       icons: STATUS_ICONS,
       labels: STATUS_LABELS,
       legend: [DONE, ACTIVE, AVAILABLE, LOCKED, BLOCKED].map((status) => ({ status, label: STATUS_LABELS[status] })),
     }
   },
   computed: {
+    // The appearance in force; the graph redraws on its key, so a switch between two dark presets redraws it too.
+    appearance() {
+      return activeAppearance()
+    },
+
     colors() {
-      return statusColors(this.$vuetify.theme.dark)
+      return statusColors(this.appearance)
+    },
+
+    // The typeface and text size in force (utilities/appearance-font.js); the graph is drawn again when they change.
+    typeface() {
+      return mapFont()
     },
 
     tech() {
@@ -144,27 +163,27 @@ export default {
 
     facts() {
       const { entry, tech } = this
-      const banked = this.research.state.paused.get(tech.id) || 0
+      const { paused } = this.research.state
+      const banked = paused.has(tech.id) ? paused.get(tech.id) : 0
+      const costKnown = isKnownNumber(tech.cost)
+      const cost = { label: 'Cost', value: costKnown ? `${this.count(tech.cost)} RP` : UNKNOWN_TEXT, ...(costKnown ? {} : { status: 'unavailable' }) }
 
       if (entry.status === DONE) {
-        return [
-          { label: 'Cost', value: `${this.count(tech.cost)} RP` },
-          { label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology not yet researched' : 'technologies not yet researched' },
-        ]
+        return [cost, { label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology not yet researched' : 'technologies not yet researched' }]
       } else if (entry.status === BLOCKED) {
-        return [{ label: 'Cost', value: `${this.count(tech.cost)} RP` }]
+        return [cost]
       }
 
-      const facts = [{ label: entry.status === ACTIVE ? 'RP left on this project' : 'RP to research it', value: `${this.count(entry.remaining)} RP`, note: banked ? `${this.count(banked)} banked of ${this.count(tech.cost)}` : entry.status === ACTIVE ? `of ${this.count(tech.cost)}` : '' }]
+      const facts = [{ label: entry.status === ACTIVE ? 'RP left on this project' : 'RP to research it', value: isKnownNumber(entry.remaining) ? `${this.count(entry.remaining)} RP` : UNKNOWN_TEXT, result: remainingResult(entry), note: banked > 0 ? `${this.count(banked)} banked of ${this.count(tech.cost)}` : entry.status === ACTIVE ? `of ${this.count(tech.cost)}` : '' }]
 
       if (entry.missing.length) {
-        facts.push({ label: 'RP to get there', value: `${this.count(entry.pathRp)} RP`, note: `${entry.missing.length + 1} steps, prerequisites included` })
+        facts.push({ label: 'RP to get there', value: isKnownNumber(entry.pathRp) ? `${this.count(entry.pathRp)} RP` : UNKNOWN_TEXT, result: pathRpResult(entry), note: `${entry.missing.length + 1} steps, prerequisites included` })
       }
 
       const rate = this.research.totalRate
 
       if (rate > 0) {
-        facts.push({ label: 'With every lab on it', value: durationLabel(entry.pathRp / rate), note: `at ${this.count(rate)} RP a year, if one scientist could run them all` })
+        facts.push({ label: 'With every lab on it', value: isKnownNumber(entry.pathRp) ? durationLabel(entry.pathRp / rate, this.separator) : UNKNOWN_TEXT, result: pathRpResult(entry), note: `at ${this.count(rate)} RP a year, if one scientist could run them all` })
       }
 
       facts.push({ label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology' : 'technologies' })
@@ -175,7 +194,7 @@ export default {
     order() {
       const { info, graph } = this.research
 
-      return [...this.entry.missing, this.tech.id].map((id) => ({ id, name: graph.techs.get(id).name, status: info.get(id).status, remaining: info.get(id).remaining }))
+      return [...this.entry.missing, this.tech.id].map((id) => ({ id, name: graph.techs.get(id).name, status: info.get(id).status, remaining: info.get(id).remaining, result: remainingResult(info.get(id)) }))
     },
 
     opens() {
@@ -195,7 +214,8 @@ export default {
   },
   watch: {
     chain: 'draw',
-    '$vuetify.theme.dark': 'draw',
+    'appearance.key': 'draw',
+    typeface: 'draw',
   },
   mounted() {
     this.draw()
@@ -239,16 +259,15 @@ export default {
         }
 
         const { graph, info } = this.research
-        const dark = this.$vuetify.theme.dark
-        const theme = chartTheme(dark)
-        const colors = statusColors(dark)
+        const theme = chartTheme(this.appearance)
+        const colors = statusColors(this.appearance)
         const elements = [
           ...this.chain.nodes.map((node) => {
             const tech = graph.techs.get(node.id)
             const status = info.get(node.id).status
 
             return {
-              data: { id: String(node.id), status, target: node.id === this.tech.id, label: status === DONE ? truncate(tech.name, 30) : `${truncate(tech.name, 30)}\n${this.count(info.get(node.id).remaining)} RP` },
+              data: { id: String(node.id), status, target: node.id === this.tech.id, label: status === DONE ? truncate(tech.name, 30) : `${truncate(tech.name, 30)}\n${isKnownNumber(info.get(node.id).remaining) ? `${this.count(info.get(node.id).remaining)} RP` : 'RP not known'}` },
               position: { x: node.layer * COLUMN_WIDTH, y: node.row * ROW_HEIGHT },
             }
           }),
@@ -278,8 +297,8 @@ export default {
                 'text-wrap': 'wrap',
                 'text-valign': 'center',
                 'text-halign': 'center',
-                'font-size': 11,
-                'font-family': 'Roboto, Helvetica Neue, Arial, sans-serif',
+                'font-size': this.typeface.size(11),
+                'font-family': this.typeface.family,
                 color: theme.ink,
               },
             },
@@ -322,8 +341,8 @@ export default {
   }
 
   .fact-value {
-    font-size: 22px;
-    line-height: 30px;
+    font-size: calc(22px * var(--ae-font-scale));
+    line-height: calc(30px * var(--ae-font-scale));
   }
 
   .status-chip {
@@ -391,7 +410,7 @@ export default {
   }
 
   .empty {
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     opacity: 0.7;
   }
 

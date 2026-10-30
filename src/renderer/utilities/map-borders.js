@@ -7,19 +7,20 @@ const LINE = 3
 export const TINT = 0.14
 // The group's name beside each shape, in map units. Like the systems' names, it shows once it would be 9 pixels tall on screen.
 const LABEL_SIZE = 16
-const LABEL_FONT = `500 ${LABEL_SIZE}px Roboto, sans-serif`
+const LABEL_WEIGHT = 500
 const LABEL_MIN_PX = 9
 // Between a name and its shape's line.
 const LABEL_GAP = 8
 // The systems' own names, as the page's cytoscape style draws them: under the marker, 5 units down, in a 14 px font on a background 2 units wider all round, each line under the first 14 units more.
-const NAME_FONT = '14px Roboto, sans-serif'
+const NAME_SIZE = 14
 const NAME_DROP = 3
 const NAME_HEIGHT = 21
 const NAME_LINE = 14
 // Round a name's place, the room counted as crowding when choosing the freer side.
 const CROWD = 40
 
-export const showsLabels = (zoom) => LABEL_SIZE * zoom >= LABEL_MIN_PX
+// `type` is the typeface and text size the map draws in (`mapFont()` of components/charts/theme.js: `font(px, weight)` gives a canvas font and `size(px)` a size at the chosen text size). The sizes above are at the base text size; every one that depends on a name's size follows it.
+export const showsLabels = (zoom, type) => type.size(LABEL_SIZE) * zoom >= LABEL_MIN_PX
 
 // The systems of each group, split where the group's own links don't join them: [{ owner, ids, links }], with `links` the [source, target] pairs inside the part. `ownerOf(row)` is the group (the same object for every system in it, with `name` and `color`), or nothing for a system outside every group.
 export const groupBorders = (rows, links, ownerOf) => {
@@ -96,8 +97,8 @@ const tracePart = (path, part, { positionOf, sizeOf }, grow) => {
   })
 }
 
-// Draws the parts on `context`, already transformed to map units, at `zoom` screen pixels to a map unit. Each shape gets a line of its group's colour and a light tint inside; later shapes lie over earlier ones where they meet. `positionOf(id)` and `sizeOf(id)` give a system's place and marker size; `places`, from `placeLabels`, puts the groups' names, and none are drawn without it.
-export const drawBorders = (context, parts, { positionOf, sizeOf, zoom, ink, halo, places = null }) => {
+// Draws the parts on `context`, already transformed to map units, at `zoom` screen pixels to a map unit. Each shape gets a line of its group's colour and a light tint inside; later shapes lie over earlier ones where they meet. `positionOf(id)` and `sizeOf(id)` give a system's place and marker size; `places`, from `placeLabels`, puts the groups' names, and none are drawn without it; `type` is needed with `places`.
+export const drawBorders = (context, parts, { positionOf, sizeOf, zoom, ink, halo, places = null, type = null }) => {
   if (!parts.length) {
     return
   }
@@ -124,11 +125,11 @@ export const drawBorders = (context, parts, { positionOf, sizeOf, zoom, ink, hal
     context.globalAlpha = 1
   })
 
-  if (!places || !showsLabels(zoom)) {
+  if (!places || !showsLabels(zoom, type)) {
     return
   }
 
-  context.font = LABEL_FONT
+  context.font = type.font(LABEL_SIZE, LABEL_WEIGHT)
   context.textBaseline = 'middle'
   context.lineJoin = 'round'
   context.lineWidth = 4
@@ -178,11 +179,11 @@ const touches = (box, at, radius) => {
   return dx * dx + dy * dy < radius * radius
 }
 
-// Where each part's name goes: [{ name, x, y, align, box }], in map units. A name sits on the left or the right of one of the part's systems: level with it just outside its shape, or just above or below the system's ring, in the gap where no system's name is drawn. The place chosen covers the fewest markers, system names and other parts' names, then crosses the fewest links and shapes, then has the least close by. Larger parts choose first. `systems` are every system's id, `links` every link ({ source, target }) and `nameOf(id)` a system's label, its lines split by newlines; `context` measures the text.
-export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf, nameOf }) => {
+// Where each part's name goes: [{ name, x, y, align, box }], in map units. A name sits on the left or the right of one of the part's systems: level with it just outside its shape, or just above or below the system's ring, in the gap where no system's name is drawn. The place chosen covers the fewest markers, system names and other parts' names, then crosses the fewest links and shapes, then has the least close by. Larger parts choose first. `systems` are every system's id, `links` every link ({ source, target }) and `nameOf(id)` a system's label, its lines split by newlines; `context` measures the text, in the font `type` gives.
+export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf, nameOf, type }) => {
   const obstacles = []
 
-  context.font = NAME_FONT
+  context.font = type.font(NAME_SIZE)
   systems.forEach((id) => {
     const at = positionOf(id)
 
@@ -192,16 +193,16 @@ export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf
       const width = Math.max(...lines.map((line) => context.measureText(line).width)) + 4
 
       obstacles.push({ x1: at.x - half, y1: at.y - half, x2: at.x + half, y2: at.y + half })
-      obstacles.push({ x1: at.x - width / 2, y1: at.y + half + NAME_DROP, x2: at.x + width / 2, y2: at.y + half + NAME_DROP + NAME_HEIGHT + NAME_LINE * (lines.length - 1) })
+      obstacles.push({ x1: at.x - width / 2, y1: at.y + half + NAME_DROP, x2: at.x + width / 2, y2: at.y + half + NAME_DROP + type.size(NAME_HEIGHT) + type.size(NAME_LINE) * (lines.length - 1) })
     }
   })
 
   const segments = links.map(({ source, target }) => [positionOf(source), positionOf(target)]).filter(([a, b]) => a && b)
   const rings = parts.flatMap((part) => part.ids.map((id) => ({ at: positionOf(id), radius: sizeOf(id) / 2 + ROOM + LINE })).filter((ring) => ring.at))
   const places = []
-  const height = LABEL_SIZE * 1.2
+  const height = type.size(LABEL_SIZE) * 1.2
 
-  context.font = LABEL_FONT
+  context.font = type.font(LABEL_SIZE, LABEL_WEIGHT)
   ;[...parts].filter((part) => part.owner.name).sort((a, b) => b.ids.length - a.ids.length).forEach((part) => {
     const name = part.owner.name
     const width = context.measureText(name).width

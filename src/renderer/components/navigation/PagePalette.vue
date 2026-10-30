@@ -34,6 +34,7 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import { activeAppearance } from '../../utilities/appearance'
 import { sectionById } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
 
@@ -98,7 +99,7 @@ export default {
     },
     // Display rows with group headings, each page row numbered for the keyboard selection.
     rows () {
-      const describe = (page, index) => ({ page, index, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]), section: page.section ? sectionById[page.section].title : '' })
+      const describe = (page, index) => ({ page, index, style: sectionStyle(activeAppearance(), sectionById[page.section]), section: page.section ? sectionById[page.section].title : '' })
 
       if (this.matches) {
         return this.matches.map(describe)
@@ -172,7 +173,7 @@ export default {
 
 .page-palette__group {
   padding: 10px 16px 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -206,25 +207,25 @@ export default {
 }
 
 .page-palette__name {
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
 }
 
 .page-palette__blurb {
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 
 .page-palette__section {
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   font-weight: 500;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--sc);
+  color: var(--sc-text);
 }
 
 .page-palette__locked {
   padding: 10px 16px 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 
@@ -239,7 +240,7 @@ export default {
   gap: 14px;
   padding: 10px 16px;
   border-top: 1px solid var(--ae-border);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 </style>

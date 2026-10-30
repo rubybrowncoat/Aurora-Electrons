@@ -12,7 +12,7 @@
 </template>
 
 <script>
-// The panel that slides out of the rail: a head with a title and a note, the content, and a foot. The title takes the colour `--sc` of whoever styles the panel.
+// The panel that slides out of the rail: a head with a title and a note, the content, and a foot. The title takes the text colour `--sc-text` of whoever styles the panel.
 export default {
   props: {
     title: {
@@ -76,16 +76,16 @@ export default {
 }
 
 .flyout-panel__title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
-  color: var(--sc);
+  color: var(--sc-text);
 }
 
 .flyout-panel__meta {
   font-family: var(--ae-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 
@@ -96,7 +96,7 @@ export default {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 </style>

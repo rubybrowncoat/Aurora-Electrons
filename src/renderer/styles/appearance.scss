@@ -1,0 +1,339 @@
+// Vuetify paints the app, its cards, its tables, its lists and its expansion panels from constants of its own (#ffffff and #121212, #ffffff and #1e1e1e). These rules take those surfaces from the appearance in force (the custom properties on the root, utilities/appearance.js), with the specificity of Vuetify's own rules and after them, so a preset can change them. The baseline presets hold Vuetify's constants.
+
+.v-application {
+  &.theme--light,
+  &.theme--dark {
+    background: var(--ae-bg);
+  }
+}
+
+.v-card,
+.v-data-table {
+  &.theme--light,
+  &.theme--dark {
+    background-color: var(--ae-card);
+  }
+}
+
+// A list (a menu's, a dropdown's, the About page's) and an expansion panel are Vuetify sheets with a surface of its own, so they took #1e1e1e or #ffffff on a preset whose card is another colour, and the text drawn on them (the inks below, the section colours of the history menu) was measured against the card and not against what was behind it. They take the card, as a card does; scripts/check-contrast.js requires each rule.
+@each $theme in light, dark {
+  .v-list.theme--#{$theme},
+  .v-expansion-panels.theme--#{$theme} .v-expansion-panel {
+    background-color: var(--ae-card);
+  }
+}
+
+// Keyboard focus: a 2px ring in the appearance's focus colour on the controls Vuetify leaves with a faint grey overlay (or, for a clickable chip, with none), so the focused control is told from its neighbours by an edge and not by a wash. scripts/check-contrast.js measures the focus colour at 3:1 or more on every surface of every preset.
+.v-application {
+  a:focus-visible,
+  .v-btn:focus-visible,
+  .v-chip--link:focus-visible,
+  .v-chip--clickable:focus-visible,
+  .v-tab:focus-visible,
+  .v-list-item--link:focus-visible,
+  .v-slide-group__prev:focus-visible,
+  .v-slide-group__next:focus-visible,
+  .v-pagination__item:focus-visible,
+  .v-pagination__navigation:focus-visible,
+  .v-expansion-panel-header:focus-visible,
+  .v-icon--link:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
+  }
+
+  .v-list-item--link:focus-visible,
+  .v-tab:focus-visible,
+  .v-expansion-panel-header:focus-visible {
+    outline-offset: -2px;
+  }
+
+  // A button-icon such as the row expander keeps Vuetify's round faint overlay, so the ring follows it.
+  .v-icon--link:focus-visible {
+    border-radius: 50%;
+  }
+
+  // A table row a page makes focusable (Enter selects it), and a sortable column head (components/page/keyboard-controls.js makes it focusable; Vuetify's own rule takes its outline away). The head shows its sort arrow while it holds focus, as it does under the pointer.
+  .v-data-table tbody tr[tabindex]:focus-visible,
+  .v-data-table-header th.sortable:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: -2px;
+  }
+
+  .v-data-table-header th.sortable:focus-visible .v-data-table-header__icon {
+    opacity: 1;
+  }
+}
+
+// Every list (the history menu's, a dropdown's, a menu's): Vuetify's overlay over an entry is the text colour at 4% hovered up to 16% on the light theme and 8% up to 32% on the dark one. The strongest takes a section colour (the history menu's icons) under 3:1 on every preset, and takes the chosen entry of a dropdown, which is drawn in the focus colour under an overlay in that colour, under 4.5:1 on the dark presets (the dark card under it is a mid grey). So every state of an entry but the hovered one is held to the opacity of a hovered entry, the chosen entry is told by the colour of its text and by a bar on its leading edge (below), and the keyboard's highlight takes the ring a focused entry has. scripts/check-contrast.js reads these rules and measures the text and the section colours under that overlay (`LIST_VEIL` in utilities/appearance-contrast.js).
+@each $theme, $opacity in (light: 0.04, dark: 0.08) {
+  .v-application .v-list .v-list-item.theme--#{$theme} {
+    &:focus::before,
+    &.v-list-item--active::before,
+    &.v-list-item--active:hover::before,
+    &.v-list-item--active:focus::before,
+    &.v-list-item--highlighted::before {
+      opacity: $opacity;
+    }
+  }
+}
+
+.v-application .v-list .v-list-item--highlighted {
+  outline: 2px solid var(--ae-primary);
+  outline-offset: -2px;
+}
+
+// The chosen entry of a list (a dropdown's chosen option, the preset of a hand-written menu that is `input-value`) carries a 3px bar on its leading edge in the focus colour, inset so it does not shift the layout: the way a selected table row carries one (styles/page-chrome.scss). The overlay is the same as a hovered entry's and an entry of a hand-written menu is drawn in the text ink, so neither the overlay nor the colour of the text tells the chosen entry from the one under the pointer. The 2px ring of the keyboard's highlight is drawn over the bar and stops short of it: an entry that is both is a 5px bar, 3px of it clear of the ring. scripts/check-contrast.js reads these two rules and measures the bar on the entry's overlay.
+.v-application .v-list .v-list-item--active {
+  box-shadow: inset 3px 0 0 var(--ae-primary);
+}
+
+.v-application .v-list .v-list-item--active.v-list-item--highlighted {
+  box-shadow: inset 5px 0 0 var(--ae-primary);
+}
+
+// A link in running text (an anchor with no Vuetify class: the router links, the external links, the research views' tech links, the map's text actions) is underlined in a preset whose focus colour is too close to its text ink to tell a link by colour (utilities/appearance.js: `focus.linkLine` is emitted as `--ae-link-line` only for such a preset, and the selector matches the root's inline style only then, so the other presets draw their links as before). scripts/check-contrast.js requires the rule whenever the focus colour is under 20 CIEDE2000 from the text.
+.v-application[style*='--ae-link-line'] a:not([class^='v-']):not([class*=' v-']) {
+  text-decoration-line: var(--ae-link-line);
+}
+
+// A pressed button of a toggle group (a chosen mode, view or range) carries a 3px bar along its bottom edge in the focus colour and a wash of the selected-row token, besides Vuetify's grey wash, which is under 1.5:1 against its neighbours and so cannot tell the state on its own. Vuetify's own wash of the pressed button (white at 18% to 32% on the dark theme) would pull the bar under 3:1 against the button, so the wash is the preset's own, at one strength whether the button is pressed, hovered or focused (scripts/check-contrast.js measures the bar on it). The focused button's own grey wash is dropped, so the wash means pressed and the ring means focus.
+.v-application .v-btn-toggle {
+  > .v-btn {
+    &:not(.v-btn--active):focus::before {
+      opacity: 0;
+    }
+
+    &.v-btn--active::before,
+    &.v-btn--active:hover::before,
+    &.v-btn--active:focus::before {
+      background-color: var(--ae-row-selected);
+      opacity: 1;
+    }
+
+    &.v-btn--active::after {
+      display: block;
+      content: '';
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background: var(--ae-primary);
+      pointer-events: none;
+    }
+  }
+}
+
+// A table row under the pointer, and a row ticked in a table with checkboxes (`v-data-table__selected`). Vuetify washes the first grey (#eeeeee, and #616161 on the dark theme, where that takes secondary text to 4.0:1 and a red or amber figure to 1.9:1 and 2.6:1) and the second #f5f5f5, and #505050 on the dark theme, which takes a red figure to 2.8:1. The appearance's own faint washes of the focus colour keep the text they sit under at 4.5:1 (scripts/check-contrast.js measures them). A row that carries a wash of its own keeps it under the pointer instead of taking a second one over it, because two washes layered would pull the severity figures in it under 4.5:1: a picked row takes the selection wash again, and a compared row that differs (`compare-differs`, washed on its cells) and the focused row of Mineral Outlook (`is-focus-row`, hatched) take none. scripts/check-contrast.js reads this block and measures the layered wash of any washed row whose hover it does not settle (`.<class>:hover`).
+.v-application .v-data-table > .v-data-table__wrapper > table > tbody > tr {
+  &:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background-color: var(--ae-hover);
+  }
+
+  &.v-data-table__selected,
+  &.v-data-table__selected:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper),
+  &.is-selected-row:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper),
+  &.selected-row:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background-color: var(--ae-row-selected);
+  }
+
+  &.compare-differs:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background: transparent;
+  }
+
+  // The focused row of Mineral Outlook is hatched in the two bands of its tokens, at rest and under the pointer: Vuetify's hover sets the whole `background` shorthand, which would take the hatching away, so the rule is here at hover's specificity.
+  &.is-focus-row,
+  &.is-focus-row:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background: repeating-linear-gradient(-45deg, var(--ae-row-stripe) 0, var(--ae-row-stripe) 12px, var(--ae-row-stripe-soft) 12px, var(--ae-row-stripe-soft) 24px);
+  }
+}
+
+// Text on a filled chip: Vuetify draws it white (a `dark` chip, or a chip in one of its named colours). The preset's `inks.onFill` replaces it, so the text is 4.5:1 or more on every colour the chip is filled with (scripts/check-contrast.js). A hex fill is inline style, a named one a class; the icon and the close button follow the text.
+.v-application {
+  .v-chip:not(.v-chip--outlined).primary,
+  .v-chip:not(.v-chip--outlined).success,
+  .v-chip:not(.v-chip--outlined).error,
+  .v-chip:not(.v-chip--outlined).warning,
+  .v-chip:not(.v-chip--outlined).info,
+  .v-chip:not(.v-chip--outlined)[style*='background-color'] {
+    color: var(--ae-on-fill);
+
+    .v-icon {
+      color: inherit;
+    }
+  }
+}
+
+// Text on a filled button or avatar in the primary colour: Vuetify draws a button's white, which is 2:1 to 3.1:1 on the lighter focus colours of the dark presets (the same colour has to be 4.5:1 as text on their surfaces, so it cannot also be dark enough for white). The preset's `inks.onFill` replaces it, as on a chip (scripts/check-contrast.js measures it on `focus.primary`). A disabled button keeps Vuetify's own disabled colours.
+.v-application {
+  .v-btn:not(.v-btn--outlined):not(.v-btn--text):not(.v-btn--disabled).primary,
+  .v-avatar.primary {
+    color: var(--ae-on-fill);
+
+    .v-icon {
+      color: inherit;
+    }
+  }
+}
+
+// Vuetify's own text: each of its components draws its text in a colour of the theme (black at 87% or white; 60% and 70% for secondary text), which the inks of a preset that adapts a reference never reach. The rules below, at Vuetify's own specificity and after it, draw the text in `inks.text` and `inks.textMuted` instead: the baselines carry Vuetify's own values, so Light and Dark do not change (utilities/appearance.js). A theme the preset is not based on keeps Vuetify's colours (`--ae-text-light` and `--ae-text-dark` are per theme). A disabled component keeps Vuetify's disabled colours (each selector leaves its disabled state out, or Vuetify's `!important` wins); icons, tabs, placeholders and the text of a filled coloured button keep Vuetify's colours as well; a toolbar, snackbar or other sheet filled with a named colour is handled by the rules after these. scripts/check-contrast.js reads these rules from the compiled stylesheet.
+@each $theme in light, dark {
+  .v-application.theme--#{$theme},
+  .v-sheet:not(.v-snack__wrapper).theme--#{$theme},
+  .v-card.theme--#{$theme},
+  .v-list.theme--#{$theme},
+  .v-list-item:not(.v-list-item--active):not(.v-list-item--disabled).theme--#{$theme},
+  .v-input:not(.v-input--is-disabled).theme--#{$theme},
+  .v-input:not(.v-input--is-disabled).theme--#{$theme} input,
+  .v-input:not(.v-input--is-disabled).theme--#{$theme} textarea,
+  .v-select:not(.v-input--is-disabled).theme--#{$theme} .v-select__selections,
+  .v-chip.theme--#{$theme},
+  .v-data-table.theme--#{$theme},
+  .v-data-table.theme--#{$theme} .v-data-table-header th.sortable:hover,
+  .v-data-table.theme--#{$theme} .v-data-table-header th.sortable.active,
+  .v-expansion-panels.theme--#{$theme} .v-expansion-panel:not(.v-expansion-panel--disabled),
+  .v-footer.theme--#{$theme},
+  .v-pagination.theme--#{$theme} .v-pagination__item:not(.v-pagination__item--active),
+  .v-btn:not(.v-btn--has-bg):not(.v-btn--icon).theme--#{$theme} {
+    color: var(--ae-text-#{$theme});
+  }
+
+  .v-application.theme--#{$theme} .text--primary {
+    color: var(--ae-text-#{$theme}) !important;
+  }
+
+  .v-subheader.theme--#{$theme},
+  .v-list-item:not(.v-list-item--disabled).theme--#{$theme} .v-list-item__subtitle,
+  .v-list-item:not(.v-list-item--disabled).theme--#{$theme} .v-list-item__action-text,
+  .v-label:not(.v-label--is-disabled).theme--#{$theme},
+  .v-messages.theme--#{$theme},
+  .v-counter.theme--#{$theme},
+  .v-card.theme--#{$theme} > .v-card__text,
+  .v-card.theme--#{$theme} > .v-card__subtitle,
+  .v-data-table.theme--#{$theme} > .v-data-table__wrapper > table > thead > tr > th,
+  .v-file-input.theme--#{$theme} .v-file-input__text--placeholder {
+    color: var(--ae-text-muted-#{$theme});
+  }
+
+  .v-application.theme--#{$theme} .text--secondary {
+    color: var(--ae-text-muted-#{$theme}) !important;
+  }
+}
+
+// Text and icons on a dark-theme surface filled with one of Vuetify's named colours (the System view's toolbar, the snackbar): the ordinary text inks above are drawn for the surfaces of the preset, not for these fills, so the rules below, after them and more specific, draw `inks.onColor` on the title, the icons and the text buttons, and `inks.onSnackbar` on a snackbar's message. The baselines carry Vuetify's own white, so Light and Dark do not change (utilities/appearance.js); an adaptation's inks are 4.5:1 on the primary and the four severities (scripts/check-contrast.js measures each pairing from this compiled stylesheet). `secondary` and `accent` are not used as fills. A disabled button and a filled button keep their own colours.
+.v-application {
+  @each $name in primary, success, error, warning, info {
+    .v-sheet.theme--dark.#{$name}:not(.v-snack__wrapper) {
+      color: var(--ae-on-color);
+
+      .v-icon,
+      .v-btn:not(.v-btn--disabled):not(.v-btn--has-bg) {
+        color: inherit;
+      }
+    }
+
+    .v-snack__wrapper.v-sheet.theme--dark.#{$name} {
+      color: var(--ae-on-snackbar);
+
+      .v-icon {
+        color: inherit;
+      }
+
+      .v-btn:not(.v-btn--disabled):not(.v-btn--has-bg) {
+        color: var(--ae-on-color);
+      }
+    }
+  }
+}
+
+// The typeface and text size (utilities/appearance-font.js) are set on the root element as `--ae-font`, `--ae-mono` and `--ae-font-scale`, with the root font size, so everything Vuetify sizes in rem follows the text size. These are the bundled defaults, in force until the settings are read. Vuetify sets its family on each typography class with !important, so each of them takes the choice here, after Vuetify's sheet.
+:root {
+  --ae-font: Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ae-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
+  --ae-font-scale: 1;
+}
+
+$ae-type-classes: display-4, display-3, display-2, display-1, headline, title, subtitle-2, subtitle-1, body-2, body-1, caption, overline;
+$ae-type-names: h1, h2, h3, h4, h5, h6, subtitle-1, subtitle-2, body-1, body-2, button, caption, overline;
+
+.v-application {
+  font-family: var(--ae-font);
+
+  @each $name in $ae-type-classes {
+    .#{$name} {
+      font-family: var(--ae-font) !important;
+    }
+  }
+
+  @each $name in $ae-type-names {
+    .text-#{$name},
+    .text-sm-#{$name},
+    .text-md-#{$name},
+    .text-lg-#{$name},
+    .text-xl-#{$name} {
+      font-family: var(--ae-font) !important;
+    }
+  }
+}
+
+// Vuetify sizes the text of some components in pixels, which the root font size does not move: a text field and its label, an alert, a chip, the messages and the counter under a field, a badge, breadcrumbs and a tooltip. Each takes the text size here, at 100 % exactly the size Vuetify gives it. Icons keep their size: they are drawn to fit a button, not read.
+$ae-vuetify-text: (
+  '.v-input': 16,
+  '.v-label': 16,
+  '.v-alert': 16,
+  '.v-input--radio-group legend.v-label': 14,
+  '.v-chip.v-size--x-small': 10,
+  '.v-chip.v-size--small': 12,
+  '.v-chip.v-size--default': 14,
+  '.v-chip.v-size--large': 16,
+  '.v-chip.v-size--x-large': 18,
+  '.v-messages': 12,
+  '.v-counter': 12,
+  '.v-badge__badge': 12,
+  '.v-breadcrumbs li': 14,
+  '.v-tooltip__content': 14,
+);
+
+$ae-vuetify-lines: (
+  '.v-chip': 20,
+  '.v-input .v-label': 20,
+  '.v-select__selections': 18,
+  '.v-text-field input': 20,
+  '.v-text-field__prefix': 20,
+  '.v-text-field__suffix': 20,
+  '.v-messages__message': 12,
+  '.v-counter': 12,
+  '.v-tooltip__content': 22,
+);
+
+$ae-vuetify-chip-heights: (
+  '.v-chip.v-size--x-small': 16,
+  '.v-chip.v-size--small': 24,
+  '.v-chip.v-size--default': 32,
+  '.v-chip.v-size--large': 54,
+  '.v-chip.v-size--x-large': 66,
+);
+
+.v-application {
+  @each $selector, $size in $ae-vuetify-text {
+    #{$selector} {
+      font-size: calc(#{$size}px * var(--ae-font-scale));
+    }
+  }
+
+  @each $selector, $size in $ae-vuetify-lines {
+    #{$selector} {
+      line-height: calc(#{$size}px * var(--ae-font-scale));
+    }
+  }
+
+  .v-text-field .v-label {
+    height: calc(20px * var(--ae-font-scale));
+  }
+
+  @each $selector, $size in $ae-vuetify-chip-heights {
+    #{$selector} {
+      height: calc(#{$size}px * var(--ae-font-scale));
+    }
+  }
+}

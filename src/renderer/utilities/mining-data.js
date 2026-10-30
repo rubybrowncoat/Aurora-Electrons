@@ -1,5 +1,14 @@
 // The race's mining as the Mineral Outlook page and the Colonization Planner read it: one row per colony or orbital miner and deposit, with what minerals.js `surfaceRate` and `orbitalRate` need.
 
+// The commander bonus ID of the Mining bonus, which the rows below read by ID.
+export const MINING_BONUS = 6
+
+// The text a figure resting on the Mining bonus carries while the save's lookup row for it is not confirmed (`blockedBonuses` of utilities/capabilities.js).
+export const MINING_WITHHELD = 'commander bonus 6, Mining: the save\'s lookup row is not confirmed'
+
+// The rows of `surfaceMiningQuery` or `orbitalMiningQuery` with the Mining bonus columns made null (and `BonusWithheld` set to why) when `blocked` holds the Mining bonus, so no rate is worked out from a bonus the save does not name as the planners expect; the same rows otherwise.
+export const gateMiningRows = (rows, blocked) => (blocked.has(MINING_BONUS) ? rows.map((row) => ({ ...row, ...('CommanderBonus' in row ? { CommanderBonus: null } : { GovernorBonus: null, SectorBonus: null }), BonusWithheld: MINING_WITHHELD })) : rows)
+
 // An NPR always keeps its civilian complexes' minerals; a player race keeps them only when it buys them.
 const PURCHASES_CIVILIAN_MINERALS = 'case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end'
 

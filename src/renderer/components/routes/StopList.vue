@@ -1,7 +1,7 @@
 <template>
-  <v-card class="panel stop-list" data-summary="The places the route visits, in order, with the leg to the next stop. Add, change, remove or reorder them to plan the journey." elevation="1">
+  <v-card class="panel stop-list" data-summary="The places the route visits, in order, with the leg to the next stop." elevation="1">
     <div class="panel-head">
-      <span>Stops</span>
+      <span>Stops<provenance-mark rule="route.travelTime" label /></span>
       <span class="stop-list__tools">
         <v-switch :input-value="cycle" label="Return to start" dense hide-details class="stop-list__cycle" :disabled="rows.length < 2" @change="(value) => $emit('update:cycle', Boolean(value))" />
         <place-picker label="Add a stop" :groups="groups" @need="(id) => $emit('need', id)" @pick="(place) => $emit('insert', rows.length, place)">
@@ -42,6 +42,7 @@
           <span v-if="row.leg.closing" class="stop__leg-to">Back to {{ row.leg.toName }}:</span>
           <span v-if="row.leg.summary" class="text-no-wrap">{{ row.leg.summary }}</span>
           <span v-else class="warning--text">No explored route{{ row.leg.note ? `: ${row.leg.note}` : '' }}</span>
+          <provenance-mark v-if="row.leg.result" :result="row.leg.result" />
         </div>
       </li>
     </ol>
@@ -52,12 +53,13 @@
 </template>
 
 <script>
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 import PlacePicker from './PlacePicker.vue'
 
-// The stops of a route, in order, to add to, change, remove and reorder, with the figures of the leg to the next stop under each. `rows` are { index, key, status ('ok', 'loading' or 'missing'), place, leg } where `leg` is { closing, toName, summary, note } or null. Emits `insert` (index, place), `replace` (index, place), `remove` (index), `move` (from, to), `need` (a place group the picker has to have read) and `update:cycle`. A row drags by its handle with the mouse; the arrow buttons move it from the keyboard.
+// The stops of a route, in order, to add to, change, remove and reorder, with the figures of the leg to the next stop under each. `rows` are { index, key, status ('ok', 'loading' or 'missing'), place, leg } where `leg` is { closing, toName, summary, note, result } or null, `result` being the provenance result of the leg's travel time (or of its missing route). Emits `insert` (index, place), `replace` (index, place), `remove` (index), `move` (from, to), `need` (a place group the picker has to have read) and `update:cycle`. A row drags by its handle with the mouse; the arrow buttons move it from the keyboard.
 export default {
   name: 'StopList',
-  components: { PlacePicker },
+  components: { PlacePicker, ProvenanceMark },
   props: {
     rows: { type: Array, required: true },
     cycle: { type: Boolean, default: false },
@@ -179,8 +181,8 @@ export default {
     border-radius: 50%;
     border: 1px solid currentColor;
     text-align: center;
-    font-size: 12px;
-    line-height: 20px;
+    font-size: calc(12px * var(--ae-font-scale));
+    line-height: calc(20px * var(--ae-font-scale));
     font-variant-numeric: tabular-nums;
   }
 

@@ -4,6 +4,7 @@ import { init as vueInit } from '@sentry/vue'
 
 import './plugins/async-computed'
 import './plugins/icons'
+import './plugins/truncated-text'
 import vuetify from './plugins/vuetify'
 import database from './plugins/database'
 import history from './plugins/history'

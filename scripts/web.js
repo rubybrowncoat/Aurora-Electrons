@@ -1,9 +1,10 @@
 /*
-  Web mode: serves the renderer as a plain browser app for testing without Electron. Electron/Node-only modules are swapped for the shims in ./web/shims, and database calls go to ./web/database-middleware.js, which runs the real Sequelize models against ./AuroraDB.db (override with AURORA_DB). The middleware executes raw SQL, so the server listens on localhost only and the middleware answers only the page (see web/database-middleware.js). Run through run-vite.js (`bun run web`).
+  Web mode: serves the renderer as a plain browser app for testing without Electron. Electron/Node-only modules are swapped for the shims in ./web/shims, and database calls go to ./web/database-middleware.js, which runs the real Sequelize models against ./AuroraDB.db (override with AURORA_DB). The middleware executes raw SQL, so the server listens on 127.0.0.1 only and the middleware answers only the page (see web/database-middleware.js). Run through run-vite.js (`bun run web`).
 */
 const path = require('path')
 
 const PORT = Number(process.env.PORT) || 9080
+const HOST = '127.0.0.1'
 const SHIMS_DIR = path.join(__dirname, 'web', 'shims')
 
 // `bun install --ignore-scripts`, and any later install that relinks sqlite3, leaves it without its native binary; every database call would then fail.
@@ -46,9 +47,9 @@ const main = async () => {
     },
     configFile: false,
     mode: 'development',
-    // Its own cache, so `bun run web` and `bun run dev` can run side by side.
-    cacheDir: path.join(__dirname, '..', 'node_modules', '.vite-web'),
-    server: { port: PORT, host: 'localhost' },
+    // Its own cache inside the checkout, outside the node_modules junction a lane shares with the main repo, so `bun run web` and `bun run dev` can run side by side and no lane writes another checkout's cache.
+    cacheDir: path.join(__dirname, '..', '.vite-web'),
+    server: { port: PORT, host: HOST },
   })
 
   const server = await createServer({ ...config, plugins: [...config.plugins, webMode] })

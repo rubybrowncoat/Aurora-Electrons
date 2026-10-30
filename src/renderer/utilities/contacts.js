@@ -1,0 +1,2 @@
+// Whether a track of FCT_Contacts is one the race holds now, as an SQL condition over the track joined to its FCT_Game: the game brings every track it still detects up to the game time at each sensor pass and treats a track of any other time as lost, which it keeps, with the time it was last detected, for up to a year. Null while either time is not stored. A contact has a track for each way it is detected, and is held while one of them is.
+export const HELD_CONTACT = 'FCT_Contacts.LastUpdate = FCT_Game.GameTime'

@@ -7,8 +7,9 @@
 </template>
 
 <script>
-import { flagUrl } from '../../utilities/flags'
+import { activeAppearance } from '../../utilities/appearance'
 import { hashColor } from '../../utilities/color'
+import { flagUrl } from '../../utilities/flags'
 
 // A race's flag, or its initials on a colour taken from its title when the flag file isn't there. Without a race, an icon.
 export default {
@@ -32,22 +33,23 @@ export default {
       return this.race.RaceTitle.split(/\s+/).filter(Boolean).map((word) => word[0]).join('').slice(0, 2).toUpperCase() || '?'
     },
     color () {
-      return this.race ? hashColor(this.race.RaceTitle, this.$vuetify.theme.dark) : 'primary'
+      return this.race ? hashColor(this.race.RaceTitle, activeAppearance()) : 'primary'
     },
+    // The flag is the one of a save's folder, and a name repeats between saves: the same name under another save is another flag.
     flag () {
-      return this.race ? this.race.FlagPic : null
+      return this.race && this.race.FlagPic ? `${this.$store.state.savePath}\0${this.race.FlagPic}` : null
     },
   },
   watch: {
     flag: {
       immediate: true,
-      async handler (name) {
+      async handler (key) {
         this.src = null
 
-        if (name) {
-          const src = await flagUrl(name)
+        if (key) {
+          const src = await flagUrl(this.race.FlagPic)
 
-          if (this.flag === name) {
+          if (this.flag === key) {
             this.src = src
           }
         }

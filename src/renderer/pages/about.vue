@@ -1,13 +1,14 @@
 <template>
   <div>
     <v-container fluid class="about-page">
-      <v-row>
-        <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="What this app is, its version and who made it. Use it to check which release is running." elevation="1">
+      <v-row class="my-0">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
+          <v-card class="panel flex-grow-1" data-summary="What this app is, its version, the Aurora saves it supports and who made it." elevation="1">
             <div class="panel-head">
-              <span class="d-flex align-center">
+              <span class="d-flex align-center flex-wrap">
                 <span>Aurora Electrons</span>
                 <v-chip small class="ml-3">v{{ version }}</v-chip>
+                <v-chip small outlined class="ml-2" data-aurora-line>For Aurora {{ auroraLine }} saves</v-chip>
               </span>
               <span class="caption text--secondary">Looking Inwards</span>
             </div>
@@ -38,8 +39,8 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Places to report bugs, follow updates and discuss the app. Use them to get help or share feedback." elevation="1">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
+          <v-card class="panel flex-grow-1" data-summary="Places to report bugs, follow updates and discuss the app." elevation="1">
             <div class="panel-head"><span>Links</span></div>
             <v-list dense>
               <v-list-item>
@@ -71,20 +72,22 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Where the app keeps its settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
+          <v-card class="panel flex-grow-1" data-summary="The save this window shows and where the app keeps its settings and Empire History files." elevation="1">
             <div class="panel-head">
               <span>Data</span>
               <v-btn v-if="dataFolder" small outlined @click="openDataFolder"><v-icon small left>mdi-folder-open-outline</v-icon>Open folder</v-btn>
             </div>
             <div class="panel-body body-2">
-              <div class="font-weight-medium">Settings</div>
+              <div class="font-weight-medium">Save shown</div>
+              <div class="path" :class="{ 'path--missing': !savePath }" data-save-path>{{ savePath || 'No save yet' }}</div>
+              <div class="font-weight-medium mt-3">Settings</div>
               <div class="path" :class="{ 'path--missing': !settingsPath }">{{ settingsPath || 'Not available in this mode' }}</div>
               <div class="font-weight-medium mt-3">Empire History</div>
               <div class="path" :class="{ 'path--missing': !historyPath }">{{ historyPath || 'Not available in this mode' }}</div>
-              <div class="caption text--secondary mt-1">One file per game, named <code>game-&lt;GameID&gt;.json</code>.</div>
+              <div class="caption text--secondary mt-1">One file per campaign branch, named <code>campaign-&lt;id&gt;-&lt;branch&gt;.json</code>, and <code>campaigns.json</code> for the registry that tells which campaign a save belongs to.</div>
               <template v-if="historyFile">
-                <div class="caption text--secondary mt-1">The open game's file:</div>
+                <div class="caption text--secondary mt-1">The registry file:</div>
                 <div class="path">{{ historyFile }}</div>
               </template>
             </div>
@@ -92,8 +95,8 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="The libraries and tools this app is built on. Use the links to read about any of them." elevation="1">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
+          <v-card class="panel flex-grow-1" data-summary="The libraries and tools the app is built on." elevation="1">
             <div class="panel-head"><span>Built with</span></div>
             <div class="panel-body">
               <external-link v-for="item in stack" :key="item.name" :href="item.href" class="stack-link mr-2 mb-2">
@@ -103,8 +106,44 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12">
-          <v-card class="panel" data-summary="How to help improve the app with pull requests and issues. Follow the steps to get a change in." elevation="1">
+        <v-col cols="12" class="py-0">
+          <v-card class="panel" data-summary="The fonts, icons and community themes the app uses, with their authors and licenses." elevation="1" data-credits>
+            <div class="panel-head"><span>Credits</span></div>
+            <v-simple-table class="credits-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Author</th>
+                  <th>Source</th>
+                  <th>License</th>
+                  <th>Changes</th>
+                  <th>Notices</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="credit in credits" :key="credit.id" :data-credit="credit.id">
+                  <td>
+                    <div class="font-weight-medium">{{ credit.name }}</div>
+                    <div class="caption text--secondary">{{ credit.kind }} · {{ credit.covers }}</div>
+                    <div class="caption"><span class="font-weight-medium">{{ credit.reuse.kind }}.</span> {{ credit.reuse.detail }}</div>
+                  </td>
+                  <td>{{ credit.author }}</td>
+                  <td class="text-no-wrap"><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
+                  <td><external-link :href="credit.license.href">{{ credit.license.label }}</external-link></td>
+                  <td>{{ credit.modifications }}</td>
+                  <td class="text-no-wrap">
+                    <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
+                    <div v-if="credit.compatibility" class="caption text-wrap mt-2" data-credit-compatibility><span class="font-weight-medium">{{ credit.compatibility.title }}: {{ credit.compatibility.status }}.</span> {{ credit.compatibility.text }}</div>
+                  </td>
+                </tr>
+              </tbody>
+            </v-simple-table>
+            <div class="panel-foot caption text--secondary">Each notice is the license text as it comes with the asset's package, or with the community themes the presets are adapted from, bundled into the app. Bundled files ship in the app; visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages; they are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" class="py-0">
+          <v-card class="panel" data-summary="How to contribute pull requests and issues." elevation="1">
             <div class="panel-head"><span>Contribute</span></div>
             <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
             <v-list dense>
@@ -123,6 +162,19 @@
           </v-card>
         </v-col>
       </v-row>
+
+      <v-dialog v-model="noticeOpen" max-width="760" scrollable>
+        <v-card v-if="notice" data-notice-dialog>
+          <v-card-title class="subtitle-1">{{ notice.asset }}: {{ notice.title }}</v-card-title>
+          <v-card-text>
+            <pre class="notice-text">{{ notice.text }}</pre>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn text @click="noticeOpen = false">Close</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-container>
   </div>
 </template>
@@ -132,7 +184,9 @@ import { shell } from 'electron'
 import { mapActions, mapGetters } from 'vuex'
 
 import ExternalLink from '../components/ExternalLink.vue'
-import { historyConfig } from '../utilities/history'
+import { STATED_FORMULA_VERSION } from '../utilities/capabilities'
+import { CREDITS } from '../utilities/credits'
+import { registryStore } from '../utilities/history'
 import { FORUM_URL } from '../utilities/navigation'
 import { version } from '../../../package.json'
 
@@ -153,6 +207,7 @@ export default {
   data() {
     return {
       version,
+      auroraLine: STATED_FORMULA_VERSION,
       forumUrl: FORUM_URL,
       repoUrl: REPO_URL,
       issuesUrl: `${REPO_URL}/issues`,
@@ -172,6 +227,11 @@ export default {
         { name: 'PixiJS 6', href: 'https://pixijs.com/' },
       ],
 
+      credits: CREDITS,
+      // The notice the dialog shows: { asset, title, text }.
+      notice: null,
+      noticeOpen: false,
+
       // Each step is a list of text and `{ code }` parts.
       steps: [
         ['Fork the repository on GitHub and clone the fork.'],
@@ -189,6 +249,7 @@ export default {
     ...mapGetters([
       'config',
       'GameID',
+      'savePath',
     ]),
 
     settingsPath() {
@@ -198,11 +259,11 @@ export default {
     dataFolder() {
       return this.settingsPath ? folderOf(this.settingsPath) : ''
     },
-    // The open game's history file, once a game is picked.
+    // The campaign registry's file, which sits in the history folder.
     historyFile() {
-      return this.GameID ? historyConfig(this.GameID).path || '' : ''
+      return registryStore().path || ''
     },
-    // The folder the history files live in: the open game's file locates it, else it sits beside the settings.
+    // The folder the history files live in: the registry file locates it, else it sits beside the settings.
     historyPath() {
       if (this.historyFile) {
         return folderOf(this.historyFile)
@@ -213,6 +274,11 @@ export default {
   },
   methods: {
     ...mapActions('snackbar', ['activateSnackbar']),
+
+    openNotice(credit, item) {
+      this.notice = { asset: credit.name, title: item.title, text: item.text }
+      this.noticeOpen = true
+    },
 
     // The system's file manager opens the folder; it answers with an error message, empty when it opened.
     async openDataFolder() {
@@ -229,7 +295,7 @@ export default {
 <style lang="scss" scoped>
 .path {
   font-family: var(--ae-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   word-break: break-all;
   color: var(--ae-muted);
 }
@@ -252,14 +318,55 @@ export default {
   }
 }
 
+// A list's icons and step numbers line up with the panel's title and text, which sit 24px in (styles/page-chrome.scss).
+.panel .v-list-item {
+  padding: 0 24px;
+}
+
 .steps__text {
   white-space: normal;
 }
 
 .steps__number {
   justify-content: center;
-  color: #fff;
-  font-size: 12px;
+  color: var(--ae-on-fill);
+  font-size: calc(12px * var(--ae-font-scale));
+}
+
+// Every cell starts at the same line and keeps the same space below it; the selector matches Vuetify's own cell rule, which sets the padding, so it wins.
+.credits-table.v-data-table > .v-data-table__wrapper > table > tbody > tr > td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  vertical-align: top;
+}
+
+// A notice opens in a dialog; it reads as a link, like the source and license beside it.
+.credit-notice {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ae-primary);
+  text-decoration-line: var(--ae-link-line, none);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
+  }
+}
+
+.notice-text {
+  font-family: var(--ae-mono);
+  font-size: calc(12px * var(--ae-font-scale));
+  white-space: pre-wrap;
+  color: var(--ae-ink);
 }
 
 code {
@@ -270,6 +377,6 @@ code {
   background: var(--ae-chrome);
   color: var(--ae-ink);
   font-family: var(--ae-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
 }
 </style>

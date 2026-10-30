@@ -17,6 +17,19 @@ left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.GameID = FCT_Race.GameID and FC
 where (FCT_Race.NPR = 0 or :spyNPR = 1)
 order by FCT_Game.GameID, FCT_Race.NPR, FCT_Race.RaceID`
 
+// What the save holds of one game and one race, apart from the list above, which leaves out a game with no race to show and (without `spyNPR`) the NPRs: { game: { GameID, StartYear, GameTime, CivilianShippingLinesActive } | null, race: { RaceID, NPR, SpecialNPRID } | null }. `null` means the save has no such row, which is a different thing from the list not showing it. Read from the copy it is given, past the query cache, so it is the save's answer now. It reads only columns the list reads (the empire list's capability entry stands for both).
+export const loadSelection = async (database, GameID, RaceID) => {
+  const [games] = await database.query('select GameID, StartYear, GameTime, CivilianShippingLinesActive from FCT_Game where GameID = :GameID', { replacements: { GameID }, raw: true })
+  const [races] = RaceID === null ? [[]] : await database.query('select RaceID, NPR, SpecialNPRID from FCT_Race where GameID = :GameID and RaceID = :RaceID', { replacements: { GameID, RaceID }, raw: true })
+  const [game] = games
+  const [race] = races
+
+  return {
+    game: game ? { GameID: game.GameID, StartYear: game.StartYear, GameTime: game.GameTime, CivilianShippingLinesActive: toBoolean(game.CivilianShippingLinesActive) } : null,
+    race: race ? { RaceID: race.RaceID, NPR: toBoolean(race.NPR), SpecialNPRID: toNumber(race.SpecialNPRID) } : null,
+  }
+}
+
 // What kind of empire a race is: a player's, an ordinary NPR empire, or one of the game's special factions.
 export const empireKind = ({ NPR, SpecialNPRID }) => {
   const special = toNumber(SpecialNPRID)

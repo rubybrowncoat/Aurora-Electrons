@@ -48,9 +48,9 @@ const stopTree = (app) => {
   return app.close()
 }
 
-// Counts the renderer's database calls and keeps their failures, re-wrapping each database the store swaps in when the save changes.
+// Counts the renderer's database calls and keeps their failures, re-wrapping each database the store swaps in when the save changes. A read the app refused because its database was replaced (utilities/retired.js, marked `retired`) is counted apart: it is the intended end of work on the copy left, not a failure.
 const instrument = () => {
-  const smoke = (window.__smoke = window.__smoke || { pending: new Map(), next: 0, last: Date.now(), errors: [], counts: {}, done: [], blockedMs: 0, databases: 0 })
+  const smoke = (window.__smoke = window.__smoke || { pending: new Map(), next: 0, last: Date.now(), errors: [], retired: 0, counts: {}, done: [], blockedMs: 0, databases: 0 })
 
   // Time the renderer's main thread spends in tasks over 50 ms, which delays everything queued behind them.
   new PerformanceObserver((list) => list.getEntries().forEach((entry) => (smoke.blockedMs += entry.duration))).observe({ entryTypes: ['longtask'] })
@@ -72,7 +72,11 @@ const instrument = () => {
       smoke.last = Date.now()
 
       return query(sql, ...rest).catch((error) => {
-        smoke.errors.push(`${error.message} :: ${String(sql).slice(0, 160)}`)
+        if (error && error.retired === true) {
+          smoke.retired++
+        } else {
+          smoke.errors.push(`${error.message} :: ${String(sql).slice(0, 160)}`)
+        }
 
         throw error
       }).finally(() => {
@@ -132,6 +136,9 @@ const run = async () => {
   let problems = []
   const checks = []
   const check = (name, ok, detail) => checks.push({ name, ok, detail })
+  // Set while the recovery step holds a lock on the save: the refusals that lock causes are what the step is about, not problems.
+  let expectLocked = false
+  const lockRefusal = (text) => expectLocked && /SQLITE_BUSY|database is locked/i.test(text)
 
   app.process().stderr.on('data', (data) => String(data).split(/\r?\n/).filter((line) => line.trim() && !MAIN_NOISE.some((noise) => noise.test(line))).forEach((line) => problems.push(`main: ${line.trim()}`)))
 
@@ -154,7 +161,7 @@ const run = async () => {
   const page = await appWindow()
 
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    if (message.type() === 'error' && !lockRefusal(message.text())) {
       problems.push(`console: ${message.text()}`)
     }
   })
@@ -174,7 +181,7 @@ const run = async () => {
     while (true) {
       const state = await smokeState()
 
-      state.errors.forEach((error) => problems.push(`db: ${error}`))
+      state.errors.filter((error) => !lockRefusal(error)).forEach((error) => problems.push(`db: ${error}`))
 
       if (state.inFlight <= 0 && state.now - state.last >= SETTLE_MS && !(await page.evaluate(pageLoading))) {
         return
@@ -340,10 +347,12 @@ const run = async () => {
 
   problems = []
 
-  const { GameID, RaceID, settingsPath, revision } = await page.evaluate(() => {
-    const { state } = window.$app.$store
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters['history/campaign']), null, { timeout: 30000 }).catch(() => {})
 
-    return { GameID: state.GameID, RaceID: state.RaceID, settingsPath: state.config.path, revision: state.history.revision }
+  const { GameID, RaceID, settingsPath, revision, campaign } = await page.evaluate(() => {
+    const { state, getters } = window.$app.$store
+
+    return { GameID: state.GameID, RaceID: state.RaceID, settingsPath: state.config.path, revision: state.history.revision, campaign: getters['history/campaign'] }
   })
 
   check('storage path IPC', GameID !== null, GameID !== null ? `loaded ${save}` : 'no game loaded')
@@ -353,7 +362,7 @@ const run = async () => {
 
   check('flag IPC', found === `data:image/png;base64,${FLAG_PNG.toString('base64')}` && missing === null && escaped === null && escapedBackslash === null && notAName === null, `found ${String(found).slice(0, 24)}..., missing ${missing}, dotdot ${escaped}, backslash ${escapedBackslash}, null ${notAName}`)
 
-  const historyPath = path.join(userData, 'history', `game-${GameID}.json`)
+  const historyPath = campaign ? path.join(userData, 'history', `campaign-${campaign.campaignId}-${campaign.branchId}.json`) : path.join(userData, 'history', 'campaign-unsettled.json')
   const readHistory = () => (fs.existsSync(historyPath) ? JSON.parse(fs.readFileSync(historyPath, 'utf8')) : null)
   const snapshotCount = (history) => (history && history.races && history.races[RaceID] ? history.races[RaceID].snapshots.length : 0)
   const before = readHistory()
@@ -376,11 +385,150 @@ const run = async () => {
 
     check('save watcher reloads', true, `database reopened, history revision ${revision} -> ${await page.evaluate(() => window.$app.$store.state.history.revision)}`)
     check('same save, same history', snapshotCount(after) === snapshotCount(before), `${snapshotCount(before)} -> ${snapshotCount(after)} snapshots`)
+
+    const reopened = await page.evaluate(() => window.$app.$store.getters['history/campaign'])
+
+    check('same save, same campaign', Boolean(campaign) && Boolean(reopened) && reopened.campaignId === campaign.campaignId && reopened.branchId === campaign.branchId, `${campaign && campaign.campaignId} -> ${reopened && reopened.campaignId}`)
   } catch (error) {
     check('save watcher reloads', false, error.message.split('\n')[0])
   }
 
   await page.screenshot({ path: path.join(OUT, 'after-reload.png') })
+
+  // Switching the window to another save (store/saves.js, src/main/saves.js): a copy of the save with its own Flags folder, reached by the store's own action, then back; the open dialog is answered from the main process.
+  try {
+    const other = path.join(work, 'other', 'AuroraDB.db')
+    const otherFlag = Buffer.concat([FLAG_PNG, Buffer.from('other')])
+
+    fs.mkdirSync(path.join(path.dirname(other), 'Flags'), { recursive: true })
+    fs.copyFileSync(save, other)
+    fs.writeFileSync(path.join(path.dirname(other), 'Flags', 'smoke-flag.png'), otherFlag)
+
+    const select = (file) => page.evaluate((target) => window.$app.$store.dispatch('saves/select', target), file)
+    const shown = (file) => page.waitForFunction((target) => {
+      const { state } = window.$app.$store
+
+      return state.savePath === target && state.databasePath === target && state.empires.loaded && state.empires.games.length > 0
+    }, file, { timeout: 60000 })
+    const flagOf = (name, database) => page.evaluate(([flag, owner]) => window.__aurora.electron.ipcRenderer.invoke('read-flag', flag, owner), [name, database])
+    const dataUrl = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`
+
+    // Closing the dialog changes nothing; the dialog is answered from the main process, which decides what it returns.
+    await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }) })
+
+    const opened = await page.evaluate(() => window.$app.$store.state.database !== null && window.__smoke.databases)
+    const canceled = await page.evaluate(() => window.$app.$store.dispatch('saves/choose'))
+
+    check('save switch: closing the dialog', canceled.action === 'canceled' && (await page.evaluate(() => window.__smoke.databases)) === opened && (await page.evaluate((target) => window.$app.$store.state.savePath === target, save)), JSON.stringify(canceled))
+
+    const result = await select(other)
+
+    check('save switch: A to B answers switched', result.action === 'switched' && result.path === other, JSON.stringify(result))
+
+    const cleared = await page.evaluate(() => {
+      const { state } = window.$app.$store
+
+      return { GameID: state.GameID, games: state.empires.games.length, route: window.$app.$route.path }
+    })
+
+    check('save switch: nothing of the old save stays shown', cleared.GameID === null && cleared.games === 0 && cleared.route === '/', JSON.stringify(cleared))
+
+    await shown(other)
+
+    const [activePath, flagB, flagStale, flagActive] = await Promise.all([
+      page.evaluate(() => window.__aurora.electron.ipcRenderer.invoke('request-storage-path')),
+      flagOf('smoke-flag.png', other),
+      flagOf('smoke-flag.png', save),
+      flagOf('smoke-flag.png'),
+    ])
+
+    check('save switch: the main process names the new save', activePath === other, activePath)
+    check('save switch: flags are those of the new save', flagB === dataUrl(otherFlag) && flagActive === dataUrl(otherFlag) && flagStale === null, `B ${String(flagB).slice(0, 24)}, stale ${flagStale}`)
+
+    const missing = await select(path.join(work, 'no-such-folder', 'AuroraDB.db'))
+    const listed = await page.evaluate(() => window.$app.$store.state.saves.notice)
+
+    check('save switch: a missing save is reported and nothing changes', missing.action === 'unavailable' && Boolean(listed && listed.retry) && (await page.evaluate((target) => window.$app.$store.state.savePath === target, other)), JSON.stringify(listed))
+
+    // Touching the save left changes nothing, touching the save shown opens it again; one watcher is live.
+    const before = await page.evaluate(() => window.__smoke.databases)
+    const stamp = new Date(Date.now() + 5000)
+
+    fs.utimesSync(save, stamp, stamp)
+    await wait(5000)
+    check('save switch: the save left is no longer watched', (await page.evaluate(() => window.__smoke.databases)) === before, `databases ${before}`)
+
+    fs.utimesSync(other, stamp, stamp)
+    await page.waitForFunction((count) => window.__smoke.databases > count, before, { timeout: 30000 }).then(() => check('save switch: the save shown is watched', true, 'database reopened'), (error) => check('save switch: the save shown is watched', false, error.message.split('\n')[0]))
+
+    // Back through the dialog.
+    await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] }) }, save)
+
+    const back = await page.evaluate(() => window.$app.$store.dispatch('saves/choose'))
+
+    await shown(save)
+
+    const [flagA, flagGone] = await Promise.all([flagOf('smoke-flag.png', save), flagOf('smoke-flag.png', other)])
+
+    check('save switch: back to A through the dialog', back.action === 'switched' && flagA === dataUrl(FLAG_PNG) && flagGone === null, `${back.action}, A ${String(flagA).slice(0, 24)}`)
+
+    // Back on A, the watcher of B no longer acts and the one of A does: one watcher at a time (scripts/check-save-switching.js counts the watchers themselves, which the preload's frozen chokidar module does not let this run wrap).
+    await settle()
+
+    const shownBack = await page.evaluate(() => window.__smoke.databases)
+    const later = new Date(Date.now() + 10000)
+
+    fs.utimesSync(other, later, later)
+    await wait(5000)
+
+    const leftAlone = (await page.evaluate(() => window.__smoke.databases)) === shownBack
+
+    fs.utimesSync(save, later, later)
+
+    const reopened = await page.waitForFunction((count) => window.__smoke.databases > count, shownBack, { timeout: 30000 }).then(() => true, () => false)
+
+    check('save switch: back on A, only A is watched', leftAlone && reopened, `B left alone ${leftAlone}, A reopened ${reopened}`)
+    await settle()
+  } catch (error) {
+    check('save switch', false, error.message.split('\n')[0])
+  }
+
+  // Recovery from a locked save: a second connection of the page holds an exclusive lock on the save while the file changes. The app reports the save unreadable (in the status line too) and retries on its own, within bounds; once the lock is gone it reads the save again and says nothing is wrong. The refusals the lock causes are expected for the length of the step.
+  try {
+    expectLocked = true
+    await settle()
+
+    await page.evaluate((file) => {
+      const { Sequelize } = window.__aurora.sequelize
+
+      window.__smokeLock = new Sequelize({ dialect: 'sqlite', storage: file, logging: false })
+
+      return window.__smokeLock.query('begin exclusive')
+    }, save)
+
+    const stamp = new Date(Date.now() + 20000)
+
+    fs.utimesSync(save, stamp, stamp)
+
+    const unreadable = await page.waitForFunction(() => window.$app.$store.state.freshness.recovery.state === 'unreadable', null, { timeout: 60000 }).then(() => true, () => false)
+    const wording = await page.evaluate(() => (document.querySelector('[data-save-status]') || { textContent: '' }).textContent)
+    const refusedAsFresh = await page.evaluate(() => window.$app.$store.state.freshness.refresh.outcome === 'ok')
+
+    await page.evaluate(async () => {
+      await window.__smokeLock.query('rollback')
+      await window.__smokeLock.close()
+      delete window.__smokeLock
+    })
+
+    const recovered = await page.waitForFunction(() => window.$app.$store.state.freshness.recovery.state === 'ok' && window.$app.$store.state.freshness.refresh.outcome === 'ok', null, { timeout: 60000 }).then(() => true, () => false)
+
+    check('save recovery: a locked save is reported unreadable, then read again once the lock is gone', unreadable && !refusedAsFresh && /could not be read/.test(wording) && recovered, `unreadable ${unreadable}, shown as fresh ${refusedAsFresh}, status "${wording.slice(0, 120)}", recovered ${recovered}`)
+    await settle()
+  } catch (error) {
+    check('save recovery', false, error.message.split('\n')[0])
+  } finally {
+    expectLocked = false
+  }
 
   const reloadProblems = problems
 

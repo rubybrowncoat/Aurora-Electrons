@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons-new",
-  "version": "0.11.0",
+  "version": "2.7.10",
   "description": "Aurora Electrons",
   "main": "./out/main/index.js",
   "scripts": {
@@ -11,6 +11,8 @@
     "electron:smoke": "node scripts/run-vite.js scripts/electron-smoke.js",
     "lint": "node_modules/.bin/eslint --ext .js,.vue,.ts -f ./node_modules/eslint-friendly-formatter ./src",
     "lint:fix": "bun run lint --fix",
+    "check": "bun scripts/check-all.js",
+    "check:quick": "bun scripts/check-all.js --quick",
     "preinstall": "node scripts/check-engines.js",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -29,6 +31,7 @@
     "@sentry/vue": "11.4.0",
     "@timohausmann/quadtree-js": "^1.2.6",
     "@vitejs/plugin-vue2": "^2.3.4",
+    "acorn": "^8.15.0",
     "chart.js": "^4.5.1",
     "chokidar": "^4.0.3",
     "color-hash": "^2.0.2",

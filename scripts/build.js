@@ -4,7 +4,7 @@ require('./check-engines')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const { checkInstalled, checkPackaged } = require('./check-native')
+const { checkInstalled, checkPackaged } = require('./lib/native-check')
 
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 const BUILD_DIR = path.join(PROJECT_ROOT, 'build')

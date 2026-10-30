@@ -23,6 +23,11 @@ import { color, hsl } from 'd3-color'
 import Quadtree from '@timohausmann/quadtree-js'
 import { Viewport } from 'pixi-viewport'
 import { mapGetters } from 'vuex'
+import { jumpPointLook, loadSystemJumpPoints } from '../utilities/system-jump-points'
+import { mapFont } from '~/components/charts/theme'
+import { activeAppearance } from '~/utilities/appearance'
+import { whenFontsReady } from '~/utilities/appearance-font'
+import { DEFAULT_HIERARCHY, skyStyle } from '~/utilities/map-hierarchy'
 import { starName, systemBodyName, toNumber } from '~/utilities/aurora'
 import { approximatelyEquals, safeModulo360 } from '~/utilities/math'
 
@@ -37,19 +42,6 @@ const AU_KM = 149597870.7
 const PX_PER_AU = 150
 const WORLD_MAGNIFICATION = 1000
 
-const bodyTypes = {
-  1: 'Asteroid',
-  2: 'Terrestrial Planet',
-  3: 'Dwarf Planet',
-  4: 'Gas Giant',
-  5: 'Super Jovian',
-  7: 'Small Moon',
-  8: 'Moon',
-  9: 'Large Moon',
-  10: 'Small Terrestrial Moon',
-  11: 'Large Terrestrial Moon',
-  14: 'Comet',
-}
 const renderOrbitBodyType = new Set([2, 3, 4, 5, 7, 8, 9, 10, 11]) // 7, 8, 9, 10, 11
 const lunarBodyTypeIds = new Set([7, 8, 9, 10, 11])
 
@@ -234,10 +226,22 @@ const pickBodyColor = (body) => {
 const unitsToPx = (u) => u * PX_PER_AU * WORLD_MAGNIFICATION
 const kmToPx = (km) => unitsToPx(km / AU_KM)
 
-const TEXT_STYLES = {
+// The system view's sky colours as the numbers Pixi takes, from the appearance's `space` role.
+const hexInt = (hex) => Number.parseInt(hex.slice(1), 16)
+const spaceColors = (space) => ({
+  background: hexInt(space.background),
+  label: hexInt(space.label),
+  bodyOrbit: hexInt(space.bodyOrbit),
+  jumpUnexplored: hexInt(space.jumpUnexplored),
+  jumpExplored: hexInt(space.jumpExplored),
+})
+
+// The names drawn in the sky, in the typeface and at the text size in force (`type` is `mapFont()`).
+const textStyles = (label, type) => ({
   body: new PIXI.TextStyle({
-    fill: 0xffffff,
-    fontSize: 12,
+    fill: label,
+    fontFamily: type.family,
+    fontSize: type.size(12),
     // align: 'left',
 
     dropShadow: true,
@@ -246,14 +250,15 @@ const TEXT_STYLES = {
     // dropShadowAlpha: 1,
   }),
   star: new PIXI.TextStyle({
-    fill: 0xffffff,
-    fontSize: 16,
+    fill: label,
+    fontFamily: type.family,
+    fontSize: type.size(16),
     fontWeight: 'bold',
 
     dropShadow: true,
     dropShadowDistance: 2,
   }),
-}
+})
 
 // Get WORLD rotation by summing ancestor local rotations (stable even with y-down & scales)
 const getWorldRotation = (displayObject) => {
@@ -338,22 +343,39 @@ export default {
       type: [String, Number],
       required: true,
     },
+    // The level of the visual hierarchy (utilities/map-hierarchy.js), kept by the map.
+    hierarchy: {
+      type: String,
+      default: DEFAULT_HIERARCHY,
+    },
+    // The jump point (WarpPointID) a link selected: drawn with a halo. Null for none.
+    jumpPointId: {
+      type: [String, Number],
+      default: null,
+    },
   },
   data() {
     return {
-      _initRaf: null,
-      _resizeRaf: null,
-
-      _needsUpdate: false,
-
       userInteracted: false,
     }
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
+
+    appearance() {
+      return activeAppearance()
+    },
+
+    typeface() {
+      return mapFont()
+    },
   },
   watch: {
     elements: 'scheduleInitPixi',
+    'appearance.key': 'scheduleInitPixi',
+    typeface: 'scheduleInitPixi',
+    hierarchy: 'scheduleInitPixi',
+    jumpPointId: 'scheduleInitPixi',
   },
   mounted() {
     window.addEventListener('resize', this._onResize, { passive: true })
@@ -361,6 +383,7 @@ export default {
   beforeDestroy() {
     window.removeEventListener('resize', this._onResize)
 
+    this._initToken = (this._initToken || 0) + 1
     this._cleanup()
   },
   methods: {
@@ -802,7 +825,6 @@ export default {
     redrawPhysicalBodyMarkers() {
       if (!this._annotationRegistry || !this.viewport) return
 
-      const s = this.viewport.scale?.x || 1
       const visible = this._getVisibleWorldRect(64)
       const query = { x: visible.xMin, y: visible.yMin, width: visible.xMax - visible.xMin, height: visible.yMax - visible.yMin }
 
@@ -1178,7 +1200,7 @@ export default {
       this.redrawPhysicalBodyMarkers()
     },
 
-    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { color: 0x6aa7ff, alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, labelPadPx = 8, markerProvider = null } = {}) {
+    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, markerProvider = null } = {}) {
       const root = new PIXI.Container()
       root.position.set(toNumber(origin.x), toNumber(origin.y))
       this.worldLayer.addChild(root)
@@ -1265,7 +1287,7 @@ export default {
 
         // Label for star (bigger, always shown)
         const labelText = starName(index, system)
-        const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
+        const starLabel = new PIXI.Text(labelText, this._textStyles.star)
         starLabel.anchor.set(0, 0.5)
         // starLabel.position.set(anchor.position.x + radiusPx + labelPadPx, anchor.position.y)
         starLabel._baseWpx = starLabel.width
@@ -1296,7 +1318,7 @@ export default {
       return { root, byStarID: Object.fromEntries(byStarID), byComponent: Object.fromEntries(drawnByComponent) }
     },
 
-    drawBodiesForSystem(bodies, { style = { color: 0x32cd32, alpha: 1, width: 2 }, sizeOpts = { radiusUnits: 'km', exaggeration: 1 }, keepLabelUpright = true, labelPadPx = 8, minBodyRadius = 4, markerProvider = null } = {}) {
+    drawBodiesForSystem(bodies, { style = { color: this._space.bodyOrbit, alpha: 1, width: 2 }, sizeOpts = { radiusUnits: 'km', exaggeration: 1 }, keepLabelUpright = true, labelPadPx = 8, minBodyRadius = 4, markerProvider = null } = {}) {
       // index bodies and a depth function that climbs ParentBodyID
       const byId = new Map()
       for (const b of bodies) byId.set(toNumber(b.SystemBodyID, -1), b)
@@ -1365,7 +1387,7 @@ export default {
       return out
     },
 
-    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null, deferredRegistration = false } = {}) {
+    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: this._space.bodyOrbit, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null, deferredRegistration = false } = {}) {
       const orbitContainer = new PIXI.Container()
       orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
       orbitContainer.cullable = true
@@ -1434,12 +1456,12 @@ export default {
         if (orbitLine && aRaw > 0) {
           const g = new PIXI.Graphics()
           const w = style.width ?? 1
-          g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
+          g.lineStyle(w, style.color ?? this._space.bodyOrbit, style.alpha ?? 0.55)
           g.drawCircle(0, 0, ax)
           g.cullable = true
           g._orbitMeta = {
             baseWidth: w,
-            color: style.color ?? 0x8aa1ff,
+            color: style.color ?? this._space.bodyOrbit,
             alpha: style.alpha ?? 0.55,
             isCircle: true,
             r: ax,
@@ -1479,12 +1501,12 @@ export default {
         if (orbitLine && (ax > 0 || by > 0)) {
           const g = new PIXI.Graphics()
           const w = style.width ?? 1
-          g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
+          g.lineStyle(w, style.color ?? this._space.bodyOrbit, style.alpha ?? 0.55)
           g.drawEllipse(cxSigned, 0, ax, by)
           g.cullable = true
           g._orbitMeta = {
             baseWidth: w,
-            color: style.color ?? 0x8aa1ff,
+            color: style.color ?? this._space.bodyOrbit,
             alpha: style.alpha ?? 0.55,
             isCircle: false,
             ax,
@@ -1563,7 +1585,7 @@ export default {
 
       // Interactivity
       marker.interactive = true
-      marker.on('pointerdown', (e, ...asd) => {
+      marker.on('pointerdown', (e) => {
         const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
         this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
       })
@@ -1594,7 +1616,7 @@ export default {
       // Label
       let label = null
       if (nameText) {
-        label = new PIXI.Text(String(nameText), TEXT_STYLES.body)
+        label = new PIXI.Text(String(nameText), this._textStyles.secondary)
         label.anchor.set(0, 0.5)
         // label.position.set(marker.x + (labelPadPx ?? 8), marker.y)
         label._baseWpx = label.width
@@ -1639,8 +1661,8 @@ export default {
       const circleTex = this._getShapeTexture('circle')
       const squareOutlineTex = this._getShapeTexture('squareOutline')
 
-      const COLOR_RED = 0xff3b30
-      const COLOR_ORANGE = 0xffa500
+      const COLOR_RED = this._space.jumpUnexplored
+      const COLOR_ORANGE = this._space.jumpExplored
 
       // tiny physical size; min-screen clamp makes it visible
       const physR = 1e-6
@@ -1662,8 +1684,9 @@ export default {
         const gp = orbitContainer.toGlobal(anchor.position)
         const wp = this.viewport.toWorld(gp.x, gp.y)
 
-        const explored = toNumber(jp.Explored, 0) === 1
-        const hasGate = toNumber(jp.JumpGateStrength, 0) >= 1000
+        const look = jumpPointLook(jp)
+        const explored = look.explored
+        const hasGate = look.gate
         const tint = explored ? COLOR_ORANGE : COLOR_RED
 
         // marker is a Container so we can stack shapes
@@ -1677,6 +1700,16 @@ export default {
         core.width = core.height = diameter
         core.tint = tint
         marker.addChild(core)
+
+        // halo behind a point a link selected, in the point's own tint
+        if (this.jumpPointId !== null && Number(jp.WarpPointID) === Number(this.jumpPointId)) {
+          const halo = new PIXI.Sprite(circleTex)
+          halo.anchor.set(0.5)
+          halo.width = halo.height = diameter * 3.4
+          halo.tint = tint
+          halo.alpha = 0.5
+          marker.addChildAt(halo, 0)
+        }
 
         // optional square outline (gate present)
         if (hasGate) {
@@ -1708,8 +1741,8 @@ export default {
             const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
             this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
           } else if (e.data.button === 2) {
-            if (jp.Explored && jp.DestinationID) {
-              this.$emit('jump', jp.DestinationID)
+            if (look.destinationId) {
+              this.$emit('jump', look.destinationId)
             }
           }
         })
@@ -1718,10 +1751,10 @@ export default {
         marker.zIndex = this._annotationPriority(550) // Custom: 550
         this.markerLayer.addChild(marker)
 
-        // label (optional; uses Name if present)
+        // label: the far system's name once the point is explored, else the word for a far side not known
         let label = null
-        const labelText = (jp.DestinationName && String(jp.DestinationName).trim()) || 'Unexplored'
-        label = new PIXI.Text(labelText, TEXT_STYLES.body)
+        const labelText = look.label
+        label = new PIXI.Text(labelText, this._textStyles.body)
         label.anchor.set(0, 0.5)
         label._baseWpx = label.width
         label._baseHpx = label.height
@@ -1747,13 +1780,19 @@ export default {
       this._initRaf = requestAnimationFrame(() => {
         this._initRaf = null
 
-        if (!this.elements.system) return
-        if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) return
+        const token = (this._initToken = (this._initToken || 0) + 1)
 
-        this._cleanup()
+        // Text is measured when it is made, so the scene waits for the faces it draws in; a later request, or leaving the page, drops this one.
+        whenFontsReady().then(() => {
+          if (token !== this._initToken) return
+          if (!this.elements.system) return
+          if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) return
 
-        this.userInteracted = false
-        this.initPixi()
+          this._cleanup()
+
+          this.userInteracted = false
+          this.initPixi()
+        })
       })
     },
 
@@ -1767,6 +1806,14 @@ export default {
         console.warn('initPixi: stars not loaded yet')
         return
       }
+
+      this._space = spaceColors(this.appearance.space)
+      this._textStyles = textStyles(this._space.label, this.typeface)
+      // The names of the bodies are secondary marks: the level of the hierarchy dims them, the names of stars and jump points stay at full strength.
+      const sky = skyStyle(this.hierarchy, this.appearance.space)
+
+      this._textStyles.secondary = this._textStyles.body.clone()
+      this._textStyles.secondary.fill = hexInt(sky.bodyLabel)
 
       console.log('SystemView initPixi', this.$props)
 
@@ -1782,7 +1829,7 @@ export default {
       this.pixi = new PIXI.Application({
         width,
         height,
-        backgroundColor: 0x000040,
+        backgroundColor: this._space.background,
         antialias: false,
         autoDensity: true,
         resolution: Math.max(window.devicePixelRatio || 1, 1),
@@ -1823,14 +1870,14 @@ export default {
 
       this._starsResult = this.drawSystem(this.elements.system, this.elements.stars, {
         origin: { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 },
-        orbitStyle: { color: 0x00ff00, alpha: 1, width: 1 },
+        orbitStyle: { alpha: sky.orbit.alpha, width: sky.orbit.starWidth },
         starSize: { exaggeration: 1, minPx: 0, maxPx: 1e7 },
         minStarRadius: 8,
         markerProvider: this._markerSpecForBody,
       })
 
       this.drawBodiesForSystem(this.elements.systemBodies, {
-        style: { color: 0x32cd32, alpha: 1, width: 2 },
+        style: { color: this._space.bodyOrbit, alpha: sky.orbit.alpha, width: sky.orbit.bodyWidth },
         sizeOpts: {
           // choose what you prefer:
           // radiusUnits: 'km', exaggeration: 1,  minPx: 0,    // strict physical realism
@@ -2002,19 +2049,7 @@ export default {
           }))
         })
 
-        const jumpPoints = await this.database.query(`
-          select FCT_JumpPoint.*, FCT_RaceSysSurvey.Name as SourceName, VIR_Destination.SystemID as DestinationID, VIR_Destination.Name as DestinationName, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint 
-          
-          inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
-          left join (
-            select * from FCT_JumpPoint
-            left join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
-          ) as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID 
-          left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID 
-          left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID
-          
-          where FCT_JumpPoint.SystemID = ${this.$props.systemId} and FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
-        `).then(([items]) => {
+        const jumpPoints = await loadSystemJumpPoints(this.database, { GameID: this.GameID, RaceID: this.RaceID, SystemID: this.$props.systemId }).then((items) => {
           console.log('Loaded jump points:', items)
           return items
         })
@@ -2068,8 +2103,8 @@ export default {
 
 .title {
   margin: 0;
-  color: #fff;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+  color: var(--ae-space-ink);
+  text-shadow: 2px 2px 4px var(--ae-space-shadow);
   font-weight: 600;
 }
 </style>
