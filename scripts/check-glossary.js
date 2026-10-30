@@ -4,13 +4,13 @@
   What it holds the glossary to:
   - every page of the registry that belongs to a section has a help entry with terms and links, every entry names terms and links that exist, and none stands unused or for a page that is gone;
   - the unit and estimate terms the planning pages need (cost, runway, maintenance, estimated outputs) are mapped to the pages that show them;
-  - every term has a local definition of its own, a reviewed date and a game version label, and every link a title, a note on what it covers and an https address;
+  - every term has a local definition of its own and none carries a review date or a game version label, and every link a title, a note on what it covers and an https address;
   - the help speaks in the impersonal voice, and a definition is short, original text with no address in it;
   - links and provenance stay apart: no glossary entry names a rule or a verification, no link's text claims to verify a figure, and no registered rule cites a glossary link;
   - no text that a result gives a tooltip (the provenance mark of a result and of a rule, the footer of a chart) names its rule by id or carries a dotted name;
   - the figures a definition states hold in the app's own rules: the shortage and the hauling shortfall of a colony, the runway of a mineral and of a maintenance location, the RP left and the time left of research, and the climb of maintenance life are run on small made-up rows and held to what the definitions say (no source text is matched).
 
-  Then each mutation (an entry dropped, a date or version label removed, a link made http or left without its note, a first-person phrase, a link cited as a rule's source, or an expression of one of those rules changed) must make at least one check fail.
+  Then each mutation (an entry dropped, a review date or version label added, a link made http or left without its note, a first-person phrase, a link cited as a rule's source, or an expression of one of those rules changed) must make at least one check fail.
 
   Usage: node scripts/check-glossary.js
 */
@@ -56,7 +56,7 @@ const MAX_COVERS = 200
 const FIRST_OR_SECOND_PERSON = /\b(?:me|my|myself|we|our|ours|ourselves|us|you|your|yours|yourself|yourselves)\b|\bmine\b(?=\s*(?:[.,;:!?)]|$))/i
 const FIRST_PERSON_I = /\bI(?:['’](?:m|ll|ve|d))?\b/
 const VERIFICATION_CLAIM = /\b(?:verif\w*|confirm\w*|prov(?:e|es|ed|en|ing)|validat\w*|authoritative|checked against|official formula)\b/i
-const FORBIDDEN_FIELDS = ['rule', 'rules', 'verification', 'verifies', 'verifiedBy', 'provenance']
+const FORBIDDEN_FIELDS = ['rule', 'rules', 'verification', 'verifies', 'verifiedBy', 'provenance', 'reviewed', 'versions']
 
 let failures = 0
 let checks = 0
@@ -74,16 +74,6 @@ const check = (name, result, detail = '') => {
 }
 
 const text = (value) => typeof value === 'string' && value.trim().length > 0
-
-const validDate = (value) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) {
-    return false
-  }
-
-  const date = new Date(`${value}T00:00:00Z`)
-
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value && value <= new Date().toISOString().slice(0, 10)
-}
 
 // The first problem of a list of [label, problem] pairs, or true.
 const firstProblem = (problems) => {
@@ -137,7 +127,7 @@ const loadModules = (directory, ruleModules) => loadUtilities([...new Set([...MO
 
 // The checks that need no save, over the modules `m` ({ glossary, navigation }) and the renderer folder `tree` they and the component sources were read from: [[name, async () => true or a message]]. Run on the real sources and again on each mutated copy, where one at least must fail.
 const synthetic = (m, tree) => {
-  const { TERMS, LINKS, PAGE_HELP, GAME_VERSION, helpFor, helpRoutes } = m.glossary
+  const { TERMS, LINKS, PAGE_HELP, helpFor, helpRoutes } = m.glossary
   const read = (file) => fs.readFileSync(path.join(tree, file), 'utf8')
   const panel = () => read(HELP_PANEL)
   const { provenance, finances, logistics, research, 'colony-minerals': colonyMineralRules, 'haul-plan': haulPlan, 'mineral-outlook': mineralOutlook, 'design-rules': designRules, minerals, colonization, commanders, 'route-time': routeTime, colonies } = m
@@ -185,14 +175,10 @@ const synthetic = (m, tree) => {
       ...TERMS.map((item) => [item.id, /^[a-z]+(?:-[a-z]+)*$/.test(item.id) ? '' : 'not kebab case']),
     ])],
 
-    ['every term has a name, a local definition of its own, a reviewed date and a game version label', async () => firstProblem(TERMS.flatMap((item) => [
+    ['every term has a name and a local definition of its own', async () => firstProblem(TERMS.flatMap((item) => [
       [`${item.id} term`, text(item.term) ? '' : 'no name'],
       [`${item.id} definition`, text(item.definition) && item.definition.trim().length >= 40 ? '' : 'missing or too short to stand alone'],
-      [`${item.id} reviewed`, validDate(item.reviewed) ? '' : `not a past date: ${phraseOf(item.reviewed)}`],
-      [`${item.id} versions`, /^\d+\.\d+\.x$/.test(phraseOf(item.versions)) ? '' : `not a version label: ${phraseOf(item.versions)}`],
     ]))],
-
-    ['the glossary is reviewed against the game version the app targets', async () => firstProblem(TERMS.map((item) => [item.id, item.versions === GAME_VERSION ? '' : `${item.versions} is not ${GAME_VERSION}`]))],
 
     ['a definition is short text of its own with no address and no quotation block', async () => firstProblem(TERMS.map((item) => [item.id, item.definition.length > MAX_DEFINITION ? `${item.definition.length} characters` : /https?:|www\./i.test(item.definition) ? 'holds an address' : /\n/.test(item.definition) ? 'spans lines' : '']))],
 
@@ -223,7 +209,7 @@ const synthetic = (m, tree) => {
       ...templateText(panel()).map((value) => ['card', voiceProblem(value)]),
     ])],
 
-    ['no entry names a rule or a verification, and no link text claims to verify a figure', async () => firstProblem([
+    ['no entry names a rule or a verification, or carries a review date or a version label, and no link text claims to verify a figure', async () => firstProblem([
       ...[...TERMS, ...LINKS].flatMap((item) => FORBIDDEN_FIELDS.map((field) => [`${item.id}`, Object.prototype.hasOwnProperty.call(item, field) ? `has a ${field} field` : ''])),
       ...LINKS.flatMap((item) => [item.title, item.covers].map((value) => [`link ${item.id}`, VERIFICATION_CLAIM.test(value) ? `says "${VERIFICATION_CLAIM.exec(value)[0]}"` : ''])),
     ])],
@@ -494,9 +480,9 @@ const MUTATIONS = [
   ['a page names a term that is not defined', GLOSSARY, '[\'game-log\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', '[\'game-log-missing\', \'production-cycle\', \'cease-fire\', \'fleet-cease-fire\', \'ship-open-fire\', \'game-events-window\']', ['every term and link a page names exists']],
   ['a term is no longer shown on any page', GLOSSARY, 'terms: [\'game-log\', \'production-cycle\'', 'terms: [\'production-cycle\'', ['every term and link is shown on some page']],
   ['the runway term leaves the Mineral Outlook', GLOSSARY, 'terms: [\'runway\', \'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', 'terms: [\'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', ['mapped to the pages that show them']],
-  ['a term loses its reviewed date', GLOSSARY, 'versions: GAME_VERSION, reviewed })', 'versions: GAME_VERSION })', ['every term has a name']],
-  ['a term loses its version label', GLOSSARY, 'units, definition, versions: GAME_VERSION, ', 'units, definition, ', ['every term has a name', 'the glossary is reviewed against the game version']],
-  ['a term loses its local definition', GLOSSARY, 'units, definition, versions', 'units, definition: \'\', versions', ['every term has a name']],
+  ['a term carries a review date', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, reviewed: \'2026-10-13\' })', ['carries a review date or a version label']],
+  ['a term carries a game version label', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, versions: \'2.7.x\' })', ['carries a review date or a version label']],
+  ['a term loses its local definition', GLOSSARY, 'units, definition })', 'units, definition: \'\' })', ['every term has a name']],
   ['a definition holds an address', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'See https://example.com for the mass unit of ships, cargo and minerals;', ['a definition is short text of its own']],
   ['a definition speaks in the first person', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'The mass unit of my ships, cargo and minerals;', ['the help speaks in the impersonal voice']],
   ['a definition speaks to the reader', GLOSSARY, 'A ship that houses population aboard.', 'A ship that houses your population aboard.', ['the help speaks in the impersonal voice']],

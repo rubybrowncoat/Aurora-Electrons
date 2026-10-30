@@ -766,7 +766,7 @@ const readPanel = () => {
     types: [...root.querySelectorAll('li[data-type]:not([data-observation])')].map((element) => ({ type: Number(element.getAttribute('data-type')), name: shownText(element.querySelector('.diagnostic-name')), group: shownText(element.querySelector('.diagnostic-chip:not([data-hidden]):not([data-unlisted])')), count: { value: numeral(element.querySelector('[data-count-value]')), words: shownText(element.querySelector('.diagnostic-count')) }, newest: shownText(element.querySelector('[data-newest-date]')), marks: [...element.querySelectorAll('.diagnostic-chip')].filter(on).map(visibleText), shown: seen(element), hook: { count: element.getAttribute('data-count') === null ? null : Number(element.getAttribute('data-count')) } })),
     observations: [...root.querySelectorAll('li[data-observation]')].map((element) => ({ key: element.getAttribute('data-key'), type: Number(element.getAttribute('data-type')), name: shownText(element.querySelector('.diagnostic-event-head .diagnostic-name')), message: shownText(element.querySelector('.diagnostic-message')), state: shownText(element.querySelector('[data-event-state]')), copies: copiesOf(element), shown: seen(element), dated: seen(element.querySelector('[data-event-date]')), date: shownText(element.querySelector('[data-event-date]')), increment: shownText(element.querySelector('[data-event-increment]')), hook: { state: element.getAttribute('data-state'), copies: Number(element.getAttribute('data-copies')) } })),
     inputs: [...root.querySelectorAll('li[data-input]')].map((element) => ({ id: element.getAttribute('data-input'), status: shownText(element.querySelector('.provenance-mark__label')), shown: seen(element), hook: { status: element.getAttribute('data-status') } })),
-    pointers: [...root.querySelectorAll('li[data-pointer]')].map((element) => ({ id: element.getAttribute('data-pointer'), shown: seen(element), name: shownText(element.querySelector('[data-pointer-name]')), version: shownText(element.querySelector('[data-pointer-version]')), definition: shownText(element.querySelector('[data-pointer-definition]')) })),
+    pointers: [...root.querySelectorAll('li[data-pointer]')].map((element) => ({ id: element.getAttribute('data-pointer'), shown: seen(element), name: shownText(element.querySelector('[data-pointer-name]')), definition: shownText(element.querySelector('[data-pointer-definition]')) })),
     hooks: { state: root.getAttribute('data-state'), verdict: root.getAttribute('data-verdict'), branches: branches.join(' and ') || null, reasons: reasons.map((entry) => entry.role) },
     text: visibleText(root),
   }
@@ -1583,7 +1583,7 @@ pageCheck('inputs', 'saved', 'the inputs are told with their status: the log est
   assert.ok(o.windows[1].inputs.every((input) => input.shown))
 })
 
-pageCheck('pointers', 'saved', 'the four checks of the game itself are named in the owner-approved order, each with the date they were reviewed and the text of its glossary term', async ({ o, terms }) => {
+pageCheck('pointers', 'saved', 'the four checks of the game itself are named in the owner-approved order, each with the text of its glossary term', async ({ o, terms }) => {
   o.windows.forEach((screen) => {
     assert.deepEqual(screen.pointers.map((pointer) => pointer.id), POINTERS)
     screen.pointers.forEach((pointer) => {
@@ -1594,7 +1594,6 @@ pageCheck('pointers', 'saved', 'the four checks of the game itself are named in 
       assert.ok(pointer.shown, pointer.id)
       assert.equal(pointer.name, words(term.term), `${pointer.id} name`)
       assert.equal(pointer.definition, words(term.definition), `${pointer.id} definition`)
-      assert.ok(pointer.version !== null && pointer.version.includes(term.reviewed), `${pointer.id}: ${pointer.version}`)
     })
   })
 })
@@ -1776,7 +1775,6 @@ const PAGE_FAULTS = [
   { name: 'a type draws its count negative', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(-entry.count) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
   { name: 'identical events draw their copies negative', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value>{{ count(-observation.copies) }}</span>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
   { name: 'a type draws its count with a stray character', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count) }} %</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'a pointer draws another review date', file: PANEL, change: swapText('Reviewed {{ entry.reviewed }}', 'Reviewed 2000-01-01'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'a pointer draws the definition of the first pointer under its own name', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition>{{ pointers[0].definition }}</div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'a pointer draws its definition at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>', '<div data-pointer-definition style="opacity: 0">'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'the checklist reads the archive before the watcher refreshes it and keys it by the revision only', file: PAGE, change: chain(swapText('      archiveChoice: false,\n', '      archiveChoice: false,\n      archive: null,\n'), swapText('    archive() {\n      return this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null\n    },\n\n', ''), swapText('this.archiveSnapshot,', "this.archiveRecord ? this.archiveRecord.revision : '',"), swapText('    archiveRecord(record) {', '    archiveKey: {\n      immediate: true,\n      handler() {\n        this.archive = this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null\n      },\n    },\n    archiveRecord(record) {')), fails: ['archive-refresh'], needs: ['refresh'] },
@@ -1823,7 +1821,6 @@ const EQUIVALENT_PANEL = chain(
   swapText(':data-reason="reason">{{ reasonText[reason] }}</li>', ':data-reason="reason" v-text="reasonText[reason]"></li>'),
   swapText('<span v-else-if="diagnosis.verdict === \'absent\'" data-verdict-shown="absent">', '<span v-else-if="\'absent\' === diagnosis.verdict" data-verdict-shown="absent">'),
   swapText('<span data-verdict-count>{{ count(diagnosis.observed) }}</span>', '<span data-verdict-count style="opacity: 1">{{ count(Number(diagnosis.observed)) }}</span>'),
-  swapText('<span class="caption text--secondary" data-pointer-version> Reviewed {{ entry.reviewed }}</span>', '<span class="caption text--secondary" data-pointer-version style="opacity: 1"><span style="opacity: 1"> Reviewed {{ entry.reviewed }}</span></span>'),
   swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition style="opacity: 1"><span style="opacity: 1">{{ entry.definition }}</span></div>'),
   swapText('<span class="diagnostic-name" data-pointer-name>{{ entry.term }}</span>', '<span class="diagnostic-name" data-pointer-name style="opacity: 1"><span style="opacity: 1">{{ entry.term }}</span></span>'),
   swapText('<span data-verdict-words>{{ verdictText.absent }}</span>', '<span data-verdict-words style="opacity: 1"><span style="opacity: 1">{{ verdictText.absent }}</span></span>'),

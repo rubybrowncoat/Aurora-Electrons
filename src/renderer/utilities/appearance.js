@@ -56,7 +56,7 @@ const SOLARIS_SOURCE = {
   revision: '83aa53017754216367851620b4457284db654c15',
   revisionDate: '2021-05-20',
   license: 'MIT License',
-  inspected: "The colour numbers in the theme's public source: the legacy colours it replaces and the four it puts in their place. Read in October 2026, at the revision above, and typed into this preset as values.",
+  inspected: "The colour numbers in the theme's public source: the legacy colours it replaces and the four it puts in their place. Read at the revision above and typed into this preset as values.",
   copied: 'No source code, image, icon or font of the theme is copied or bundled; colour values are the only thing taken, and the preset does not reproduce the theme.',
   note: 'The source does not say which Aurora version the legacy colours come from; its last commit is dated 2021-05-20. Nothing here states what any release of the game uses today.',
 }
@@ -69,7 +69,7 @@ const T2D_SOURCE = {
   revision: 'ebee1f9feafcac13904740562d96a05b8336e9e7',
   revisionDate: '2021-05-12',
   license: 'MIT License',
-  inspected: "The colour numbers in the theme's public source (the legacy navy and pale yellow it replaces, the black and white it puts in their place, the grey it draws map lines in) and the look of its published screenshot (black controls with white outlines). Read in October 2026, at the revision above, and typed into this preset as values.",
+  inspected: "The colour numbers in the theme's public source (the legacy navy and pale yellow it replaces, the black and white it puts in their place, the grey it draws map lines in) and the look of its published screenshot (black controls with white outlines). Read at the revision above and typed into this preset as values.",
   copied: 'No source code, image, icon or font of the theme is copied or bundled; colour values are the only thing taken. The theme\'s custom icon set, made by another author, and its font choice are references only: the preset uses the app\'s own icons and typeface.',
   note: 'The theme lists corner cases that "don\'t quite look good yet" and its published screenshot keeps the default light window chrome on some dialogs, green text on black in a field and overlapping map labels; none of these is reproduced. The source does not say which Aurora version it was drawn for; its last commit is dated 2021-05-12. Nothing here states what any release of the game uses today.',
 }
@@ -82,7 +82,7 @@ const CRISTO_SOURCE = {
   revision: '4b30899b984c1dd1bb75d2bd7c17a994a1227bdb',
   revisionDate: '2026-06-15',
   license: 'No license of its own; it keeps the Solaris theme\'s MIT License, and no grant covers the colours added by Cristotheme or DeepBlue',
-  inspected: "The colour numbers in the theme's public source (the window, text, map text, planet, orbit and control colours and the border it derives), as of the revision above; the file itself was last changed in August 2022. Read in October 2026 and typed into this preset as values. Nothing was run, and the compiled patch was not opened.",
+  inspected: "The colour numbers in the theme's public source (the window, text, map text, planet, orbit and control colours and the border it derives), as of the revision above; the file itself was last changed in August 2022. Read and typed into this preset as values. Nothing was run, and the compiled patch was not opened.",
   copied: "No source code, image, icon, font, event-colour file or compiled file of the theme is copied or bundled; colour values are the only thing taken. Its icons (the Solaris theme's, by other authors) and its font choice are not used: the preset keeps the app's own icons and typeface.",
   note: 'The repository states no license for the colours it adds, and the owner of this app accepted that no explicit grant covers them. Two of its colours (the window and the map text) first appear in DeepBlue and three (the text, the planet and the orbit) are its own. It has no screenshot of its own, only a video thumbnail that agrees with the window, planet and control colours; the compiled patch in the repository draws a white orbit where the source says pale green, so the preset takes neither. It does not say which Aurora version it was drawn for. Nothing here states what any release of the game uses today.',
 }
@@ -95,7 +95,7 @@ const DEEPBLUE_SOURCE = {
   revision: '6e2ad38bf75a2b4b17cd9af57ba031b44ee30a5f222465befad693175c7a6614',
   revisionDate: '2021-06-02',
   license: 'No license of its own; it keeps the Solaris theme\'s MIT License, and no grant covers the colours added by DeepBlue',
-  inspected: "The colour numbers in the theme's source, from the archive the author linked in the thread (the SHA-256 above, whose source reads version 1.3.0.0 and whose files date from June 2021), and the author's own screenshot, a lossless capture of the theme in the game, which shows every colour used here. Read in October 2026 and typed into this preset as values. Nothing was run, and the compiled files were read as bytes only.",
+  inspected: "The colour numbers in the theme's source, from the archive the author linked in the thread (the SHA-256 above, whose source reads version 1.3.0.0 and whose files date from June 2021), and the author's own screenshot, a lossless capture of the theme in the game, which shows every colour used here. Read and typed into this preset as values. Nothing was run, and the compiled files were read as bytes only.",
   copied: "No source code, image, icon, font, event-colour file or compiled file of the theme is copied or bundled; colour values are the only thing taken. Its icons (the Solaris theme's, by other authors) and its font choice are not used: the preset keeps the app's own icons and typeface.",
   note: "The author states no license for the colours chosen and credits the rest to the Solaris author, the app's owner accepted that no explicit grant covers them, and the preset claims none. The thread no longer answers at its own address and was read from a web-archive capture of January 2024, so the revision shown is the archive's hash, not a repository revision. The author's two distributions disagree on the map text colour (#EED8A4 in the archive and in the screenshot, #E7C77C in the older full bundle); the preset takes the first. Cristotheme reuses the window and map-text colours, which the Cristo inspired preset records. It does not say which Aurora version it was drawn for. Nothing here states what any release of the game uses today.",
 }

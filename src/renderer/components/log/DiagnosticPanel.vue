@@ -70,7 +70,6 @@
       <ul class="diagnostic-list">
         <li v-for="entry in pointers" :key="entry.id" :data-pointer="entry.id">
           <span class="diagnostic-name" data-pointer-name>{{ entry.term }}</span>
-          <span class="caption text--secondary" data-pointer-version> Reviewed {{ entry.reviewed }}</span>
           <div data-pointer-definition>{{ entry.definition }}</div>
         </li>
       </ul>
