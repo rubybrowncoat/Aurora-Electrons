@@ -239,13 +239,15 @@ const report = (label, seen) => {
 // ---------- the page has finished its reads ----------
 
 // Run in the page by `settled`: `{ limit }` is the longest it waits in milliseconds, `loading` a function that says whether the page still works on what it read (or null). One round lets the page run what an answer sets going (a microtask, a task, then two frames of the renderer), and the page is settled when a round that began with no call out ends with none out, none started during it and `loading` saying no: a round that began with a call out does not count, as that call's answer may have come during it and what the answer sets going runs after the round has ended. A call that started during the round, or that is out after it, makes another round once the calls are in, so a read that a watcher starts when another finishes, and one that read starts in turn, is waited for to its end. It never waits on a quiet period: how long it takes is what the reads take. What the page has only scheduled for later than the round (a timer, a debounce) is not a call out: a step that sets one going waits for its effect first. At the limit the wait ends as a failure, whichever part of it was under way (`stage`), never as a page that has settled.
-const settleInPage = async ({ limit }, loading) => {
+const settleInPage = async ({ limit, held = [] }, loading) => {
   const reads = window.__auroraReads
 
   if (!reads) {
     return { signal: false }
   }
 
+  const heldLabels = new Map(held.map((id) => [id, reads.pending.get(id)]))
+  const changedHeld = () => held.length > 0 && (window.__auroraReads !== reads || held.some((id) => !reads.pending.has(id) || reads.pending.get(id) !== heldLabels.get(id)))
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   const EXPIRED = {}
@@ -264,19 +266,28 @@ const settleInPage = async ({ limit }, loading) => {
 
   try {
     for (;;) {
-      const open = reads.pending.size
+      if (changedHeld()) {
+        return { signal: true, invalidHeld: true }
+      }
+
+      const open = reads.pending.size - held.length
       const before = reads.started
 
       await within(sleep(0), 'a task of its own')
       await within(frames(), 'two frames')
 
+      if (changedHeld()) {
+        return { signal: true, invalidHeld: true }
+      }
+
+      const remaining = reads.pending.size - held.length
       const working = Boolean(loading && loading())
 
-      if (!open && !working && reads.started === before) {
+      if (!open && !remaining && !working && reads.started === before) {
         return { signal: true, settled: true }
       }
 
-      if (reads.pending.size) {
+      if (reads.pending.size && !held.length) {
         await within(reads.idle(), 'the calls out')
       }
     }
@@ -294,8 +305,9 @@ const settleInPage = async ({ limit }, loading) => {
 const SETTLE_LIMIT = 120000
 const SETTLE_NAMED = 5
 
+// With `held`, only those exact pending ids are exempt: each must remain present with its captured label in every round. Other calls and their continuations still finish, with a stable start counter across a task and two frames; global idle is never awaited while held reads remain. A missing or changed exemption is a HarnessError.
 // Waits until the reads the page has started are done, by the page's own count of its database calls (scripts/web/shims/pending-reads.js) and no quiet period, and until `loading`, a function run in the page (scripts/page-loading.js is one), says the page is done working on them. Bounded by `limit` (ms): past it the wait throws and names what was still out. A page with no count is a HarnessError, never a page that has settled.
-const settled = async (page, { limit = SETTLE_LIMIT, loading = null } = {}) => {
+const settled = async (page, { limit = SETTLE_LIMIT, loading = null, held = [] } = {}) => {
   if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
     throw new HarnessError(`the limit of a wait for the page to settle is a number of milliseconds above 0, not ${String(limit)}`)
   }
@@ -304,10 +316,18 @@ const settled = async (page, { limit = SETTLE_LIMIT, loading = null } = {}) => {
     throw new HarnessError('what says the page is still loading is a function run in the page, or null')
   }
 
-  const seen = await page.evaluate(`(${settleInPage})(${JSON.stringify({ limit })}, ${loading ? `(${loading})` : 'null'})`)
+  if (!Array.isArray(held) || held.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(held).size !== held.length) {
+    throw new HarnessError('the held database calls are distinct positive integer ids from the counted pending reads')
+  }
+
+  const seen = await page.evaluate(`(${settleInPage})(${JSON.stringify({ limit, held })}, ${loading ? `(${loading})` : 'null'})`)
 
   if (!seen.signal) {
     throw new HarnessError('the page has no count of its database calls (window.__auroraReads, put there by scripts/web/shims/pending-reads.js): it is not served by the web shims, and a wait for its reads would end at once')
+  }
+
+  if (seen.invalidHeld) {
+    throw new HarnessError('a held database call disappeared or changed, or its page read tracker was replaced, while the other reads were awaited')
   }
 
   if (!seen.settled) {

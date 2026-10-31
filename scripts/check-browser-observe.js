@@ -1,7 +1,7 @@
 /*
   Checks scripts/lib/browser-observe.js, the one policy of the checks that drive a page of the real renderer in a browser: what the page did and what went wrong while it did it, in a record of the same shape whether the observation went through or not; and the one way they read the screen as the player sees it.
 
-  Run: bun scripts/check-browser-observe.js [--no-mutations]
+  Run: bun scripts/check-browser-observe.js [--no-mutations] [--only=<case>]
 
   Each case of the record drives a page served from memory in Chromium (no application, no database) and looks at the record `observe` returns:
   - a quiet page gives a whole record with no error;
@@ -36,7 +36,8 @@ const { loadUtilities } = require('./lib/utilities')
 
 const HELPER = path.join(__dirname, 'lib', 'browser-observe.js')
 const HOST = 'http://observe.test'
-const options = { mutations: !process.argv.includes('--no-mutations') }
+const options = { mutations: !process.argv.includes('--no-mutations'), only: (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length) }
+const selected = (name) => !options.only || name === options.only
 
 let checks = 0
 let failures = 0
@@ -508,6 +509,143 @@ const CASES = {
     assert.deepEqual(await page.evaluate(() => window.log), ['A', 'B', 'C', 'D', 'E'], 'the wait ended before the reads of the chain did')
   }),
 
+  // A held call remains outstanding while A's answer starts B two frames later. Completion must reach B without waiting for the held call or sampling the gap between A and B.
+  'settled-held-chain': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, COUNTED, async (page) => {
+    const held = await page.evaluate(() => {
+      window.log = []
+      window.tracked('held target', () => new Promise(() => {}))
+
+      const ids = [...window.__auroraReads.pending.keys()]
+      const frame = window.requestAnimationFrame.bind(window)
+      const frames = () => new Promise((resolve) => frame(() => frame(resolve)))
+      let answer
+      let first = true
+
+      window.tracked('A', () => new Promise((resolve) => { answer = resolve })).then(() => { window.log.push('A'); return frames() }).then(() => window.tracked('B', () => new Promise((resolve) => setTimeout(resolve, 150)))).then(() => window.log.push('B'))
+      window.requestAnimationFrame = (callback) => frame((time) => {
+        callback(time)
+
+        if (first) {
+          first = false
+          answer()
+        }
+      })
+
+      return ids
+    })
+    const out = await outcome(lib.settled(page, { limit: 20000, held }), 8000)
+
+    assert.ok('value' in out, out.late ? 'the held read blocked completion' : String(out.error))
+    assert.deepEqual(await page.evaluate(() => window.log), ['A', 'B'], 'the held-read wait missed the late continuation')
+    assert.deepEqual(await page.evaluate(() => [...window.__auroraReads.pending.keys()]), held)
+  }),
+
+  'settled-held-change': async (lib, browser, tracker = TRACKER) => {
+    for (const replacement of [false, true]) {
+      await counting(browser, tracker, COUNTED, async (page) => {
+        const held = await page.evaluate((replace) => {
+          let release
+
+          window.tracked('held original', () => new Promise((resolve) => { release = resolve }))
+
+          const ids = [...window.__auroraReads.pending.keys()]
+          const frame = window.requestAnimationFrame.bind(window)
+          let first = true
+
+          window.requestAnimationFrame = (callback) => frame((time) => {
+            if (first) {
+              first = false
+              release()
+
+              if (replace) {
+                window.tracked('held replacement', () => new Promise(() => {}))
+              }
+            }
+
+            callback(time)
+          })
+
+          return ids
+        }, replacement)
+        const out = await outcome(lib.settled(page, { limit: 2000, held }), 8000)
+
+        assert.ok(out.error instanceof lib.HarnessError, replacement ? 'a replacement id was exempted' : 'an exhausted exemption was accepted')
+        assert.ok(out.error.message.includes('held database call'), out.error.message)
+      })
+    }
+  },
+
+  'settled-held-timeout': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, COUNTED, async (page) => {
+    const held = await page.evaluate(() => {
+      window.tracked('held target', () => new Promise(() => {}))
+
+      const ids = [...window.__auroraReads.pending.keys()]
+
+      window.tracked('nonheld never answers', () => new Promise(() => {}))
+
+      return ids
+    })
+    const out = await outcome(lib.settled(page, { limit: 700, held }), 8000)
+
+    assert.ok(out.error && !(out.error instanceof lib.HarnessError), 'an outstanding nonheld read did not fail at the deadline')
+    assert.ok(out.error.message.includes('700 ms') && out.error.message.includes('nonheld never answers'), out.error.message)
+  }),
+
+  'settled-held-signal': async (lib, browser, tracker = TRACKER) => {
+    await counting(browser, tracker, '<p>no counter</p>', async (page) => {
+      const out = await outcome(lib.settled(page, { limit: 700, held: [1] }))
+
+      assert.ok(out.error instanceof lib.HarnessError)
+      assert.ok(out.error.message.includes('__auroraReads'), out.error.message)
+    })
+    await counting(browser, tracker, COUNTED, async (page) => {
+      const out = await outcome(lib.settled(page, { limit: 700, held: [1] }))
+
+      assert.ok(out.error instanceof lib.HarnessError, 'an id absent at entry was exempted')
+      assert.ok(out.error.message.includes('held database call'), out.error.message)
+    })
+  },
+
+  // A starts and finishes inside the wait's first round; its answer schedules B beyond that round. A stable pending count alone cannot establish completion in that gap.
+  'settled-started-round': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, COUNTED, async (page) => {
+    await page.evaluate(() => {
+      window.log = []
+      const frame = window.requestAnimationFrame.bind(window)
+      const frames = () => new Promise((resolve) => frame(() => frame(resolve)))
+      let first = true
+
+      window.requestAnimationFrame = (callback) => frame((time) => {
+        callback(time)
+
+        if (first) {
+          first = false
+          window.tracked('A', () => Promise.resolve()).then(() => { window.log.push('A'); return frames() }).then(() => window.tracked('B', () => new Promise((resolve) => setTimeout(resolve, 150)))).then(() => window.log.push('B'))
+        }
+      })
+    })
+    let atCompletion = null
+    const capturingPage = {
+      evaluate: async (source) => {
+        const snapshot = await page.evaluate(async (text) => {
+          // eslint-disable-next-line no-eval
+          const result = await (0, eval)(text)
+
+          return { result, log: [...window.log] }
+        }, source)
+
+        atCompletion = snapshot.log
+        // Deliberate host latency is part of this control: B finishing later cannot repair the captured completion evidence.
+        await new Promise((resolve) => setTimeout(resolve, 300))
+
+        return snapshot.result
+      },
+    }
+    const out = await outcome(lib.settled(capturingPage, { limit: 20000 }), 8000)
+
+    assert.ok('value' in out, String(out.error))
+    assert.deepEqual(atCompletion, ['A', 'B'], 'a call that began and ended inside the round was missed at completion')
+  }),
+
   'settled-loading': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<p>page</p>`, async (page) => {
     await page.evaluate(() => {
       window.busy = true
@@ -588,7 +726,7 @@ const CASES = {
   }),
 
   'settled-arguments': async (lib, browser, tracker = TRACKER) => counting(browser, tracker, `${COUNTED}<p>page</p>`, async (page) => {
-    const calls = [{ limit: 0 }, { limit: Number.NaN }, { limit: '5' }, { limit: -1 }, { loading: 'yes' }]
+    const calls = [{ limit: 0 }, { limit: Number.NaN }, { limit: '5' }, { limit: -1 }, { loading: 'yes' }, { held: 1 }, { held: [0] }, { held: [1, 1] }, { held: ['1'] }]
     const outs = await Promise.all(calls.map((given) => outcome(lib.settled(page, given))))
 
     assert.deepEqual(outs.map((out) => out.error instanceof lib.HarnessError), calls.map(() => true), 'an argument of another shape stops the run')
@@ -621,6 +759,11 @@ const WORDS = {
   figures: 'the 90 texts of the page\'s own formatter read back, signed and in their grouping, as the numbers rounded as the page rounds them, and every text that is no figure is refused',
   roles: 'a region is read by role and a list by identity, never by place or as a set, and a word is read back through its table',
   tracked: 'the page\'s count of its database calls holds a call from its start to its answer or failure, ends it before the caller goes on with the answer, counts every start, says when none is out and cuts a long label',
+  'settled-started-round': 'a call that starts and ends inside a round still holds completion for its late continuation',
+  'settled-held-chain': 'an exact held id stays out while late chained nonheld reads finish',
+  'settled-held-change': 'a disappeared or replaced held id is a HarnessError',
+  'settled-held-timeout': 'nonheld reads still fail at the deadline while exact held ids remain out',
+  'settled-held-signal': 'held exemptions require the read signal and ids present at entry',
   'settled-chain': 'the wait for the page ends when the last read is answered, through a read that a watcher starts a microtask, two frames and a task after another, not when the first is',
   'settled-loading': 'the wait for the page goes on while the page says it is still loading, with no call out',
   'settled-timeout': 'a wait that is not over at its limit fails there, as a failure of the page and not of the harness, and names the calls still out and that the page was loading',
@@ -705,11 +848,14 @@ const FAULTS = [
   ['a line no row has is not told', ';[...byIdentity.keys()].filter((id) => !ids.includes(id))', ';[].filter((id) => !ids.includes(id))', 'roles'],
   ['two rows of one identity are not told', 'if (new Set(ids).size !== ids.length) {', 'if (false) {', 'roles'],
   ['a word of two labels reads as the first', 'return keys.length === 1 ? keys[0] : null', 'return keys.length ? keys[0] : null', 'roles'],
+  ['a held id may disappear', 'held.some((id) => !reads.pending.has(id) || reads.pending.get(id) !== heldLabels.get(id))', 'false', 'settled-held-change'],
+  ['held reads are waited for as ordinary calls', 'const open = reads.pending.size - held.length', 'const open = reads.pending.size', 'settled-held-chain'],
+  ['the held read blocks on global idle', 'if (reads.pending.size && !held.length) {', 'if (reads.pending.size) {', 'settled-held-chain'],
   ['a wait that is over at its limit is a page that settled', 'return { signal: true, settled: false, pending: [...reads.pending.values()], working: Boolean(loading && loading()), stage }', 'return { signal: true, settled: true, pending: [...reads.pending.values()], working: Boolean(loading && loading()), stage }', 'settled-timeout'],
   ['the limit of a wait that is under way is no failure', 'throw EXPIRED', 'stage = stage', 'settled-frozen'],
   ['a page that has settled never gives the wait back', 'return { signal: true, settled: true }', 'await new Promise(() => {})', 'settled-chain'],
-  ['a round that began with a call out settles the page', 'if (!open && !working && reads.started === before) {', 'if (!working && reads.started === before) {', 'settled-late-answer'],
-  ['a call that started during the round does not hold the wait', 'if (!open && !working && reads.started === before) {', 'if (!open && !working) {', 'settled-chain'],
+  ['a round that began with a call out settles the page', 'if (!open && !remaining && !working && reads.started === before) {', 'if (!remaining && !working && reads.started === before) {', 'settled-late-answer'],
+  ['a call that started during the round does not hold the wait', 'if (!open && !remaining && !working && reads.started === before) {', 'if (!open && !remaining && !working) {', 'settled-started-round'],
   ['the wait for a page does not let it run what an answer sets going', "await within(frames(), 'two frames')", 'void frames', 'settled-chain'],
   ['the wait for a page does not look at its loading', 'const working = Boolean(loading && loading())', 'const working = false', 'settled-loading'],
   ['a wait for a page that is over its limit does not say what was out', "const named = seen.pending.slice(0, SETTLE_NAMED).join('; ')", "const named = ''", 'settled-timeout'],
@@ -733,6 +879,10 @@ const REWRITES = [
 /* eslint-enable no-template-curly-in-string */
 
 const main = async () => {
+  if (options.only && !Object.prototype.hasOwnProperty.call(CASES, options.only)) {
+    throw new Error(`No helper case ${options.only}`)
+  }
+
   const browser = await require('playwright').chromium.launch()
   const folders = []
 
@@ -741,7 +891,7 @@ const main = async () => {
 
     const lib = require(HELPER)
 
-    for (const [name, run] of Object.entries(CASES)) {
+    for (const [name, run] of Object.entries(CASES).filter(([name]) => selected(name))) {
       try {
         await run(lib, browser)
         check(`${name}: ${WORDS[name]}`, true)
@@ -775,7 +925,7 @@ const main = async () => {
 
       console.log('\nPlanted faults')
 
-      for (const [name, from, to, caught, target] of FAULTS) {
+      for (const [name, from, to, caught, target] of FAULTS.filter((entry) => selected(entry[3]))) {
         const thrown = await over(from, to, caught, target)
 
         check(`planted: ${name}: caught by ${caught}: ${WORDS[caught]}`, thrown instanceof assert.AssertionError, thrown ? `${thrown.name}: ${String(thrown.message).split('\n')[0]}` : 'nothing failed')
@@ -783,7 +933,7 @@ const main = async () => {
 
       console.log('\nEquivalent rewrites')
 
-      for (const [name, from, to, kept, target] of REWRITES) {
+      for (const [name, from, to, kept, target] of REWRITES.filter((entry) => selected(entry[3]))) {
         const thrown = await over(from, to, kept, target)
 
         check(`rewrite: ${name}: ${kept} still holds`, thrown === null, thrown ? `${thrown.name}: ${String(thrown.message).split('\n')[0]}` : '')

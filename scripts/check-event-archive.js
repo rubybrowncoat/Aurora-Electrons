@@ -1,7 +1,7 @@
 /*
   Checks the event archive and the pins: the opt-in record of a race's game log, kept per branch, and the durable pins on events (src/renderer/utilities/event-archive.js, event-pins.js and their use in utilities/history.js).
 
-  node scripts/check-event-archive.js [--no-mutations]
+  bun scripts/check-event-archive.js [--no-mutations] [--head-check=<key>[,<key>...]]
 
   Groups, each check numbered and keyed (a mutation names the keys it must break):
   - rows: how an event is normalised and identified (null against 0, text, the exact fingerprint, the multiset of identical rows), what a capture takes of a read;
@@ -17,9 +17,11 @@
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, subjectModule, judged, caughtAll, kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { HarnessError } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
 
@@ -53,10 +55,10 @@ const STUBS = {
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
-const loadModules = async (directory) => {
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory })
+const loadModules = async (directory, sources = {}) => {
+  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory, sources })
 
-  return { a: loaded['event-archive'], p: loaded['event-pins'], history: loaded.history, directory, reload: () => loadModules(directory) }
+  return { a: subjectModule(loaded['event-archive'], 'event archive'), p: { ...subjectModule(loaded['event-pins'], 'event pins'), PinLimit: loaded['event-pins'].PinLimit }, history: subjectModule(loaded.history, 'history recorder'), raw: loaded, directory, reload: () => loadModules(directory, sources) }
 }
 
 // ---------- the saves, read only ----------
@@ -742,8 +744,13 @@ check('lineage', 'a branch with no archive starts from its parent up to the fork
   const campaign = { id: 'c', branches: { b1: { id: 'b1', parent: null, fork: null }, b2: { id: 'b2', parent: 'b1', fork: { t: 300 } }, b3: { id: 'b3', parent: 'b2', fork: { t: 500 } }, b4: { id: 'b4', parent: 'b1', fork: { t: null } }, b7: { id: 'b7', parent: 'b1', fork: { t: 100 } } } }
 
   assert.equal(m.a.eventFileName('c', 'b2'), 'campaign-c-b2-events')
-  assert.deepEqual(idsOf(m.a.eventBase(io, campaign, 'b2').races[7]), [1, 2])
-  assert.deepEqual(idsOf(m.a.eventBase(io, campaign, 'b3').races[7]), [1, 2], 'through a parent with no archive the earlier fork bounds it')
+  const directSeed = m.a.eventBase(io, campaign, 'b2')
+  const indirectSeed = m.a.eventBase(io, campaign, 'b3')
+
+  assert.ok(directSeed && directSeed.races && directSeed.races[7], 'a branch with no archive receives its parent race through the fork')
+  assert.deepEqual(idsOf(directSeed.races[7]), [1, 2])
+  assert.ok(indirectSeed && indirectSeed.races && indirectSeed.races[7], 'a branch receives its ancestor race through a parent with no archive')
+  assert.deepEqual(idsOf(indirectSeed.races[7]), [1, 2], 'through a parent with no archive the earlier fork bounds it')
   assert.deepEqual(m.a.eventBase(io, campaign, 'b4'), {})
   assert.deepEqual(m.a.eventBase(io, campaign, 'b7'), {}, 'forked before any increment ended')
   assert.equal(m.a.eventBase(io, campaign, 'b1'), file)
@@ -755,7 +762,9 @@ check('lineage', 'a branch with no archive starts from its parent up to the fork
   assert.deepEqual(m.a.eventSeed(io, marked, 'b5', 300), {})
   assert.deepEqual(m.a.eventBase(io, marked, 'b6'), {}, 'nothing passes through a branch seeded empty')
   assert.equal(m.a.eventForkFile(io, marked, 'b5'), null)
-  assert.deepEqual(idsOf(m.a.eventForkFile(io, marked, 'b2').races[7]), [1, 2], 'a branch that predates the mark is seeded')
+  const forkFile = m.a.eventForkFile(io, marked, 'b2')
+  assert.ok(forkFile && forkFile.races && forkFile.races[7], 'a branch that predates the mark receives the parent race in its fork archive')
+  assert.deepEqual(idsOf(forkFile.races[7]), [1, 2], 'a branch that predates the mark is seeded')
   assert.equal(m.a.eventForkFile(io, campaign, 'b1'), null, 'a branch with its own archive is not given another')
   assert.equal(m.a.eventForkFile(io, campaign, 'b4'), null)
   assert.equal(m.a.eventForkFile(io, campaign, 'b7'), null, 'a parent that holds nothing up to the fork gives nothing')
@@ -972,9 +981,14 @@ check('tipupto', 'an archive up to a game time drops a tip that ends after it an
 check('failonly', 'a record that holds nothing but noted failures is kept in the archive up to a game time while one of them is not later than it, and a branch forked then is given it', 'unit', ({ m }) => {
   const record = m.a.withFailure(m.a.withFailure(null, { at: 1, t: 200, reason: 'early' }), { at: 2, t: 900, reason: 'late' })
   const file = { version: 1, races: { 7: record } }
+  const raceOf = (file, label) => {
+    assert.ok(file && file.races && file.races[7], label)
 
-  assert.deepEqual(m.a.eventsUpTo(file, 200).races[7].failures.map((failure) => failure.reason), ['early'], 'a failure at the time is kept')
-  assert.deepEqual(m.a.eventsUpTo(file, 1000).races[7].failures.map((failure) => failure.reason), ['early', 'late'])
+    return file.races[7]
+  }
+
+  assert.deepEqual(raceOf(m.a.eventsUpTo(file, 200), 'the archive keeps the race with an eligible noted failure').failures.map((failure) => failure.reason), ['early'], 'a failure at the time is kept')
+  assert.deepEqual(raceOf(m.a.eventsUpTo(file, 1000), 'the archive keeps the race with both noted failures').failures.map((failure) => failure.reason), ['early', 'late'])
   assert.deepEqual(m.a.eventsUpTo(file, 199), {}, 'with no failure by the time and nothing else, the race is dropped')
   assert.deepEqual(m.a.eventsUpTo({ version: 1, races: { 7: m.a.withFailure(null, { at: 1, t: 900, reason: 'late' }) } }, 500), {})
   assert.equal(m.a.eventFileProblem(m.a.eventsUpTo(file, 500)), null)
@@ -984,13 +998,13 @@ check('failonly', 'a record that holds nothing but noted failures is kept in the
   const given = m.a.eventForkFile(io, campaign, 'b2')
 
   assert.ok(given, 'a fork given a parent that noted a failed read by the fork')
-  assert.deepEqual(given.races[7].failures.map((failure) => failure.reason), ['early'])
+  assert.deepEqual(raceOf(given, 'the fork keeps its parent race record').failures.map((failure) => failure.reason), ['early'])
   assert.deepEqual(given.races[7].increments, [])
   assert.equal(m.a.eventForkFile(io, campaign, 'b3'), null, 'a fork before the failure is given nothing')
   assert.deepEqual(m.a.eventBase(io, campaign, 'b2'), given)
 
   const capped = { ...m.a.withFailure(merged(m, null, capture(m, 1, 5, [...many(2, 'a', 2), ev(3, 'b')])).record, { at: 3, t: 200, reason: 'early' }), cut: 700 }
-  const seed = m.a.eventsUpTo({ version: 1, races: { 7: capped } }, 500).races[7]
+  const seed = raceOf(m.a.eventsUpTo({ version: 1, races: { 7: capped } }, 500), 'the capped archive keeps the race with an eligible noted failure')
 
   assert.equal(m.a.eventFileProblem({ version: 1, races: { 7: capped } }), null)
   assert.deepEqual(seed.failures.map((failure) => failure.reason), ['early'], 'a cut past the time drops the events, not the failure noted before it')
@@ -1213,9 +1227,12 @@ check('limit', 'at most 500 events are pinned on a branch: the next throws PinLi
   }
 
   assert.equal(store.pins.length, 500)
-  assert.throws(() => m.p.withPin(store, 'b1', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'over' }), (error) => error instanceof m.p.PinLimit && error.name === 'PinLimit' && error.limit === 500 && error instanceof Error)
-  assert.equal(m.p.withPin(store, 'b1', ev(1, 'e'), { increment: ID(1), count: 1, names: {}, at: 1, id: 'again' }), store, 'a group already pinned is no new pin')
-  assert.equal(m.p.withPin(store, 'b2', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'other' }).pins.length, 501)
+  assert.throws(() => m.raw['event-pins'].withPin(store, 'b1', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'over' }), (error) => error instanceof m.p.PinLimit && error.name === 'PinLimit' && error.limit === 500 && error instanceof Error)
+  const duplicate = m.p.withPin(store, 'b1', ev(1, 'e'), { increment: ID(1), count: 1, names: {}, at: 1, id: 'again' })
+
+  assert.equal(duplicate.pins.length, 500, 'a duplicate at the cap leaves exactly 500 pins')
+  assert.equal(duplicate, store, 'a group already pinned is no new pin')
+  assert.equal(m.p.withPin(store, 'b2', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'other' }).pins.length, 501, 'a full first branch leaves the other branch free to add its first pin')
   assert.equal(m.p.withPin(m.p.withoutPin(store, 'b1', 'p0'), 'b1', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'fits' }).pins.length, 500)
 })
 
@@ -2133,6 +2150,9 @@ check('rnpr', 'a race that is not a player\'s is not read even when it is chosen
 
 check('rfailed', 'a failed read of the log is not a failed pass: the empire\'s file is as without an archive, the race\'s record holds one failure entry (the save\'s game time and the reason) and no row, span or tip, a good read of the same save fills the rows in and keeps the entry, and a later failed read adds an entry and erases nothing', 'recorder', ({ r, m }) => {
   const rows = (record) => ({ increments: record.increments, spans: record.spans, tip: record.tip, revision: record.revision, captures: record.captures, conflicts: record.conflicts, cut: record.cut })
+  assert.equal(r.failed.run.failed.length, 0, 'a failed log read is recorded as data, not as a failed recorder pass')
+  assert.ok(r.failed.events && r.failed.events.races && r.failed.events.races[FALRYX_RACE], 'a failed log read leaves the race archive record')
+
   const failed = r.failed.events.races[FALRYX_RACE]
   const filled = r.filled.races[FALRYX_RACE]
   const erased = r.erased.races[FALRYX_RACE]
@@ -2231,6 +2251,8 @@ check('rnoted', 'a branch forked after a failed read of its parent is given the 
   assert.ok(r.noted.fork && Number.isFinite(r.noted.fork.t))
 
   const child = r.noted.child.races[FALRYX_RACE]
+  assert.ok(child && Array.isArray(child.failures), 'the fork retains the inherited noted-failure list')
+
   const kept = parent.failures.filter((failure) => failure.t <= r.noted.fork.t)
 
   assert.ok(kept.length >= 1 && kept.some((failure) => failure.t === r.noted.t), 'the failure at the first save is one the fork inherits')
@@ -2305,8 +2327,8 @@ const MUTATIONS = [
   { name: 'the fingerprint joins the fields as text', file: 'event-archive.js', find: 'JSON.stringify([Number(IncrementID), ...fields])', replace: '[Number(IncrementID), ...fields].join(\'|\')', fails: ['fields'] },
   { name: 'identical rows are counted once', file: 'event-archive.js', find: 'counts.set(key, (counts.get(key) || 0) + 1)', replace: 'counts.set(key, 1)', fails: ['counts', 'recon2', 'pinstate'] },
   { name: 'a capture counts identical rows once', file: 'event-archive.js', find: 'groups.set(key, groups.has(key) ? [groups.get(key)[0], groups.get(key)[1] + 1] : [fields, 1])', replace: 'groups.set(key, [fields, 1])', fails: ['capture', 'rows', 'recon1'] },
-  { name: 'a row of an increment the ledger lacks is thrown, not left out', file: 'event-archive.js', find: '      orphans++\n      return', replace: '      orphans++', fails: ['capture'] },
-  { name: 'a failed read is thrown', file: 'event-archive.js', find: 'return { failed: error }', replace: 'throw error', fails: ['readfail'] },
+  { name: 'an orphan row is assigned to the first known increment instead of left out', file: 'event-archive.js', find: '      orphans++\n      return', replace: '      orphans++\n      const orphan = eventFields(row)\n      const groups = byIncrement.get(ids[0]) || new Map()\n      groups.set(JSON.stringify(orphan), [orphan, 1])\n      byIncrement.set(ids[0], groups)\n      return', fails: ['capture'] },
+  { name: 'a failed read is thrown', throws: true, file: 'event-archive.js', find: 'return { failed: error }', replace: 'throw error', fails: ['readfail'] },
   { name: 'the window is read again for each race', file: 'event-archive.js', find: 'const seen = window || (await readLogWindow(database, GameID, options))', replace: 'const seen = await readLogWindow(database, GameID, options)', fails: ['readfail'] },
   { name: 'the window starts after the log\'s oldest increment', file: 'event-archive.js', find: 'FCT_Increments.IncrementID >= $' + '{Number(first)}', replace: 'FCT_Increments.IncrementID > $' + '{Number(first)}', fails: ['window'] },
   { name: 'touching spans are not merged', file: 'event-archive.js', find: 'if (last && start <= last[1]) {', replace: 'if (last && start < last[1]) {', fails: ['span', 'append'] },
@@ -2417,10 +2439,10 @@ const MUTATIONS = [
   { name: 'a pass merges into an empty archive, not the branch\'s', file: 'history.js', find: 'mergeEvents(base.value, {', replace: 'mergeEvents({}, {', fails: ['rfile', 'rrepeat'] },
   { name: 'clearing a history leaves its event archive', file: 'history.js', find: 'planned(eventStore(campaignId, branchId), eventsFrom),', replace: 'null,', fails: ['rclear'] },
   { name: 'an event is estimated at 256 bytes', file: 'event-archive.js', find: 'export const EVENT_BYTES = 200', replace: 'export const EVENT_BYTES = 256', fails: ['estimate', 'bytes'] },
-  { name: 'a group already pinned is pinned again', file: 'event-pins.js', find: 'if (pinOfRow(store, branch, row)) {\n    return store', replace: 'if (false) {\n    return store', fails: ['pin', 'limit'] },
+  { name: 'a group already pinned is pinned again', file: 'event-pins.js', find: 'if (pinOfRow(store, branch, row)) {\n    return store', replace: 'if (pinOfRow(store, branch, row)) {\n    return { ...store, pins: [...store.pins, pinOfRow(store, branch, row)] }', fails: ['pin', 'limit'] },
   { name: 'the pin limit is one more', file: 'event-pins.js', find: 'export const MAX_PINS = 500', replace: 'export const MAX_PINS = 501', fails: ['limit'] },
   { name: 'the pin limit is reached one too late', file: 'event-pins.js', find: 'if (pinsOf(store, branch).length >= MAX_PINS) {', replace: 'if (pinsOf(store, branch).length > MAX_PINS) {', fails: ['limit'] },
-  { name: 'the limit counts every branch', file: 'event-pins.js', find: 'if (pinsOf(store, branch).length >= MAX_PINS) {', replace: 'if (store.pins.length >= MAX_PINS) {', fails: ['limit'] },
+  { name: 'the limit counts every branch', file: 'event-pins.js', find: 'if (pinsOf(store, branch).length >= MAX_PINS) {', replace: 'if (store.pins.length >= MAX_PINS && pinsOf(store, branch).length < MAX_PINS) {\n    return store\n  }\n\n  if (pinsOf(store, branch).length >= MAX_PINS) {', fails: ['limit'] },
   { name: 'pins are listed oldest first', file: 'event-pins.js', find: 'b.fields[0] - a.fields[0] || b.increment[0] - a.increment[0]', replace: 'a.fields[0] - b.fields[0] || a.increment[0] - b.increment[0]', fails: ['pin'] },
   { name: 'a pin is found on every branch', file: 'event-pins.js', find: 'pin.branch === branch && pinKey(pin) === key', replace: 'pinKey(pin) === key', fails: ['pin'] },
   { name: 'a removal reaches the copy on another branch', file: 'event-pins.js', find: '!(pin.branch === branch && pin.id === id)', replace: 'pin.id !== id', fails: ['pin'] },
@@ -2431,8 +2453,8 @@ const MUTATIONS = [
   { name: 'a pin the fork has is inherited again', file: 'event-pins.js', find: ' && !own.has(pinKey(pin)))', replace: ')', fails: ['pinseed'] },
   { name: 'the parent is not seeded first', file: 'event-pins.js', find: 'next = seededPins(next, parent, lineage, walked)', replace: 'next = next', fails: ['pinseed'] },
   { name: 'a branch is seeded again', file: 'event-pins.js', find: 'if (store.seeded[branch] || !lineage', replace: 'if (!lineage', fails: ['pinseed'] },
-  { name: 'a branch the registry does not know is marked', file: 'event-pins.js', find: '|| !lineage[branch] || walked.has(branch)', replace: '|| walked.has(branch)', fails: ['pinseed'] },
-  { name: 'a pin is held without asking whether the log was read', file: 'event-pins.js', find: "if (!window) {\n    return 'unread'\n  }", replace: 'if (false) {\n    return null\n  }', fails: ['pinstate'] },
+  { name: 'a branch the registry does not know is marked', file: 'event-pins.js', find: '  if (store.seeded[branch] || !lineage || !lineage[branch] || walked.has(branch)) {\n    return store\n  }', replace: '  if (lineage && !lineage[branch]) {\n    return { ...store, seeded: { ...store.seeded, [branch]: true } }\n  }\n\n  if (store.seeded[branch] || !lineage || !lineage[branch] || walked.has(branch)) {\n    return store\n  }', fails: ['pinseed'] },
+  { name: 'a pin is held without asking whether the log was read', file: 'event-pins.js', find: "if (!window) {\n    return 'unread'\n  }", replace: "if (!window) {\n    return 'held'\n  }", fails: ['pinstate'] },
   { name: 'the oldest increment of the log is before it', file: 'event-pins.js', find: 'if (window.first === null || id < window.first) {', replace: 'if (window.first === null || id <= window.first) {', fails: ['pinstate'] },
   { name: 'the length is not part of an increment\'s identity', file: 'event-pins.js', find: 'if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {', replace: 'if (identity[1] !== pin.increment[1]) {', fails: ['pinstate'] },
   { name: 'a ledger that differs is not told', file: 'event-pins.js', find: 'if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {', replace: 'if (false) {', fails: ['pinstate', 'pinsave'] },
@@ -2494,53 +2516,63 @@ const outcomeOf = async (context, entry) => {
   try {
     const outcome = await context.run(entry)
 
-    return outcome === 'skip' ? 'skip' : true
+    return { id: entry.key, ok: true, kind: null, threw: false, skipped: outcome === 'skip', detail: '' }
   } catch (error) {
-    return String((error && error.stack) || error).split('\n').slice(0, 8).join('\n         ')
+    if (error instanceof HarnessError) {
+      throw error
+    }
+
+    return { id: entry.key, ok: false, kind: kindOf(error), threw: isSubjectThrow(error), skipped: false, detail: String((error && error.stack) || error).split('\n').slice(0, 8).join('\n         ') }
   }
 }
 
-const planted = (mutation) => plantedCopy(utilitiesDirectory, 'ae-event-archive-mutant-', mutation.file, mutation.find, mutation.replace)
+// A fault changes one module's source; imports and reloads receive that same override. The unchanged modules and their shared registry are loaded through the same content-addressed utility loader, without copying the entire utilities tree.
+const planted = (mutation) => ({ [mutation.file.replace(/\.js$/, '')]: plantedPatch(mutation.file, fs.readFileSync(path.join(utilitiesDirectory, mutation.file), 'utf8'), mutation.find, mutation.replace) })
 
 // A mutation judged in this process, as `show` prints it: the result (true, or why it fails) and the detail of a pass.
-const judge = async (mutation) => {
+const judge = async (mutation, { modulesOf = loadModules, entries = checks, context = contextOf } = {}) => {
+  refusePlanting(mutation.name)
   const started = Date.now()
-  let directory = null
+  const sources = mutation.schedules ? {} : planted(mutation)
+  const mutant = context(await modulesOf(utilitiesDirectory, sources), mutation.fails, mutation.schedules)
+  const named = entries.filter((entry) => mutation.fails.includes(entry.key))
+  const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
+  const outcomes = []
 
-  try {
-    if (!mutation.schedules) {
-      directory = planted(mutation)
-    }
-
-    const mutant = contextOf(await loadModules(directory || utilitiesDirectory), mutation.fails, mutation.schedules)
-    const named = checks.filter((entry) => mutation.fails.includes(entry.key))
-    const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
-    const missed = []
-    const skipped = []
-
-    for (const entry of named) {
-      const outcome = await outcomeOf(mutant, entry)
-
-      if (outcome === 'skip') {
-        skipped.push(entry.key)
-      } else if (outcome === true) {
-        missed.push(entry.key)
-      }
-    }
-
-    const ran = named.length - skipped.length
-
-    return { result: absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, detail: `${mutation.fails.join(', ')}; ${((Date.now() - started) / 1000).toFixed(1)} s` }
-  } catch (error) {
-    return { result: `does not load: ${error.message}` }
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
+  for (const entry of named) {
+    outcomes.push(await outcomeOf(mutant, entry))
   }
+
+  const skipped = outcomes.filter((outcome) => outcome.skipped).map((outcome) => outcome.id)
+  const ran = outcomes.filter((outcome) => !outcome.skipped)
+  const failed = judged(ran, `the event fault "${mutation.name}"`)
+  const caught = ran.length > 0 && caughtAll(ran, { name: mutation.name, throws: mutation.throws })
+  const details = failed.map(({ id, threw, detail }) => `${id}: ${threw ? 'subject throw' : 'value'}: ${detail.split('\n')[0]}`).join('; ')
+
+  return { result: absent.length ? `no check is keyed ${absent.join(', ')}` : !ran.length ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : !caught ? 'a named check did not fail by an allowed assertion' : true, detail: `${details}; ${((Date.now() - started) / 1000).toFixed(1)} s` }
 }
 
-// The mutations run in child processes, several side by side (CHECK_JOBS), each child judging its share one after another the way the whole run once did in one process: every mutation still gets a fresh copy of the modules and fresh scenarios, and a child holds only its own share of module copies in memory. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its verdicts.
+// Exercise this suite's actual outcome and credit path with an independent one-check scenario, without planting a source or reading a save.
+check('credit-boundaries', 'event fault credit rejects harness exceptions and undeclared subject throws, credits a named wrong value, and permits an explicitly declared error-propagation contract', 'unit', async () => {
+  const fault = { name: 'credit probe', schedules: [], fails: ['probe'] }
+  const entries = [{ key: 'probe', run: ({ m }) => m.a.probe() }]
+  const context = (m) => ({ run: (entry) => entry.run({ m }) })
+  const probe = (run, throws = false) => judge({ ...fault, throws }, { entries, context, modulesOf: async () => ({ a: subjectModule({ probe: run }, 'credit probe') }) })
+
+  await assert.rejects(judge(fault, { entries, modulesOf: async () => ({}), context: () => ({ run: () => { throw new Error('fixture broke') } }) }), (error) => error instanceof HarnessError && error.message.includes('fixture broke'))
+  await assert.rejects(probe(() => { throw new Error('unexpected subject exception') }), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
+  await assert.rejects(probe(() => { throw new assert.AssertionError({ message: 'subject assertion is not a check assertion' }) }), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
+
+  const wrong = await judge(fault, { entries: [{ key: 'probe', run: () => assert.equal(2, 1, 'independent expected value') }], context, modulesOf: async () => ({}) })
+  const explicit = await probe(() => { throw new Error('declared propagation defect') }, true)
+
+  assert.equal(wrong.result, true)
+  assert.ok(wrong.detail.includes('probe: value:'), wrong.detail)
+  assert.equal(explicit.result, true)
+  assert.ok(explicit.detail.includes('probe: subject throw:'), explicit.detail)
+})
+
+// The mutations run in child processes, several side by side (CHECK_JOBS), each child judging its share one after another the way the whole run once did in one process: every mutation gets its source override and fresh scenarios; module identity remains governed by the utility loader, and a child holds only its own share of module copies in memory. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its verdicts.
 const MUTANTS_PREFIX = 'MUTANTS_RESULT '
 const CHILD_MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutants=')).map((argument) => argument.slice(10).split(',').map(Number))[0]
 
@@ -2554,14 +2586,43 @@ const childMain = async () => {
   const verdicts = []
 
   for (const index of CHILD_MUTANTS) {
-    verdicts.push(await judge(MUTATIONS[index]))
+    console.log(`MUTANT_START ${JSON.stringify({ index, name: MUTATIONS[index].name })}`)
+
+    let verdict
+
+    try {
+      verdict = await judge(MUTATIONS[index])
+    } catch (error) {
+      throw new HarnessError(`event fault ${index} "${MUTATIONS[index].name}", declared checks [${MUTATIONS[index].fails.join(', ')}], could not be credited: ${error && error.stack ? error.stack : error}`)
+    }
+
+    verdicts.push(verdict)
+    console.log(`MUTANT_DETAIL ${JSON.stringify({ index, name: MUTATIONS[index].name, ...verdict })}`)
   }
 
   await closeHandles()
   process.stdout.write(`${MUTANTS_PREFIX}${JSON.stringify(verdicts)}\n`, () => process.exit(0))
 }
 
+const mutantChunk = async (chunk) => {
+  const result = await runChild(__filename, [`--mutants=${chunk.join(',')}`], { onLine: (line, stream) => { if (stream === 'stderr') { console.error(line) } else if (/^MUTANT_(START|DETAIL) /.test(line)) { console.log(line) } } })
+
+  if (result.code !== 0) {
+    console.error(`CHUNK_FAILURE ${chunk.join(',')}\nComplete child stdout:\n${result.stdout}\nComplete child stderr:\n${result.stderr}`)
+  }
+
+  return lastJson(result, MUTANTS_PREFIX)
+}
+
 const main = async () => {
+  const focus = (process.argv.find((argument) => argument.startsWith('--head-check=')) || '').slice('--head-check='.length)
+
+  const requested = focus ? focus.split(',') : []
+
+  if (focus && (mayMutate() || requested.some((key) => !checks.some((entry) => entry.key === key)))) {
+    throw new HarnessError('--head-check names an existing check and requires --no-mutations')
+  }
+
   const began = Date.now()
   const real = await loadModules(utilitiesDirectory)
   const context = contextOf(real)
@@ -2576,27 +2637,27 @@ const main = async () => {
 
   console.log('The event archive')
 
-  for (const entry of checks) {
+  for (const entry of checks.filter((entry) => !focus || requested.includes(entry.key))) {
     number++
 
     const started = Date.now()
     const outcome = await outcomeOf(context, entry)
 
-    if (outcome === 'skip') {
+    if (outcome.skipped) {
       console.log(`  skip   ${number}. ${entry.key}: its saves are not here`)
       continue
     }
 
-    show(`${number}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - started) / 1000).toFixed(1)} s`)
+    show(`${number}. ${entry.key}: ${entry.name}`, outcome.ok ? true : outcome.detail, entry.needs === 'unit' ? '' : `${((Date.now() - started) / 1000).toFixed(1)} s`)
   }
 
   const checksTook = Date.now() - began
 
-  if (!process.argv.includes('--no-mutations')) {
+  if (mayMutate()) {
     console.log('\nMutations: each must break the checks it names')
 
     const chunks = chunksOf(MUTATIONS.length)
-    const verdicts = spread(chunks, await inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANTS_PREFIX)))
+    const verdicts = spread(chunks, await inParallel(chunks, mutantChunk))
 
     MUTATIONS.forEach((mutation, index) => {
       const verdict = verdicts[index]

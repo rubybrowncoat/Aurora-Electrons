@@ -18,12 +18,14 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const { assert, subjectModule, runChecks, judged, caughtBy } = require('./lib/fault-credit')
-const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
+const { assert, subjectModule, runChecks, judged, caughtBy, caughtAll, through, harnessOwn, boundary, judgedGroup } = require('./lib/fault-credit')
+const { observe, validate, failedObservation, failureLine, describe, HarnessError, settled: readsSettled, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
-const { patched } = require('./lib/mutant-source')
+const { loadPage, instantiate } = require('./lib/page-loader')
+const { patched, plantedPatch, plantedGroup } = require('./lib/mutant-source')
 const pageLoading = require('./page-loading')
-const { runSuite } = require('./lib/suite-runner')
+const { runSuite, declaredGroup, RunnerError } = require('./lib/suite-runner')
+const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -578,6 +580,10 @@ unit('watched-set', 'the watched types are the six fire and boarding types, all 
   })
 })
 
+unit('pointer-spec', 'the checklist names the four owner-approved manual checks in their reviewed order', ({ d }) => {
+  assert.deepEqual(d.POINTER_TERMS, POINTERS)
+})
+
 // ---------- planted faults and rewrites of the utilities ----------
 
 const swap = (file, from, to) => ({ [file]: patched(`${file}.js`, sourceOf(file), from, to) })
@@ -616,6 +622,10 @@ const UNIT_FAULTS = [
   { name: 'a page fault leaves out every window its check reads', pageFaults: () => PAGE_FAULTS.map((fault, index) => (index === 3 ? { ...fault, screens: ['broken'] } : fault)), fails: ['fault-screens'] },
   { name: 'a benign page rewrite leaves out screens of the head', pageRewrites: () => PAGE_REWRITES.map((rewrite, index) => (index === 0 ? { ...rewrite, screens: ['window:0'] } : rewrite)), fails: ['fault-screens'] },
   { name: 'the head leaves a hole in its four saved windows', headWindows: () => { const windows = Array.from({ length: 4 }, () => ({})); delete windows[2]; return windows }, fails: ['fault-screens'] },
+  { name: 'the Fleet window controls are left out of the pointer specification', sources: () => ({ 'log-diagnostics': plantedPatch('log-diagnostics.js', sourceOf('log-diagnostics'), "['cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window']", "['cease-fire', 'game-events-window']") }), fails: ['pointer-spec'] },
+  { name: 'a covered window is always partial', sources: () => ({ 'event-archive': plantedPatch('event-archive.js', sourceOf('event-archive'), "? 'partial' : 'observed'\n\n  return {\n    state,", "? 'partial' : 'partial'\n\n  return {\n    state,") }), fails: ['tip-closes', 'fork'] },
+  { name: 'a browser group names an undeclared binding check', pageFaults: () => PAGE_FAULTS.map((fault, index) => index === 3 ? { ...fault, fails: ['undeclared-binding'] } : fault), fails: ['browser-catalog'] },
+  { name: 'two browser group members claim the same binding check', pageFaults: () => PAGE_FAULTS.map((fault, index) => index === 3 ? { ...fault, fails: PAGE_FAULTS[4].fails } : fault), fails: ['browser-catalog'] },
 ]
 
 const UNIT_REWRITES = [
@@ -731,7 +741,13 @@ const countsOf = (lines) => {
 }
 
 // What the panel shows; runs in the page, through the shared readers of scripts/lib/browser-observe.js (`installScreen`: `visible`, `visibleText`, `hooked`). The hooks the template carries name what an element is (`data-type`, `data-key`, `data-input`, `data-reason`); the values (the states, the verdict, the counts, the copies, the statuses, the reasons, the marks, the window the control draws chosen) are the text the element that draws each value draws, never its container's, read by `visibleText` when the element is on screen (`visible`, or drawing text of its own). The page gives back text only: `settled` turns each label back into its kind by the panel's own label maps and reads each numeral (`{ shown }`) as a figure, in Node. The hooks' own values are kept in `hooks` beside them, for the check that they agree.
-const readPanel = () => {
+const readPanel = (scope = null) => {
+  const store = window.$app.$store
+
+  if (scope && (store.state.freshness.generation !== scope.generation || store.getters.RaceID !== scope.race)) {
+    return { invalidScope: true }
+  }
+
   const { visible, visibleText, hooked } = window.__screen
   const seen = (element) => Boolean(element) && visible(element)
   const on = (element) => Boolean(element) && (visible(element) || visibleText(element) !== '')
@@ -831,7 +847,7 @@ const raceOpenIn = (page, RaceID) => page.evaluate(async (race) => {
   return window.$app.$store.getters.RaceID === race
 }, RaceID)
 
-// A wait for `done()` for no longer than `timeout` on the clock given. A wait that outlasts it fails with a message that names what is outstanding (`what()`, which may be async): the failure is the observation's, nothing was seen, so it is never credited as a product fault. Every wait loop of this file goes through it.
+// A wait for `done()` for no longer than `timeout` on the clock given. A wait that outlasts it fails with a message that names what is outstanding (`what()`, which may be async): the failure is the observation's, nothing was seen, so it is never credited as a product fault. Condition waits of this file go through it; database completion uses the shared counted-read wait.
 const waitFor = async ({ done, what, label, clock, sleep, timeout = TIMEOUT }) => {
   const started = clock.now()
 
@@ -846,31 +862,26 @@ const waitFor = async ({ done, what, label, clock, sleep, timeout = TIMEOUT }) =
 
 const REAL_CLOCK = { now: () => Date.now(), sleep: null }
 
-// The page that `observe` opens, made ready for the Game Log of the player's race: the race picked on the Empires page, the log opened and settled, each step named through `step` and bounded by TIMEOUT. `rules.hold` makes the reads it names wait in `held` until they are let go, `rules.fail` answers the reads it names with an error. `clock` is the clock of the waits (a virtual one in the controls of the waits). The checklist is read as the first read leaves it (`opened`) and, if it is folded, unfolded through its toggle as a player does before reading it, unless `keepFold` leaves it to the observation.
-const prepare = async (page, url, step, clock = REAL_CLOCK, keepFold = false) => {
+// The page that `observe` opens, made ready for the Game Log of the player's race: the race picked on the Empires page, the log opened and settled, each step named through `step` and bounded by TIMEOUT. `rules.hold` makes the reads it names wait in `held` until they are let go, `rules.fail` answers the reads it names with an error. The checklist is read as the first read leaves it (`opened`) and, if it is folded, unfolded through its toggle as a player does before reading it, unless `keepFold` leaves it to the observation.
+const prepare = async (page, url, step, keepFold = false) => {
   await installScreen(page)
 
-  const state = { held: [], pending: new Map(), last: clock.now(), hold: null, fail: null }
-  const sleep = (ms) => (clock.sleep ? clock.sleep(ms) : page.waitForTimeout(ms))
+  const state = { held: [], pending: new Map(), hold: null, fail: null }
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
-  const outstanding = () => `${state.pending.size} database calls in flight${state.pending.size ? ` (${[...state.pending.values()].join('; ')})` : ''}, ${clock.now() - state.last} ms since the last, ${state.held.length} held`
 
   page.on('request', (request) => {
     if (isDatabaseCall(request)) {
       state.pending.set(request, `${request.method()} ${new URL(request.url()).pathname} ${String(request.postData() || '').slice(0, 120)}`.trim())
-      state.last = clock.now()
     }
   })
   page.on('requestfinished', (request) => {
     if (isDatabaseCall(request)) {
       state.pending.delete(request)
-      state.last = clock.now()
     }
   })
   page.on('requestfailed', (request) => {
     if (isDatabaseCall(request)) {
       state.pending.delete(request)
-      state.last = clock.now()
     }
   })
   await page.route('**/__aurora-db/query', async (route) => {
@@ -891,7 +902,7 @@ const prepare = async (page, url, step, clock = REAL_CLOCK, keepFold = false) =>
     }
   })
 
-  const settle = () => waitFor({ done: async () => !((state.pending.size > 0 && !state.held.length) || clock.now() - state.last < 1500 || await page.evaluate(pageLoading)), what: outstanding, label: 'the settling of the page', clock, sleep })
+  const settle = () => readsSettled(page, { limit: TIMEOUT, loading: pageLoading })
 
   step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
@@ -909,7 +920,7 @@ const prepare = async (page, url, step, clock = REAL_CLOCK, keepFold = false) =>
   step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
   step('waiting for the reads that the picking of the race starts')
-  await waitFor({ done: async () => state.pending.size === 0 && clock.now() - state.last >= 1500, what: outstanding, label: 'the database reads that the picking of the race starts', clock, sleep })
+  await readsSettled(page, { limit: TIMEOUT })
   step('opening /log')
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/log')
   await page.waitForFunction(pageLoading.arrived, '/log', { timeout: TIMEOUT })
@@ -922,55 +933,32 @@ const prepare = async (page, url, step, clock = REAL_CLOCK, keepFold = false) =>
   return { state, settle, opened }
 }
 
-// The waits of `prepare` on a page that is only enough of one, and a clock that is only advanced by the sleeps: a database call that never finishes must end the wait at the suite's timeout with a message that names the call (the observation's failure, never a fault of the product), and a call that finishes before the deadline must let the wait return.
+// The bounded condition wait retains virtual-clock controls. Database completion itself is tested by check-browser-observe's settled cases, including a pending call, late continuation, frozen frame and deadline.
 const virtualClock = (onSleep = null) => {
   const clock = { time: 0, sleeps: 0, now: () => clock.time, sleep: async (ms) => { clock.time += ms; clock.sleeps++; if (onSleep) { onSleep(clock) } } }
 
   return clock
 }
 
-const pretendPage = () => {
-  const handlers = {}
-  const picker = { locator: () => picker, filter: () => picker, first: () => picker, last: () => picker, getByText: () => picker, click: async () => {} }
-  const request = { url: () => 'http://localhost/__aurora-db/query', method: () => 'POST', postData: () => JSON.stringify({ sql: 'select GameTime from FCT_Game' }) }
-  const page = { handlers, request, on: (name, handler) => { handlers[name] = handler }, route: async () => {}, addInitScript: async () => {}, goto: async () => handlers.request(request), locator: () => picker, evaluate: async (work) => (work === pageLoading ? false : String(work).includes('RaceID')), waitForFunction: async () => {}, waitForSelector: async () => {}, waitForTimeout: async () => {} }
-
-  return page
-}
-
 const failureOf = (work) => work.then(() => null, (error) => error)
 
-unit('wait-deadline', 'a database call that never finishes ends the initial wait and the settling at the suite\'s timeout, with a message that names the call', async () => {
-  const initial = virtualClock()
-  const failed = await failureOf(prepare(pretendPage(), 'http://localhost/', () => {}, initial))
+unit('wait-deadline', 'a condition that never finishes ends at the suite timeout with a message naming what is outstanding', async () => {
+  const clock = virtualClock()
+  const failed = await failureOf(waitFor({ done: async () => false, what: () => 'POST /__aurora-db/query select GameTime from FCT_Game', label: 'the held read', clock, sleep: clock.sleep }))
 
   assert.ok(failed instanceof Error)
-  assert.ok(failed.message.includes('the database reads that the picking of the race starts did not finish within 120000 ms'), failed.message)
-  assert.ok(failed.message.includes('1 database calls in flight (POST /__aurora-db/query') && failed.message.includes('select GameTime from FCT_Game'), failed.message)
-  assert.ok(initial.time > TIMEOUT && initial.time <= TIMEOUT + 250, String(initial.time))
-
-  const page = pretendPage()
-  const clock = virtualClock((now) => { if (now.sleeps === 20 && page.handlers.requestfinished) { page.handlers.requestfinished(page.request) } })
-  const { settle } = await prepare(page, 'http://localhost/', () => {}, clock)
-  const settleStart = clock.time
-
-  page.handlers.request(page.request)
-
-  const settling = await failureOf(settle())
-
-  assert.ok(settling instanceof Error)
-  assert.ok(settling.message.includes('the settling of the page did not finish within 120000 ms') && settling.message.includes('select GameTime from FCT_Game'), settling.message)
-  assert.ok(clock.time - settleStart > TIMEOUT && clock.time - settleStart <= TIMEOUT + 250, String(clock.time - settleStart))
+  assert.ok(failed.message.includes('the held read did not finish within 120000 ms'), failed.message)
+  assert.ok(failed.message.includes('POST /__aurora-db/query select GameTime from FCT_Game'), failed.message)
+  assert.ok(clock.time > TIMEOUT && clock.time <= TIMEOUT + 250, String(clock.time))
 })
 
-unit('wait-completes', 'a database call that finishes before the deadline lets the initial wait and the settling return', async () => {
-  const page = pretendPage()
-  const clock = virtualClock((now) => { if (now.sleeps === 20) { page.handlers.requestfinished(page.request) } })
-  const outcome = await failureOf(prepare(page, 'http://localhost/', () => {}, clock))
+unit('wait-completes', 'a condition that finishes before the deadline lets the wait return as soon as its effect is observable', async () => {
+  const clock = virtualClock()
+  const outcome = await failureOf(waitFor({ done: async () => clock.sleeps >= 20, what: () => 'the read has not finished', label: 'the held read', clock, sleep: clock.sleep }))
 
   assert.equal(outcome, null)
-  assert.ok(clock.sleeps >= 20 && clock.time < TIMEOUT, String(clock.time))
-  assert.ok(clock.time >= 5000 + 1500, String(clock.time))
+  assert.equal(clock.sleeps, 20)
+  assert.equal(clock.time, 5000)
 })
 
 // The panel's label maps, from the utilities the page draws them with: the windows offered (each by its seconds, from `WINDOWS`), the window and event states, the reasons, the verdicts (a found verdict by its count of one or many), the words of a count that is no figure, the marks of a type, the provenance statuses. `FORMAT` holds the glossary the pointers come from and the app's date formatter. Both are set before the page is first read.
@@ -1048,7 +1036,15 @@ const settled = (screen, menu = null) => {
   }
 }
 
-const read = async (page, menu = null) => settled(await page.evaluate(readPanel), menu)
+const read = async (page, menu = null, scope = null) => {
+  const raw = await page.evaluate(readPanel, scope)
+
+  if (raw.invalidScope) {
+    throw new HarnessError('the race or save generation changed before the held log observation')
+  }
+
+  return settled(raw, menu)
+}
 
 // The words of the note a folded panel draws in its head: the verdicts that carry no count, and the count of a found verdict before its word. They are the suite's own, never the panel's.
 const NOTE_WORDS = { absent: 'None found', unavailable: 'Not covered by the log' }
@@ -1192,13 +1188,13 @@ const isRaceLog = (race) => (sql) => new RegExp(`^select FCT_GameLog\\.Increment
 
 // The checklist's fold on its own page, as a player meets it: no read of any race but the player's before it, and the races opened in turn by `foldSequence`. It is a page of its own because a race opened once is kept by the page's reads and never read again, which the held read of `observeSaved` needs it to be.
 const observeFolded = (browser, url) => observe(browser, async ({ page, step }) => {
-  const { state, settle, opened } = await prepare(page, url, step, REAL_CLOCK, true)
+  const { state, settle, opened } = await prepare(page, url, step, true)
 
   return { fold: await foldSequence({ page, step, state, settle, opened }) }
 }, { expected: [FAILED_FETCH] })
 
 // The head and rewrites drive every window and race transition. A fault may name just the screens its credited checks read; their reader-path requirements are checked before the drive starts. The checklist, if it opens folded, is unfolded through its toggle before the panel is read.
-const observeSaved = (browser, url, screens = null) => observe(browser, async ({ page, step }) => {
+const observeSaved = (browser, url, screens = null, { afterHeldCapture = null } = {}) => observe(browser, async ({ page, step }) => {
   const { state, settle } = await prepare(page, url, step)
   const seen = { windows: [] }
   const wanted = (name) => screens === null || screens.includes(name)
@@ -1228,10 +1224,45 @@ const observeSaved = (browser, url, screens = null) => observe(browser, async ({
     step('the race is switched while its read is held')
     state.hold = isRaceLog(QUIET)
     state.held.length = 0
+    const generation = await page.evaluate(() => window.$app.$store.state.freshness.generation)
+
     await switchRace(page, QUIET, true)
-    // Held, and the page has asked for all else it needs: the reads in flight are the held ones, and none has started for 1.5 s.
-    await until(page, 'the page with the read of the new race held', async () => state.held.length > 0 && state.pending.size <= state.held.length && Date.now() - state.last >= 1500, () => `${state.held.length} reads held, ${state.pending.size} in flight, ${Date.now() - state.last} ms since the last`)
-    seen.held = { screen: await read(page), calls: state.held.length }
+    // Capture exact counted ids only when every pending network request and every counted read is one of the intercepted target reads. Subsequent continuations are waited out by the same task/frame algorithm while these ids stay held.
+    let held = null
+
+    await until(page, 'the page with the read of the new race held', async () => {
+      if (!state.held.length || state.pending.size !== state.held.length) {
+        return false
+      }
+
+      const capture = await page.evaluate(({ race, generation, count }) => {
+        const store = window.$app.$store
+        const reads = window.__auroraReads
+
+        if (!reads) {
+          return { missing: true }
+        }
+        if (store.state.freshness.generation !== generation) {
+          return { changed: true }
+        }
+
+        return store.getters.RaceID === race && reads.pending.size === count ? { ids: [...reads.pending.keys()] } : null
+      }, { race: QUIET, generation, count: state.held.length })
+
+      if (capture && (capture.missing || capture.changed)) {
+        throw new HarnessError(capture.missing ? 'the held log read has no counted-read signal' : 'the save generation changed while the log read was held')
+      }
+
+      held = capture && capture.ids
+
+      return Boolean(held)
+    }, () => `${state.held.length} reads held, ${state.pending.size} in flight`)
+    if (afterHeldCapture) {
+      await afterHeldCapture({ page, state, held, generation })
+    }
+
+    await readsSettled(page, { limit: TIMEOUT, held })
+    seen.held = { screen: await read(page, null, { race: QUIET, generation }), calls: state.held.length }
     state.hold = null
 
     for (const route of state.held.splice(0)) {
@@ -1620,12 +1651,12 @@ pageCheck('window-chosen', 'any', 'each window is chosen in the menu by the labe
   })
 })
 
-pageCheck('window-state', 'saved', 'a window ending at the newest increment of the save is partial for that increment, and a window that reaches before the log or meets its oldest increment says so too', async ({ o }) => {
-  o.windows.slice(0, 3).forEach((screen, index) => {
-    assert.equal(screen.state, 'partial', `window ${index}`)
-    reasonsAre(screen, ['tail'], `window ${index}`)
-  })
-  assert.equal(o.windows[3].state, 'partial')
+pageCheck('window-state', 'saved', 'every chosen window draws its independently expected coverage state', async ({ o }) => {
+  o.windows.forEach((screen, index) => assert.equal(screen.state, 'partial', `window ${index}`))
+})
+
+pageCheck('window-reasons', 'saved', 'every chosen window draws the independent reasons for its partial coverage', async ({ o }) => {
+  o.windows.slice(0, 3).forEach((screen, index) => reasonsAre(screen, ['tail'], `window ${index}`))
   reasonsAre(o.windows[3], ['before', 'head', 'tail'], 'window 3')
 })
 
@@ -1668,7 +1699,7 @@ const listedAs = (screen, groups, truth, labels, label) => {
   }
 }
 
-pageCheck('events', 'saved', 'every window lists the events SQL says the race\'s log holds of the watched types in it, one entry for each group of identical rows, with the type counts, the dates of its range and of each event and the sentence of its verdict', async ({ o, truth, labels }) => {
+const eventBinding = async ({ o, truth, labels }, binding) => {
   // The dates are the oracle's game times written by the app's shared date formatter, which this check does not test.
   const dateOf = (seconds) => FORMAT.dateText(truth.startYear, seconds)
 
@@ -1680,28 +1711,58 @@ pageCheck('events', 'saved', 'every window lists the events SQL says the race\'s
     const groups = await truth.watchedRows(PLAYER, truth.end - WINDOW_SECONDS[index], truth.end)
     const expected = await truth.watched(PLAYER, truth.end - WINDOW_SECONDS[index], truth.end)
 
-    listedAs(screen, groups, truth, labels, `window ${index}`)
-    assert.equal(screen.verdict, expected.length ? 'found' : 'absent', `window ${index}`)
+    for (const [group, observation] of paired(`window ${index}: the events listed`, screen.observations, groups, (line) => line.key, (row) => row.key)) {
+      if (binding === 'event-increment') {
+        assert.match(observation.increment || '', /^\d+$/, `window ${index}, ${observation.key} increment`)
+        assert.equal(observation.increment, String(group.increment), `window ${index}, ${observation.key} increment`)
+      } else if (binding === 'event-date') {
+        assert.equal(observation.date, dateOf(group.time), `window ${index}, ${observation.key} date`)
+      } else if (binding === 'event-type') {
+        assert.equal(observation.type, group.type, `window ${index}, ${observation.key} type`)
+        assert.equal(observation.name, labels.names[group.type], `window ${index}, ${observation.key} type name`)
+      } else if (binding === 'event-message') {
+        assert.equal(observation.message, plainOf(group.message), `window ${index}, ${observation.key} message`)
+      }
+    }
+    if (binding === 'verdict') {
+      assert.equal(screen.verdict, expected.length ? 'found' : 'absent', `window ${index}`)
+    }
 
     const counts = countsOf(expected)
     const total = [...counts.values()].reduce((sum, count) => sum + count, 0)
     const types = typesOf(screen, `window ${index}`)
 
-    WATCHED_TYPES.forEach((type) => assert.equal(types.get(type).count, counts.get(type) || 0, `window ${index}, type ${type}`))
-    assert.equal(screen.verdictCount, expected.length ? total : null, `window ${index}`)
-    assert.equal(screen.verdictWords, expected.length ? labels.verdict[total === 1 ? 'found:one' : 'found:many'] : labels.verdict.absent, `window ${index}`)
-    assert.equal(screen.from, dateOf(truth.end - WINDOW_SECONDS[index]), `window ${index} range start`)
-    assert.equal(screen.to, dateOf(truth.end), `window ${index} range end`)
-    WATCHED_TYPES.forEach((type) => {
-      const times = groups.filter((group) => group.type === type).map((group) => group.time)
-      const entry = types.get(type)
+    if (binding === 'type-count') {
+      WATCHED_TYPES.forEach((type) => assert.equal(types.get(type).count, counts.get(type) || 0, `window ${index}, type ${type}`))
+    }
+    if (binding === 'verdict-count') {
+      assert.equal(screen.verdictCount, expected.length ? total : null, `window ${index}`)
+    }
+    if (binding === 'verdict') {
+      assert.equal(screen.verdictWords, expected.length ? labels.verdict[total === 1 ? 'found:one' : 'found:many'] : labels.verdict.absent, `window ${index}`)
+    }
+    if (binding === 'window-range') {
+      assert.equal(screen.from, dateOf(truth.end - WINDOW_SECONDS[index]), `window ${index} range start`)
+    }
+    if (binding === 'window-range') {
+      assert.equal(screen.to, dateOf(truth.end), `window ${index} range end`)
+    }
+    if (binding === 'type-labels') {
+      WATCHED_TYPES.forEach((type) => {
+        const times = groups.filter((group) => group.type === type).map((group) => group.time)
+        const entry = types.get(type)
 
-      assert.equal(entry.name, labels.names[type], `window ${index}, type ${type} name`)
-      assert.equal(entry.group, FIRE_TYPES.includes(type) ? labels.groups.fire : labels.groups.boarding, `window ${index}, type ${type} group`)
-      assert.equal(entry.newest, times.length ? dateOf(Math.max(...times)) : null, `window ${index}, type ${type} newest`)
-    })
+        assert.equal(entry.name, labels.names[type], `window ${index}, type ${type} name`)
+        assert.equal(entry.group, FIRE_TYPES.includes(type) ? labels.groups.fire : labels.groups.boarding, `window ${index}, type ${type} group`)
+        assert.equal(entry.newest, times.length ? dateOf(Math.max(...times)) : null, `window ${index}, type ${type} newest`)
+      })
+    }
   }
-})
+}
+
+for (const binding of ['event-increment', 'event-date', 'event-type', 'event-message', 'verdict', 'type-count', 'verdict-count', 'window-range', 'type-labels']) {
+  pageCheck(binding, 'saved', `the displayed ${binding} agrees with the independent SQL row of its identity`, (context) => eventBinding(context, binding))
+}
 
 pageCheck('event-order', 'saved', 'every window lists its events newest first: the game time falling, then the increment, then the type, each row placed by the group it names', async ({ o, truth }) => {
   for (const [index, screen] of o.windows.entries()) {
@@ -1717,7 +1778,17 @@ pageCheck('event-order', 'saved', 'every window lists its events newest first: t
   }
 })
 
-pageCheck('event-copies', 'saved', 'identical rows are one entry that says how many they are', async ({ o }) => {
+pageCheck('event-copies', 'saved', 'identical rows are one entry that says how many they are', async ({ o, truth }) => {
+  for (const [index, screen] of o.windows.entries()) {
+    if (screen) {
+      const groups = await truth.watchedRows(PLAYER, truth.end - WINDOW_SECONDS[index], truth.end)
+
+      for (const [group, observation] of paired(`window ${index}: event copies`, screen.observations, groups, (line) => line.key, (row) => row.key)) {
+        assert.equal(observation.copies, group.copies, `window ${index}, ${observation.key} copies`)
+      }
+    }
+  }
+
   const fire = o.windows[1].observations.filter((observation) => observation.type === 119)
 
   assert.equal(fire.length, 1)
@@ -1860,35 +1931,45 @@ pageCheck('fold-hand', 'fold', 'a fold or unfold by hand through the toggle stan
   assert.equal(foldedOf(o.fold.handBroken, 'handBroken'), false, 'a checklist unfolded by hand stays open for the race whose read fails, which the rule folds')
 })
 
-pageCheck('fold-toggle', 'fold', 'the toggle is drawn in the first element of the head, draws no text, says what it does (Show or Hide the checklist) and whether the content is shown, and controls the one element that holds every part below the head; that content is drawn exactly when the checklist is not folded; while it is folded a note of the verdict (None found, Not covered by the log, or the count found) is drawn apart from the title, and none while it is not; the window control is drawn either way', async ({ o, truth }) => {
+const foldBinding = async ({ o, truth }, binding) => {
   const player = await defaultOf(truth, PLAYER)
 
   for (const [name, fold] of Object.entries(o.fold)) {
     const folded = foldedOf(fold, name)
 
-    assert.equal(fold.toggle.shown, true, `${name}: the toggle is drawn`)
-    assert.equal(fold.toggle.inTitle, true, `${name}: the toggle sits in the first element of the head`)
-    assert.equal(fold.toggle.text, '', `${name}: the toggle draws no text`)
-    assert.equal(fold.toggle.label, folded ? 'Show the checklist' : 'Hide the checklist', `${name}: the label of the toggle`)
-    assert.equal(fold.content.found, true, `${name}: the element the toggle controls (${fold.toggle.controls})`)
-    assert.equal(fold.content.holdsParts, true, `${name}: the content holds every part below the head`)
-    assert.equal(fold.content.holdsHead, false, `${name}: the content holds nothing of the head`)
-    assert.equal(fold.content.shown, !folded, `${name}: the content is drawn exactly when the checklist is not folded`)
-    assert.ok(fold.content.parts.length >= 3, `${name}: the parts`)
-    fold.content.parts.forEach((part) => assert.equal(part.shown, !folded, `${name}: the ${part.name} is drawn exactly when the checklist is not folded`))
-    assert.equal(fold.control, true, `${name}: the window control is drawn`)
-    assert.ok(fold.title.startsWith(CHECKLIST_TITLE), `${name}: the title is ${fold.title}`)
-    assert.equal(fold.note.inTitle || !fold.note.found, true, `${name}: the note is drawn in the first element of the head`)
-
-    if (folded) {
+    if (binding === 'fold-content') {
+      assert.equal(fold.toggle.shown, true, `${name}: the toggle is drawn`)
+      assert.equal(fold.toggle.inTitle, true, `${name}: the toggle sits in the first element of the head`)
+      assert.equal(fold.toggle.text, '', `${name}: the toggle draws no text`)
+      assert.equal(fold.content.found, true, `${name}: the element the toggle controls (${fold.toggle.controls})`)
+      assert.equal(fold.content.holdsParts, true, `${name}: the content holds every part below the head`)
+      assert.equal(fold.content.holdsHead, false, `${name}: the content holds nothing of the head`)
+      assert.ok(fold.content.parts.length >= 3, `${name}: the parts`)
+      assert.equal(fold.control, true, `${name}: the window control is drawn`)
+      assert.ok(fold.title.startsWith(CHECKLIST_TITLE), `${name}: the title is ${CHECKLIST_TITLE}`)
+    }
+    if (binding === 'fold-label') {
+      assert.equal(fold.toggle.label, folded ? 'Show the checklist' : 'Hide the checklist', `${name}: the label of the toggle`)
+    } else if (binding === 'fold-content') {
+      assert.equal(fold.content.shown, !folded, `${name}: the content is drawn exactly when the checklist is not folded`)
+      fold.content.parts.forEach((part) => assert.equal(part.shown, !folded, `${name}: the ${part.name} is drawn exactly when the checklist is not folded`))
+    } else if (binding === 'fold-note-placement') {
+      assert.equal(fold.note.inTitle || !fold.note.found, true, `${name}: the note is drawn in the first element of the head`)
+      if (folded) {
+        assert.ok(!fold.title.includes(fold.note.text), `${name}: the note is no part of the title (${fold.title})`)
+      }
+    } else if (binding === 'fold-note-visibility' && !folded) {
+      assert.equal(fold.note.text, null, `${name}: no note is drawn while the checklist is open`)
+    } else if (binding === 'fold-note-value' && folded) {
       assert.equal(fold.note.kind, fold.verdict, `${name}: the note stands for the verdict`)
       assert.equal(fold.note.count, fold.verdict === 'found' ? player.total : null, `${name}: the count of the note`)
-      assert.ok(!fold.title.includes(fold.note.text), `${name}: the note is no part of the title (${fold.title})`)
-    } else {
-      assert.equal(fold.note.text, null, `${name}: no note is drawn while the checklist is open`)
     }
   }
-})
+}
+
+for (const binding of ['fold-label', 'fold-content', 'fold-note-placement', 'fold-note-visibility', 'fold-note-value']) {
+  pageCheck(binding, 'fold', `the visible ${binding} matches the fold state and independent verdict`, (context) => foldBinding(context, binding))
+}
 
 pageCheck('gap', 'older', 'an archive that stops before the save starts leaves a gap in a window that reaches into it, and what only the archive holds is listed with the state of its increment', async ({ o, seeded }) => {
   const thirty = o.windows[3]
@@ -1940,26 +2021,41 @@ pageCheck('observed-window', 'ahead', 'an archive that is ahead of the save leav
 // Every screen of an observation, the panel drawn.
 const screensOf = (o) => [...o.windows.filter(Boolean), ...['day', 'quiet', 'broken', 'back', 'before', 'failure', 'restored', 'coverage'].map((key) => o[key]), o.held && o.held.screen].filter((screen) => screen && screen.present)
 
-pageCheck('hooks', 'any', 'the hooks the panel carries for the next item say what it draws: the state, the verdict and the reasons of the window, the count of each type, the state and copies of each event, the status of each input, and what each row draws of its own identity', async ({ o, truth, labels }) => {
+const hookBinding = async ({ o, truth, labels }, binding) => {
   screensOf(o).forEach((screen, index) => {
-    screen.observations.forEach((observation) => {
-      const [increment, time, type] = JSON.parse(observation.key)
+    if (binding === 'hooks-event-identity') {
+      screen.observations.forEach((observation) => {
+        const [increment, time, type] = JSON.parse(observation.key)
 
-      assert.equal(observation.increment, String(increment), `screen ${index}, ${observation.key} increment`)
-      assert.equal(observation.date, FORMAT.dateText(truth.startYear, time), `screen ${index}, ${observation.key} date`)
-      assert.equal(observation.type, type, `screen ${index}, ${observation.key} type`)
-      assert.equal(observation.name, labels.names[type], `screen ${index}, ${observation.key} type name`)
-      assert.equal(observation.message, plainOf(JSON.parse(observation.key)[3]), `screen ${index}, ${observation.key} message`)
-    })
-    assert.equal(screen.hooks.state, screen.state, `screen ${index}`)
-    assert.equal(screen.hooks.verdict, screen.verdict, `screen ${index}`)
-    assert.equal(screen.hooks.branches, screen.verdict, `screen ${index}`)
-    assert.deepEqual(screen.hooks.reasons, screen.reasons, `screen ${index}`)
-    screen.types.forEach((entry) => assert.equal(entry.hook.count, entry.count, `screen ${index}, type ${entry.type}`))
-    screen.observations.forEach((observation) => assert.deepEqual(observation.hook, { state: observation.state, copies: observation.copies }, `screen ${index}, ${observation.key}`))
-    screen.inputs.forEach((input) => assert.equal(input.hook.status, input.status, `screen ${index}, input ${input.id}`))
+        assert.equal(observation.increment, String(increment), `screen ${index}, ${observation.key} increment`)
+        assert.equal(observation.date, FORMAT.dateText(truth.startYear, time), `screen ${index}, ${observation.key} date`)
+        assert.equal(observation.type, type, `screen ${index}, ${observation.key} type`)
+        assert.equal(observation.name, labels.names[type], `screen ${index}, ${observation.key} type name`)
+        assert.equal(observation.message, plainOf(JSON.parse(observation.key)[3]), `screen ${index}, ${observation.key} message`)
+      })
+    } else if (binding === 'hooks-window-state') {
+      assert.equal(screen.hooks.state, screen.state, `screen ${index}`)
+    } else if (binding === 'hooks-verdict') {
+      assert.equal(screen.hooks.verdict, screen.verdict, `screen ${index}`)
+      assert.equal(screen.hooks.branches, screen.verdict, `screen ${index}`)
+    } else if (binding === 'hooks-reasons') {
+      assert.deepEqual(screen.hooks.reasons, screen.reasons, `screen ${index}`)
+    } else if (binding === 'hooks-type-count') {
+      screen.types.forEach((entry) => assert.equal(entry.hook.count, entry.count, `screen ${index}, type ${entry.type}`))
+    } else if (binding === 'hooks-event-state') {
+      screen.observations.forEach((observation) => assert.equal(observation.hook.state, observation.state, `screen ${index}, ${observation.key}`))
+      screen.observations.forEach((observation) => assert.deepEqual(Object.keys(observation.hook).sort(), ['copies', 'state']))
+    } else if (binding === 'hooks-event-copies') {
+      screen.observations.forEach((observation) => assert.equal(observation.hook.copies, observation.copies, `screen ${index}, ${observation.key}`))
+    } else if (binding === 'hooks-input-status') {
+      screen.inputs.forEach((input) => assert.equal(input.hook.status, input.status, `screen ${index}, input ${input.id}`))
+    }
   })
-})
+}
+
+for (const binding of ['hooks-event-identity', 'hooks-window-state', 'hooks-verdict', 'hooks-reasons', 'hooks-type-count', 'hooks-event-state', 'hooks-event-copies', 'hooks-input-status']) {
+  pageCheck(binding, 'any', `the ${binding} hook agrees with the displayed binding`, (context) => hookBinding(context, binding))
+}
 
 pageCheck('no-errors', 'every', 'the page raises no error that no check named', async ({ unexpected }) => {
   assert.deepEqual(unexpected, [])
@@ -1967,10 +2063,10 @@ pageCheck('no-errors', 'every', 'the page raises no error that no check named', 
 
 // ---------- planted faults and rewrites of the page ----------
 
-const swapText = (from, to) => (text) => patched('the page file', text, from, to)
+const swapText = (from, to) => Object.assign((text) => patched('the page file', text, from, to), { find: from, to, edits: [{ find: from, to }] })
 
 // Several changes of one file, applied in turn.
-const chain = (...changes) => (text) => changes.reduce((current, change) => change(current), text)
+const chain = (...changes) => Object.assign((text) => changes.reduce((current, change) => change(current), text), { edits: changes.flatMap((change) => change.edits) })
 
 const PANEL = 'src/renderer/components/log/DiagnosticPanel.vue'
 const PAGE = 'src/renderer/pages/log.vue'
@@ -1982,8 +2078,8 @@ const SCREEN_READS = {
   panel: WINDOW_SCREENS.map((screen) => [screen]),
   'window-chosen': [WINDOW_SCREENS],
   'window-state': WINDOW_SCREENS.map((screen) => [screen]),
-  events: [WINDOW_SCREENS],
-  'event-order': [WINDOW_SCREENS],
+  'window-reasons': WINDOW_SCREENS.map((screen) => [screen]),
+  ...Object.fromEntries(['event-increment', 'event-date', 'event-type', 'event-message', 'verdict', 'type-count', 'verdict-count', 'window-range', 'type-labels', 'event-order'].map((id) => [id, [WINDOW_SCREENS]])),
   'event-copies': [['window:1']],
   'event-states': [['window:3']],
   'game-master': [WINDOW_SCREENS],
@@ -1994,11 +2090,11 @@ const SCREEN_READS = {
   'unavailable-read': [['broken']],
   'no-claims': SAVED_SCREENS.map((screen) => [screen]),
   back: [['held'], ['quiet'], ['broken'], ['back']],
-  hooks: [SAVED_SCREENS],
+  ...Object.fromEntries(['hooks-event-identity', 'hooks-window-state', 'hooks-verdict', 'hooks-reasons', 'hooks-type-count', 'hooks-event-state', 'hooks-event-copies', 'hooks-input-status'].map((id) => [id, [SAVED_SCREENS]])),
   'no-errors': [],
 }
 
-const screenProblems = (faults) => faults.filter((fault) => fault.screens !== undefined && (fault.needs[0] !== 'saved' || !Array.isArray(fault.screens) || !fault.screens.length || fault.screens.some((screen) => !SAVED_SCREENS.includes(screen)) || fault.fails.some((id) => !SCREEN_READS[id] || SCREEN_READS[id].some((choices) => !choices.some((screen) => fault.screens.includes(screen)))))).map((fault) => fault.name)
+const screenProblems = (faults) => faults.filter((fault) => !BROWSER_MOVED.has(PAGE_FAULTS.findIndex((original) => original.name === fault.name)) && fault.screens !== undefined && (fault.needs[0] !== 'saved' || !Array.isArray(fault.screens) || !fault.screens.length || fault.screens.some((screen) => !SAVED_SCREENS.includes(screen)) || fault.fails.some((id) => !SCREEN_READS[id] || SCREEN_READS[id].some((choices) => !choices.some((screen) => fault.screens.includes(screen)))))).map((fault) => fault.name)
 
 unit('fault-screens', 'every narrowed page fault drives a screen or state of every reader path its named checks use, and rewrites drive every screen', ({ pageFaults = PAGE_FAULTS, pageRewrites = PAGE_REWRITES, headWindows = Array.from({ length: 4 }, () => ({})) }) => {
   assert.deepEqual(screenProblems(pageFaults), [])
@@ -2011,42 +2107,42 @@ const GLOSSARY = 'src/renderer/utilities/glossary.js'
 /* eslint-disable no-template-curly-in-string */
 const PAGE_FAULTS = [
   { name: 'the evidence of the earlier race is kept while the new one is read', file: PAGE, change: swapText('this.diagnostic = Object.freeze({ key, database, inputs: null })', 'this.diagnostic = Object.freeze({ key, database, inputs: this.diagnostic.inputs })'), fails: ['race-switch'], needs: ['saved'], screens: ['held', 'quiet'] },
-  { name: 'an unavailable window carries counts of 0 in its hooks', file: PANEL, change: swapText(':data-count="diagnosis.verdict === \'unavailable\' ? null : entry.count"', ':data-count="entry.count"'), fails: ['hooks'], needs: ['saved'], screens: ['broken'] },
-  { name: 'every event carries the state of the window in its hook', file: PANEL, change: swapText(':data-state="observation.state"', ':data-state="diagnosis.state"'), fails: ['hooks'], needs: ['saved'], screens: ['window:3'] },
-  { name: 'a type draws a count other than its own', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count + 1) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'every event draws a constant state', file: PANEL, change: swapText('data-event-state>{{ stateText[observation.state] }}</span>', 'data-event-state>{{ stateText.partial }}</span>'), fails: ['event-states'], needs: ['saved'], screens: ['window:3'] },
-  { name: 'the window draws a constant state', file: PANEL, change: swapText('data-window-state>{{ stateText[diagnosis.state] }}</span>', 'data-window-state>{{ stateText.observed }}</span>'), fails: ['window-state'], needs: ['saved'], screens: WINDOW_SCREENS },
-  { name: 'identical events draw no copies', file: PANEL, change: swapText('<span v-if="observation.copies > 1" class="diagnostic-chip" data-event-copies>', '<span v-if="false" class="diagnostic-chip" data-event-copies>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'every input draws a constant status', file: PANEL, change: swapText('<provenance-mark :result="input.result" label />', '<provenance-mark status="confirmed" label />'), fails: ['inputs'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'every reason draws the same words', file: PANEL, change: swapText(':data-reason="reason">{{ reasonText[reason] }}</li>', ':data-reason="reason">{{ reasonText.tail }}</li>'), fails: ['window-state'], needs: ['saved'], screens: WINDOW_SCREENS },
-  { name: 'an absent window draws the unknown verdict', file: PANEL, change: swapText('<span v-else-if="diagnosis.verdict === \'absent\'" data-verdict-shown="absent">', '<span v-else-if="false" data-verdict-shown="absent">'), fails: ['events', 'no-claims'], needs: ['saved'] },
-  { name: 'a found window draws the count of groups, not of events', file: PANEL, change: swapText('<span data-verdict-count>{{ count(diagnosis.observed) }}</span>', '<span data-verdict-count>{{ count(diagnosis.observations.length) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'a type draws its count negative', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(-entry.count) }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'identical events draw their copies negative', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value>{{ count(-observation.copies) }}</span>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'a type draws its count with a stray character', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count) }} %</span>'), fails: ['events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'a pointer draws the definition of the first pointer under its own name', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition>{{ pointers[0].definition }}</div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
-  { name: 'a pointer draws its definition at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>', '<div data-pointer-definition style="opacity: 0">'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
+  { group: 'unavailable', name: 'an unavailable window carries counts of 0 in its hooks', file: PANEL, change: swapText(':data-count="diagnosis.verdict === \'unavailable\' ? null : entry.count"', ':data-count="entry.count"'), fails: ['hooks-type-count'], needs: ['saved'], screens: ['broken'] },
+  { group: 'windows-b', name: 'every event carries the state of the window in its hook', file: PANEL, change: swapText(':data-state="observation.state"', ':data-state="diagnosis.state"'), fails: ['hooks-event-state'], needs: ['saved'], screens: ['window:3'] },
+  { group: 'windows-a', name: 'a type draws a count other than its own', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count + 1) }}</span>'), fails: ['type-count', 'hooks-type-count'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-a', name: 'every event draws a constant state', file: PANEL, change: swapText('data-event-state>{{ stateText[observation.state] }}</span>', 'data-event-state>{{ stateText.partial }}</span>'), fails: ['event-states', 'hooks-event-state'], needs: ['saved'], screens: ['window:3'] },
+  { group: 'windows-a', name: 'the window draws a constant state', file: PANEL, change: swapText('data-window-state>{{ stateText[diagnosis.state] }}</span>', 'data-window-state>{{ stateText.observed }}</span>'), fails: ['window-state', 'hooks-window-state'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { group: 'windows-a', name: 'identical events draw no copies', file: PANEL, change: swapText('<span v-if="observation.copies > 1" class="diagnostic-chip" data-event-copies>', '<span v-if="false" class="diagnostic-chip" data-event-copies>'), fails: ['event-copies', 'hooks-event-copies'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-a', name: 'every input draws a constant status', file: PANEL, change: swapText('<provenance-mark :result="input.result" label />', '<provenance-mark status="confirmed" label />'), fails: ['inputs', 'hooks-input-status'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-b', name: 'every reason draws the same words', file: PANEL, change: swapText(':data-reason="reason">{{ reasonText[reason] }}</li>', ':data-reason="reason">{{ reasonText.tail }}</li>'), fails: ['window-reasons', 'hooks-reasons'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { name: 'an absent window draws the unknown verdict', file: PANEL, change: swapText('<span v-else-if="diagnosis.verdict === \'absent\'" data-verdict-shown="absent">', '<span v-else-if="false" data-verdict-shown="absent">'), fails: ['verdict', 'no-claims', 'hooks-verdict'], needs: ['saved'] },
+  { group: 'windows-b', name: 'a found window draws the count of groups, not of events', file: PANEL, change: swapText('<span data-verdict-count>{{ count(diagnosis.observed) }}</span>', '<span data-verdict-count>{{ count(diagnosis.observations.length) }}</span>'), fails: ['verdict-count'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'a type draws its count negative', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(-entry.count) }}</span>'), fails: ['type-count', 'hooks-type-count'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-b', name: 'identical events draw their copies negative', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value>{{ count(-observation.copies) }}</span>'), fails: ['event-copies', 'hooks-event-copies'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-b', name: 'a type draws its count with a stray character', file: PANEL, change: swapText('<span data-count-value>{{ count(entry.count) }}</span>', '<span data-count-value>{{ count(entry.count) }} %</span>'), fails: ['type-count', 'hooks-type-count'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-a', name: 'a pointer draws the definition of the first pointer under its own name', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition>{{ pointers[0].definition }}</div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
+  { group: 'windows-b', name: 'a pointer draws its definition at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>', '<div data-pointer-definition style="opacity: 0">'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'the checklist reads the archive before the watcher refreshes it and keys it by the revision only', file: PAGE, change: chain(swapText('      archiveChoice: false,\n', '      archiveChoice: false,\n      archive: null,\n'), swapText('    archive() {\n      return this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null\n    },\n\n', ''), swapText('this.archiveSnapshot,', "this.archiveRecord ? this.archiveRecord.revision : '',"), swapText('    archiveRecord(record) {', '    archiveKey: {\n      immediate: true,\n      handler() {\n        this.archive = this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null\n      },\n    },\n    archiveRecord(record) {')), fails: ['archive-refresh'], needs: ['refresh'] },
   { name: 'the Fleet window controls are left out of the pointers', file: DIAGNOSTICS, change: swapText("['cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window']", "['cease-fire', 'game-events-window']"), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
   { name: 'an empty window is worded as safe', file: DIAGNOSTICS, change: swapText('None of the watched event types was found in the observed part of this window. The log keeps only what the game wrote, so this says nothing about the game beyond the log.', 'Nothing happened in this window: the race is safe.'), fails: ['no-claims'], needs: ['saved'] },
-  { name: 'the absent sentence is drawn for a found diagnosis with its hooks intact', file: PANEL, change: swapText("{{ verdictText.found[diagnosis.observed === 1 ? 'one' : 'many'] }}", '{{ verdictText.absent }}'), fails: ['events', 'hooks'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'the absent sentence is drawn for an unavailable diagnosis with its hooks intact', file: PANEL, change: swapText('<span data-verdict-words>{{ verdictText.unavailable }}</span>', '<span data-verdict-words>{{ verdictText.absent }}</span>'), fails: ['unavailable-read', 'hooks'], needs: ['saved'], screens: ['broken'] },
-  { name: 'the end of the range is shifted by one increment', file: PANEL, change: swapText('{{ date(diagnosis.window.to) }}', '{{ date(diagnosis.window.to - 432000) }}'), fails: ['events'], needs: ['saved'], screens: ['window:0'] },
-  { name: 'the copies numeral is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value><span style="opacity: 0">{{ count(observation.copies) }}</span></span>'), fails: ['event-copies', 'events'], needs: ['saved'], screens: ['window:1'] },
-  { name: 'the end of the range is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-window-to>{{ date(diagnosis.window.to) }}</span>', '<span data-window-to><span style="opacity: 0">{{ date(diagnosis.window.to) }}</span></span>'), fails: ['panel', 'events'], needs: ['saved'], screens: WINDOW_SCREENS },
-  { name: 'a pointer definition is drawn by a child at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition><span style="opacity: 0">{{ entry.definition }}</span></div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
-  { name: 'two events of one type draw one another\'s date and increment', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('data-event-increment>{{ observation.increment[0] }}', 'data-event-increment>{{ twin(at).increment[0] }}'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events'], needs: ['saved'], screens: ['window:3'] },
-  { name: 'two events of one type draw one another\'s date', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events'], needs: ['saved'], screens: ['window:3'] },
-  { name: 'the events are listed in reverse', file: PANEL, change: swapText('this.diagnosis.observations.slice(0, LISTED)', 'this.diagnosis.observations.slice(0, LISTED).reverse()'), fails: ['event-order'], needs: ['saved'], screens: ['window:2'] },
-  { name: 'two events of one type draw one another\'s message', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('<div class="diagnostic-message">{{ observation.message }}</div>', '<div class="diagnostic-message">{{ twin(at).message }}</div>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['events', 'hooks'], needs: ['saved'], screens: ['window:3'] },
-  { name: 'a type draws the group of the other kind', file: PANEL, change: swapText('<span class="diagnostic-chip">{{ groups[entry.group] }}</span>', '<span class="diagnostic-chip">{{ groups[entry.group === \'fire\' ? \'boarding\' : \'fire\'] }}</span>'), fails: ['events'], needs: ['saved'], screens: ['window:0'] },
+  { group: 'windows-a', name: 'the absent sentence is drawn for a found diagnosis with its hooks intact', file: PANEL, change: swapText("{{ verdictText.found[diagnosis.observed === 1 ? 'one' : 'many'] }}", '{{ verdictText.absent }}'), fails: ['verdict', 'hooks-verdict'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'unavailable', name: 'the absent sentence is drawn for an unavailable diagnosis with its hooks intact', file: PANEL, change: swapText('<span data-verdict-words>{{ verdictText.unavailable }}</span>', '<span data-verdict-words>{{ verdictText.absent }}</span>'), fails: ['unavailable-read', 'hooks-verdict'], needs: ['saved'], screens: ['broken'] },
+  { group: 'windows-a', name: 'the end of the range is shifted by one increment', file: PANEL, change: swapText('{{ date(diagnosis.window.to) }}', '{{ date(diagnosis.window.to - 432000) }}'), fails: ['window-range'], needs: ['saved'], screens: ['window:0'] },
+  { group: 'windows-c', name: 'the copies numeral is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-copies-value>{{ count(observation.copies) }}</span>', '<span data-copies-value><span style="opacity: 0">{{ count(observation.copies) }}</span></span>'), fails: ['event-copies', 'hooks-event-copies'], needs: ['saved'], screens: ['window:1'] },
+  { group: 'windows-b', name: 'the end of the range is drawn by a child at opacity 0', file: PANEL, change: swapText('<span data-window-to>{{ date(diagnosis.window.to) }}</span>', '<span data-window-to><span style="opacity: 0">{{ date(diagnosis.window.to) }}</span></span>'), fails: ['panel', 'window-range'], needs: ['saved'], screens: WINDOW_SCREENS },
+  { group: 'windows-c', name: 'a pointer definition is drawn by a child at opacity 0', file: PANEL, change: swapText('<div data-pointer-definition>{{ entry.definition }}</div>', '<div data-pointer-definition><span style="opacity: 0">{{ entry.definition }}</span></div>'), fails: ['pointers'], needs: ['saved'], screens: ['window:0'] },
+  { group: 'windows-a', name: 'two events of one type draw one another\'s date and increment', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('data-event-increment>{{ observation.increment[0] }}', 'data-event-increment>{{ twin(at).increment[0] }}'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['event-date', 'event-increment', 'hooks-event-identity'], needs: ['saved'], screens: ['window:3'] },
+  { group: 'windows-b', name: 'two events of one type draw one another\'s date', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('data-event-date>{{ date(observation.time) }}</span>', 'data-event-date>{{ date(twin(at).time) }}</span>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['event-date', 'hooks-event-identity'], needs: ['saved'], screens: ['window:3'] },
+  { group: 'windows-a', name: 'the events are listed in reverse', file: PANEL, change: swapText('this.diagnosis.observations.slice(0, LISTED)', 'this.diagnosis.observations.slice(0, LISTED).reverse()'), fails: ['event-order'], needs: ['saved'], screens: ['window:2'] },
+  { group: 'windows-c', name: 'two events of one type draw one another\'s message', file: PANEL, change: chain(swapText('<li v-for="observation in shown" :key="observation.key" data-observation', '<li v-for="(observation, at) in shown" :key="observation.key" data-observation'), swapText('<div class="diagnostic-message">{{ observation.message }}</div>', '<div class="diagnostic-message">{{ twin(at).message }}</div>'), swapText('    nameOf(type) {', '    twin(at) {\n      const same = this.shown.filter((item) => item.type === this.shown[at].type)\n\n      return same[(same.indexOf(this.shown[at]) + 1) % same.length]\n    },\n\n    nameOf(type) {')), fails: ['event-message', 'hooks-event-identity'], needs: ['saved'], screens: ['window:3'] },
+  { group: 'windows-a', name: 'a type draws the group of the other kind', file: PANEL, change: swapText('<span class="diagnostic-chip">{{ groups[entry.group] }}</span>', '<span class="diagnostic-chip">{{ groups[entry.group === \'fire\' ? \'boarding\' : \'fire\'] }}</span>'), fails: ['type-labels'], needs: ['saved'], screens: ['window:0'] },
   { name: 'a game-master-only event is listed', file: DIAGNOSTICS, change: swapText(' && !group[GAME_MASTER]', ''), fails: ['game-master', 'events'], needs: ['saved'], screens: ['window:0'] },
   { name: 'a gap between the archive and the save is not told', file: DIAGNOSTICS, change: swapText('if (gaps.slice(1).some(meets)) {', 'if (false) {'), fails: ['gap'], needs: ['older'] },
   { name: 'a window an archive covers is partial all the same', file: ARCHIVE, change: swapText("? 'partial' : 'observed'\n\n  return {\n    state,", "? 'partial' : 'partial'\n\n  return {\n    state,"), fails: ['observed-window'], needs: ['ahead'] },
   { name: 'the verdict sits in a hidden ancestor', file: PANEL, change: swapText('<div v-else class="diagnostic-body">', '<div v-else class="diagnostic-body" v-show="false">'), fails: ['panel'], needs: ['saved'], screens: WINDOW_SCREENS },
   { name: 'the verdict sits in an ancestor at opacity 0', file: PANEL, change: swapText('<div v-else class="diagnostic-body">', '<div v-else class="diagnostic-body" style="opacity: 0">'), fails: ['panel'], needs: ['saved'], screens: WINDOW_SCREENS },
-  { name: 'an unavailable window draws the words of none observed under its unknown hook', file: PANEL, change: swapText('data-count-unknown>{{ countText.unknown }}</span>', 'data-count-unknown>{{ countText.none }}</span>'), fails: ['unavailable-read'], needs: ['saved'], screens: ['broken'] },
-  { name: 'a hidden type draws the words of the unlisted mark under its hidden hook', file: PANEL, change: swapText('data-hidden>{{ markText.hidden }}</span>', 'data-hidden>{{ markText.unlisted }}</span>'), fails: ['hidden-flag'], needs: ['saved'], screens: ['window:1'] },
+  { name: 'an unavailable window draws the words of none observed under its unknown hook', file: PANEL, change: swapText('data-count-unknown>{{ countText.unknown }}</span>', 'data-count-unknown>{{ countText.none }}</span>'), fails: ['unavailable-read', 'hooks-type-count'], needs: ['saved'], screens: ['broken'] },
+  { group: 'windows-a', name: 'a hidden type draws the words of the unlisted mark under its hidden hook', file: PANEL, change: swapText('data-hidden>{{ markText.hidden }}</span>', 'data-hidden>{{ markText.unlisted }}</span>'), fails: ['hidden-flag'], needs: ['saved'], screens: ['window:1'] },
   { name: 'every window of the menu and the window chosen draw the label of the first window, the values intact', file: PANEL, change: swapText('item-text="text"', ':item-text="() => windows[0].text"'), fails: ['panel', 'window-chosen'], needs: ['saved'], screens: WINDOW_SCREENS },
   { name: 'the checklist always opens unfolded', file: PANEL, change: swapText("this.decision = this.diagnosis !== null && this.seconds === DEFAULT_WINDOW && this.diagnosis.verdict !== 'found'", 'this.decision = false'), fails: ['fold-rule'], needs: ['fold'] },
   { name: 'the checklist always opens folded', file: PANEL, change: swapText("this.decision = this.diagnosis !== null && this.seconds === DEFAULT_WINDOW && this.diagnosis.verdict !== 'found'", 'this.decision = true'), fails: ['fold-rule'], needs: ['fold'] },
@@ -2056,12 +2152,13 @@ const PAGE_FAULTS = [
   { name: 'the checklist is folded or unfolded again by a window change', file: PANEL, change: swapText('    diagnosis() {\n      this.decide()\n    },\n', '    diagnosis() {\n      this.decide()\n    },\n\n    seconds() {\n      this.decided = false\n      this.decide()\n    },\n'), fails: ['fold-stays'], needs: ['fold'] },
   { name: 'a choice by hand is dropped when the read scope changes', file: PAGE, change: swapText('      handler() {\n        this.loadDiagnostic()\n      },\n    },\n    database() {', '      handler() {\n        this.diagnosticHand = null\n        this.loadDiagnostic()\n      },\n    },\n    database() {'), fails: ['fold-hand'], needs: ['fold'] },
   { name: 'the toggle leaves the fold as it is', file: PANEL, change: swapText("this.$emit('update:hand', !this.folded)", "this.$emit('update:hand', this.folded)"), fails: ['fold-hand'], needs: ['fold'] },
-  { name: 'the folded content is never hidden', file: PANEL, change: swapText('<div v-show="!folded" id="diagnostic-content">', '<div id="diagnostic-content">'), fails: ['fold-toggle'], needs: ['fold'] },
-  { name: 'the toggle says the opposite of what is shown', file: PANEL, change: swapText(':aria-expanded="String(!folded)"', ':aria-expanded="String(folded)"'), fails: ['fold-toggle'], needs: ['fold'] },
-  { name: 'the toggle keeps one label whatever it does', file: PANEL, change: swapText(":aria-label=\"folded ? 'Show the checklist' : 'Hide the checklist'\"", 'aria-label="Show the checklist"'), fails: ['fold-toggle'], needs: ['fold'] },
-  { name: 'the note is drawn as a part of the title', file: PANEL, change: swapText('class="caption text--secondary ml-2" data-diagnostic-note', 'class="ml-2" data-diagnostic-note'), fails: ['fold-toggle'], needs: ['fold'] },
-  { name: 'the note is drawn while the checklist is open', file: PANEL, change: swapText('v-if="folded && note"', 'v-if="note"'), fails: ['fold-toggle'], needs: ['fold'] },
-  { name: 'the note of a found verdict draws no count', file: PANEL, change: swapText('`${this.count(this.diagnosis.observed)} found`', "'Found'"), fails: ['fold-toggle'], needs: ['fold'] },
+  { group: 'fold-bindings', name: 'the folded content is never hidden', file: PANEL, change: swapText('<div v-show="!folded" id="diagnostic-content">', '<div id="diagnostic-content">'), fails: ['fold-content'], needs: ['fold'] },
+  { name: 'the toggle says the opposite of what is shown', file: PANEL, change: swapText(':aria-expanded="String(!folded)"', ':aria-expanded="String(folded)"'), fails: ['fold-label', 'fold-content', 'fold-note-visibility', 'fold-note-value'], needs: ['fold'] },
+  { group: 'fold-bindings', name: 'the toggle keeps one label whatever it does', file: PANEL, change: swapText(":aria-label=\"folded ? 'Show the checklist' : 'Hide the checklist'\"", 'aria-label="Show the checklist"'), fails: ['fold-label'], needs: ['fold'] },
+  { group: 'fold-bindings', name: 'the note is drawn as a part of the title', file: PANEL, change: swapText('class="caption text--secondary ml-2" data-diagnostic-note', 'class="ml-2" data-diagnostic-note'), fails: ['fold-note-placement'], needs: ['fold'] },
+  { group: 'fold-bindings', name: 'the note is drawn while the checklist is open', file: PANEL, change: swapText('v-if="folded && note"', 'v-if="note"'), fails: ['fold-note-visibility'], needs: ['fold'] },
+  { group: 'fold-bindings', name: 'the note of a found verdict draws no count', file: PANEL, change: swapText('`${this.count(this.diagnosis.observed)} found`', "'Found'"), fails: ['fold-note-value'], needs: ['fold'] },
+  { name: 'an event displays the name of another watched type', file: PANEL, change: swapText('{{ nameOf(observation.type) }}', '{{ nameOf(119) }}'), fails: ['event-type', 'hooks-event-identity'], needs: ['saved'], screens: ['window:3'] },
 ]
 
 // One equivalent rewrite of each family, made together so that the page is observed once for all of them: the window control written long-hand and listening to its input event, its labels bound by a function and one of them worded another way (R047-2), the page taking the window by an explicit handler, each condition in parentheses or turned round, the qualifier of the hidden mark moved from prefix to suffix, the verdicts, a pointer and the headings worded another way, the pointer ids registered by a spread and a template literal, the order of the events by parenthesised comparisons, each value drawn by `v-text`, through `Number`, `String` or a template literal, and each element and its ancestors at opacity 1 with its text in a child at opacity 1 (R161-6, R161-9). The page, the panel, the checklist and the glossary each change; where two families meet on one element, both are made on it.
@@ -2125,6 +2222,265 @@ const PAGE_REWRITES = [
 ]
 /* eslint-enable no-template-curly-in-string */
 
+// Calculation faults retain their original registry indices but run against independent in-process oracles. Browser heads still prove that Vue's actual watchers, events and displayed bindings reach the player.
+const LOGIC_MOVED = new Map([[38, 'fold-arrival'], [39, 'fold-arrival'], [40, 'fold-arrival'], [41, 'fold-arrival'], [42, 'fold-arrival'], [43, 'fold-stays'], [44, 'fold-host-hand'], [45, 'fold-toggle-value']])
+const UTILITY_MOVED = new Map([[17, { variant: 32, ids: ['pointer-spec'] }], [18, { variant: 27, ids: ['verdict-text'] }], [30, { variant: 13, ids: ['game-master', 'events-listed'] }], [31, { variant: 2, ids: ['archive-gap'] }], [32, { variant: 33, ids: ['tip-closes', 'fork'] }]])
+const BROWSER_MOVED = new Set([...UTILITY_MOVED.keys(), ...LOGIC_MOVED.keys()])
+
+const foldLogic = async (sources = {}) => {
+  const panel = await loadPage('components/log/DiagnosticPanel', { stubs: STUBS, sources })
+  const host = await loadPage('pages/log', { stubs: STUBS, sources })
+  const scene = ({ seconds = 86400, hand = null } = {}) => {
+    const events = []
+    const vm = instantiate(panel, { boundary, $store: { getters: {}, dispatch: async () => {} }, data: { diagnosis: null, pending: true, seconds, hand, startYear: 2000 }, emit: harnessOwn((...args) => events.push(args)) })
+    const set = (name, value) => {
+      vm[name] = value
+
+      const watcher = panel.watch && panel.watch[name]
+      const handler = typeof watcher === 'function' ? watcher : watcher && watcher.handler
+
+      if (handler) {
+        through(`the checklist watcher ${name}`, () => handler.call(vm, value))
+      }
+    }
+
+    through('the checklist created hook', () => panel.created.call(vm))
+
+    return { vm, set, events, arrive: (verdict) => { set('diagnosis', { verdict, observed: verdict === 'found' ? 3 : 0 }); set('pending', false) } }
+  }
+
+  return { scene, host }
+}
+
+const FOLD_LOGIC = [
+  {
+    id: 'fold-arrival',
+    name: 'fold decisions follow the independent arrival truth table and wait for the read',
+    run: ({ scene }) => {
+      for (const seconds of [3600, 86400, 2592000]) {
+        for (const verdict of ['found', 'absent', 'unavailable']) {
+          const { vm, set } = scene({ seconds })
+
+          set('diagnosis', { verdict, observed: verdict === 'found' ? 3 : 0 })
+          assert.equal(vm.decided, false, 'a pending read cannot decide the fold')
+          set('pending', false)
+          assert.equal(vm.folded, seconds === 86400 && verdict !== 'found', `${seconds}, ${verdict}`)
+          assert.equal(vm.decided, true)
+        }
+      }
+    },
+  },
+  {
+    id: 'fold-stays',
+    name: 'later window and verdict changes preserve the fold decided on arrival',
+    run: ({ scene }) => {
+      const folded = scene()
+
+      folded.arrive('absent')
+      folded.set('seconds', 2592000)
+      folded.set('diagnosis', { verdict: 'found', observed: 3 })
+      assert.equal(folded.vm.folded, true, 'an arrived folded panel stays folded')
+
+      const opened = scene({ seconds: 2592000 })
+
+      opened.arrive('unavailable')
+      opened.set('seconds', 86400)
+      opened.set('diagnosis', { verdict: 'absent', observed: 0 })
+      assert.equal(opened.vm.folded, false, 'an arrived open panel stays open')
+    },
+  },
+  {
+    id: 'fold-host-hand',
+    name: 'a diagnostic scope change asks for a read and retains either explicit hand choice',
+    run: ({ host }) => {
+      for (const hand of [true, false]) {
+        let calls = 0
+        const vm = { diagnosticHand: hand, loadDiagnostic: harnessOwn(() => { calls++ }) }
+
+        through('the diagnostic-key watcher', () => host.watch.diagnosticKey.handler.call(vm))
+        assert.equal(calls, 1)
+        assert.equal(vm.diagnosticHand, hand)
+      }
+    },
+  },
+  {
+    id: 'fold-toggle-value',
+    name: 'a hand choice overrides the arrival rule and toggling emits its exact opposite',
+    run: ({ scene }) => {
+      for (const hand of [true, false]) {
+        for (const verdict of ['found', 'absent', 'unavailable']) {
+          const current = scene({ hand })
+
+          current.arrive(verdict)
+          assert.equal(current.vm.folded, hand)
+          current.vm.toggle()
+          assert.deepEqual(current.events, [['update:hand', !hand]])
+          current.set('pending', true)
+          current.set('diagnosis', { verdict: 'found', observed: 3 })
+          current.set('pending', false)
+          assert.equal(current.vm.folded, hand, 'a later scope cannot discard the hand choice')
+        }
+      }
+    },
+  },
+]
+
+const checkLogicHead = async () => {
+  for (const { name, ok, detail } of await runChecks(FOLD_LOGIC, await foldLogic())) {
+    report(name, ok ? true : detail)
+  }
+}
+
+const checkLogicFault = async (index) => {
+  refusePlanting(`in-process checklist fault ${index}`)
+  const fault = PAGE_FAULTS[index]
+  const source = plantedPatch(fault.file, original(fault.file), fault.change.find, fault.change.to)
+  const sources = { [fault.file.slice('src/renderer/'.length).replace(/\.(vue|js)$/, '')]: source }
+  const results = await runChecks(FOLD_LOGIC.filter(({ id }) => id === LOGIC_MOVED.get(index)), await foldLogic(sources))
+  const failed = judged(results, `the in-process checklist fault "${fault.name}"`)
+
+  report(`fault caught in process: ${fault.name}`, caughtAll(results, { name: fault.name }) ? true : 'the named independent logic check did not fail by value', detailsOf(failed, [LOGIC_MOVED.get(index)]))
+}
+
+const GROUP_SCENES = { 'windows-a': WINDOW_SCREENS, 'windows-b': WINDOW_SCREENS, 'windows-c': WINDOW_SCREENS, unavailable: ['broken'], 'fold-bindings': null }
+
+const faultGroups = (faults = PAGE_FAULTS) => {
+  const groups = new Map()
+
+  faults.forEach((fault) => {
+    const index = PAGE_FAULTS.findIndex((original) => original.name === fault.name)
+
+    if (fault.group && !BROWSER_MOVED.has(index)) {
+      groups.set(fault.group, [...(groups.get(fault.group) || []), { ...fault, key: String(index) }])
+    }
+  })
+
+  return groups
+}
+
+const sourceEdits = (members) => members.flatMap((member) => member.change.edits.map((edit, index) => ({ file: member.file, name: `${member.name}: edit ${index}`, find: edit.find, to: edit.to })))
+
+// This is source validation only: it constructs no mutated text and serves no fault in a quick run.
+const browserCatalog = (faults = PAGE_FAULTS) => {
+  const problems = []
+  const ids = new Set(PAGE_CHECKS.map((item) => item.id))
+  const singles = new Set([0, 9, 11, 16, 33, 34, 35, 37, 47, 52])
+  const active = faults.filter((fault) => !BROWSER_MOVED.has(PAGE_FAULTS.findIndex((original) => original.name === fault.name)))
+
+  if (faults.length !== 53 || active.length !== 40 || new Set(faults.map((fault) => fault.name)).size !== faults.length) {
+    problems.push('the original 52 declarations and one visible type-binding fault must retain 13 explicit in-process mappings and 40 browser faults with unique names')
+  }
+  if (ids.size !== PAGE_CHECKS.length) {
+    problems.push('page check ids are not unique')
+  }
+  for (const id of ['window-reasons', 'event-increment', 'event-date', 'event-type', 'event-message', 'verdict', 'type-count', 'verdict-count', 'window-range', 'type-labels', 'fold-label', 'fold-content', 'fold-note-placement', 'fold-note-visibility', 'fold-note-value', 'hooks-event-identity', 'hooks-window-state', 'hooks-verdict', 'hooks-reasons', 'hooks-type-count', 'hooks-event-state', 'hooks-event-copies', 'hooks-input-status']) {
+    if (!ids.has(id) || !active.some((fault) => fault.fails.includes(id))) {
+      problems.push(`new binding check ${id} has no declared browser value fault`)
+    }
+  }
+  active.forEach((fault) => fault.fails.filter((id) => !ids.has(id)).forEach((id) => problems.push(`${fault.name}: unknown check ${id}`)))
+  faults.forEach((fault) => {
+    const index = PAGE_FAULTS.findIndex((original) => original.name === fault.name)
+
+    if (index < 0) {
+      problems.push(`unknown fault declaration: ${fault.name}`)
+    }
+    if (!BROWSER_MOVED.has(index) && Boolean(fault.group) === singles.has(index)) {
+      problems.push(`${index}: wide visibility, scope and control faults stay single; every other browser fault belongs to its declared group`)
+    }
+  })
+  for (const [group, members] of faultGroups(faults)) {
+    try {
+      declaredGroup(group, members)
+    } catch (error) {
+      if (!(error instanceof RunnerError)) {
+        throw error
+      }
+      problems.push(error.message)
+    }
+    if (!(group in GROUP_SCENES) || new Set(members.map((member) => member.needs[0])).size !== 1) {
+      problems.push(`${group}: every member needs the same declared observation flow`)
+    }
+    if (GROUP_SCENES[group]) {
+      problems.push(...screenProblems(members.map((member) => ({ ...member, screens: GROUP_SCENES[group] }))))
+    }
+    const intervals = new Map()
+
+    for (const edit of sourceEdits(members)) {
+      const text = original(edit.file)
+      const count = text.split(edit.find).length - 1
+
+      if (!edit.find || count !== 1) {
+        problems.push(`${group}: ${edit.name} has ${count} anchor matches`)
+        continue
+      }
+
+      const start = text.indexOf(edit.find)
+      const end = start + edit.find.length
+      const previous = intervals.get(edit.file) || []
+
+      if (previous.some((other) => start < other.end && other.start < end)) {
+        problems.push(`${group}: ${edit.name} overlaps another original-source anchor`)
+      }
+      intervals.set(edit.file, [...previous, { start, end }])
+    }
+  }
+  for (const [index, id] of LOGIC_MOVED) {
+    if (!FOLD_LOGIC.some((check) => check.id === id) || !PAGE_FAULTS[index].change.find) {
+      problems.push(`${index}: the in-process fold mapping has no independent check or exact anchor`)
+    }
+  }
+
+  for (const [index, mapping] of UTILITY_MOVED) {
+    const fault = UNIT_FAULTS[mapping.variant]
+
+    if (!fault || mapping.ids.some((id) => !fault.fails.includes(id) || !UNIT.some((check) => check.id === id))) {
+      problems.push(`${index}: the moved utility fault has no retained named independent oracle`)
+    }
+  }
+
+  return problems
+}
+
+unit('browser-catalog', 'every browser binding has a declared check, flow and nonoverlapping original-source anchor, with all moved families retained', ({ pageFaults = PAGE_FAULTS }) => {
+  assert.deepEqual(browserCatalog(pageFaults), [])
+})
+
+const applicableChecks = (kind, scenes) => PAGE_CHECKS.filter((item) => forKind(item, kind) && (kind === 'fold' || item.id === 'no-errors' || (SCREEN_READS[item.id] && SCREEN_READS[item.id].every((choices) => choices.some((scene) => scenes.includes(scene))))))
+
+const checkPageGroup = async (group, members) => {
+  refusePlanting(group)
+  const problems = browserCatalog()
+
+  if (problems.length) {
+    throw new HarnessError(`browser group source catalog failed before planting: ${problems.join('; ')}`)
+  }
+
+  const all = faultGroups().get(group)
+  const kind = all[0].needs[0]
+  const scenes = GROUP_SCENES[group]
+  const edits = sourceEdits(members)
+  const texts = Object.fromEntries([...new Set(edits.map((edit) => edit.file))].map((file) => [file, original(file)]))
+  const changed = plantedGroup(texts, edits)
+  const variant = { name: `the group ${group}`, needs: [kind], screens: scenes, parts: Object.entries(changed).map(([file, text]) => ({ file, change: () => text })) }
+  const seen = await view(kind, variant)
+  const outcome = await resultsOfPage(seen, await contextOf(kind, variant), { ids: null, list: applicableChecks(kind, scenes), label: `the group ${group}` })
+
+  if (outcome.unobserved) {
+    throw new HarnessError(`the group ${group} was not observed: ${outcome.unobserved}`)
+  }
+  if (outcome.results.some((result) => result.threw)) {
+    throw new HarnessError(`the ordinary binding group ${group} raised a subject exception`)
+  }
+
+  for (const { member, caught, failed } of judgedGroup(outcome.results, members, { what: `the group ${group}`, alone: members.length === 1 })) {
+    console.log(`MEMBER_CREDIT ${JSON.stringify({ group, key: member.key, name: member.name, mode: members.length === 1 ? 'solo' : 'grouped', failures: failed.map(({ id, kind, threw, detail }) => ({ id, kind, threw, detail })) })}`)
+    const missing = member.fails.filter((id) => !failed.some((result) => result.id === id && result.kind === 'assertion' && !result.threw))
+
+    report(`fault caught: ${member.name}`, caught && !missing.length ? true : `these named binding assertions did not fail by value: ${missing.join(', ')}`, detailsOf(failed, member.fails))
+  }
+}
+
 // ---------- the run ----------
 
 let checks = 0
@@ -2171,6 +2527,7 @@ const checkUnitsHead = async () => {
 }
 
 const checkUnitFault = async (fault) => {
+  refusePlanting(fault.name)
   const failed = await judgeUnits(fault)
   const missed = fault.fails.filter((id) => !caughtBy(failed, [id], { name: fault.name, throws: fault.throws }))
 
@@ -2355,7 +2712,22 @@ const checkRecorder = async () => {
   await recorderControls(SCREEN.chrome, SCREEN.server.url, SCREEN.seeds.ahead.file)
 }
 
+// Renew after the exact held ids were captured. The old requests and tracker stay present, so only the atomic race/generation guard at the screen read can refuse this observation.
+const checkHeldGeneration = async () => {
+  let witness = null
+  const seen = await observeSaved(SCREEN.chrome, SCREEN.server.url, ['held'], {
+    afterHeldCapture: async ({ page, state, held, generation }) => {
+      state.hold = null
+      await page.evaluate(() => window.$app.$store.dispatch('renew', { storagePath: window.$app.$store.state.databasePath }))
+      witness = await page.evaluate(({ ids, previous }) => ({ retained: ids.every((id) => window.__auroraReads.pending.has(id)), renewed: window.$app.$store.state.freshness.generation > previous }), { ids: held, previous: generation })
+    },
+  })
+
+  report('a save renewed after held-id capture is refused at the held log observation, while its exact held requests remain counted', witness && witness.retained && witness.renewed && seen.value === null && typeof seen.error === 'string' && seen.error.includes('the race or save generation changed before the held log observation') ? true : `the generation guard did not refuse the renewed observation: ${JSON.stringify({ witness, value: seen.value, error: seen.error })}`)
+}
+
 const checkPageFault = async (fault) => {
+  refusePlanting(fault.name)
   const missing = screenProblems([fault])
 
   if (missing.length) {
@@ -2398,19 +2770,23 @@ const CONTROL_FAULT = 'a type draws its count negative'
 
 // The utilities' head and variants, then the page's, one pool: a worker runs them one after another, the page's on its one page server and browser.
 const variantsOf = ({ mutations, browser }) => [
+  { key: 'logic', name: 'the head: checklist calculation and watcher truth tables (in process)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkLogicHead },
+  ...(mutations ? [...LOGIC_MOVED.keys()].map((index) => ({ key: `logic-fault:${index}`, name: `in-process checklist fault: ${PAGE_FAULTS[index].name}`, pool: 'suite', deadline: DEADLINES.memory, run: () => checkLogicFault(index) })) : []),
   { key: 'units', name: 'the head: the checklist and the window states (in memory)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkUnitsHead },
   ...(mutations ? UNIT_FAULTS.map((fault, index) => ({ key: `unit-fault:${index}`, name: `unit fault: ${fault.name}`, heading: '\nplanted faults in the utilities', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitFault(fault) })) : []),
   ...(mutations ? UNIT_REWRITES.map((rewrite, index) => ({ key: `unit-rewrite:${index}`, name: `unit rewrite: ${rewrite.name}`, heading: '\nrewrites of the utilities that say the same thing', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitRewrite(rewrite) })) : []),
   ...(browser ? [
+    { key: 'guard:held-generation', name: 'the head: held log observation refuses a renewed save generation', head: true, pool: 'suite', deadline: DEADLINES.page, browser: true, run: checkHeldGeneration },
     { key: 'page', name: 'the head: the Game Log page in a browser', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkPageHead },
     { key: 'recorder', name: 'the head: the wait for the recorder', head: true, pool: 'suite', deadline: DEADLINES.recorder, run: checkRecorder },
   ] : []),
-  ...(browser && mutations ? PAGE_FAULTS.map((fault, index) => ({ key: `page-fault:${index}`, name: `page fault: ${fault.name}`, heading: '\nplanted faults in the page', pool: 'suite', deadline: DEADLINES.page, browser: true, run: () => checkPageFault(fault) })) : []),
+  ...(browser && mutations ? PAGE_FAULTS.flatMap((fault, index) => BROWSER_MOVED.has(index) || fault.group ? [] : [{ key: `page-fault:${index}`, name: `page fault: ${fault.name}`, heading: '\nplanted faults in the page', pool: 'suite', deadline: DEADLINES.page, browser: true, run: () => checkPageFault(fault) }]) : []),
+  ...(browser && mutations ? [...faultGroups()].map(([group, members]) => ({ key: `page-group:${group}`, name: `page group ${group}: ${members.map((member) => member.name).join(' | ')}`, pool: 'suite', deadline: DEADLINES.page, browser: true, members, run: (handed) => checkPageGroup(group, handed) })) : []),
   ...(browser && mutations ? PAGE_REWRITES.map((rewrite, index) => ({ key: `page-rewrite:${index}`, name: `page rewrite: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.page, browser: true, baseline: rewriteKind(rewrite), run: () => checkPageRewrite(rewrite) })) : []),
 ]
 
 const main = async () => {
-  const options = { mutations: !process.argv.includes('--no-mutations'), browser: !process.argv.includes('--no-browser') }
+  const options = { mutations: mayMutate(), browser: !process.argv.includes('--no-browser') }
   const totals = await runSuite({
     script: __filename,
     variants: variantsOf(options),
