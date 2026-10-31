@@ -2519,11 +2519,32 @@ const runPart = async (part, options) => {
 // The deadlines, in seconds: five times the slowest time measured (the suites 1.8 s, a save 24 s, the control 0.6 s, a mutant 1.5 s), at least two minutes, for a busy machine. The suites build the constructed rows, the loaders and the page; a save is read and compared with SQL whole; the control runs the suites again and the controls of the credit; a mutant runs the suites over its copy.
 const DEADLINES = { suites: 120, save: 120, control: 120, mutant: 120 }
 
-// The parts, in the order they print, each in a process of its own as they ran before the runner.
+// Saves, suites and controls keep independent workers. Mutants share bounded queues, with fresh per-load module trees for every variant.
+let mutantPoolTainted = false
+const refuseMutantPoolResidue = () => {
+  const handlerLeft = [Vue.config.errorHandler, Vue.config.warnHandler].some((handler) => handler !== undefined && handler !== null)
+
+  if (mutantPoolTainted || STORE.getters.database !== null || handlerLeft) {
+    throw new HarnessError('the hierarchy mutant worker is tainted or retains fixture/STORE/Vue state; later work must run in a fresh worker')
+  }
+}
+const runPooledMutant = async (index, options) => {
+  refusePlanting(MUTANTS[index][0])
+
+  try {
+    refuseMutantPoolResidue()
+    await runPart('mutant:' + index, options)
+  } catch (error) {
+    mutantPoolTainted = true
+    throw error
+  }
+}
+
+// Original keys, order, deadlines, counts and resume records are unchanged; each pool contains at most 16 original mutant indices.
 const variantsOf = (options) => [
   { key: 'suites', name: 'the suites: constructed rows, loaders and the page', head: true, deadline: DEADLINES.suites, run: () => runPart('suites', options) },
   ...(options.saves ? selectedSaves(options).map(({ file, index }) => ({ key: `save:${index}`, name: `the save ${path.relative(root, file).replace(/\\/g, '/')}`, head: true, heading: options.mutations ? '\nEvery save found' : '\nSelected saves (full-matrix indices)', deadline: DEADLINES.save, run: () => runPart(`save:${index}`, options) })) : []),
-  ...(options.mutations ? [{ key: 'control', name: 'control: the unmodified code and the credit of a fault', heading: '\nMutations', deadline: DEADLINES.control, run: () => runPart('control', options) }, ...MUTANTS.map(([name], index) => ({ key: `mutant:${index}`, name: `mutant: ${name}`, heading: '\nMutations', deadline: DEADLINES.mutant, run: () => runPart(`mutant:${index}`, options) }))] : []),
+  ...(options.mutations ? [{ key: 'control', name: 'control: the unmodified code and the credit of a fault', heading: '\nMutations', deadline: DEADLINES.control, run: () => runPart('control', options) }, ...MUTANTS.map(([name], index) => ({ key: `mutant:${index}`, name: `mutant: ${name}`, heading: '\nMutations', pool: `hierarchy-mutants:${Math.floor(index / 16)}`, deadline: DEADLINES.mutant, run: () => runPooledMutant(index, options) }))] : []),
 ]
 
 const main = async () => {
@@ -2532,6 +2553,11 @@ const main = async () => {
     script: __filename,
     inputs: options.saves ? selectedSaves(options).map(({ file }) => file) : [],
     variants: variantsOf(options),
+    afterEach: (variant) => {
+      if (variant.key.startsWith('mutant:')) {
+        refuseMutantPoolResidue()
+      }
+    },
     counts: () => ({ checks, failures, extra: { unsupportedSaves, emptySaves, skippedSaves } }),
   })
   const { unsupportedSaves: unsupported = 0, emptySaves: empty = 0, skippedSaves: skipped = 0 } = totals.extra
