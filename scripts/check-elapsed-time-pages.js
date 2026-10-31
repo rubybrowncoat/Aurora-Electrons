@@ -1,7 +1,7 @@
 /*
   Checks the elapsed-time figures of the Routes page (src/renderer/pages/routes.vue), the round trip of the Transport page (src/renderer/pages/information.vue) and the cycle of the Hauling page (src/renderer/pages/hauling.vue) as a browser draws them: the real renderer is served by scripts/lib/page-server.js over a constructed copy of a save, opened in Chromium, driven through its controls, and what a player sees is read back through the shared readers of scripts/lib/browser-observe.js, each element found by the `data-*` hook its template carries and never by its wording.
 
-  Run: bun scripts/check-elapsed-time-pages.js [--no-mutations] [--only=<text>|<text>...] [--probe]
+  Run: bun scripts/check-elapsed-time-pages.js [--no-mutations] [--only=<text>|<text>...] [--probe] [--solo] [--faults=<original-index>[,<index>...]]
 
   The save is a copy of saves/AuroraDB_271_skoormit_saved.db with the rows this script writes: a second way between two systems (a new pair of explored jump points, so that a way of two jumps and one of three both exist), the jump points of both ways given positions that make the two-jump way fly for hours between its jumps and the three-jump way a minute or two, two fleets with crews that draw different delays (one of them carrying a delay from a jump just made), and a speed typed into the page. The three-jump way is then the shortest and its waits make it the slower: Fewest jumps and Fastest time must choose the two-jump way, which flies about 150 times as far, and Shortest the three-jump one; a lower-case ranking would choose the three-jump way for Fastest time. Two more copies run in processes of their own (`WORLDS`): fleets that hold a speed of their own in a nebula (Hauling), and fleets set to their maximum speed with dust in the start system alone, whose cap the fleet carries past the jump into the clear system after it, so that the flight of the way is a range (Routes).
   What the page should show is worked out here, in a clock and a search of the explored jump points written from the rules of the game's jump shock and nebulae and not from the modules of the app (nothing of src/renderer/utilities is imported): the ways between the two systems are enumerated from SQL rows, each flown at the speed with the delay of the crew drawn after every jump, and the wait at a jump is the delay less the time flown since the last one, with the longest case given two of the longest subpulses (12 hours) past the second the delay clears. A system with dust is flown at the cap the thinnest armour of the fleet allows there, and the longest case keeps the cap of each system left for a longest subpulse past its transit, as the game gives the speed back only at its next pass over the fleet. The page's figures are compared with that, each by the system and stop it belongs to:
@@ -13,7 +13,7 @@
   - the Transport page's round trip for a fleet shows flying, loading, transits, the wait range, the total and the round trips a year, which reconcile with one another.
   - the Travel time of the table of distances, in the time order, is the elapsed time of the way the order picks to each system, found by searching the table for the system;
   - each stop of a round trip (Transport) or of a cycle (Hauling), paired with the oracle's by the name it is drawn under (the colony's or the order's, save data either way), shows the loading strength and the hours that the cargo, the crew, the race's technology and the colony's spaceport give, worked out here from SQL rows and the rules of the game, and the Hauling sentence gives the order delays the fixture sets, read by the role of each figure and not by its wording.
-  Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names by a wrong value of its own, never because the page threw (scripts/lib/fault-credit.js), and a fault under which the page raises an error it does not name is not credited. The baseline of every world and every benign rewrite is judged by `no-errors` beside its own checks, so a page that raises an error no check names never passes. Every fault is paired with a benign rewrite of the same text that must still pass. The rewrites of a world are served in stacks, each joining the first stack whose texts it still applies to, and each stack is read on the pages of its rewrites and judged by the checks of those pages; one rewrite of each family (an explicit value and event for `v-model`, a longhand binding, a qualifier moved, prose worded another way, a condition in brackets) is also served alone. The standing faults of the in-process checks (scripts/check-fleet-profile.js, scripts/check-route-time.js) cover the modules; this script proves that their results reach the screen.
+  Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names by a wrong value of its own, never because the page threw (scripts/lib/fault-credit.js), and a fault under which the page raises an error it does not name is not credited. The baseline of every world and every benign rewrite is judged by `no-errors` beside its own checks, so a page that raises an error no check names never passes. Every fault is paired with a benign rewrite of the same text that must still pass. The rewrites of a world are served in stacks, each joining the first stack whose texts it still applies to, and each stack is read on the pages of its rewrites and judged by the checks of those pages; the retained original representatives cover each family (an explicit value and event for `v-model`, a longhand binding, a qualifier moved, prose worded another way, a condition in brackets) in those same compatible stacks. An explicitly selected single rewrite still runs as a singleton. The standing faults of the in-process checks (scripts/check-fleet-profile.js, scripts/check-route-time.js) cover the modules; this script proves that their results reach the screen.
 
   Prints `N of N checks passed`; any failed check sets exit code 1. It needs Playwright's Chromium (`bunx playwright install chromium` once). Vite starts with a cold cache on every run, so a run takes minutes. `--only=<text>|<text>` runs the faults and rewrites whose name holds any of the texts (the rewrites chosen stacked as in a full run, so that one chosen rewrite is served alone), and `--probe` prints what each page shows and stops.
 */
@@ -21,8 +21,11 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const { observe, validate, failureLine, describe, failedObservation, HarnessError, installScreen, readFigure, pairedBy } = require('./lib/browser-observe')
-const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
+const { observe, validate, failureLine, describe, failedObservation, HarnessError, settled, installScreen, readFigure, pairedBy } = require('./lib/browser-observe')
+const { caughtAll, notCaught, unobserved, judgedGroup } = require('./lib/fault-credit')
+const { declaredGroup } = require('./lib/suite-runner')
+const { plantedGroup } = require('./lib/mutant-source')
+const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -525,35 +528,9 @@ const deadlineOnly = (error) => {
   }
 }
 
-// The page that `observe` opens, made ready: the readers of the screen put in it and the race picked on the Empires page. Gives the function that waits for the page to settle: no database call in flight, none started or ended for `quiet` ms and no read of the page under way, within TIMEOUT.
+// The page that `observe` opens, made ready: the readers of the screen put in it and the race picked on the Empires page. Completion follows the page's counted reads and their continuations, bounded by TIMEOUT. Steps that start a deferred action wait for its displayed effect before settling.
 const prepare = async (page, url) => {
-  const state = { inFlight: 0, last: Date.now() }
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
-
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
-    }
-  })
-
-  const settle = async (quiet = 1500) => {
-    const started = Date.now()
-
-    while (state.inFlight > 0 || Date.now() - state.last < quiet || await page.evaluate(pageLoading)) {
-      if (Date.now() - started > TIMEOUT) {
-        throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-      }
-
-      await page.waitForTimeout(250)
-    }
-  }
+  const settle = () => settled(page, { limit: TIMEOUT, loading: pageLoading })
 
   await installScreen(page)
   await page.goto(url, { timeout: TIMEOUT })
@@ -567,8 +544,7 @@ const prepare = async (page, url) => {
   }
 
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
-  // The reads the pick started are waited for with no quiet period: every run then opens a page first (`open`), and its settle waits out the quiet period over every call, a call of the pick reported late included.
-  await settle(0)
+  await settled(page, { limit: TIMEOUT })
 
   return { settle }
 }
@@ -1152,13 +1128,13 @@ const faultVerdict = (seen, x, fault) => {
 
 // ---------- the faults and the rewrites ----------
 
-const swap = (from, to) => (text) => {
+const swap = (from, to) => Object.assign((text) => {
   if (text.split(from).length !== 2) {
     throw new Error(`The variant must apply exactly once to the page: ${from}`)
   }
 
   return text.replace(from, () => to)
-}
+}, { from, to })
 
 // The text of each file `variants` change, each change made on the text the one before it left: Map { file => text }. A change that does not apply exactly once throws (`swap`).
 const changedTexts = (variants, original) => variants.reduce((texts, variant) => texts.set(variant.file, variant.change(texts.has(variant.file) ? texts.get(variant.file) : original(variant.file))), new Map())
@@ -1190,16 +1166,16 @@ const EXPANDED = '            <template #expanded-item="{ headers, item }">\n   
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  { name: 'the wait cell states the shortest wait', file: ROUTES_FILE, scope: 'routes', change: swap('wait.lo === wait.hi ? this.span(wait.hi) : `${this.span(wait.lo)} to ${this.span(wait.hi)}`', 'this.span(wait.lo)'), fails: ['wait', 'reconcile'] },
+  { name: 'the wait cell states the shortest wait', file: ROUTES_FILE, scope: 'routes', change: swap('wait.lo === wait.hi ? this.span(wait.hi) : `${this.span(wait.lo)} to ${this.span(wait.hi)}`', 'this.span(wait.lo)'), fails: ['wait', 'reconcile', 'tile'] },
   { name: 'the elapsed cell states the lower case', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.elapsed ? span(item.elapsed.hi) : '—' }}", "{{ item.elapsed ? span(item.elapsed.lo) : '—' }}"), fails: ['elapsed'] },
-  { name: 'the flight cell counts the flight twice', file: ROUTES_FILE, scope: 'routes', change: swap('{{ flightText(item.flight, item.flightHi) }}', '{{ flightText(item.flight && item.flight * 2, item.flightHi && item.flightHi * 2) }}'), fails: ['flight'] },
+  { name: 'the flight cell counts the flight twice', file: ROUTES_FILE, scope: 'routes', change: swap('{{ flightText(item.flight, item.flightHi) }}', '{{ flightText(item.flight && item.flight * 2, item.flightHi && item.flightHi * 2) }}'), fails: ['flight', 'reconcile'] },
   { name: 'the transit cell states a second for each jump', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.transit === undefined ? '—' : span(item.transit) }}", "{{ item.transit === undefined ? '—' : span(item.transit + 1) }}"), fails: ['flight'] },
   { name: 'the start offset note states a minute too much', file: ROUTES_FILE, scope: 'routes', change: swap('<span data-part="offset">{{ span(plan.time.startDelay) }}</span>', '<span data-part="offset">{{ span(plan.time.startDelay + 60) }}</span>'), fails: ['offset'] },
   { name: 'the travel time tile states half the time', file: ROUTES_FILE, scope: 'routes', change: swap('this.span(time.value * SECONDS_PER_DAY)', 'this.span(time.value * SECONDS_PER_DAY / 2)'), fails: ['tile'] },
   { name: 'the leg table is not displayed (v-show)', file: ROUTES_FILE, scope: 'routes', change: swap(LEG_PANEL, 'data-leg-detail v-show="false" elevation="1">'), fails: ['route', 'flight', 'wait', 'elapsed'] },
   { name: 'the whole page is transparent (an ancestor with no opacity)', file: ROUTES_FILE, scope: 'routes', change: swap('<v-container fluid class="routes-page">', '<v-container fluid class="routes-page" style="opacity: 0">'), fails: ['route', 'flight', 'tile'] },
   { name: 'the slot of the Wait column is one nothing consumes', file: ROUTES_FILE, scope: 'routes', change: swap('<template #[`item.wait`]="{ item }">', '<template #[`item.waits`]="{ item }">'), fails: ['wait'] },
-  { name: 'fastest time ranks without a crew', file: ROUTES_FILE, scope: 'routes', change: swap("return this.order === 'time' && !(this.timing && this.timing.shock) ? 'km' : this.order", 'return this.order'), fails: ['notice'] },
+  { name: 'fastest time ranks without a crew', file: ROUTES_FILE, scope: 'routes', change: swap("return this.order === 'time' && !(this.timing && this.timing.shock) ? 'km' : this.order", 'return this.order'), fails: ['notice', 'route', 'flight', 'wait', 'elapsed', 'tile'] },
   { name: 'the wait row states the shortest wait', file: INFORMATION_FILE, scope: 'transport', change: swap('text: known ? range(trip.waitSeconds.lo, trip.waitSeconds.hi) :', 'text: known ? this.span(trip.waitSeconds.lo) :'), fails: ['cycle-wait'] },
   { name: 'the round trip row states the lower case alone', file: INFORMATION_FILE, scope: 'transport', change: swap('text: known ? range(trip.tripSecondsLow, trip.tripSeconds) :', 'text: known ? this.span(trip.tripSecondsLow) :'), fails: ['cycle-total'] },
   { name: 'the flying row is the whole round trip', file: INFORMATION_FILE, scope: 'transport', change: swap("{ key: 'flight', label: 'Flying', text: known ? this.span(trip.travelSeconds) : 'Not known' }", "{ key: 'flight', label: 'Flying', text: known ? this.span(trip.tripSeconds) : 'Not known' }"), fails: ['cycle-flight'] },
@@ -1232,7 +1208,51 @@ const FAULTS = [
   { name: 'the note of the travel time states the flight at its lowest case', file: ROUTES_FILE, scope: 'routes', world: 'capped', change: swap("{ text: this.flightText(flight, flightHi), part: 'flight' }", "{ text: this.span(flight), part: 'flight' }"), fails: ['tile'] },
 ]
 
-// Every rewrite runs in a stack with the others of its world (`stacksOf`); `alone` marks the one rewrite of each family that also runs by itself: an explicit value and event for `v-model`, a longhand binding, a qualifier moved, prose worded another way and a condition in brackets.
+// These four bindings use the unchanged union of the main Routes scenes. Full applicable checks,
+// including reconciliation and no-errors, run for each solo member as well as the composite.
+const ROUTE_GROUP = [2, 4, 5, 28].map((index) => ({ ...FAULTS[index], key: String(index) }))
+const viewFault = async (fault, view) => {
+  refusePlanting(fault.name)
+
+  return view([fault.scope], [fault])
+}
+const viewRouteFaults = async (members, view) => {
+  refusePlanting('route-bindings')
+
+  return view(['routes'], members, true)
+}
+const routeEdits = (members) => members.map((member) => ({ name: member.name, file: member.file, find: member.change.from, to: member.change.to }))
+const validateRouteGroup = (original) => {
+  declaredGroup('route-bindings', ROUTE_GROUP)
+  const intervals = []
+
+  for (const member of ROUTE_GROUP) {
+    if (member.scope !== 'routes' || member.world || member.fails.some((id) => !SCOPES.routes.includes(id))) {
+      throw new HarnessError('route-bindings must retain main Routes members with known checks')
+    }
+    const text = original(member.file)
+    const { from } = member.change
+    const start = text.indexOf(from)
+
+    if (!from || text.split(from).length !== 2 || intervals.some((entry) => entry.file === member.file && start < entry.end && entry.start < start + from.length)) {
+      throw new HarnessError('route-bindings anchors must occur exactly once and have disjoint original-source intervals')
+    }
+    intervals.push({ file: member.file, start, end: start + from.length })
+  }
+}
+const routeGroupOutcome = (seen, x, members) => {
+  const results = resultsOf(seen, x, { ids: judgedBy(SCOPES.routes), label: 'route-bindings, all applicable route checks' }).map(({ id, name, result, kind }) => ({ id, name, ok: result === true, kind, threw: false, detail: result === true ? '' : String(result) }))
+  const credits = judgedGroup(results, members, { what: 'route-bindings', alone: members.length === 1 })
+
+  for (const { member, failed } of credits) {
+    if (!member.fails.every((id) => failed.some((result) => result.id === id && result.kind === 'assertion' && result.threw === false))) {
+      throw new HarnessError('route-bindings member did not fail every declared check by value: ' + member.key)
+    }
+  }
+  return credits
+}
+
+// Every rewrite runs once in a compatible stack of its world (`stacksOf`). The original `alone` metadata identifies the five retained family representatives; it adds no duplicate execution. An explicitly selected singleton still runs.
 const BENIGN = [
   { name: 'the order toggle bound by an explicit value and event', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap('<v-btn-toggle v-model="order" mandatory dense>', '<v-btn-toggle :value="order" mandatory dense @change="order = $event">') },
   { name: 'the wait text with its condition in brackets', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap("wait === null ? 'Not known' : wait.lo === wait.hi ?", "wait === null ? 'Not known' : (wait.lo === wait.hi) ?") },
@@ -1343,7 +1363,7 @@ const PLANS = {
   capped: { title: 'The Routes page for a fleet that carries the cap of a nebula past a jump (a constructed copy of the save, in a process of its own)', prefix: 'carried cap: ', label: 'the carried cap', scopes: ['routes'], ids: CAPPED_CHECKS, expect: (truth) => expectationsOf(truth, { runs: CAPPED_RUNS }), controls: cappedControls },
 }
 
-const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
+const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) => {
   const { startPageServer } = require('./lib/page-server')
   const plan = PLANS[world]
   const { folder, file } = await constructedSave(WORLDS[world] || null)
@@ -1367,6 +1387,8 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
 
     const names = Object.fromEntries(Object.entries(truth.fleets).map(([key, fleet]) => [key, fleet.name]))
     const original = (name) => fs.readFileSync(path.join(root, name), 'utf8')
+
+    validateRouteGroup(original)
     // Puts back each of `files` that a view served in place of the file, and throws the first restore that failed once all have been tried.
     const restore = (files) => {
       const failed = []
@@ -1384,8 +1406,8 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
       }
     }
     // What the pages in `scopes` show with each of `variants` served in place of the text it changes (`changedTexts`), every file served restored afterwards.
-    const view = async (scopes, variants = []) => {
-      const texts = changedTexts(variants, original)
+    const view = async (scopes, variants = [], faultGroup = false) => {
+      const texts = faultGroup ? new Map(Object.entries(plantedGroup(Object.fromEntries([...new Set(variants.map((variant) => variant.file))].map((file) => [file, original(file)])), routeEdits(variants)))) : changedTexts(variants, original)
 
       for (const [file, text] of texts) {
         server.replace(file, text)
@@ -1458,15 +1480,30 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
     if (mutating && !unobserved(baseline)) {
       console.log('\nplanted faults')
 
-      for (const fault of FAULTS.filter((variant) => wanted(variant) && mine(variant))) {
-        report(`fault caught: ${fault.name}`, faultVerdict(await view([fault.scope], [fault]), x, fault), `fails ${fault.fails.join(', ')}`)
+      const members = ROUTE_GROUP.filter((member) => wanted(FAULTS[Number(member.key)]) && mine(member))
+      const batches = solo ? members.map((member) => [member]) : members.length ? [members] : []
+
+      for (const batch of batches) {
+        const started = performance.now()
+        const seen = await viewRouteFaults(batch, view)
+        const seconds = (performance.now() - started) / 1000
+        const credits = routeGroupOutcome(seen, x, batch)
+
+        for (const { member, failed } of credits) {
+          console.log('MEMBER_CREDIT ' + JSON.stringify({ group: 'route-bindings', key: member.key, name: member.name, mode: solo || batch.length === 1 ? 'solo' : 'grouped', failures: failed.map(({ id, kind, threw, detail }) => ({ id, kind, threw, detail })) }))
+          report('fault caught: ' + member.name, true, 'fails ' + member.fails.join(', '))
+        }
+        console.log('GROUP_TIMING ' + JSON.stringify({ group: 'route-bindings', members: batch.map((member) => member.key), mode: solo || batch.length === 1 ? 'solo' : 'grouped', seconds }))
+      }
+      for (const fault of FAULTS.filter((variant, index) => !ROUTE_GROUP.some((member) => Number(member.key) === index) && wanted(variant) && mine(variant))) {
+        report(`fault caught: ${fault.name}`, faultVerdict(await viewFault(fault, view), x, fault), `fails ${fault.fails.join(', ')}`)
       }
 
       console.log('\nrewrites that say the same thing')
 
       const rewrites = BENIGN.filter((one) => wanted(one) && mine(one))
-      // The rewrites marked `alone` by themselves, then every stack, but for a stack of one rewrite that has run alone.
-      const served = [...rewrites.filter((one) => one.alone).map((one) => [one]), ...stacksOf(rewrites, original).filter((stack) => stack.length > 1 || !stack[0].alone)]
+      // Every retained rewrite runs once in its compatible stack; an explicitly selected singleton still runs.
+      const served = stacksOf(rewrites, original)
 
       for (const stack of served) {
         const scopes = [...new Set(stack.map(({ scope }) => scope))]
@@ -1487,9 +1524,17 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine }) => {
 // The worlds are processes (a process starts one page server): the main one, with the fleets at their maximum speed and no dust, runs here, and each of WORLDS, a copy of the save with rows of its own, runs as a child of this one and counts in its total. Each child is bounded by WORLD_LIMIT; one that runs past it is ended and fails the run.
 const main = async () => {
   const probing = process.argv.includes('--probe')
-  const mutating = !process.argv.includes('--no-mutations') && !probing
+  const mutating = mayMutate() && !probing
   const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).toLowerCase()
-  const wanted = (variant) => !only || only.split('|').some((text) => text && variant.name.toLowerCase().includes(text))
+  const faultArgument = process.argv.find((argument) => argument.startsWith('--faults='))
+  const selected = faultArgument ? faultArgument.slice('--faults='.length).split(',') : null
+
+  if (selected && (!selected.length || selected.some((key) => !/^\d+$/.test(key) || !FAULTS[Number(key)]) || new Set(selected.map(Number)).size !== selected.length)) {
+    throw new HarnessError('--faults must name distinct existing original fault indices')
+  }
+  const indices = selected && new Set(selected.map(Number))
+  const solo = process.argv.includes('--solo')
+  const wanted = (variant) => (!only || only.split('|').some((text) => text && variant.name.toLowerCase().includes(text))) && (!indices || indices.has(FAULTS.indexOf(variant)))
   const world = (process.argv.find((argument) => argument.startsWith('--world=')) || '--world=main').slice('--world='.length)
   const worldOf = (variant) => variant.world || 'main'
   const mine = (variant) => worldOf(variant) === world
@@ -1500,7 +1545,7 @@ const main = async () => {
   }
 
   if (runs(world)) {
-    await runWorld({ world, probing, mutating, only, wanted, mine })
+    await runWorld({ world, probing, mutating, only, wanted, mine, solo })
   }
 
   if (world === 'main' && !probing) {
