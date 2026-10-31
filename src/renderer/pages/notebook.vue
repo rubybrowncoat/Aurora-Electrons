@@ -74,9 +74,9 @@
                 </div>
               </div>
             </div>
-            <div v-else-if="scope && !read.error" class="caption text--secondary" data-note-empty>{{ entries.length ? 'No note is in this system.' : 'No notes yet for this race' }}{{ read.notes.length ? ', apart from ' + read.notes.length + ' that this version cannot read' : '' }}.</div>
+            <div v-else-if="scope && !read.error" class="caption text--secondary" data-note-empty>{{ entries.length ? 'No note is in this system.' : 'No notes yet for the race' }}{{ read.notes.length ? ', apart from ' + read.notes.length + ' that this version cannot read' : '' }}.</div>
             <div v-for="note in read.notes" :key="note.uuid" class="caption text--secondary mt-1" data-note-unreadable>{{ note.reason }}</div>
-            <div class="caption text--secondary mt-3" data-note-limits>A note is checked against this save each time and is never moved to another object by its name: a rename keeps the link and shows the new name, and an object that has gone leaves the note stale with the name and system it had when the note was last kept. A colony and a designed tech have no date in the save and an ID can be given again, so the link to one reads not checked and the note shows what holds that ID now, apart from the link. A body in a system found after the branches parted, or a fleet with no creation entry, reads not checked on another branch. A note is kept for this branch unless it is shared; another race or branch never lists it. Nothing here gives an order or writes the save.</div>
+            <div class="caption text--secondary mt-3" data-note-limits>Use it to judge whether a note still points at the object it was kept for. A note is checked against this save each time and is never moved to another object by its name: a rename keeps the link and shows the new name, and an object that has gone leaves the note stale with the name and system it had when the note was last kept. A colony and a designed tech have no date in the save and an ID can be given again, so the link to one reads not checked and the note shows what holds that ID now, apart from the link. A body in a system found after the branches parted, or a fleet with no creation entry, reads not checked on another branch. A note is kept for this branch unless it is shared; another race or branch never lists it. Nothing here gives an order or writes the save.</div>
           </div>
         </v-card>
 
@@ -284,7 +284,7 @@ export default {
     },
 
     caption() {
-      return this.entries.length ? `${this.entries.length} kept for this race` : 'Keep a plan about one object of the economy'
+      return this.entries.length ? `${this.entries.length} kept for the race` : 'Keep a plan about one object of the economy'
     },
 
     // The systems the race knows, for the body picker.

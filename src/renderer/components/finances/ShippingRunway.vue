@@ -184,7 +184,7 @@
       </v-simple-table>
       <div v-else class="caption text--secondary">No other use is logged in the window.</div>
 
-      <div class="caption text--secondary mt-3">The observed past rate of the treasury is the Stock rates panel of <router-link to="/history">Empire History</router-link>{{ historyRecorded ? '' : ', which is empty while history does not record this race' }}; it is not repeated here.</div>
+      <div class="caption text--secondary mt-3">The observed past rate of the treasury is the Stock rates panel of <router-link to="/history">Empire History</router-link>{{ historyRecorded ? '' : ', which is empty while history does not record the race' }}; it is not repeated here.</div>
     </div>
     <div class="panel-foot caption text--secondary">Compare each scenario with the no-change runway and non-shipping budget obligations. Each scenario keeps the window's rates constant from now on, replaces the civilian shipping flows as stated and keeps every other logged flow. Logged amounts remain separate from scenario estimates. The calculation uses the current tax rate because the save keeps no earlier rate. A rate change within the window therefore gives an incorrect split of logged contracts. Unlogged changes and the treasury cap of twice annual wealth are excluded, as shown in Treasury against the log. New contract fares come from the Civilian shipping-line payouts panel. Enter the running cost of government transports. They are not assumed to be free, and a blank cost gives no estimate. The spread shows how far the exhaustion moves with the window the rates are scaled from. It is not a probability.</div>
   </v-card>

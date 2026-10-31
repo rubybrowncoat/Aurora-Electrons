@@ -34,7 +34,7 @@
             <div class="panel-body">
               <div class="setting">
                 <div class="setting__text">
-                  <div class="body-2">{{ empireName || 'This empire' }}</div>
+                  <div class="body-2">{{ empireName || 'The race' }}</div>
                   <div class="caption text--secondary">{{ empireNote }}</div>
                 </div>
                 <v-btn outlined :disabled="!empireCount" @click="ask('empire')">Reset</v-btn>
@@ -47,7 +47,7 @@
                 <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Reset the remembered views to each page's defaults. Each page remembers its options, filters, searches, views, and each table's sort and rows per page. These are app-wide, except for what is about the empire's own things (its systems, colonies, fleets, a search over them), which is kept per empire. A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the number format and Computer-run empires, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
+            <div class="panel-foot caption text--secondary">Use it to reset the remembered views to each page's defaults. Each page remembers its options, filters, searches, views, and each table's sort and rows per page. These are app-wide, except for what is about the empire's own things (its systems, colonies, fleets, a search over them), which is kept per empire. A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the number format and Computer-run empires, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
           </v-card>
         </v-col>
       </v-row>
@@ -122,7 +122,7 @@
               </div>
               <font-choice class="setting setting--block" :config="config" @changed="reinstantiateConfig" />
             </div>
-            <div class="panel-foot caption text--secondary">The theme (Light, Dark or System) applies at once. System follows the operating system. A named preset replaces the theme until a theme is chosen again. The lamp in the app bar sets the opposite of the mode drawn now, so it ends System or a named preset too. The section accents apply at once and are kept whatever preset is chosen. The preset sample uses example data, and choosing a preset previews its colours throughout the app. Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply. A typeface that is not installed is shown as such, and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance, not an Aurora game file. A file is read whole and shown as a draft with the roles it left out and the contrast it measures. One that fails changes nothing. Every setting is kept in the settings file, and About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">Use it to try a preset or theme and return to a plain theme if it does not suit. The theme (Light, Dark or System) applies at once. System follows the operating system. A named preset replaces the theme until a theme is chosen again. The lamp in the app bar sets the opposite of the mode drawn now, so it ends System or a named preset too. The section accents apply at once and are kept whatever preset is chosen. The preset sample uses example data, and choosing a preset previews its colours throughout the app. Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply. A typeface that is not installed is shown as such, and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance, not an Aurora game file. A file is read whole and shown as a draft with the roles it left out and the contrast it measures. One that fails changes nothing. Every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
       </v-row>
@@ -197,7 +197,7 @@
                       <tbody>
                         <tr v-for="change in plan.changes" :key="change.fullKey">
                           <td><span class="transfer__field">{{ change.key }}</span></td>
-                          <td>{{ change.scope === 'race' ? 'This empire' : 'App-wide' }}</td>
+                          <td>{{ change.scope === 'race' ? 'The race' : 'App-wide' }}</td>
                           <td><span class="transfer__field">{{ shorten(change.old) }}</span></td>
                           <td><span class="transfer__field">{{ shorten(change.value) }}</span></td>
                         </tr>
@@ -212,7 +212,7 @@
                       <li v-for="item in plan.excluded" :key="item.id"><strong>{{ item.title }}.</strong> {{ item.reason }}</li>
                     </ul>
                   </div>
-                  <v-checkbox v-if="plan.needsConfirmation" v-model="confirmed" label="Import it into this empire anyway" dense hide-details class="mt-0" data-transfer-confirm />
+                  <v-checkbox v-if="plan.needsConfirmation" v-model="confirmed" label="Import it into the race anyway" dense hide-details class="mt-0" data-transfer-confirm />
                   <div class="presets__actions">
                     <v-btn small depressed color="primary" :disabled="!canImport" data-transfer-action="import" @click="runImport">Import {{ count(plan.changes.length) }} {{ valuesOf(plan.changes.length) }}</v-btn>
                     <v-btn small outlined data-transfer-action="cancel-import" @click="cancelImport">Cancel</v-btn>
@@ -235,7 +235,7 @@
                 <v-btn outlined data-transfer-action="undo" @click="undo">Undo</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">A file holds only the categories chosen, as the app stores them, and nothing of the save. Values about one empire travel without its game and empire ids and are written to the empire picked here. Values the file does not hold stay as they are. The whole file is checked before anything is written, so an unknown key, or a value the page would not accept, rejects it and names the field. One undo is kept, in a file of its own beside the settings, and the next import replaces it. Empire History, Warnings mutes and exclusions, what was new at the last visit, local scenarios and save paths are never exported or imported.</div>
+            <div class="panel-foot caption text--secondary">Use it to carry preferences to another copy of the app or another empire and to undo an import. A file holds only the categories chosen, as the app stores them, and nothing of the save. Values about one empire travel without its game and empire ids and are written to the empire picked here. Values the file does not hold stay as they are. The whole file is checked before anything is written, so an unknown key, or a value the page would not accept, rejects it and names the field. One undo is kept, in a file of its own beside the settings, and the next import replaces it. Empire History, Warnings mutes and exclusions, what was new at the last visit, local scenarios and save paths are never exported or imported.</div>
           </v-card>
         </v-col>
       </v-row>
@@ -552,11 +552,11 @@ export default {
     },
 
     exportNote() {
-      return this.RaceID ? `Saves the selected categories, as stored for ${this.empireName || 'this empire'}, to a JSON file.` : 'No empire is picked, so only the app-wide values are saved to the JSON file.'
+      return this.RaceID ? `Saves the selected categories, as stored for ${this.empireName || 'the race'}, to a JSON file.` : 'No empire is picked, so only the app-wide values are saved to the JSON file.'
     },
 
     importNote() {
-      return this.RaceID ? `Reads a file and shows every change before anything is written. Empire values go to ${this.empireName || 'this empire'}.` : 'Reads a file and shows every change before anything is written. Pick an empire to import its empire values.'
+      return this.RaceID ? `Reads a file and shows every change before anything is written. Empire values go to ${this.empireName || 'the race'}.` : 'Reads a file and shows every change before anything is written. Pick an empire to import its empire values.'
     },
 
     shownErrors() {
@@ -590,7 +590,7 @@ export default {
     },
 
     targetText() {
-      return this.RaceID ? `${this.empireName || 'this empire'} (empire ${this.RaceID}) of ${this.target.gameName || 'a campaign'} (game ${this.GameID})` : 'no empire picked'
+      return this.RaceID ? `${this.empireName || 'the race'} (empire ${this.RaceID}) of ${this.target.gameName || 'a campaign'} (game ${this.GameID})` : 'no empire picked'
     },
 
     nothingNote() {
@@ -792,7 +792,7 @@ export default {
     },
 
     ask(scope) {
-      this.pending = scope === 'empire' ? { scope, title: `Reset what ${this.empireName || 'this empire'}'s pages remember?`, text: `${this.count(this.empireCount)} ${values(this.empireCount)} go back to each page's defaults. The app-wide views and the other empires' stay.` } : { scope, title: 'Reset every remembered view?', text: `${this.count(this.totalCount)} ${values(this.totalCount)} go back to each page's defaults, for every empire and app-wide. The Display settings, the number format and Computer-run empires, mutes, pinned systems and clusters stay.` }
+      this.pending = scope === 'empire' ? { scope, title: `Reset what ${this.empireName || 'the race'}'s pages remember?`, text: `${this.count(this.empireCount)} ${values(this.empireCount)} go back to each page's defaults. The app-wide views and the other empires' stay.` } : { scope, title: 'Reset every remembered view?', text: `${this.count(this.totalCount)} ${values(this.totalCount)} go back to each page's defaults, for every empire and app-wide. The Display settings, the number format and Computer-run empires, mutes, pinned systems and clusters stay.` }
     },
 
     reset() {

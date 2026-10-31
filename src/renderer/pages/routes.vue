@@ -63,7 +63,7 @@
         <v-row>
           <v-col cols="12" lg="5" xl="4">
             <stop-list :rows="stopRows" :cycle="cycle" :groups="pickerGroups" @insert="insertStop" @replace="replaceStop" @remove="removeStop" @move="moveStop" @need="ensureLarge" @update:cycle="(value) => (cycle = value)">
-              <template #foot>Each leg is routed on its own over the jump points the race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Each leg leaves when the one before arrives, and a body it reaches (an independent asteroid, a moon, a trojan, or an eccentric orbit within one orbit of the last body update) is where it will be on arrival, so a later leg leaves from that position; the static figure beside it holds every body where the save has it. Every other place is held at its saved position, and the positions listed above say why. The positions the distances rest on, and how old they are, are listed under the figures above.</template>
+              <template #foot>Use it to add, replace, remove and reorder the places the route visits. Each leg is routed on its own over the jump points the race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Each leg leaves when the one before arrives, and a body it reaches (an independent asteroid, a moon, a trojan, or an eccentric orbit within one orbit of the last body update) is where it will be on arrival, so a later leg leaves from that position; the static figure beside it holds every body where the save has it. Every other place is held at its saved position, and the positions listed above say why. The positions the distances rest on, and how old they are, are listed under the figures above.</template>
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
@@ -124,8 +124,7 @@
               <span v-else class="text-no-wrap">{{ timeText(item.total) }}</span><provenance-mark :result="item.timeResult" />
             </template>
           </v-data-table>
-          <div v-if="plan.time && plan.time.startDelay > 0" class="panel-foot caption text--secondary" data-start-offset>The fleet starts with <span data-part="offset">{{ span(plan.time.startDelay) }}</span> of jump shock left from a jump just made, which the first jump waits out.</div>
-          <div class="panel-foot caption text--secondary">Times are flying {{ speedText }}, counted from the first stop. {{ shockFoot }}<provenance-mark :result="speedResult" /></div>
+          <div class="panel-foot caption text--secondary">Use it to judge how long each leg takes and where the fleet waits. <span v-if="plan.time && plan.time.startDelay > 0" data-start-offset>The fleet starts with <span data-part="offset">{{ span(plan.time.startDelay) }}</span> of jump shock left from a jump just made, which the first jump waits out.</span> Times are flying {{ speedText }}, counted from the first stop. {{ shockFoot }}<provenance-mark :result="speedResult" /></div>
         </v-card>
 
         <v-card class="panel" data-summary="Compare explored-route distances, jumps and travel times from the first stop to every known system." elevation="1" data-distance-panel>
@@ -149,7 +148,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            To a system, routes end at the jump point they arrive through; from a system, they start at its centre, as the galactic map measures. Only jump points the race has explored are used. Click a row to add that system as the last stop.
+            Use it to pick the next stop by its distance and travel time. To a system, routes end at the jump point they arrive through; from a system, they start at its centre, as the galactic map measures. Only jump points the race has explored are used. Click a row to add that system as the last stop.
           </div>
         </v-card>
       </template>

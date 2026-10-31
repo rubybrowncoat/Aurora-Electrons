@@ -81,7 +81,7 @@
       <div v-if="view.notes.length" class="px-4 caption text--secondary" data-recovery-notes>{{ view.notes.length }} {{ view.notes.length === 1 ? 'status' : 'statuses' }} written by another version of the app or not valid {{ view.notes.length === 1 ? 'is' : 'are' }} not listed.</div>
 
       <div class="px-4 py-3 caption text--secondary" data-recovery-foot>
-        Use it to keep track of what is worth a recovery. A status is the player's own note for this race on this branch: it gives the game no order and changes nothing in the save. The statuses are pending (none kept), acknowledged and a personal recovery. An object that is no longer in the save is listed as no longer observed, with its status as it was kept. The save does not say why it is gone, so no outcome is assumed, and the same ID and details seen again are the same object again. What a wreck holds and how long a pod's life support lasts are not shown; a field the race cannot see is shown as Unknown. {{ observationRule }}
+        Use it to keep track of what is worth a recovery. A status is the player's own note for the race on this branch: it gives the game no order and changes nothing in the save. The statuses are pending (none kept), acknowledged and a personal recovery. An object that is no longer in the save is listed as no longer observed, with its status as it was kept. The save does not say why it is gone, so no outcome is assumed, and the same ID and details seen again are the same object again. What a wreck holds and how long a pod's life support lasts are not shown; a field the race cannot see is shown as Unknown. {{ observationRule }}
       </div>
     </template>
   </v-card>

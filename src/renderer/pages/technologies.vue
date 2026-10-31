@@ -18,7 +18,7 @@
 
       <template v-if="research">
         <v-alert v-if="startPointsResult.value > 0" type="info" outlined dense class="mt-3">
-          This empire has {{ count(startPointsResult.value) }} starting tech points left. The game's Research tab can spend them on techs instantly.<provenance-mark :result="startPointsResult" />
+          The race has {{ count(startPointsResult.value) }} starting tech points left. The game's Research tab can spend them on techs instantly.<provenance-mark :result="startPointsResult" />
         </v-alert>
         <v-alert v-else-if="!startPointsKnown" type="warning" outlined dense class="mt-3">
           The starting tech points left are not stored, so whether any can be spent is unknown.<provenance-mark :result="startPointsResult" />
@@ -268,7 +268,7 @@ export default {
       const nothing = next.unknown ? `${this.count(next.unknown)} ${plural(next.unknown, 'project has', 'projects have')} no landing time${next.causes.length ? `, missing ${next.causes.join(', ')}` : ''}` : schedule.length ? 'Every project is paused or has no scientist or rate' : 'No research project is under way'
 
       return [
-        tile({ label: 'Researched', value: `${this.count(done.done.value)} of ${this.count(done.reachable.value)}`, note: `${share}${isAvailable(done.share) ? ' of what this empire can research' : ': nothing is reachable to measure against'}${counts[BLOCKED] ? `, ${this.count(counts[BLOCKED])} more out of reach` : ''}`, icon: 'mdi-check-circle', iconColor: 'primary' }, done.done, done.share),
+        tile({ label: 'Researched', value: `${this.count(done.done.value)} of ${this.count(done.reachable.value)}`, note: `${share}${isAvailable(done.share) ? ' of what the race can research' : ': nothing is reachable to measure against'}${counts[BLOCKED] ? `, ${this.count(counts[BLOCKED])} more out of reach` : ''}`, icon: 'mdi-check-circle', iconColor: 'primary' }, done.done, done.share),
         tile({ label: 'Research output', value: isAvailable(output.result) ? `${this.count(output.result.value)} RP a year` : '—', note: `${this.count(output.projects)} ${plural(output.projects, 'project', 'projects')}${unrated}, ${busy} of ${built} labs busy${idleText}${overText}`, icon: idle ? 'mdi-alert' : null, iconColor: 'warning' }, output.result, labs.assigned, labs.built, labs.idle),
         next.project ? tile({ label: 'Next to land', value: next.project.Name, note: isAvailable(next.result) ? `${landing}${next.unknown ? `; ${this.count(next.unknown)} ${plural(next.unknown, 'project', 'projects')} with no landing time could land first` : ''}` : `Landing date unavailable: ${next.result.inputs.missing.join(', ')}` }, next.result) : tile({ label: 'Next to land', value: next.unknown ? '—' : 'Nothing running', note: nothing }, next.result),
         tile({ label: 'Available now', value: `${this.count(availableResult(counts).value)} ${plural(counts[AVAILABLE], 'technology', 'technologies')}`, note: `${this.count(freeScientistsResult(this.scientists).value)} free ${plural(scientists.total, 'scientist', 'scientists')} to run them` }, availableResult(counts), freeScientistsResult(this.scientists)),

@@ -2068,7 +2068,7 @@ const PAGE_FAULTS = [
 const EQUIVALENT_PANEL = chain(
   swapText('@change="(value) => $emit(\'window\', value)"', 'v-on:input="(value) => $emit(\'window\', value)"'),
   swapText('item-text="text"', ':item-text="(entry) => entry.text"'),
-  swapText('Reading the log for this race.', 'The log of this race is being read.'),
+  swapText('Reading the log for the race.', 'The log of the race is being read.'),
   swapText('v-if="diagnosis.verdict === \'found\'"', 'v-if="(diagnosis.verdict === \'found\')"'),
   swapText('Event types watched', 'Watched event types'),
   swapText('<div class="diagnostic-verdict" data-verdict-text>', '<div class="diagnostic-verdict" data-verdict-text style="opacity: 1">'),

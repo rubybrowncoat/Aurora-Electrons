@@ -9,7 +9,7 @@
       <template v-else>
         <v-alert v-if="view.error" type="warning" outlined dense data-colony-error>The colonies followed could not be read from the settings: {{ view.error }}.</v-alert>
 
-        <div class="history-colonies__row"><span class="history-colonies__label">Followed</span><span class="history-colonies__value" data-colony-followed>{{ count(view.followed) }} of at most {{ count(limit) }} for this race<template v-if="view.dropped"> ({{ count(view.dropped) }} dropped, their record is kept)</template></span></div>
+        <div class="history-colonies__row"><span class="history-colonies__label">Followed</span><span class="history-colonies__value" data-colony-followed>{{ count(view.followed) }} of at most {{ count(limit) }} for the race<template v-if="view.dropped"> ({{ count(view.dropped) }} dropped, their record is kept)</template></span></div>
         <div class="history-colonies__row"><span class="history-colonies__label">Size, estimated</span><span class="history-colonies__value" data-colony-estimate>{{ estimateText() }}</span></div>
         <div class="history-colonies__row"><span class="history-colonies__label">Size, measured</span><span class="history-colonies__value" data-colony-measured>{{ measuredText() }}</span></div>
 
@@ -32,7 +32,7 @@
         </div>
 
         <div v-if="message" class="caption mt-2" data-colony-message>{{ message }}</div>
-        <div class="caption text--secondary mt-2" data-colony-limits>Following starts with the open save and records one reading for each save read after it while the app is open, including the colony's population, installations and stockpiles. Nothing is kept for a colony until it is chosen, and the size of the record is estimated before choosing. A save that was not read leaves its interval unobserved, and nothing is filled in for it. A colony that left the save or changed hands is shown as gone, one held by another race or on another body as not the colony that was chosen, and one that could not be read as not read. None of them is a zero. Stopping keeps what was recorded and adds nothing after it. Each branch keeps its own record, seeded from the branch it forked from up to the fork and never merged. Saves are only read, never changed.</div>
+        <div class="caption text--secondary mt-2" data-colony-limits>Use it to choose which colonies to follow and to see what recording them costs. Following starts with the open save and records one reading for each save read after it while the app is open, including the colony's population, installations and stockpiles. Nothing is kept for a colony until it is chosen, and the size of the record is estimated before choosing. A save that was not read leaves its interval unobserved, and nothing is filled in for it. A colony that left the save or changed hands is shown as gone, one held by another race or on another body as not the colony that was chosen, and one that could not be read as not read. None of them is a zero. Stopping keeps what was recorded and adds nothing after it. Each branch keeps its own record, seeded from the branch it forked from up to the fork and never merged. Saves are only read, never changed.</div>
       </template>
     </div>
   </v-card>
@@ -166,7 +166,7 @@ export default {
     measuredText() {
       const view = this.view
 
-      return view.measured === null ? 'None recorded yet on this branch.' : `${this.size(view.measured)} for this race's colony series on this branch, in ${this.count(view.snapshots)} snapshots. Measured as compact JSON; the file on disk is larger by its indentation.`
+      return view.measured === null ? 'None recorded yet on this branch.' : `${this.size(view.measured)} for the race's colony series on this branch, in ${this.count(view.snapshots)} snapshots. Measured as compact JSON; the file on disk is larger by its indentation.`
     },
     entryText(entry, followed, absent) {
       if (!entry) {

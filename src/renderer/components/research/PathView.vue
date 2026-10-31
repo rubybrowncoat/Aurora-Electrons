@@ -43,7 +43,7 @@
         </span>
       </div>
       <div ref="graph" class="graph" role="img" :aria-label="`Prerequisites of ${tech.name}`" />
-      <div class="panel-foot caption text--secondary">An arrow runs from a prerequisite to what it unlocks. The leftmost researched boxes are those the race already holds; click any box to look at that technology. Scroll to zoom, drag to move.</div>
+      <div class="panel-foot caption text--secondary">Use it to find which prerequisites are still missing and to open any of them. An arrow runs from a prerequisite to what it unlocks. The leftmost researched boxes are those the race already holds; click any box to look at that technology. Scroll to zoom, drag to move.</div>
     </v-card>
 
     <v-row v-if="tech">
@@ -52,7 +52,7 @@
           <div class="panel-head"><span>{{ order.length > 1 ? 'Research in this order' : 'Nothing else needed' }}</span></div>
           <div class="panel-body">
             <div v-if="entry.status === 'done'" class="empty">Already researched.</div>
-            <div v-else-if="entry.status === 'blocked'" class="empty">Out of reach for this empire, so no order gets there.</div>
+            <div v-else-if="entry.status === 'blocked'" class="empty">Out of reach for the race, so no order gets there.</div>
             <ol v-else class="steps">
               <li v-for="step in order" :key="step.id" class="step">
                 <v-icon small :color="colors[step.status]">{{ icons[step.status] }}</v-icon>

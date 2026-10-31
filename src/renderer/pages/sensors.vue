@@ -131,7 +131,7 @@
               </template>
             </div>
           </div>
-          <div class="panel-foot caption text--secondary">The size and the range are those the Missile Designer evaluated, with the range being the wanted range of the sizing. A saved missile is checked against the save and keeps the detection rule's own status while its stored size and range are the ones handed over. A candidate, a hypothetical or typed tech level, or a saved missile that changed since is marked assumed in every figure the target feeds. The signature and resolution are the scenario of the Missile Designer. The jammer is listed as carried but is not applied. A missile target takes no jammer, so the sizing does not read it, and the jammer typed in the toolbar is left as it was. Editing a sizing input ends the handover.</div>
+          <div class="panel-foot caption text--secondary">Use it to check that the sizing below starts from the missile and scenario intended. The size and the range are those the Missile Designer evaluated, with the range being the wanted range of the sizing. A saved missile is checked against the save and keeps the detection rule's own status while its stored size and range are the ones handed over. A candidate, a hypothetical or typed tech level, or a saved missile that changed since is marked assumed in every figure the target feeds. The signature and resolution are the scenario of the Missile Designer. The jammer is listed as carried but is not applied. A missile target takes no jammer, so the sizing does not read it, and the jammer typed in the toolbar is left as it was. Editing a sizing input ends the handover.</div>
         </v-card>
 
         <template v-if="mode === 'passive'">
@@ -187,7 +187,7 @@
               <template #[`item.reachUncloaked`]="{ item }"><span class="text-no-wrap" data-sensors="reach-active-uncloaked">{{ shown(item.reach.uncloaked, 2, MILLION) }}</span><provenance-mark :result="item.reach.uncloaked" /></template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              At rest a class shows a twentieth of its size in HS as thermal signature; moving, it shows the larger of that and the engines' summed power times thermal rating times the share of top speed. The sum is compared with the signature the save stores for the class, and a warning icon names a stored figure the rule does not reproduce. The cross-section is the one the save stores; where the save stores none, it is the class size times the rating of the last cloak that fits the class, never under 0.3, and an active sensor sees the size instead when the cloak is damaged. EM is estimated from the shield strength and the active sensors switched on, since the saves store no emission. The enemy figures are typed assumptions: a blank one is unknown and never 0, and nothing of another empire is read from the save. The EM figure assumes shields at full strength and the thermal figure comes from the class's engines at the chosen share, so shields below full strength, damaged engines, overhaul, towing and nebulae change the real figures; a hypothetical cloak is not sized here. <div class="mt-2">The speed shares are percentages of top speed typed in the toolbar, separated by commas; idle and full speed are always shown beside them.</div>
+              Use it to decide which class to hide with a cloak, a quieter engine or a slower cruise. At rest a class shows a twentieth of its size in HS as thermal signature; moving, it shows the larger of that and the engines' summed power times thermal rating times the share of top speed. The sum is compared with the signature the save stores for the class, and a warning icon names a stored figure the rule does not reproduce. The cross-section is the one the save stores; where the save stores none, it is the class size times the rating of the last cloak that fits the class, never under 0.3, and an active sensor sees the size instead when the cloak is damaged. EM is estimated from the shield strength and the active sensors switched on, since the saves store no emission. The enemy figures are typed assumptions: a blank one is unknown and never 0, and nothing of another empire is read from the save. The EM figure assumes shields at full strength and the thermal figure comes from the class's engines at the chosen share, so shields below full strength, damaged engines, overhaul, towing and nebulae change the real figures; a hypothetical cloak is not sized here. <div class="mt-2">The speed shares are percentages of top speed typed in the toolbar, separated by commas; idle and full speed are always shown beside them.</div>
             </div>
           </v-card>
 
@@ -226,7 +226,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">The share is the part of top speed the fleet moves at. Idle, with no move orders, is the floor of a twentieth of the class size, and a share too low to rise above the floor shows the floor. A class with no engine shows the floor at rest and 0 when it moves. The reach is that of a passive thermal sensor of the typed sensitivity against each signature; with no sensitivity typed the reach is unknown, and the table says so. The chart and the table list the same points.</div>
+            <div class="panel-foot caption text--secondary">Use it to pick a cruise speed that keeps the class out of an enemy sensor's reach. The share is the part of top speed the fleet moves at. Idle, with no move orders, is the floor of a twentieth of the class size, and a share too low to rise above the floor shows the floor. A class with no engine shows the floor at rest and 0 when it moves. The reach is that of a passive thermal sensor of the typed sensitivity against each signature; with no sensitivity typed the reach is unknown, and the table says so. The chart and the table list the same points.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare passive thermal and EM detection ranges for the entered target signatures." elevation="1">
@@ -269,7 +269,7 @@
                 </v-simple-table>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">A passive sensor detects a target out to 250,000 km times the square root of its sensitivity times the target's signature, so four times the sensitivity doubles the range. A sensor size typed in the toolbar adds a proposed thermal and an EM sensor of that size at the levels in use, ahead of the rest, and a hypothetical level marks its ranges. The sensors are the thermal and EM designs the race has researched, strongest first; the chart draws the strongest eight of each kind and the typed enemy sensor, and the table holds the rest. The number fitted to a ship does not add, and a target's cloak and jammer do not change a passive range. The target signatures and the enemy sensitivity are typed, in the game's thermal or EM figures, and are assumed. The axes are logarithmic.</div>
+            <div class="panel-foot caption text--secondary">Use it to decide what size of passive sensor a target of a given signature calls for. A passive sensor detects a target out to 250,000 km times the square root of its sensitivity times the target's signature, so four times the sensitivity doubles the range. A sensor size typed in the toolbar adds a proposed thermal and an EM sensor of that size at the levels in use, ahead of the rest, and a hypothetical level marks its ranges. The sensors are the thermal and EM designs the race has researched, strongest first; the chart draws the strongest eight of each kind and the typed enemy sensor, and the table holds the rest. The number fitted to a ship does not add, and a target's cloak and jammer do not change a passive range. The target signatures and the enemy sensitivity are typed, in the game's thermal or EM figures, and are assumed. The axes are logarithmic.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare engine cost and thermal signature when the selected class is redesigned at each researched thermal reduction level." elevation="1">
@@ -303,7 +303,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">Each engine of the class is designed again from its own engine and fuel techs at the level's multiplier, which is the share of the engine's power that shows as heat. The cost factor is read from the level's tech and multiplies the engine's BP only when the multiplier is under 1. The thermal signature at a share is worked out as in the signatures panel from the engines at that level. The current level is the one every engine of the class was designed at. An engine whose tech rows are missing leaves the level unavailable, naming them.</div>
+            <div class="panel-foot caption text--secondary">Use it to weigh the cost of a quieter engine against the signature it saves. Each engine of the class is designed again from its own engine and fuel techs at the level's multiplier, which is the share of the engine's power that shows as heat. The cost factor is read from the level's tech and multiplies the engine's BP only when the multiplier is under 1. The thermal signature at a share is worked out as in the signatures panel from the engines at that level. The current level is the one every engine of the class was designed at. An engine whose tech rows are missing leaves the level unavailable, naming them.</div>
           </v-card>
         </template>
 
@@ -318,7 +318,7 @@
               <active-sizing-panel :scenarios="sizingScenarios" />
             </div>
             <div class="panel-foot caption text--secondary">
-              <div>The best resolution is the pair with the lowest BP, then the smaller HS. When no cost is known, the smallest pair is best. A size beyond the largest legal one is reported as such, never as 0.</div> <div class="mt-2">The cross-section of a typed size is the size over 50 t per HS, never under 0.3 HS. A missile is seen by its size over 20 MSP per HS, never under 0.3 HS, by the search sensor, and by its size in MSP, never under 0.33, by the missile fire control. No jammer applies to a missile, so the Jammer figure is not applied to a missile target. A class with a working cloak has a second table with the cloak damaged. A hypothetical tech level is marked assumed in every figure that reads it.</div>
+              <div>Use it to decide whether to build at the best resolution or at another that suits the hull. The best resolution is the pair with the lowest BP, then the smaller HS. When no cost is known, the smallest pair is best. A size beyond the largest legal one is reported as such, never as 0.</div> <div class="mt-2">The cross-section of a typed size is the size over 50 t per HS, never under 0.3 HS. A missile is seen by its size over 20 MSP per HS, never under 0.3 HS, by the search sensor, and by its size in MSP, never under 0.33, by the missile fire control. No jammer applies to a missile, so the Jammer figure is not applied to a missile target. A class with a working cloak has a second table with the cloak damaged. A hypothetical tech level is marked assumed in every figure that reads it.</div>
             </div>
           </v-card>
 
@@ -357,7 +357,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">The curve is the effective range of each sensor against a target of each size, at the sensor's own resolution and ECCM and against the jammer typed in the toolbar. A target size is typed and assumed; the cross-section is the size over 50 t per HS, never under 0.3 HS. A sensor with no stored range or resolution has no point, never 0. The proposed pair comes first, then the saved sensors; the chart draws the first eight and the table lists all. The chart and the table hold the same points.</div>
+            <div class="panel-foot caption text--secondary">Use it to find how small a target each sensor can still pick up. The curve is the effective range of each sensor against a target of each size, at the sensor's own resolution and ECCM and against the jammer typed in the toolbar. A target size is typed and assumed; the cross-section is the size over 50 t per HS, never under 0.3 HS. A sensor with no stored range or resolution has no point, never 0. The proposed pair comes first, then the saved sensors; the chart draws the first eight and the table lists all. The chart and the table hold the same points.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare a saved search sensor and missile fire control against the target with the best replacement pair to design." elevation="1">
@@ -403,7 +403,7 @@
                 <div v-else class="caption text--secondary mt-3" data-sensors="pair-no-alternative">No pair of legal sizes reaches the range, so none is proposed.</div>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each member is measured at its stored range, resolution and ECCM against the target and the jammer. A missile target takes no jammer. The pair reaches as far as the shorter member. A search sensor that falls short limits the pair whatever the fire control reaches, and the reverse. When both fall short, the member that reaches less is named. The pair to design instead is the best one at the saved resolution of the search sensor when one reaches the range, else the best overall.</div>
+            <div class="panel-foot caption text--secondary">Use it to judge whether a saved pair is worth keeping and which member falls short. Each member is measured at its stored range, resolution and ECCM against the target and the jammer. A missile target takes no jammer. The pair reaches as far as the shorter member. A search sensor that falls short limits the pair whatever the fire control reaches, and the reverse. When both fall short, the member that reaches less is named. The pair to design instead is the best one at the saved resolution of the search sensor when one reaches the range, else the best overall.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare the proposed pair's cost and ability to reach the target range against the jammer at each hardening and ECCM level." elevation="1">
@@ -437,7 +437,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">The sizes stay those of the proposed pair at the chosen resolution. The levels change the cost and the ECCM the pair meets the jammer with. Hardening sets the Uridium of the sensor, and ECCM sets the Corbomite on top of it. The tinted row is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair. A missile target takes no jammer, so the ECCM changes no reach against it.</div>
+            <div class="panel-foot caption text--secondary">Use it to choose the hardening and ECCM levels a jammed target calls for. The sizes stay those of the proposed pair at the chosen resolution. The levels change the cost and the ECCM the pair meets the jammer with. Hardening sets the Uridium of the sensor, and ECCM sets the Corbomite on top of it. The tinted row is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair. A missile target takes no jammer, so the ECCM changes no reach against it.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Review researched active sensors and missile fire controls, with their stored figures and detection ranges." elevation="1">
@@ -461,7 +461,7 @@
                 <span :key="scenario.key" class="text-no-wrap" :data-sensors="`existing-reach-${scenario.key}`">{{ shown(item.reaches.find((entry) => entry.key === scenario.key).reach, 3, MILLION) }}</span><provenance-mark :key="`${scenario.key}-mark`" :result="item.reaches.find((entry) => entry.key === scenario.key).reach" />
               </template>
             </v-data-table>
-            <div class="panel-foot caption text--secondary">The figures are as the save stores them. The reach is the stored range cut by the resolution against the target and, for a ship, shortened by the jammer over the ECCM, so a design the stored figures do not give a reach for shows Unknown. A missile target takes no jammer. A missile fire control reaches as far as its own stored range. The links open the design in Designed Tech and its research in the Tech Tree.</div>
+            <div class="panel-foot caption text--secondary">Use it to find an existing design that already reaches the target. The figures are as the save stores them. The reach is the stored range cut by the resolution against the target and, for a ship, shortened by the jammer over the ECCM, so a design the stored figures do not give a reach for shows Unknown. A missile target takes no jammer. A missile fire control reaches as far as its own stored range. The links open the design in Designed Tech and its research in the Tech Tree.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare the proposed pair's detection range against each class with its cloak working and damaged." elevation="1">
@@ -492,7 +492,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">Each class is seen at its cross-section: the class size times the rating of the last cloak that fits, never under 0.3 HS, and the size alone where the cloak is damaged. The reach is that of the proposed search sensor and missile fire control at the chosen resolution, against the jammer typed in the toolbar. A class with no known cross-section shows Unknown.</div>
+            <div class="panel-foot caption text--secondary">Use it to judge which classes rely on a working cloak to stay out of the proposed pair's reach. Each class is seen at its cross-section: the class size times the rating of the last cloak that fits, never under 0.3 HS, and the size alone where the cloak is damaged. The reach is that of the proposed search sensor and missile fire control at the chosen resolution, against the jammer typed in the toolbar. A class with no known cross-section shows Unknown.</div>
           </v-card>
         </template>
 
@@ -525,7 +525,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">The range of a beam fire control is its range multiplier times the distance rating, never above 1,400,000 km, and its tracking speed is its tracking multiplier times the speed rating. The two are sized separately, each at the smallest legal multiplier that reaches what is wanted; a range above the cap is reported as beyond it, not as met. A single weapon control is offered only where the race has researched or hypothetically chose the single weapon tech, and the restriction in the heading says which kind is sized: an unrestricted control is never taken for a single weapon one.</div>
+            <div class="panel-foot caption text--secondary">Use it to see whether a wanted range and tracking speed are within reach of a beam fire control, and at what multipliers. The range of a beam fire control is its range multiplier times the distance rating, never above 1,400,000 km, and its tracking speed is its tracking multiplier times the speed rating. The two are sized separately, each at the smallest legal multiplier that reaches what is wanted; a range above the cap is reported as beyond it, not as met. A single weapon control is offered only where the race has researched or hypothetically chose the single weapon tech, and the restriction in the heading says which kind is sized: an unrestricted control is never taken for a single weapon one.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare beam fire controls at each combination of range and tracking multipliers." elevation="1">
@@ -563,7 +563,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">Each row designs the fire control at the two multipliers from the distance and speed ratings, the weapon number of the restriction and the hardening and ECCM levels in use. A row whose range multiplier takes the range past the cap of 1,400,000 km is flagged: the range stays at the cap and the rest of the multiplier only adds size and cost. A figure the tech lines do not give shows Unknown, naming the line.</div>
+            <div class="panel-foot caption text--secondary">Use it to choose the multipliers that give the range and tracking speed wanted without more size and cost than needed. Each row designs the fire control at the two multipliers from the distance and speed ratings, the weapon number of the restriction and the hardening and ECCM levels in use. A row whose range multiplier takes the range past the cap of 1,400,000 km is flagged: the range stays at the cap and the rest of the multiplier only adds size and cost. A figure the tech lines do not give shows Unknown, naming the line.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Compare researched beam fire controls' stored range and tracking speed with the requirements." elevation="1">
@@ -585,7 +585,7 @@
               <template #[`item.meets`]="{ item }">{{ meetsText(item.meets) }}</template>
               <template #[`item.limiting`]="{ item }">{{ limitingText(item) }}</template>
             </v-data-table>
-            <div class="panel-foot caption text--secondary">The range and the tracking speed are as the save stores them, each held to the wanted one on its own. A stored range above the cap of 1,400,000 km that designing allows (a control made outside the game's design window) is marked Above cap and kept as stored, not cut to the cap: a shot is held to the stored range, so the verdict uses it as it is. A control that meets both is marked as meeting; one that falls short names the axis that limits it, range, tracking speed or both. With no range or tracking speed typed the answer is Unknown. The links open the design in Designed Tech.</div>
+            <div class="panel-foot caption text--secondary">Use it to find a researched beam fire control that already meets the requirement and to see which axis limits one that does not. The range and the tracking speed are as the save stores them, each held to the wanted one on its own. A stored range above the cap of 1,400,000 km that designing allows (a control made outside the game's design window) is marked Above cap and kept as stored, not cut to the cap: a shot is held to the stored range, so the verdict uses it as it is. A control that meets both is marked as meeting; one that falls short names the axis that limits it, range, tracking speed or both. With no range or tracking speed typed the answer is Unknown. The links open the design in Designed Tech.</div>
           </v-card>
         </template>
       </template>

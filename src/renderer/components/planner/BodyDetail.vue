@@ -156,7 +156,7 @@
           Minerals
           <page-link v-if="deposits.length" class="ml-2" :to="mineralsLink" :name="bodyName" />
         </div>
-        <div v-if="!item.row.minerals.surveyed" class="text--secondary">Not surveyed by this race yet. Ground survey potential: {{ groundSurvey }}.</div>
+        <div v-if="!item.row.minerals.surveyed" class="text--secondary">Not surveyed by the race yet. Ground survey potential: {{ groundSurvey }}.</div>
         <div v-else-if="!deposits.length" class="text--secondary">The survey found nothing on this body.</div>
         <div v-else class="d-flex flex-wrap">
           <v-chip v-for="deposit in deposits" :key="deposit.id" small label outlined class="mr-2 mb-2" :class="{ 'text--disabled': deposit.value !== null && deposit.value <= 0 }">

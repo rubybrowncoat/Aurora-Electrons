@@ -40,7 +40,7 @@
 
       <v-row dense>
         <v-col cols="12" md="4">
-          <v-autocomplete :value="selected" :items="saved" item-text="name" item-value="uuid" label="Saved brief" dense outlined clearable hide-details="auto" :no-data-text="'No brief saved for this race yet.'" data-brief="select" @change="(value) => $emit('select', value)" />
+          <v-autocomplete :value="selected" :items="saved" item-text="name" item-value="uuid" label="Saved brief" dense outlined clearable hide-details="auto" :no-data-text="'No brief saved for the race yet.'" data-brief="select" @change="(value) => $emit('select', value)" />
         </v-col>
         <v-col cols="12" md="4">
           <v-text-field :value="draft.name" label="Name" dense outlined hide-details="auto" :counter="nameLength" :error-messages="nameError" data-brief="name" @input="(value) => $emit('field', 'name', value)" />
@@ -168,7 +168,7 @@
     </div>
 
     <div class="panel-foot caption text--secondary">
-      Every alternative is judged against the limits. Each limit shows pass, fail or unknown, with the figure found, the figure required and the reason. Requirements decide the verdict: meets if every one passes, open if none fails and one is unknown, or fails if one fails. Preferences rank the alternatives within a verdict and are never added up. A preset fills the fields with a starting point to edit. A ship size of 50 tons is 1 HS. A cargo hold stores 50 tons for each HS of its size, and a hangar holds ships by their HS. A propulsion set is engines and tanks over a hull, so its cargo, hangar and deployment are unknown. A saved class gives them as the save stores them. The presets are guidance, not game rules. A brief is kept for the race on every branch of the campaign.
+      Use it to read why an alternative meets, stays open or fails the brief. Every alternative is judged against the limits. Each limit shows pass, fail or unknown, with the figure found, the figure required and the reason. Requirements decide the verdict: meets if every one passes, open if none fails and one is unknown, or fails if one fails. Preferences rank the alternatives within a verdict and are never added up. A preset fills the fields with a starting point to edit. A ship size of 50 tons is 1 HS. A cargo hold stores 50 tons for each HS of its size, and a hangar holds ships by their HS. A propulsion set is engines and tanks over a hull, so its cargo, hangar and deployment are unknown. A saved class gives them as the save stores them. The presets are guidance, not game rules. A brief is kept for the race on every branch of the campaign.
     </div>
   </v-card>
 </template>

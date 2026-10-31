@@ -6,7 +6,7 @@
     </div>
 
     <div v-show="!folded" id="diagnostic-content">
-      <div v-if="pending" class="pa-4 text--secondary" data-diagnostic-pending role="status">Reading the log for this race.</div>
+      <div v-if="pending" class="pa-4 text--secondary" data-diagnostic-pending role="status">Reading the log for the race.</div>
       <div v-else-if="!diagnosis" class="pa-4 text--secondary" data-diagnostic-none role="status">No window can be placed: the open save gives no game time.</div>
       <div v-else class="diagnostic-body">
         <div class="diagnostic-window-line" data-window-line>

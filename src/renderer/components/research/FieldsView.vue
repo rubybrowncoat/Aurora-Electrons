@@ -156,7 +156,7 @@
               <span class="panel-title">Out of reach <span class="panel-count">{{ group.blocked.length }}</span></span>
             </v-expansion-panel-header>
             <v-expansion-panel-content>
-              <div class="caption text--secondary mb-2">Techs this empire has no way to research: found only in ruins, owned by another empire, or behind a technology the game doesn't provide.</div>
+              <div class="caption text--secondary mb-2">Techs the race has no way to research: found only in ruins, owned by another empire, or behind a technology the game doesn't provide.</div>
               <v-data-table :headers="blockedHeaders" :items="blockedRows" item-key="id" dense :custom-sort="sortNullLast" :sort-by.sync="blockedTable.sortBy" :sort-desc.sync="blockedTable.sortDesc" :items-per-page.sync="blockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.cost`]="{ item }">
                   <span v-if="item.cost === null" class="text--secondary text-no-wrap">—<provenance-mark status="unavailable" /></span>

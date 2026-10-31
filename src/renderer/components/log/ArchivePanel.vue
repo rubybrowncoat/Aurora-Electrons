@@ -12,7 +12,7 @@
     </div>
 
     <div v-if="status === 'unavailable'" class="pa-4 text--secondary" role="status">The archive is unavailable: {{ reason }}. Nothing is written to it until it can be read.</div>
-    <div v-else-if="!record" class="pa-4 text--secondary">Nothing is recorded for this race on this branch yet. The open save is recorded when the app next reads it.</div>
+    <div v-else-if="!record" class="pa-4 text--secondary">Nothing is recorded for the race on this branch yet. The open save is recorded when the app next reads it.</div>
     <div v-else class="archive-body">
       <div class="archive-tiles">
         <div class="archive-tile"><div class="caption text--secondary">Events kept</div><div class="archive-value">{{ count(kept) }} <span class="caption text--secondary">of {{ count(cap) }}</span></div><div class="caption text--secondary">About {{ size }} as stored (an estimate)</div><div v-if="hidden" class="caption text--secondary">{{ count(hidden) }} game-master-only {{ hidden === 1 ? 'event is' : 'events are' }} kept and not listed</div></div>
@@ -61,7 +61,7 @@
     </div>
 
     <div class="panel-foot caption text--secondary">
-      Show the archive in place of the open save's log to read recorded events, covered game dates and gaps. Each branch has its own archive. It inherits its parent's records up to the fork and is never merged afterwards. A save keeps only a moving window of the log. Events outside the observed spans are unknown, and an empty interval inside a span was observed and had no events. Pinned and new marks follow the same rules in the archive, and pins are still compared with the open save.
+      Use it to look back past the moving window of the open save's log by showing the archive in its place. Each branch has its own archive. It inherits its parent's records up to the fork and is never merged afterwards. A save keeps only a moving window of the log. Events outside the observed spans are unknown, and an empty interval inside a span was observed and had no events. Pinned and new marks follow the same rules in the archive, and pins are still compared with the open save.
     </div>
   </v-card>
 </template>

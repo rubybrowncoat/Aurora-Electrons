@@ -117,12 +117,12 @@
         <template v-if="!anyFindings">
           <v-icon large color="success">mdi-check-circle-outline</v-icon>
           <div class="title mt-2">All clear</div>
-          <div class="text--secondary">None of the {{ count(checkCount) }} checks found anything for this race.</div>
+          <div class="text--secondary">None of the {{ count(checkCount) }} checks found anything for the race.</div>
         </template>
         <template v-else-if="focusedCheck && !focusedHasFindings">
           <v-icon large color="success">mdi-check-circle-outline</v-icon>
           <div class="title mt-2">Nothing to report</div>
-          <div class="text--secondary">The check for {{ checkLabel(focusedCheck) }} found nothing for this race.</div>
+          <div class="text--secondary">The check for {{ checkLabel(focusedCheck) }} found nothing for the race.</div>
           <v-btn small text class="mt-2" @click="resetFilters">Show every check</v-btn>
         </template>
         <template v-else>

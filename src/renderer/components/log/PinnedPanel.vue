@@ -25,7 +25,7 @@
     </div>
     <div v-if="message" class="px-4 pb-2 error--text caption" role="alert">{{ message }}</div>
     <div class="panel-foot caption text--secondary">
-      A pin holds a copy, so the event stays readable after the save no longer holds it. Each pin shows whether the open save still holds the event, carries a note of its own and can be unpinned. A pin finds its event by its content (the time, type, message and places), never by its place in the save. One pin covers a group of identical events. A pin on this branch is shown only with this campaign and race, and a branch forked later starts with the pins of the events that had happened by the fork.
+      Use it to return to the events worth watching and to see whether the open save still holds them. A pin holds a copy, so the event stays readable after the save no longer holds it. Each pin shows whether the open save still holds the event, carries a note of its own and can be unpinned. A pin finds its event by its content (the time, type, message and places), never by its place in the save. One pin covers a group of identical events. A pin on this branch is shown only with this campaign and race, and a branch forked later starts with the pins of the events that had happened by the fork.
     </div>
   </v-card>
 </template>

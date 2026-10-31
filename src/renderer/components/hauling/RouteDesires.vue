@@ -84,7 +84,7 @@
         </template>
       </v-data-table>
       <div v-for="note in read.notes" :key="note.uuid" class="px-4 py-1 caption text--secondary" data-desire-note-unlisted>{{ note.reason }}</div>
-      <div class="panel-foot caption text--secondary">A desired route is the player's own record and gives the game no order. It is never derived from stock, reserves or production, and it changes nothing in the observed routes. Capacity counts what the capable fleets of the observed routes that carry the cargo between the two colonies deliver to the second colony. An unknown cycle is shown as not known, never as uncovered.</div>
+      <div class="panel-foot caption text--secondary">Use it to decide which wanted routes still need a fleet added or more capacity. A desired route is the player's own record and gives the game no order. It is never derived from stock, reserves or production, and it changes nothing in the observed routes. Capacity counts what the capable fleets of the observed routes that carry the cargo between the two colonies deliver to the second colony. An unknown cycle is shown as not known, never as uncovered.</div>
     </template>
   </v-card>
 </template>

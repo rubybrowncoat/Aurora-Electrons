@@ -11,7 +11,7 @@
         <li v-for="entry in notes.degraded" :key="`degraded ${entry.text}`">{{ upper(entry.text) }}: {{ entry.fields.join(', ') }}<span v-if="entry.effect">. {{ entry.effect }}</span></li>
       </ul>
     </div>
-    <div class="panel-foot caption text--secondary">The check reads the save's structure only and never changes it. It runs again when the save changes, and on request.</div>
+    <div class="panel-foot caption text--secondary">Use it to judge whether a different save is needed or a new check of the copy now open will do. The check reads the save's structure only and never changes it. It runs again when the save changes, and on request.</div>
   </v-card>
   <v-alert v-else-if="notes.degraded.length" type="warning" outlined dense class="capability-state" data-capability-state="degraded">
     <div>Part of this page is left out, because the save differs from what the page reads:</div>

@@ -90,7 +90,7 @@
           <div v-if="record.orders.length" class="caption text--secondary" data-route-orders>Stored orders: <span v-for="(order, index) in record.orders" :key="order.MoveOrderID" :data-route-order="order.MoveOrderID">{{ index ? ', ' : '' }}#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span></div>
         </div>
       </div>
-      <div class="panel-foot caption text--secondary">Routes are grouped only by their saved orders: the path, service and cargo limits of each order. Delay only sorts fleets within a route. A different conditional order creates a separate route. Each route's yearly capacity is counted once, regardless of how many fleets share it. Template names are matched by content because no table links a fleet to a template.</div>
+      <div class="panel-foot caption text--secondary">Use it to judge how much a route can carry a year before another fleet is added to it. Routes are grouped only by their saved orders: the path, service and cargo limits of each order. Delay only sorts fleets within a route. A different conditional order creates a separate route. Each route's yearly capacity is counted once, regardless of how many fleets share it. Template names are matched by content because no table links a fleet to a template.</div>
     </template>
   </v-card>
 </template>
