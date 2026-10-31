@@ -8,7 +8,8 @@
 const fs = require('fs')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { inParallel } = require('./lib/check-pool')
@@ -113,7 +114,7 @@ const run = async (text) => {
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 4).join('\n  ')}`
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const only = process.argv.find((argument) => argument.startsWith('--only='))
   const selected = only ? only.slice('--only='.length).split('|').filter(Boolean) : []
   const keep = (key, label) => !only || selected.some((text) => key === text || label.includes(text))
@@ -134,9 +135,10 @@ const main = async () => {
 
     const attempts = FAULTS.map((fault, index) => [index, ...fault]).filter(([index, label]) => keep(`fault:${index}`, label))
     const outcomes = await inParallel(attempts, async ([, label, from, to, fails]) => {
+      refusePlanting(label)
       const planted = patched(FILE, ORIGINAL, from, to)
       const found = await run(planted)
-      const missed = fails.filter((name) => !found.some((failure) => failure.name === name && failure.error instanceof assert.AssertionError))
+      const missed = fails.filter((name) => !found.some((failure) => failure.name === name && kindOf(failure.error) === 'assertion' && !isSubjectThrow(failure.error)))
 
       return { label, missed }
     })

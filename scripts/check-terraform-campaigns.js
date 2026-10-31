@@ -15,10 +15,10 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { Database } = require('bun:sqlite')
-const assert = require('./lib/bounded-assert')
+const { assert, runChecks, judged, caughtAll } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { plantedPatch } = require('./lib/mutant-source')
-const { mutating } = require('./lib/no-mutations')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const SECONDS_PER_YEAR = 31536000
@@ -129,28 +129,32 @@ const ARITHMETIC = [
 
 // The faults planted in the app's own capacity, years and area arithmetic: each must break the app-output assertions. [label, utility, text, replacement, needs the plans' saves]
 const APP_FAULTS = [
-  ['halved capacity', 'terraforming', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier * 0.5'],
-  ['doubled Earth surface area', 'terraforming', 'export const EARTH_SURFACE_AREA = 511187128', 'export const EARTH_SURFACE_AREA = 1022374256', true],
-  ['years multiplied by the capacity', 'terraforming', 'work / capacity : Infinity', 'work * capacity : Infinity'],
-  ['modifier ignored', 'terraforming', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers'],
-  ['speed ignored', 'terraforming', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier', 'TerraformingRate * terraformers * modifier'],
+  ['halved capacity', 'terraforming', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier * 0.5', false, ['capacity']],
+  ['doubled Earth surface area', 'terraforming', 'export const EARTH_SURFACE_AREA = 511187128', 'export const EARTH_SURFACE_AREA = 1022374256', true, ['work']],
+  ['years multiplied by the capacity', 'terraforming', 'work / capacity : Infinity', 'work * capacity : Infinity', false, ['years']],
+  ['modifier ignored', 'terraforming', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers', false, ['capacity']],
+  ['speed ignored', 'terraforming', 'TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier', 'TerraformingRate * terraformers * modifier', false, ['capacity']],
 ]
 // The app's capacity of each exact pair's colony (installations at the colony's modifier, orbital modules at the crew and captain share), its years for the observed change, and the work of three plans against the rule's independent expectation (the atm to move times the body's area over the Earth's, with the game's 3.1416).
-const appOutputs = async (modules, fixtures, plans) => {
+const appOutputs = async (modules, fixtures, plans, only = null) => {
   const { terraforming } = modules
 
   for (const fixture of fixtures) {
     const race = { TerraformingRate: fixture.rate, TerraformingSpeed: fixture.speed }
     const capacity = terraforming.terraformCapacity(race, Math.trunc(fixture.installations), fixture.modifier) + terraforming.terraformCapacity(race, fixture.effective, 1)
 
-    assert.ok(Math.abs(capacity / fixture.total - 1) < 1e-9, `${fixture.label}: capacity ${capacity}, rule ${fixture.total}`)
+    if (!only || only === 'capacity') {
+      assert.ok(Math.abs(capacity / fixture.total - 1) < 1e-9, `${fixture.label}: capacity ${capacity}, rule ${fixture.total}`)
+    }
 
     const years = terraforming.planYears(Math.abs(fixture.observed) * 4 * PI * fixture.radius ** 2 / EARTH_ATMOSPHERE_UNITS, capacity)
 
-    assert.ok(Math.abs(years / fixture.years - 1) < 5e-4, `${fixture.label}: years ${years}, observed ${fixture.years}`)
+    if (!only || only === 'years') {
+      assert.ok(Math.abs(years / fixture.years - 1) < 5e-4, `${fixture.label}: years ${years}, observed ${fixture.years}`)
+    }
   }
 
-  for (const [file, game, race, populationId] of plans) {
+  for (const [file, game, race, populationId] of !only || only === 'work' ? plans : []) {
     const { assessment, body } = await planOf(modules, file, game, race, populationId)
     const area = 4 * PI * body.Radius ** 2 / EARTH_ATMOSPHERE_UNITS
     const expected = assessment.plan.steps.reduce((sum, step) => sum + step.atm * area, 0)
@@ -862,15 +866,20 @@ const main = async () => {
 
   await check('app capacity, plan years and plan work agree with the rules', async () => appOutputs(modules, appFixtures, plans))
 
-  for (const [label, file, from, to, needsPlans] of mutating() ? APP_FAULTS : []) {
+  for (const [label, file, from, to, needsPlans, fails] of mutating() ? APP_FAULTS : []) {
     if (needsPlans && !plans.length) {
       continue
     }
 
     await check(`app planted fault ${label} is caught`, async () => {
+      refusePlanting(label)
       const text = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', `${file}.js`), 'utf8')
       const planted = await loadUtilities(['habitability', 'terraforming', 'colonization-data'], { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [file]: plantedPatch(`${file}.js`, text, from, to) } })
-      const caught = await appOutputs(planted, appFixtures, plans).then(() => false, () => true)
+      const results = await runChecks(fails.map((id) => ({ id, name: `app ${id}`, run: () => appOutputs(planted, appFixtures, plans, id) })), {})
+
+      judged(results, label)
+
+      const caught = caughtAll(results, { name: label })
 
       assert.ok(caught, 'the app-output assertions still pass')
     })
@@ -896,14 +905,14 @@ const main = async () => {
     }
 
     await check(`breakdown planted fault ${label} fails ${required.join(', ')}`, async () => {
+      refusePlanting(label)
       const text = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', `${module}.js`), 'utf8')
       const planted = await loadUtilities(breakdownModules, { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [module]: plantedPatch(`${module}.js`, text, from, to) } })
 
-      for (const name of required) {
-        const caught = await BREAKDOWN_CHECKS[name].run(planted).then(() => false, () => true)
+      const results = await runChecks(required.map((id) => ({ id, name: id, run: () => BREAKDOWN_CHECKS[id].run(planted) })), {})
 
-        assert.ok(caught, `${name} still passes`)
-      }
+      judged(results, label)
+      assert.ok(caughtAll(results, { name: label }), `the named breakdown checks still pass: ${required.join(', ')}`)
     })
   }
 

@@ -19,6 +19,8 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { routes: routeTable } = require('./lib/store-routes')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
@@ -226,7 +228,7 @@ const seedLegacy = (inst, { file = legacyFile([100, 200]), settings = legacySett
 // Every check is `{ name, run(m) }` over the loaded modules. A failed assertion is the check failing.
 const defineSuite = (m) => {
   const cases = []
-  const assert = require('./lib/bounded-assert')
+  const { assert } = require('./lib/fault-credit')
   const test = (group, name, run) => cases.push({ group, name, run })
   const { campaign, history } = m
   const attachModule = m['campaign-attach']
@@ -2054,7 +2056,7 @@ const realDatabase = (handle) => ({
 
 const realChecks = async (m) => {
   const results = []
-  const assert = require('./lib/bounded-assert')
+  const { assert } = require('./lib/fault-credit')
   const { campaign, history } = m
   const real = []
 
@@ -2236,6 +2238,8 @@ const MUTATIONS = [
 
 // One mutation broken in `copy` (and put back after), with the cases it names run against it.
 const applyMutation = async (copy, mutation) => {
+  refusePlanting(mutation.name)
+
   const target = path.join(copy, mutation.file.includes('/') ? mutation.file : `renderer/utilities/${mutation.file}`)
   const original = fs.readFileSync(target, 'utf8')
   const parts = original.split(mutation.find)
@@ -2249,6 +2253,12 @@ const applyMutation = async (copy, mutation) => {
   try {
     const modules = await loadModules(copy)
     const outcome = await runSuite(modules, mutation.fails)
+    const invalid = outcome.find((entry) => entry.error && (kindOf(entry.error) !== 'assertion' || isSubjectThrow(entry.error)))
+
+    if (invalid) {
+      throw invalid.error
+    }
+
     const failed = outcome.filter((entry) => entry.error)
     const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
 
@@ -2260,11 +2270,13 @@ const applyMutation = async (copy, mutation) => {
   }
 }
 
-// The mutations run in child processes, several side by side (CHECK_JOBS): each child copies the sources once and judges its share one after another, the way the whole run once did in one process, so no two mutations share a copy, a module or a global. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its results.
+// The mutations run in child processes, several side by side (CHECK_JOBS): each child copies the sources once and judges its share one after another, restoring each changed file before the next fault. The loader gives each load its own module tree; a child and its source copy are reused across its chunk. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its results.
 const MUTANTS_PREFIX = 'MUTANTS_RESULT '
 const CHILD_MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutants=')).map((argument) => argument.slice(10).split(',').map(Number))[0]
 
 const childMain = async () => {
+  refusePlanting('the campaign child faults')
+
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-campaigns-'))
   const results = []
 
@@ -2284,6 +2296,8 @@ const childMain = async () => {
 }
 
 const applyMutations = async () => {
+  refusePlanting('the campaign faults')
+
   const chunks = chunksOf(MUTATIONS.length)
   const outcomes = spread(chunks, await inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANTS_PREFIX)))
 
@@ -2294,7 +2308,7 @@ const main = async () => {
   const modules = await loadModules(src)
   const results = [...await runSuite(modules), ...await realChecks(modules)]
 
-  if (!process.argv.includes('--no-mutations')) {
+  if (mutating()) {
     results.push(...await applyMutations())
   }
 

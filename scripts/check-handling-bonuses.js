@@ -17,10 +17,11 @@ const fs = require('fs')
 const path = require('path')
 const { Database } = require('bun:sqlite')
 const compiler = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -1452,7 +1453,7 @@ const applied = (sources, one) => {
 const stacked = (edits) => edits.reduce(applied, ORIGINALS)
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split('|').filter(Boolean)
   const selected = (one) => !only.length || only.some((text) => one.name.includes(text))
   const detail = process.argv.includes('--detail')
@@ -1477,6 +1478,7 @@ const main = async () => {
     const every = (list, work) => inParallel(list, work)
     // A planted fault on sources `base`: every check it names must fail.
     const caught = async (fault, base) => {
+      refusePlanting(fault.name)
       fault.fails.forEach((name) => assert.ok(known.has(name), `${fault.name}: no check named ${name}`))
 
       const world = worldOf(applied(base, fault))
@@ -1485,7 +1487,7 @@ const main = async () => {
       for (const name of fault.fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed) {
+        if (!failed || kindOf(failed.error) !== 'assertion' || isSubjectThrow(failed.error)) {
           missed.push(name)
         } else if (detail) {
           console.log(`CAUGHT ${fault.name} by ${name}: ${short(failed.error)}`)

@@ -13,6 +13,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const vm = require('vm')
+const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 
@@ -252,13 +253,7 @@ const typed = (text) => (text === '' || text === null || text === undefined || !
 // The methods of an object-literal body (the page's own source, as it is written between two markers) compiled with the names it uses from its imports.
 const compileMethods = (source, names, values) => vm.compileFunction(`return ({${source}})`, names)(...values)
 
-const attempt = (test) => {
-  try {
-    return test()
-  } catch (error) {
-    return `threw ${error.message}`
-  }
-}
+const attempt = (test) => test()
 
 // The pages' wiring, on the text of the pages: [[name, held]]. Each statement must hold of the real pages and fail of a page with one gate cut out.
 const wiring = ({ finances, information, utility, tariff, provenance }) => {
@@ -362,95 +357,101 @@ const mutatedCopy = (file, from, to) => {
 }
 
 const MUTATIONS = [
-  ['the colonist rate is the 2.6 one', 'unit: \'colonist\', rate: 0.00015', 'unit: \'colonist\', rate: 0.0001'],
-  ['the passenger rate is the 2.6 one', 'unit: \'passenger\', rate: 0.006', 'unit: \'passenger\', rate: 0.004'],
-  ['the trade good rate is the 2.6 one', 'unit: \'trade good\', rate: 0.375', 'unit: \'trade good\', rate: 0.25'],
-  ['the cargo point rate is the 2.6 one', 'unit: \'cargo point\', rate: 0.00015', 'unit: \'cargo point\', rate: 0.0001'],
-  ['fuel is given a rate nothing publishes', 'unit: \'litre\', rate: null', 'unit: \'litre\', rate: 0.00015'],
-  ['the distance is converted with a million, not a billion', 'KM_PER_BILLION = 1e9', 'KM_PER_BILLION = 1e6'],
-  ['a route in km is priced as billion km without conversion', 'billionKm: billionKm(km), npr })', 'billionKm: km, npr })'],
-  ['the computer-run modifier is 1, as for a player', 'NPR_PAYOUT_MODIFIER = 0.5', 'NPR_PAYOUT_MODIFIER = 1'],
-  ['the computer-run modifier is the 1.5 of 2.6', 'NPR_PAYOUT_MODIFIER = 0.5', 'NPR_PAYOUT_MODIFIER = 1.5'],
-  ['the computer-run modifier is 0.75, the effective figure rather than the one set', 'NPR_PAYOUT_MODIFIER = 0.5', 'NPR_PAYOUT_MODIFIER = 0.75'],
-  ['the modifier is never applied', '(npr ? NPR_PAYOUT_MODIFIER : 1)', '1'],
-  ['the modifier is applied to a player and not to a computer-run empire', '(npr ? NPR_PAYOUT_MODIFIER : 1)', '(npr ? 1 : NPR_PAYOUT_MODIFIER)'],
-  ['the modifier is applied to both kinds of race', '(npr ? NPR_PAYOUT_MODIFIER : 1)', 'NPR_PAYOUT_MODIFIER'],
-  ['an unknown race kind is priced as a player\'s', 'typeof npr === \'boolean\' ? [] :', 'true ? [] :'],
-  ['the rows leave the race kind out of the estimate', 'billionKm: billionKm(km), npr })', 'billionKm: billionKm(km), npr: false })'],
-  ['the result no longer names the modifier it applied', 'npr ? \'the published computer-run modifier of 0.5\' : \'a player\\\'s race, paid the published rate\'', '\'the published rate\''],
-  ['the rates themselves are halved for a computer-run empire', 'value: category.rate, inputs', 'value: category.rate * 0.5, inputs'],
-  ['the payout rows price two units', 'quantity: 1, billionKm', 'quantity: 2, billionKm'],
-  ['the rates are given to every game version', 'if (ruleSupports(\'civilianTariff.rates\', version) !== true) {', 'if (false) {'],
-  ['the rules hold for any 2.x version', 'const TARIFF_VERSIONS = [\'2.7.x\']', 'const TARIFF_VERSIONS = [\'2.x\']'],
-  ['the rules hold for 2.6 as well', 'const TARIFF_VERSIONS = [\'2.7.x\']', 'const TARIFF_VERSIONS = [\'2.7.x\', \'2.6.x\']'],
-  ['an unknown rate falls through to a figure', 'if (!category || category.rate === null) {', 'if (!category) {'],
-  ['an unavailable rate no longer stops the estimate', 'if (!isAvailable(rate)) {', 'if (false) {'],
-  ['the quantity is not checked', 'finite(quantity) && quantity >= 0', 'true'],
-  ['a negative quantity is allowed', 'finite(quantity) && quantity >= 0', 'finite(quantity)'],
-  ['the distance is not checked', 'finite(distance) && distance >= 0', 'true'],
-  ['the payout adds the distance instead of multiplying', 'quantity * rate.value * distance', 'quantity * rate.value + distance'],
-  ['the payout leaves the quantity out', 'quantity * rate.value * distance', 'rate.value * distance'],
-  ['the rate is called confirmed', 'verification: \'estimated\',\n  structure: [\'the published payout rates by category\']', 'verification: \'confirmed\',\n  structure: [\'the published payout rates by category\']'],
-  ['the payout rule is called confirmed', 'verification: \'estimated\',\n  structure: [\'civilianTariff.rates\', \'the route distance\']', 'verification: \'confirmed\',\n  structure: [\'civilianTariff.rates\', \'the route distance\']'],
-  ['the payout rule drops its assumptions', 'assumptions: [\'every unit is carried the whole distance\', \'the distance is the route travelled loaded\'],', ''],
-  ['a mapping is always complete', 'complete: !unplaced.length && uses.some((use) => use.role === \'payout\')', 'complete: true'],
-  ['a mapping needs no use that carries the payout', 'uses.some((use) => use.role === \'payout\')', 'true'],
-  ['a mapping ignores an unplaced use', '!unplaced.length &&', 'true &&'],
-  ['an unknown role counts as placed', 'const unplaced = uses.filter((use) => !ROLES.includes(use.role))', 'const unplaced = uses.filter((use) => use.role === undefined)'],
-  ['every shipped use starts as a payout', 'Object.freeze({ ...use, role: null })', 'Object.freeze({ ...use, role: \'payout\' })'],
-  ['the net cost no longer waits for a complete mapping', '} else if (!mapping.complete) {', '} else if (false) {'],
-  ['the net cost holds for every version', 'if (ruleSupports(\'civilianTariff.netCost\', version) !== true) {', 'if (false) {'],
-  ['the net cost adds the taxes', 'sum(\'payout\') - sum(\'tax\')', 'sum(\'payout\') + sum(\'tax\')'],
-  ['the net cost leaves the taxes out', 'sum(\'payout\') - sum(\'tax\')', 'sum(\'payout\')'],
-  ['a use with nothing logged is not counted as 0', '(totals[use.id] || 0)', 'totals[use.id]'],
-  ['the Civilian Contracts use is missing', '  { id: 44, label: \'Civilian Contracts\', side: \'spending\' },\n', ''],
-  ['a tax use is on the spending side', '{ id: 32, label: \'Tax on Shipping Trade Goods\', side: \'income\' }', '{ id: 32, label: \'Tax on Shipping Trade Goods\', side: \'spending\' }'],
-  ['civilian mining is counted as a shipping use', '  { id: 47, label: \'Tax on Civilian Fuel\', side: \'income\' },\n', '  { id: 47, label: \'Tax on Civilian Fuel\', side: \'income\' },\n  { id: 35, label: \'Tax on Civilian Mining\', side: \'income\' },\n'],
-  ['the civilian categories take the uses of the ledger in the ledger\'s order and keep the others', 'uses.map((use) => categories.find((category) => category.id === use.id)).filter(Boolean)', 'categories'],
-  ['a small figure is rounded to a whole number', 'Number(value.toPrecision(4)).toFixed(12)', 'Math.round(value).toFixed(12)'],
-  ['the separator is dropped from a large figure', 'countText(value, 0, separator)', 'countText(value, 0)'],
-  ['the version text claims rates for any version', "ruleSupports('civilianTariff.rates', version) === true ? 'Published payout rates'", "ruleSupports('civilianTariff.rates', version) !== true ? 'Published payout rates'"],
+  ['the colonist rate is the 2.6 one', 'unit: \'colonist\', rate: 0.00015', 'unit: \'colonist\', rate: 0.0001', ['colonist: 2000']],
+  ['the passenger rate is the 2.6 one', 'unit: \'passenger\', rate: 0.006', 'unit: \'passenger\', rate: 0.004', ['passenger: 500']],
+  ['the trade good rate is the 2.6 one', 'unit: \'trade good\', rate: 0.375', 'unit: \'trade good\', rate: 0.25', ['trade good: 10']],
+  ['the cargo point rate is the 2.6 one', 'unit: \'cargo point\', rate: 0.00015', 'unit: \'cargo point\', rate: 0.0001', ['cargo point: 25000']],
+  ['fuel is given a rate nothing publishes', 'unit: \'litre\', rate: null', 'unit: \'litre\', rate: 0.00015', ['fuel has no published rate']],
+  ['the distance is converted with a million, not a billion', 'KM_PER_BILLION = 1e9', 'KM_PER_BILLION = 1e6', ['a route of 12.5e9 km']],
+  ['a route in km is priced as billion km without conversion', 'billionKm: billionKm(km), npr })', 'billionKm: km, npr })', ['one unit over a measured route']],
+  ['the computer-run modifier is 1, as for a player', 'NPR_PAYOUT_MODIFIER = 0.5', 'NPR_PAYOUT_MODIFIER = 1', ['a player\'s race is paid']],
+  ['the computer-run modifier is the 1.5 of 2.6', 'NPR_PAYOUT_MODIFIER = 0.5', 'NPR_PAYOUT_MODIFIER = 1.5', ['a player\'s race is paid']],
+  ['the computer-run modifier is 0.75, the effective figure rather than the one set', 'NPR_PAYOUT_MODIFIER = 0.5', 'NPR_PAYOUT_MODIFIER = 0.75', ['a player\'s race is paid']],
+  ['the modifier is never applied', '(npr ? NPR_PAYOUT_MODIFIER : 1)', '1', ['a player\'s race is paid']],
+  ['the modifier is applied to a player and not to a computer-run empire', '(npr ? NPR_PAYOUT_MODIFIER : 1)', '(npr ? 1 : NPR_PAYOUT_MODIFIER)', ['a player\'s race is paid']],
+  ['the modifier is applied to both kinds of race', '(npr ? NPR_PAYOUT_MODIFIER : 1)', 'NPR_PAYOUT_MODIFIER', ['a player\'s race is paid']],
+  ['an unknown race kind is priced as a player\'s', 'typeof npr === \'boolean\' ? [] :', 'true ? [] :', ['a race kind that is not true or false']],
+  ['the rows leave the race kind out of the estimate', 'billionKm: billionKm(km), npr })', 'billionKm: billionKm(km), npr: false })', ['the rows for a computer-run empire']],
+  ['the result no longer names the modifier it applied', 'npr ? \'the published computer-run modifier of 0.5\' : \'a player\\\'s race, paid the published rate\'', '\'the published rate\'', ['a computer-run result names the modifier']],
+  ['the rates themselves are halved for a computer-run empire', 'value: category.rate, inputs', 'value: category.rate * 0.5, inputs', ['the rates are the published 2.7 ones']],
+  ['the payout rows price two units', 'quantity: 1, billionKm', 'quantity: 2, billionKm', ['one unit over a measured route']],
+  ['the rates are given to every game version', 'if (ruleSupports(\'civilianTariff.rates\', version) !== true) {', 'if (false) {', ['unsupported game version null']],
+  ['the rules hold for any 2.x version', 'const TARIFF_VERSIONS = [\'2.7.x\']', 'const TARIFF_VERSIONS = [\'2.x\']', ['the rules are registered with the 2.7 versions']],
+  ['the rules hold for 2.6 as well', 'const TARIFF_VERSIONS = [\'2.7.x\']', 'const TARIFF_VERSIONS = [\'2.7.x\', \'2.6.x\']', ['the rules are registered with the 2.7 versions']],
+  ['an unknown rate falls through to a figure', 'if (!category || category.rate === null) {', 'if (!category) {', ['fuel has no published rate']],
+  ['an unavailable rate no longer stops the estimate', 'if (!isAvailable(rate)) {', 'if (false) {', ['unsupported game version null']],
+  ['the quantity is not checked', 'finite(quantity) && quantity >= 0', 'true', ['a quantity that is not a number']],
+  ['a negative quantity is allowed', 'finite(quantity) && quantity >= 0', 'finite(quantity)', ['a quantity that is not a number']],
+  ['the distance is not checked', 'finite(distance) && distance >= 0', 'true', ['a distance that is not a number of 0']],
+  ['the payout adds the distance instead of multiplying', 'quantity * rate.value * distance', 'quantity * rate.value + distance', ['trade good: 10']],
+  ['the payout leaves the quantity out', 'quantity * rate.value * distance', 'rate.value * distance', ['trade good: 10']],
+  ['the rate is called confirmed', 'verification: \'estimated\',\n  structure: [\'the published payout rates by category\']', 'verification: \'confirmed\',\n  structure: [\'the published payout rates by category\']', ['a result is estimated']],
+  ['the payout rule is called confirmed', 'verification: \'estimated\',\n  structure: [\'civilianTariff.rates\', \'the route distance\']', 'verification: \'confirmed\',\n  structure: [\'civilianTariff.rates\', \'the route distance\']', ['a result is estimated']],
+  ['the payout rule drops its assumptions', 'assumptions: [\'every unit is carried the whole distance\', \'the distance is the route travelled loaded\'],', '', ['a result is estimated']],
+  ['a mapping is always complete', 'complete: !unplaced.length && uses.some((use) => use.role === \'payout\')', 'complete: true', ['a mapping missing one use']],
+  ['a mapping needs no use that carries the payout', 'uses.some((use) => use.role === \'payout\')', 'true', ['a mapping with no use that carries the payout']],
+  ['a mapping ignores an unplaced use', '!unplaced.length &&', 'true &&', ['a mapping missing one use']],
+  ['an unknown role counts as placed', 'const unplaced = uses.filter((use) => !ROLES.includes(use.role))', 'const unplaced = uses.filter((use) => use.role === undefined)', ['an empty table and an unknown role']],
+  ['every shipped use starts as a payout', 'Object.freeze({ ...use, role: null })', 'Object.freeze({ ...use, role: \'payout\' })', ['the shipped table places no use against a payout']],
+  ['the net cost no longer waits for a complete mapping', '} else if (!mapping.complete) {', '} else if (false) {', ['incomplete mapping: no net cost']],
+  ['the net cost holds for every version', 'if (ruleSupports(\'civilianTariff.netCost\', version) !== true) {', 'if (false) {', ['a fully placed mapping still gives no net cost']],
+  ['the net cost adds the taxes', 'sum(\'payout\') - sum(\'tax\')', 'sum(\'payout\') + sum(\'tax\')', ['a fully placed mapping gives the logged payout']],
+  ['the net cost leaves the taxes out', 'sum(\'payout\') - sum(\'tax\')', 'sum(\'payout\')', ['a fully placed mapping gives the logged payout']],
+  ['a use with nothing logged is not counted as 0', '(totals[use.id] || 0)', 'totals[use.id]', ['a fully placed mapping counts a use with nothing logged']],
+  ['the Civilian Contracts use is missing', '  { id: 44, label: \'Civilian Contracts\', side: \'spending\' },\n', '', ['the civilian uses are the expected ids']],
+  ['a tax use is on the spending side', '{ id: 32, label: \'Tax on Shipping Trade Goods\', side: \'income\' }', '{ id: 32, label: \'Tax on Shipping Trade Goods\', side: \'spending\' }', ['the civilian uses are the expected ids']],
+  ['civilian mining is counted as a shipping use', '  { id: 47, label: \'Tax on Civilian Fuel\', side: \'income\' },\n', '  { id: 47, label: \'Tax on Civilian Fuel\', side: \'income\' },\n  { id: 35, label: \'Tax on Civilian Mining\', side: \'income\' },\n', ['the civilian uses are the expected ids']],
+  ['the civilian categories take the uses of the ledger in the ledger\'s order and keep the others', 'uses.map((use) => categories.find((category) => category.id === use.id)).filter(Boolean)', 'categories', ['the ledger the Finances page builds lists']],
+  ['a small figure is rounded to a whole number', 'Number(value.toPrecision(4)).toFixed(12)', 'Math.round(value).toFixed(12)', ['figures read as text:']],
+  ['the separator is dropped from a large figure', 'countText(value, 0, separator)', 'countText(value, 0)', ['figures read as text:']],
+  ['the version text claims rates for any version', "ruleSupports('civilianTariff.rates', version) === true ? 'Published payout rates'", "ruleSupports('civilianTariff.rates', version) !== true ? 'Published payout rates'", ['the version text says rates']],
 ]
 
 const PAGE_MUTATIONS = [
-  ['Finances feeds a fixed 2.7 version to the estimate', 'finances', 'payoutEstimate({ version: this.formulaVersion,', 'payoutEstimate({ version: \'2.7.x\','],
-  ['Finances reads the rates for a fixed 2.7 version', 'finances', 'rateOf(this.formulaVersion, category.id)', 'rateOf(\'2.7.x\', category.id)'],
-  ['Finances asks the net cost for a fixed 2.7 version', 'finances', 'netCostResult({ version: this.formulaVersion,', 'netCostResult({ version: \'2.7.x\','],
-  ['Finances builds its own complete mapping', 'finances', 'const TARIFF_MAPPING = treasuryMapping()', 'const TARIFF_MAPPING = { complete: true, uses: [], unplaced: [] }'],
-  ['Finances loses the summary of the panel', 'finances', 'data-summary="Estimate civilian shipping-line payouts', 'data-x="Estimate civilian shipping-line payouts'],
-  ['Finances shows a net cost figure while it is unavailable', 'finances', 'netCost.value === null ? \'—\' : signed(netCost.value)', 'signed(netCost.value)'],
-  ['Finances stops reading the schema version', 'finances', 'return await loadFormulaVersion(this.database)', 'return \'2.7.x\''],
-  ['Finances speaks to the reader', 'finances', 'Units carried times the rate times the one-way', 'Your units carried times the rate times the one-way'],
-  ['Transport prices the route for a fixed 2.7 version', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version: \'2.7.x\', km: shortest, npr })'],
-  ['Finances prices the estimate for a player\'s race only', 'finances', 'billionKm: typed(this.tariffDistance), npr: this.RaceNPR })', 'billionKm: typed(this.tariffDistance), npr: false })'],
-  ['Finances prices the estimate for a computer-run empire only', 'finances', 'billionKm: typed(this.tariffDistance), npr: this.RaceNPR })', 'billionKm: typed(this.tariffDistance), npr: true })'],
-  ['Finances gives the estimate no race kind', 'finances', 'billionKm: typed(this.tariffDistance), npr: this.RaceNPR })', 'billionKm: typed(this.tariffDistance) })'],
-  ['Finances stops reading the race kind from the store', 'finances', '    ...mapState([\'RaceNPR\']),\n', ''],
-  ['Finances loses the one-way loaded label of the distance field', 'finances', 'label="One-way loaded distance, billion km"', 'label="Distance, billion km"'],
-  ['Finances loses the one-way loaded aria label of the distance field', 'finances', 'aria-label="One-way loaded distance in billion km"', 'aria-label="Distance in billion km"'],
-  ['Finances loses the one-way loaded basis of the estimate', 'finances', 'one-way loaded route distance in billion km, with every unit carried the whole leg', 'route distance in billion km'],
-  ['Finances no longer says the units are carried the whole leg', 'finances', ', with every unit carried the whole leg', ''],
-  ['Finances loses the halving note of a computer-run empire', 'finances', ', times 0.5 for a computer-run empire', ''],
-  ['Transport stops reading the race kind from the store', 'information', '    ...mapState([\'RaceNPR\']),\n', ''],
-  ['Transport prices the nearest route for a player\'s race only', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version, km: shortest, npr: false })'],
-  ['Transport prices the longest route for a player\'s race only', 'information', 'payoutRows({ version, km: longest, npr })', 'payoutRows({ version, km: longest, npr: false })'],
-  ['Transport prices the nearest route for a computer-run empire only', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version, km: shortest, npr: true })'],
-  ['Transport leaves the race kind out of the nearest route', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version, km: shortest })'],
+  ['Finances feeds a fixed 2.7 version to the estimate', 'finances', 'payoutEstimate({ version: this.formulaVersion,', 'payoutEstimate({ version: \'2.7.x\',', ['Finances: an unsupported version gives no figure']],
+  ['Finances reads the rates for a fixed 2.7 version', 'finances', 'rateOf(this.formulaVersion, category.id)', 'rateOf(\'2.7.x\', category.id)', ['Finances: the rates, the worked estimate and the net cost take']],
+  ['Finances asks the net cost for a fixed 2.7 version', 'finances', 'netCostResult({ version: this.formulaVersion,', 'netCostResult({ version: \'2.7.x\',', ['Finances: no game version is written']],
+  ['Finances builds its own complete mapping', 'finances', 'const TARIFF_MAPPING = treasuryMapping()', 'const TARIFF_MAPPING = { complete: true, uses: [], unplaced: [] }', ['Finances: the net cost is asked of the mapping']],
+  ['Finances loses the summary of the panel', 'finances', 'data-summary="Estimate civilian shipping-line payouts', 'data-x="Estimate civilian shipping-line payouts', ['Finances: the panel has a data-summary']],
+  ['Finances shows a net cost figure while it is unavailable', 'finances', 'netCost.value === null ? \'—\' : signed(netCost.value)', 'signed(netCost.value)', ['Finances: the net cost line shows a dash']],
+  ['Finances stops reading the schema version', 'finances', 'return await loadFormulaVersion(this.database)', 'return \'2.7.x\'', ['Finances: the formula version is read']],
+  ['Finances speaks to the reader', 'finances', 'Units carried times the rate times the one-way', 'Your units carried times the rate times the one-way', ['the new text speaks in no first or second person']],
+  ['Transport prices the route for a fixed 2.7 version', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version: \'2.7.x\', km: shortest, npr })', ['Transport: the payout note prices the measured route']],
+  ['Finances prices the estimate for a player\'s race only', 'finances', 'billionKm: typed(this.tariffDistance), npr: this.RaceNPR })', 'billionKm: typed(this.tariffDistance), npr: false })', ['Finances, computer-run empire:']],
+  ['Finances prices the estimate for a computer-run empire only', 'finances', 'billionKm: typed(this.tariffDistance), npr: this.RaceNPR })', 'billionKm: typed(this.tariffDistance), npr: true })', ['Finances, player:']],
+  ['Finances gives the estimate no race kind', 'finances', 'billionKm: typed(this.tariffDistance), npr: this.RaceNPR })', 'billionKm: typed(this.tariffDistance) })', ['Finances, player:']],
+  ['Finances stops reading the race kind from the store', 'finances', '    ...mapState([\'RaceNPR\']),\n', '', ['both pages read the selected race\'s kind']],
+  ['Finances loses the one-way loaded label of the distance field', 'finances', 'label="One-way loaded distance, billion km"', 'label="Distance, billion km"', ['Finances: the panel names the one-way loaded distance']],
+  ['Finances loses the one-way loaded aria label of the distance field', 'finances', 'aria-label="One-way loaded distance in billion km"', 'aria-label="Distance in billion km"', ['Finances: the panel names the one-way loaded distance']],
+  ['Finances loses the one-way loaded basis of the estimate', 'finances', 'one-way loaded route distance in billion km, with every unit carried the whole leg', 'route distance in billion km', ['Finances, player:']],
+  ['Finances no longer says the units are carried the whole leg', 'finances', ', with every unit carried the whole leg', '', ['Finances, player:']],
+  ['Finances loses the halving note of a computer-run empire', 'finances', ', times 0.5 for a computer-run empire', '', ['Finances, computer-run empire:']],
+  ['Transport stops reading the race kind from the store', 'information', '    ...mapState([\'RaceNPR\']),\n', '', ['both pages read the selected race\'s kind']],
+  ['Transport prices the nearest route for a player\'s race only', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version, km: shortest, npr: false })', ['Transport, computer-run empire:']],
+  ['Transport prices the longest route for a player\'s race only', 'information', 'payoutRows({ version, km: longest, npr })', 'payoutRows({ version, km: longest, npr: false })', ['Transport, computer-run empire over routes of two lengths:']],
+  ['Transport prices the nearest route for a computer-run empire only', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version, km: shortest, npr: true })', ['Transport, player:']],
+  ['Transport leaves the race kind out of the nearest route', 'information', 'payoutRows({ version, km: shortest, npr })', 'payoutRows({ version, km: shortest })', ['Transport, player:']],
   // eslint-disable-next-line no-template-curly-in-string
-  ['Transport leaves the halving out of the note', 'information', '${npr ? \', with a computer-run empire paid half\' : \'\'}', ''],
-  ['Transport reads the race kind as always a player\'s', 'information', 'const npr = this.RaceNPR', 'const npr = false'],
-  ['Transport leaves out the limitation for a version without rates', 'information', 'game version has no published payout rates', 'game version has rates'],
-  ['Transport drops the provenance mark of the note', 'information', '<provenance-mark :result="payoutNote.result" label />', ''],
-  ['Transport claims the payout as the race\'s cost', 'information', 'no cost to the race is claimed', 'it is the race\'s cost'],
+  ['Transport leaves the halving out of the note', 'information', '${npr ? \', with a computer-run empire paid half\' : \'\'}', '', ['Transport, computer-run empire:']],
+  ['Transport reads the race kind as always a player\'s', 'information', 'const npr = this.RaceNPR', 'const npr = false', ['Transport, computer-run empire:']],
+  ['Transport leaves out the limitation for a version without rates', 'information', 'game version has no published payout rates', 'game version has rates', ['Transport: the note says no payout is estimated']],
+  ['Transport drops the provenance mark of the note', 'information', '<provenance-mark :result="payoutNote.result" label />', '', ['Transport: the note is a panel foot']],
+  ['Transport claims the payout as the race\'s cost', 'information', 'no cost to the race is claimed', 'it is the race\'s cost', ['Transport: the note says the payout goes']],
 ]
 
-const failedChecks = (modules) => synthetic(modules).filter(([, test]) => {
-  try {
-    return test() !== true
-  } catch (error) {
-    return true
+// Credit only the declared checks' returned values; an exception while obtaining the values cannot enter this path.
+const caughtValues = async (results, fails, name) => {
+  const named = results.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+  const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+
+  if (absent.length) {
+    throw new Error(`${name}: no check begins ${absent.join('; ')}`)
   }
-})
+
+  const failed = judged(await runChecks(named.map(([id, held]) => ({ id, name: id, run: () => assert.ok(held === true, typeof held === 'string' ? held : `${id} returned ${held}`) })), {}), name)
+
+  return fails.every((start) => caughtBy(failed, named.filter(([id]) => id.startsWith(start)).map(([id]) => id), { name }))
+}
 
 const parseArguments = (argv) => {
   const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785] }
@@ -581,23 +582,17 @@ const run = async () => {
   if (mutating()) {
     console.log('\nMutations: each must fail at least one check')
 
-    for (const [label, from, to] of MUTATIONS) {
+    for (const [label, from, to, fails] of MUTATIONS) {
       let directory
 
       try {
         directory = mutatedCopy(FILE, from, to)
 
-        let failed = []
+        const mutant = await loadUtilities(MODULES, { directory })
+        const results = synthetic({ tariff: mutant['civilian-tariff'], provenance: mutant.provenance, finances: mutant.finances }).filter(([name]) => fails.some((prefix) => name.startsWith(prefix))).map(([name, test]) => [name, test()])
+        const caught = await caughtValues(results, fails, label)
 
-        try {
-          const mutant = await loadUtilities(MODULES, { directory })
-
-          failed = failedChecks({ tariff: mutant['civilian-tariff'], provenance: mutant.provenance, finances: mutant.finances })
-        } catch (error) {
-          failed = [[`does not load: ${error.message}`]]
-        }
-
-        check(`mutation caught: ${label}`, failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
+        check(`mutation caught: ${label}`, caught ? true : 'the named checks still pass', fails.join('; '))
       } catch (error) {
         check(`mutation caught: ${label}`, error.message)
       } finally {
@@ -607,7 +602,8 @@ const run = async () => {
       }
     }
 
-    for (const [label, page, from, to] of PAGE_MUTATIONS) {
+    for (const [label, page, from, to, fails] of PAGE_MUTATIONS) {
+      refusePlanting(label)
       const source = pages[page]
 
       if (!source.includes(from)) {
@@ -616,15 +612,14 @@ const run = async () => {
         continue
       }
 
-      let failed
-
       try {
-        failed = wiring({ ...pages, [page]: source.replace(from, () => to) }).filter(([, held]) => held !== true)
-      } catch (error) {
-        failed = [[`the page no longer reads: ${error.message}`]]
-      }
+        const results = wiring({ ...pages, [page]: source.replace(from, () => to) })
+        const caught = await caughtValues(results, fails, label)
 
-      check(`mutation caught: ${label}`, failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
+        check(`mutation caught: ${label}`, caught ? true : 'the named checks still pass', fails.join('; '))
+      } catch (error) {
+        check(`mutation caught: ${label}`, error.message)
+      }
     }
   }
 

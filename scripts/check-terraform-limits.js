@@ -14,10 +14,11 @@
 const fs = require('fs')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -795,7 +796,7 @@ const run = async (checks, world) => {
 }
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const baseline = worldOf()
   const failures = await run(CHECKS, baseline)
   let passed = CHECKS.length - failures.length
@@ -806,6 +807,7 @@ const main = async () => {
   if (mutate) {
     const known = new Set(CHECKS.map(({ name }) => name))
     const outcomes = await inParallel(FAULTS, async ([label, target, from, to, fails]) => {
+      refusePlanting(label)
       fails.forEach((name) => assert.ok(known.has(name), `${label}: no check named ${name}`))
 
       const world = worldOf({ target, from, to })
@@ -814,7 +816,7 @@ const main = async () => {
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed) {
+        if (!failed || kindOf(failed.error) !== 'assertion' || isSubjectThrow(failed.error)) {
           missed.push(name)
         }
       }

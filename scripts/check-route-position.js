@@ -20,10 +20,11 @@ const fs = require('fs')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
-const { loadPage, instantiate } = require('./lib/page-loader')
+const { loadPage, loadModule, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -164,9 +165,6 @@ const resolved = (edit, text) => {
   return { ...edit, from: found[0][0], to: edit.to(found[0]) }
 }
 
-// A stable copy exposes the pages' cacheQueries without forcing another module graph for every world. The cache itself keeps databases apart with a WeakMap, as in the app.
-const QUERY_CACHE = `${fs.readFileSync(inRenderer('utilities', 'query-cache.js'), 'utf8')}\nglobalThis.__routePositionQueryCache = { cacheQueries }`
-
 const worldOf = (edits = []) => {
   const text = { ...ORIGINALS }
 
@@ -191,7 +189,20 @@ const worldOf = (edits = []) => {
   const modules = memo(() => loadUtilities(['route-position', 'route-plan', 'orbit-propagation', 'jump-graph', 'transport', 'haul-plan', 'provenance', 'places'], { sources: utilitySources }))
   const component = memo(() => loadPage('components/page/RoutePositions', { sources: pageSources }))
   const load = (name) => memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
-  const kept = (name) => ({ cache: () => globalThis.__routePositionQueryCache, load: memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf, 'utilities/query-cache': QUERY_CACHE } })) })
+  // Export the cache function from the page's own private graph, so its database wrapper and cached calculations use one WeakMap even when another page loads between them.
+  const kept = (name) => {
+    let cache = null
+    const load = memo(async () => {
+      const source = patched(`${name}.vue`, pageSources[name], '</script>', "\nexport { cacheQueries as __routePositionCacheQueries } from '../utilities/query-cache'\n</script>")
+      const page = await loadModule(name, { sources: { ...pageSources, [name]: source }, modules: { 'mixins/load-state': labelsOf } })
+
+      cache = { cacheQueries: page.__routePositionCacheQueries }
+
+      return page.default
+    })
+
+    return { cache: () => cache, load }
+  }
   const transport = kept('pages/information')
   const hauling = kept('pages/hauling')
 
@@ -3114,12 +3125,11 @@ const run = async (checks, world) => {
 }
 
 // The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
-const BY_VALUE = new Set(['timed-basis', 'timed-clock', 'fixed-body-order', 'lagrange-owner-class'])
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const only = process.argv.find((argument) => argument.startsWith('--only='))
   const selected = only ? only.slice('--only='.length).split('|').filter(Boolean) : []
   const keep = (key, label) => !only || selected.some((text) => key === text || label.includes(text))
@@ -3184,6 +3194,7 @@ const main = async () => {
       ]
     })
     const outcomes = await inParallel(attempts, async ([label, edits, fails]) => {
+      refusePlanting(label)
       const began = performance.now()
       const world = worldOf(edits)
       const missed = []
@@ -3191,7 +3202,7 @@ const main = async () => {
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed || (BY_VALUE.has(name) && !(failed.error instanceof assert.AssertionError))) {
+        if (!failed || kindOf(failed.error) !== 'assertion' || isSubjectThrow(failed.error)) {
           missed.push(name)
         }
 

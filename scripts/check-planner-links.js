@@ -20,10 +20,11 @@
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -65,11 +66,15 @@ const check = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `  [${typeof result === 'string' ? result : 'false'}]`}`)
 }
 
-const settle = async (test) => {
+const settle = async (test, valueOnly = false) => {
   try {
     return await test()
   } catch (error) {
-    return `threw ${error.message}`
+    if (valueOnly && (kindOf(error) !== 'assertion' || isSubjectThrow(error))) {
+      throw error
+    }
+
+    return valueOnly ? error.message : `threw ${error.message}`
   }
 }
 
@@ -1223,7 +1228,7 @@ const TEMPLATE_FAULTS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {
@@ -1269,6 +1274,8 @@ const openStock = ([file, GameID, RaceID]) => new Promise((resolve, reject) => {
 })
 
 const runFaults = async (faults) => {
+  refusePlanting('the planner-link faults')
+
   for (const { name, fails, ...fault } of faults) {
     let outcome
 
@@ -1283,7 +1290,7 @@ const runFaults = async (faults) => {
         const results = []
 
         for (const [statement, test] of named) {
-          results.push([statement, await settle(test)])
+          results.push([statement, await settle(test, true)])
         }
 
         const held = results.filter(([, result]) => result === true).map(([statement]) => statement)

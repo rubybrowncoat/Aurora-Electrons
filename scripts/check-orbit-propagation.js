@@ -15,9 +15,10 @@
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -1209,7 +1210,7 @@ const run = async (checks, world) => {
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const failures = await run(CHECKS, worldOf())
   let passed = CHECKS.length - failures.length
   let total = CHECKS.length
@@ -1245,13 +1246,14 @@ const main = async () => {
       return [[label, [planted], fails], [`${label}, on the sources with every benign edit`, [...BENIGN, planted], fails]]
     })
     const outcomes = await inParallel(attempts, async ([label, edits, fails]) => {
+      refusePlanting(label)
       const world = worldOf(edits)
       const missed = []
 
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed) {
+        if (!failed || kindOf(failed.error) !== 'assertion' || isSubjectThrow(failed.error)) {
           missed.push(name)
         }
       }
