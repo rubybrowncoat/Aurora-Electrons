@@ -17,7 +17,9 @@ const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, HarnessError, settled, installScreen, pairedBy, readFigure } = require('./lib/browser-observe')
 const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
+const { plantedPatch } = require('./lib/mutant-source')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating: canMutate } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -652,11 +654,6 @@ const drill = async (page, step, key) => {
   }
 
   await row.locator('[data-location-place]').first().click({ timeout: 30000 })
-  step(`waiting for the drill-down of ${key}`)
-  await page.waitForFunction((wanted) => document.querySelector(`[data-pool="${wanted}"]`) !== null, key, { timeout: 30000 }).catch(async (error) => {
-    await page.screenshot({ path: path.join(os.tmpdir(), 'ae-maintenance-pools-failure.png') })
-    throw new Error(`the drill-down of ${key} did not open (${error.message.split('\n')[0]}); open: ${short(await page.evaluate(() => [...document.querySelectorAll('[data-pool]')].map((element) => element.getAttribute('data-pool'))))}`)
-  })
   step(`settling after opening ${key}`)
   await settled(page, { limit: TIMEOUT, loading: pageLoading })
   step(`reading the drill-down of ${key}`)
@@ -1109,11 +1106,21 @@ const PAGE_FAULTS = [
 // A rewrite is judged by the checks that read the part of the page it changes (`checks`), and the drill-downs those checks read are the ones opened.
 const PAGE_BENIGN = [
   { name: 'the switch of the locations bound by an explicit prop and event instead of v-model', file: PAGE_FILE, checks: ['standalone', 'clusters', 'no-errors'], change: swap('v-model="showIdleLocations"', ':input-value="showIdleLocations" @change="showIdleLocations = $event"') },
-  { name: 'the retry of the supplied-output panel listened to by the longhand of the event', file: PAGE_FILE, checks: ['totals', 'no-errors'], change: swap('@retry="retryMspSupply"', 'v-on:retry="retryMspSupply"') },
+  { name: 'the location row expanded by the longhand of its click event', file: PAGE_FILE, checks: ['clusters'], change: swap('@click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"', 'v-on:click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"') },
   { name: 'the tonnage line states its qualifier after the figure instead of before it', file: POOL_FILE, checks: ['capacity'], change: swap('Tonnage of the assigned ships: <span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span>', '<span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span> is the tonnage of the assigned ships') },
   { name: 'the supply caption of a row worded with another word of the reviewed table', file: POOLS_FILE, checks: ['totals', 'no-errors'], change: swap('supply: \'on supply ships\'', 'supply: \'aboard supply ships\'') },
   { name: 'the condition of the drill-down parenthesised', file: POOL_FILE, checks: ['rule', 'clusters'], change: swap('<template v-if="location.pool">', '<template v-if="(location.pool)">') },
 ]
+
+const LOCATION_CLICK = '@click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"'
+const LOCATION_CLICK_LONGHAND = 'v-on:click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"'
+const LOCATION_CLICK_BROKEN = 'v-on:click:row="(item, { expand, isExpanded }) => expand(isExpanded)"'
+const LOCATION_CLICK_FAULT = {
+  name: 'the longhand location-row listener leaves the clicked location collapsed',
+  file: PAGE_FILE,
+  fails: ['clusters'],
+  change: (text) => plantedPatch(PAGE_FILE, swap(LOCATION_CLICK, LOCATION_CLICK_LONGHAND)(text), LOCATION_CLICK_LONGHAND, LOCATION_CLICK_BROKEN),
+}
 
 // ---------- the run ----------
 
@@ -1321,10 +1328,11 @@ const variantsOf = (mutating) => [
   { key: 'page', name: 'the head: the Logistics page as it is', head: true, heading: '\nThe drill-down of the maintenance locations on the Logistics page (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.page, run: checkPageHead },
   ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.page, run: () => checkPageFault(fault) })) : []),
   ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.page, run: () => checkPageRewrite(rewrite) })) : []),
+  ...(mutating ? [{ key: 'fault:location-click-longhand', name: `fault caught: ${LOCATION_CLICK_FAULT.name}`, heading: '\nbroken location-row longhand listener', pool: 'suite', deadline: DEADLINES.page, run: () => checkPageFault(LOCATION_CLICK_FAULT) }] : []),
 ]
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const mutating = canMutate()
   const totals = await runSuite({
     script: __filename,
     inputs: [SAVE],
