@@ -19,6 +19,7 @@ const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey, settled } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
 
@@ -472,6 +473,10 @@ const told = (label, seen) => {
 
 // The app with `changes` made to it ([[file, change], ...], none for the app as it is), each copy of the save opened and read as a player does.
 const view = async (changes) => {
+  if (changes.length) {
+    refusePlanting('an unsupported-save source override')
+  }
+
   for (const [file, change] of changes) {
     ENV.server.replace(file, change(ENV.originals[file]))
   }
@@ -560,6 +565,7 @@ const checkHead = async () => {
 }
 
 const checkFault = async (fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, resultsOf(await view(fault.changes), ENV.truth, { ids: fault.fails, label: `the app with the fault "${fault.name}"` }))
 }
 
@@ -588,11 +594,11 @@ const variantsOf = (mutating) => [
 ]
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const doMutations = mutating()
   const totals = await runSuite({
     script: __filename,
     inputs: [SAVE],
-    variants: variantsOf(mutating),
+    variants: variantsOf(doMutations),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
       ENV = await setUp()
@@ -617,7 +623,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating ? { fault: `fault:${FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
+    control: doMutations ? { fault: `fault:${FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 

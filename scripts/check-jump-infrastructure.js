@@ -21,6 +21,7 @@ const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, failureLine, describe, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -705,12 +706,18 @@ const BUILDER_CHECKS = [
 
 // ---------- the faults and the rewrites ----------
 
-const swap = (from, to, count = 1) => (text) => {
-  if (text.split(from).length !== count + 1) {
-    throw new Error(`The variant must apply ${count === 1 ? 'exactly once' : `${count} times`} to the file: ${from}`)
+const swap = (from, to, count = 1) => {
+  const change = (text) => {
+    if (text.split(from).length !== count + 1) {
+      throw new Error(`The variant must apply ${count === 1 ? 'exactly once' : `${count} times`} to the file: ${from}`)
+    }
+
+    return text.split(from).join(to)
   }
 
-  return text.split(from).join(to)
+  change.patches = [{ from, to, count }]
+
+  return change
 }
 
 /* eslint-disable no-template-curly-in-string */
@@ -799,6 +806,8 @@ const PAGE_BENIGN = [
   { name: 'the marker of a far side not explored in other words', file: PLACES, words: true, map: true, change: swap("export const FAR_UNKNOWN_TEXT = 'Unex'", "export const FAR_UNKNOWN_TEXT = 'Not explored'") },
   { name: 'the words for a far side with no system in other words', file: MODULE, words: true, change: swap("unexplored: 'Unexplored',", "unexplored: 'Not yet explored',") },
 ]
+
+const PAGE_COMPOSITE_A = { key: 'benign:composite-a', name: 'the composed page rewrites with the map still structurally the same', rewrites: PAGE_BENIGN.filter((_, index) => [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12].includes(index)), map: true, words: true }
 
 const MODULE_BENIGN = [
   { name: 'the time condition of the module parenthesised', file: MODULE, change: swap('const timeKnown = Boolean(facts) && Number.isFinite(facts.gameTime)', 'const timeKnown = (Boolean(facts) && Number.isFinite(facts.gameTime))') },
@@ -939,6 +948,7 @@ const checkHead = async () => {
 }
 
 const checkModuleFault = async (fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, judge(await moduleView(fault), ENV.truth, MODULE_CHECKS, fault.fails))
 }
 
@@ -949,6 +959,7 @@ const checkModuleBenign = async (rewrite) => {
 }
 
 const checkFault = async (fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, pageResults(await view(fault, { map: Boolean(fault.map) }), ENV.truth, { ids: fault.fails, label: `the page with the fault "${fault.name}"` }))
 }
 
@@ -975,6 +986,137 @@ const checkBenign = async (rewrite) => {
   const same = rewrite.words ? shape(seen.value) === shape(ENV.baseline.value) : JSON.stringify(seen.value) === JSON.stringify(ENV.baseline.value)
 
   report(`variant passes: ${rewrite.name}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
+}
+
+const composeBenign = (rewrites) => {
+  const byFile = new Map()
+
+  for (const rewrite of rewrites) {
+    const sourceText = ENV.original[rewrite.file]
+    const patches = rewrite.change.patches
+
+    if (!Array.isArray(patches) || !patches.length) {
+      throw new HarnessError(`the benign rewrite "${rewrite.name}" has no source patch catalog`)
+    }
+
+    const individual = patches.reduce((text, patch) => {
+      const count = text.split(patch.from).length - 1
+
+      if (count !== patch.count) {
+        throw new HarnessError(`the anchor of "${rewrite.name}" occurs ${count} times, expected ${patch.count}: ${patch.from}`)
+      }
+
+      return text.split(patch.from).join(patch.to)
+    }, sourceText)
+
+    if (individual !== rewrite.change(sourceText)) {
+      throw new HarnessError(`the patch catalog for "${rewrite.name}" differs from its original rewrite`)
+    }
+
+    byFile.set(rewrite.file, [...(byFile.get(rewrite.file) || []), ...patches.map((patch) => ({ ...patch, name: rewrite.name }))])
+  }
+
+  const sources = {}
+
+  for (const [file, patches] of byFile) {
+    const sourceText = ENV.original[file]
+    const edits = []
+
+    for (const patch of patches) {
+      const starts = []
+      let at = 0
+
+      while ((at = sourceText.indexOf(patch.from, at)) !== -1) {
+        starts.push(at)
+        at += patch.from.length
+      }
+
+      if (starts.length !== patch.count) {
+        throw new HarnessError(`the anchor of "${patch.name}" occurs ${starts.length} times, expected ${patch.count}: ${patch.from}`)
+      }
+
+      starts.forEach((start) => edits.push({ start, end: start + patch.from.length, to: patch.to, name: patch.name }))
+    }
+
+    const ordered = edits.sort((a, b) => a.start - b.start)
+
+    for (let index = 1; index < ordered.length; index++) {
+      if (ordered[index].start < ordered[index - 1].end) {
+        throw new HarnessError(`the benign source patches "${ordered[index - 1].name}" and "${ordered[index].name}" overlap in ${file}`)
+      }
+    }
+
+    sources[file] = [...ordered].reverse().reduce((text, edit) => `${text.slice(0, edit.start)}${edit.to}${text.slice(edit.end)}`, sourceText)
+    require('./lib/mutant-source').assertParses(file, sources[file])
+  }
+
+  return sources
+}
+
+const viewWithSources = async (sources, options = {}) => {
+  const applied = []
+  const problems = []
+  let seen
+  let failure = null
+
+  try {
+    for (const [file, text] of Object.entries(sources)) {
+      applied.push(file)
+      ENV.server.replace(file, text)
+    }
+
+    seen = told('the page with composed benign rewrites', await observePage(ENV.chrome, ENV.server.url, ENV.truth, options))
+  } catch (error) {
+    failure = error
+  } finally {
+    for (const file of applied.reverse()) {
+      try {
+        ENV.server.replace(file, null)
+      } catch (error) {
+        problems.push(`${file}: ${error && error.message ? error.message : error}`)
+      }
+    }
+  }
+
+  if (failure && problems.length) {
+    throw new HarnessError(`composed benign observation failed: ${failure && failure.message ? failure.message : failure}; cleanup failed: ${problems.join(' | ')}`)
+  }
+
+  if (failure) {
+    throw failure
+  }
+
+  if (problems.length) {
+    throw new HarnessError(`composed benign cleanup failed: ${problems.join(' | ')}`)
+  }
+
+  return seen
+}
+
+const checkPageComposite = async () => {
+  if (unobserved(ENV.baseline)) {
+    throw new HarnessError(`the page as it is was not observed, so the rewrite has no screen to be set against: ${failureLine(ENV.baseline)}`)
+  }
+
+  const rewrites = PAGE_COMPOSITE_A.rewrites
+  const sources = composeBenign(rewrites)
+  const moduleChanges = Object.fromEntries(Object.entries(sources).filter(([file]) => MODULE_FILES.includes(file)).map(([file, text]) => [file, () => text]))
+  const words = ENV.words
+  let seen
+  let wrong
+
+  try {
+    ENV.words = wordsOf(await loadModules(moduleChanges))
+    seen = await viewWithSources(sources, { map: true })
+    wrong = pageResults(seen, ENV.truth, { label: `the page with ${PAGE_COMPOSITE_A.name}`, list: PAGE_CHECKS }).filter(({ result }) => result !== true).map(({ id }) => id)
+  } finally {
+    ENV.words = words
+  }
+
+  const shape = (value) => JSON.stringify(Object.values(value.systems).map((table) => table.cells.map((entry) => [entry.id, entry.cell, entry.on])))
+  const same = shape(seen.value) === shape(ENV.baseline.value)
+
+  report(`variant passes: ${PAGE_COMPOSITE_A.name}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the page and map structure differs from the head')
 }
 
 // A save lacking a column: served from now until the reset after the variant.
@@ -1008,6 +1150,7 @@ const checkLackingHead = async (kind) => {
 }
 
 const checkLackingFault = async (kind, fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, pageResults(await lackingView(kind, fault), ENV.truth, { ids: fault.fails, label: `the save lacking ${LACKS[kind].label} with the fault "${fault.name}"`, list: LACKS[kind].checks }))
 }
 
@@ -1041,22 +1184,34 @@ const setUp = async () => {
 const DEADLINES = { head: 300, module: 120, view: 240, setup: 900 + 180 }
 const CONTROL_FAULT = 'the minefields cell draws the buoys'
 
-const variantsOf = (mutating, lacking) => [
-  { key: 'head', name: 'the head: the module and the table on the page as they are', head: true, heading: 'The jump point infrastructure table (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.head, run: checkHead },
-  ...(mutating ? MODULE_FAULTS.map((fault, index) => ({ key: `module-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the module', pool: 'suite', deadline: DEADLINES.module, run: () => checkModuleFault(fault) })) : []),
-  ...(mutating ? MODULE_BENIGN.map((rewrite, index) => ({ key: `module-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the module that say the same thing', pool: 'suite', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })) : []),
-  ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.view, run: () => checkFault(fault) })) : []),
-  ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nvariants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(rewrite) })) : []),
-  ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => ({ key: lack.key, name: `the head: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}`, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
-  ...(lacking && mutating ? Object.entries(LACKS).flatMap(([kind, lack]) => lack.faults.map((fault, index) => ({ key: `${lack.key}-fault:${index}`, name: `fault caught: ${fault.name}`, heading: `\nA save lacking ${lack.label}`, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingFault(kind, fault) }))) : []),
-]
+const variantsOf = (doMutations, lacking, explicitSelection) => {
+  const pageBenign = doMutations ? explicitSelection ? [
+    ...PAGE_BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nvariants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(rewrite) })),
+    { key: PAGE_COMPOSITE_A.key, name: `variant passes: ${PAGE_COMPOSITE_A.name}`, heading: '\ncomposed variants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: checkPageComposite },
+  ] : [
+    { key: PAGE_COMPOSITE_A.key, name: `variant passes: ${PAGE_COMPOSITE_A.name}`, heading: '\ncomposed variants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: checkPageComposite },
+    { key: 'benign:4', name: `variant passes: ${PAGE_BENIGN[4].name}`, heading: '\nvariants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(PAGE_BENIGN[4]) },
+  ] : []
+  const moduleBenign = doMutations ? MODULE_BENIGN : []
+
+  return [
+    { key: 'head', name: 'the head: the module and the table on the page as they are', head: true, heading: 'The jump point infrastructure table (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.head, run: checkHead },
+    ...(doMutations ? MODULE_FAULTS.map((fault, index) => ({ key: `module-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the module', pool: 'suite', deadline: DEADLINES.module, run: () => checkModuleFault(fault) })) : []),
+    ...moduleBenign.map((rewrite, index) => ({ key: `module-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the module that say the same thing', pool: 'suite', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })),
+    ...(doMutations ? PAGE_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.view, run: () => checkFault(fault) })) : []),
+    ...pageBenign,
+    ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => ({ key: lack.key, name: `the head: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}`, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
+    ...(lacking && doMutations ? Object.entries(LACKS).flatMap(([kind, lack]) => lack.faults.map((fault, index) => ({ key: `${lack.key}-fault:${index}`, name: `fault caught: ${fault.name}`, heading: `\nA save lacking ${lack.label}`, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingFault(kind, fault) }))) : []),
+  ]
+}
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const doMutations = mutating()
+  const explicitSelection = process.argv.some((argument) => argument.startsWith('--variants=') || argument.startsWith('--only=') || argument.startsWith('--worker='))
   const totals = await runSuite({
     script: __filename,
     inputs: [SAVE],
-    variants: variantsOf(mutating, !process.argv.includes('--no-lacking')),
+    variants: variantsOf(doMutations, !process.argv.includes('--no-lacking'), explicitSelection),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
       ENV = await setUp()
@@ -1081,7 +1236,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating ? { fault: `fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
+    control: doMutations ? { fault: `fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 
