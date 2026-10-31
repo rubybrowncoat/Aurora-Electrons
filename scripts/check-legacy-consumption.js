@@ -19,10 +19,10 @@
 */
 const crypto = require('crypto')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const v8 = require('v8')
 const sqlite3 = require('sqlite3')
+const { createOwnedTemp, removeOwnedTemp } = require('./lib/owner-temp')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
@@ -366,9 +366,9 @@ const suite = (tree, saves, unsupported) => {
   // The emptied copy of the first save that has shipbuilding in its ledger (the stock save), as a page that has no ledger.
   const fallbackSource = saves.find((save) => save.key === 'stock' && present(save)) || saves.find((save) => present(save) && save.key !== 'modded')
   const fallback = memo(async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-legacy-copy-'))
+    const directory = createOwnedTemp('ae-legacy-copy-')
 
-    cleanup.push(() => fs.rmSync(directory, { recursive: true, force: true }))
+    cleanup.push(() => removeOwnedTemp(directory))
 
     return await environment(fallbackSource, await ledgerlessOf(present(fallbackSource), directory), { ledger: false })()
   })
@@ -1723,7 +1723,7 @@ const MUTATIONS = [
 const mutatedCopy = (file, from, to) => {
   refusePlanting(`${file}: ${from}`)
 
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-legacy-mutant-'))
+  const directory = createOwnedTemp('ae-legacy-mutant-')
 
   COPIED.forEach((entry) => {
     fs.mkdirSync(path.dirname(path.join(directory, entry)), { recursive: true })
@@ -1734,7 +1734,7 @@ const mutatedCopy = (file, from, to) => {
   const source = fs.readFileSync(target, 'utf8').replace(/\r\n/g, '\n')
 
   if (source.split(from).length !== 2) {
-    fs.rmSync(directory, { recursive: true, force: true })
+    removeOwnedTemp(directory)
     throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
   }
 
@@ -1788,7 +1788,7 @@ const tryMutation = async ([label, file, from, to, fails]) => {
     return [label, error.message, '']
   } finally {
     if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
+      removeOwnedTemp(directory)
     }
   }
 }
@@ -1811,10 +1811,10 @@ const run = async () => {
     process.exit(0)
   }
 
-  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-legacy-cache-'))
+  const cache = createOwnedTemp('ae-legacy-cache-')
 
   process.env.LEGACY_CACHE = cache
-  process.on('exit', () => fs.rmSync(cache, { recursive: true, force: true }))
+  process.on('exit', () => removeOwnedTemp(cache))
 
   const { list, cleanup } = suite(rendererDirectory, saves, unsupported)
 

@@ -158,7 +158,7 @@ const faultResults = async (fault) => {
     fs.mkdirSync(path.join(scripts, 'lib'), { recursive: true })
     fs.copyFileSync(__filename, path.join(scripts, 'check-loader-isolation.js'))
 
-    for (const file of ['module-files.js', 'utilities.js', 'page-loader.js']) {
+    for (const file of ['module-files.js', 'owner-temp.js', 'utilities.js', 'page-loader.js']) {
       const source = fs.readFileSync(path.join(LIBRARY, file), 'utf8')
       const text = file === fault.file ? fault.edits.reduce((given, [from, to]) => patched(file, given, from, to), source) : source
 
