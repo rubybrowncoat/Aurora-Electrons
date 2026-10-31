@@ -17,6 +17,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { createOwnedTemp, removeOwnedTemp } = require('./lib/owner-temp')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild } = require('./lib/check-pool')
@@ -402,7 +403,7 @@ const synthetic = (m, tree) => {
 const mutatedCopy = (file, from, to) => {
   refusePlanting(`${file}: ${from}`)
 
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-glossary-mutant-'))
+  const directory = createOwnedTemp('ae-glossary-mutant-')
 
   COPIED.forEach((folder) => fs.cpSync(path.join(rendererDirectory, folder), path.join(directory, folder), { recursive: true }))
 
@@ -410,14 +411,14 @@ const mutatedCopy = (file, from, to) => {
   const source = fs.readFileSync(target, 'utf8')
 
   if (source.split(from).length !== 2) {
-    fs.rmSync(directory, { recursive: true, force: true })
+    removeOwnedTemp(directory)
     throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
   }
 
   const changed = source.replace(from, () => to)
 
   if (REGISTERS_RULE.test(source) !== REGISTERS_RULE.test(changed)) {
-    fs.rmSync(directory, { recursive: true, force: true })
+    removeOwnedTemp(directory)
     throw new Error(`The mutation of ${file} changes whether it registers a rule, which the rule modules found once for the real tree would miss: ${from}`)
   }
 
@@ -542,7 +543,7 @@ const tryMutation = async ([label, file, from, to, expected], ruleModules) => {
     return [label, error.message, '']
   } finally {
     if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
+      removeOwnedTemp(directory)
     }
   }
 }
