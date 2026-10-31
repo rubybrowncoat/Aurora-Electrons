@@ -20,10 +20,11 @@ const fs = require('fs')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
 const sqlite3 = require('sqlite3')
-const { assert, kindOf } = require('./lib/fault-credit')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -1531,12 +1532,11 @@ const run = async (checks, world) => {
 }
 
 // The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
-const BY_VALUE = new Set(['cycle-rows', 'nebula-fuel'])
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split('|').filter(Boolean)
   const selected = (label) => !only.length || only.some((text) => label.includes(text))
   const detail = process.argv.includes('--detail')
@@ -1576,13 +1576,14 @@ const main = async () => {
       return [[label, [planted], fails], [`${label}, on the sources with every benign edit`, [...BENIGN, planted], fails]]
     })
     const outcomes = await inParallel(attempts, async ([label, edits, fails]) => {
+      refusePlanting(label)
       const world = worldOf(edits)
       const missed = []
 
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed || (BY_VALUE.has(name) && kindOf(failed.error) !== 'assertion')) {
+        if (!failed || kindOf(failed.error) !== 'assertion' || isSubjectThrow(failed.error)) {
           missed.push(name)
         } else if (detail) {
           console.log(`CAUGHT ${label} by ${describeFailure(failed)}`)

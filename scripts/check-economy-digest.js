@@ -15,12 +15,12 @@ const fs = require('fs')
 const path = require('path')
 const { pathToFileURL } = require('url')
 const compiler = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { routes: routeTable } = require('./lib/store-routes')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { plantedPatch } = require('./lib/mutant-source')
-const { mutating } = require('./lib/no-mutations')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -91,6 +91,7 @@ const build = async (mutation = null) => {
   const text = { ...ORIGINALS }
 
   if (mutation) {
+    refusePlanting(mutation.name)
     text[mutation.target] = plantedPatch(FILES[mutation.target], text[mutation.target], mutation.find, mutation.replace)
   }
 
@@ -1822,7 +1823,15 @@ const main = async () => {
     }
 
     const failed = await failedOf(context)
-    const caught = mutant.fails.filter((key) => failed.has(key))
+    const invalid = [...failed].find(([, error]) => kindOf(error) !== 'assertion' || isSubjectThrow(error))
+
+    if (invalid) {
+      results.push({ ok: false, label: `fault "${mutant.name}"`, detail: `a check failed without an own value assertion: ${invalid[0]}: ${invalid[1].message}` })
+
+      continue
+    }
+
+    const caught = mutant.fails.filter((key) => failed.has(key) && kindOf(failed.get(key)) === 'assertion' && !isSubjectThrow(failed.get(key)))
 
     results.push(caught.length === mutant.fails.length ? { ok: true, label: `fault "${mutant.name}" fails ${mutant.fails.join(', ')}` } : { ok: false, label: `fault "${mutant.name}"`, detail: `expected to fail ${mutant.fails.join(', ')}; failed: ${[...failed.keys()].join(', ') || 'nothing'}` })
   }

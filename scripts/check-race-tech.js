@@ -17,6 +17,8 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 
@@ -68,11 +70,15 @@ const drain = (iterator) => {
 }
 
 // A check that throws has not held, and says so.
-const settle = async (test) => {
+const settle = async (test, valueOnly = false) => {
   try {
     return await test()
   } catch (error) {
-    return `threw ${error.message}`
+    if (valueOnly && (kindOf(error) !== 'assertion' || isSubjectThrow(error))) {
+      throw error
+    }
+
+    return valueOnly ? error.message : `threw ${error.message}`
   }
 }
 
@@ -830,6 +836,8 @@ const MUTATIONS = [
 ]
 
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(file)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-race-tech-mutant-'))
 
   fs.cpSync(utilitiesDirectory, directory, { recursive: true })
@@ -850,7 +858,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1086,7 +1094,7 @@ const run = async () => {
         const failed = []
 
         for (const [checkName, test] of named) {
-          if ((await settle(test)) !== true) {
+          if ((await settle(test, true)) !== true) {
             failed.push(checkName)
           }
         }
@@ -1104,6 +1112,7 @@ const run = async () => {
     }
 
     for (const { name, find, replace, fails } of PAGE_MUTATIONS) {
+      refusePlanting(name)
       const began = Date.now()
 
       try {
@@ -1112,7 +1121,7 @@ const run = async () => {
         const failed = []
 
         for (const [statement, held] of named) {
-          if ((await settle(held)) !== true) {
+          if ((await settle(held, true)) !== true) {
             failed.push(statement)
           }
         }

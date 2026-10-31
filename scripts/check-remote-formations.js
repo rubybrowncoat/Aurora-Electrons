@@ -16,7 +16,8 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { loadPage, instantiate } = require('./lib/page-loader')
@@ -71,7 +72,7 @@ const SURVEY_STUBS = {
   romanum: real('romanum'),
 }
 
-const options = { mutations: !process.argv.includes('--no-mutations') }
+const options = { mutations: mutating() }
 
 let checks = 0
 let failures = 0
@@ -637,20 +638,7 @@ pageAdd('page-survey-ready', 'the page holds its content back while any read is 
 
 // ---------- running ----------
 
-const run = async (list, ctx) => {
-  const out = []
-
-  for (const item of list) {
-    try {
-      await item.run(ctx)
-      out.push({ id: item.id, name: item.name, ok: true, detail: '' })
-    } catch (error) {
-      out.push({ id: item.id, name: item.name, ok: false, detail: String(error.message).split('\n')[0] })
-    }
-  }
-
-  return out
-}
+const run = (list, ctx) => runChecks(list, ctx)
 
 const MUTANTS = [
   ['the role filter is ignored', 'inRoles(row.roles, roles) && (!remoteOnly', '(!remoteOnly', REMOTE_FILE, ['select-roles', 'totals-rows']],
@@ -732,13 +720,14 @@ const main = async () => {
     console.log('\nPlanted faults')
 
     for (const [name, from, to, file, expected] of MUTANTS) {
+      refusePlanting(name)
       const original = file === REMOTE_FILE ? sources.remote : file === MAP_FILE ? sources.map : sources.survey
       const text = patched(file, original, from, to)
       const given = { remote: file === REMOTE_FILE ? text : sources.remote, map: file === MAP_FILE ? text : sources.map, survey: file === SURVEY_FILE ? text : sources.survey }
       const mod = file === REMOTE_FILE ? (await loadUtilities(['remote-formations'], { sources: { 'remote-formations': text } }))['remote-formations'] : loaded['remote-formations']
-      const failed = (await run(own, context(mod, await pagesOf(given)))).filter((result) => !result.ok).map((result) => result.id)
+      const failed = judged(await run(own, context(mod, await pagesOf(given))), name)
 
-      check(`planted: ${name}: caught by ${failed.join(', ') || 'nothing'}`, expected.some((id) => failed.includes(id)), `expected one of ${expected.join(', ')}`)
+      check(`planted: ${name}: caught by ${failed.filter((result) => result.kind === 'assertion' && !result.threw).map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, expected, { name }), `expected a value of ${expected.join(', ')}; ${failed.map((result) => `${result.id}: ${result.detail}`).join('; ')}`)
     }
 
     console.log('\nBenign rewrites')

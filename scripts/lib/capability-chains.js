@@ -19,12 +19,12 @@ const MODULES = ['capabilities', 'minerals', 'mining-data', 'mineral-outlook', '
 const OPEN_EXISTING = 0x2
 
 const MUTATIONS = [
-  ['an unknown chain reads as a multiplier of 1', 'utilities/minerals.js', 'return { bonus: null, unknown: current.Unknown }', 'return { bonus: 1, unknown: null }'],
-  ['a command without ranks is not marked unknown', 'utilities/naval-admins.js', 'Unknown: withheld || (ranks ? null : RANKS_UNKNOWN),', 'Unknown: withheld,'],
-  ['a blocked Mining bonus leaves the surface rows alone', 'utilities/mining-data.js', 'blocked.has(MINING_BONUS)', 'false'],
-  ['a blocked Mining bonus leaves the harvester rows alone', 'utilities/logistics.js', 'blocked.has(MINING_BONUS) ? rows.map', 'false ? rows.map'],
-  ['the survey rate ignores an unknown chain', 'utilities/survey.js', 'if (adminGap || !Number.isFinite(admin)) {', 'if (false) {'],
-  ['the terraforming rate ignores an unknown chain', 'utilities/terraform-capacity.js', '...(group.admin === null ? [group.adminGap || \'the naval admin chain\\\'s Terraforming bonus\'] : [])', '...[]'],
+  ['an unknown chain reads as a multiplier of 1', 'utilities/minerals.js', 'return { bonus: null, unknown: current.Unknown }', 'return { bonus: 1, unknown: null }', ['the chain of an in-range command with unknown ranks']],
+  ['a command without ranks is not marked unknown', 'utilities/naval-admins.js', 'Unknown: withheld || (ranks ? null : RANKS_UNKNOWN),', 'Unknown: withheld,', ['without the ranks, loadNavalAdmins']],
+  ['a blocked Mining bonus leaves the surface rows alone', 'utilities/mining-data.js', 'blocked.has(MINING_BONUS)', 'false', ['a blocked Mining bonus nulls']],
+  ['a blocked Mining bonus leaves the harvester rows alone', 'utilities/logistics.js', 'blocked.has(MINING_BONUS) ? rows.map', 'false ? rows.map', ['the harvester rows under a blocked Mining bonus']],
+  ['the survey rate ignores an unknown chain', 'utilities/survey.js', 'if (adminGap || !Number.isFinite(admin)) {', 'if (false) {', ['a fleet\'s survey rate under unknown ranks']],
+  ['the terraforming rate ignores an unknown chain', 'utilities/terraform-capacity.js', '...(group.admin === null ? [group.adminGap || \'the naval admin chain\\\'s Terraforming bonus\'] : [])', '...[]', ['a colony\'s terraforming rate under unknown ranks']],
 ]
 
 const adminOf = (overrides) => ({ NavalAdminCommandID: 1, SystemID: 5, ParentCommandID: 0, BonusValue: 1.2, Share: 0.05, Eligible: true, Unknown: null, Systems: new Set([5]), ...overrides })
@@ -133,7 +133,7 @@ const reportChecks = (rank, check) => {
 }
 
 // `ctx`: { check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities }.
-const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities }) => {
+const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities, caughtValues }) => {
   const copy = await alteredCopy(source, 'navalrank', ['alter table FCT_Commander drop column RankID'])
   const sequelize = new Sequelize({ dialect: 'sqlite', storage: copy, logging: false, dialectOptions: { mode: OPEN_EXISTING } })
   const database = { query: (sql) => sequelize.query(sql, { raw: true }) }
@@ -155,14 +155,14 @@ const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, pre
 
     statements.forEach(([statement, held]) => check(`naval: ${statement}`, held))
 
-    for (const [label, file, from, to] of mutating() ? MUTATIONS : []) {
+    for (const [label, file, from, to, fails] of mutating() ? MUTATIONS : []) {
       const directory = mutatedCopy(file, from, to)
 
       try {
         const mutants = await loadUtilities(MODULES, { stubs, directory: path.join(directory, 'utilities') })
-        const broken = (await results(mutants, { database, race: ids })).filter(([, held]) => !held)
+        const caught = await caughtValues(await results(mutants, { database, race: ids }), fails, label)
 
-        check(`naval: a copy of the code in which ${label} fails a check`, broken.length > 0)
+        check(`naval: a copy of the code in which ${label} fails its named check`, caught)
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }

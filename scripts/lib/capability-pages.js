@@ -13,29 +13,29 @@
 const fs = require('fs')
 const { loadPage, replacing, instantiate } = require('./page-loader')
 const { routes: routeTable } = require('./store-routes')
-const { mutating } = require('./no-mutations')
+const { mutating, refusePlanting } = require('./no-mutations')
 
 const FLEET = { ShipID: 1, ShipName: 'Surveyor', FleetID: 1, Damaged: 0, CurrentCrew: 100, ClassCrew: 100, ProductionBonus: 1.2, CaptainName: 'Captain' }
 
 const MODIFIERS = { PopulationID: 1, OrdnanceProduction: 2, OverallProductionModifier: 1.5, OrdnanceProductionPower: 3, ShipyardBuildRate: 4, OverallGroundUnitModifier: 6 }
 
 const MUTATIONS = [
-  ['lagrange', 'its unverified list is disconnected from the capability check', "return gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] })", "return false ? gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] }) : []"],
+  ['lagrange', 'its unverified list is disconnected from the capability check', "return gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] })", "return false ? gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] }) : []", ['a renamed Production bonus (5) is unverified']],
   // eslint-disable-next-line no-template-curly-in-string
-  ['lagrange', 'its withheld list ignores the missing ship columns', 'return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)]', 'return [...this.unverified]'],
+  ['lagrange', 'its withheld list ignores the missing ship columns', 'return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)]', 'return [...this.unverified]', ['a save without FCT_Ship.CurrentCrew names']],
   // eslint-disable-next-line no-template-curly-in-string
-  ['lagrange', 'its infrastructure read shows the columns as stored', 'this.missingInfrastructureFields.map((field) => `the save lacks ${fieldWords(field)}`)', 'this.missingInfrastructureFields.map((field) => `the save lacks ${field}`)'],
+  ['lagrange', 'its infrastructure read shows the columns as stored', 'this.missingInfrastructureFields.map((field) => `the save lacks ${fieldWords(field)}`)', 'this.missingInfrastructureFields.map((field) => `the save lacks ${field}`)', ['a save without FCT_Contacts.Speed names']],
   // eslint-disable-next-line no-template-curly-in-string
-  ['lagrange', 'its withheld list shows the ship columns as stored', 'this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)', 'this.missingShipFields.map((field) => `the save lacks ${field}`)'],
-  ['commanders', 'its roster parses the bonuses without the blocked set', 'parseBonuses(commander.Bonuses, this.blockedBonuses)', 'parseBonuses(commander.Bonuses)'],
-  ['logistics', 'its fuel total adds the harvesters that have no figure', 'production: refineries === null || harvesters === null ? null : refineries + harvesters', 'production: (refineries ?? 0) + harvestersKnown'],
-  ['logistics', 'its fuel balance ignores an unknown harvested total', 'const fuelNet = fuel.production === null ? null : fuel.production - fuel.high', 'const fuelNet = fuel.refineries === null ? null : (fuel.refineries + fuel.harvestersKnown) - fuel.high'],
-  ['logistics', 'its harvester rows are not gated by the blocked Mining bonus', '.then(([items]) => gateHarvesterRows(items, blocked))', '.then(([items]) => items)'],
-  ['production', 'its research read leaves the blocked Research bonus alone', 'blocked.has(RESEARCH_BONUS) ? projects.map(', 'false ? projects.map('],
-  ['recovery', 'its observation names the columns as stored', 'return entry ? entry.fields.map(fieldWords) : []\n    },\n\n    recoveryCanObserve', 'return entry ? entry.fields : []\n    },\n\n    recoveryCanObserve'],
-  ['survey-progress', 'its observation names the columns as stored', 'return entry ? entry.fields.map(fieldWords) : []\n    },\n\n    // The observation can be chosen', 'return entry ? entry.fields : []\n    },\n\n    // The observation can be chosen'],
-  ['survey-progress', 'its observation ignores the columns of the capability report that the save lacks', 'return this.observable && this.observationGaps.length === 0', 'return this.observable'],
-  ['survey-progress', 'its observation gaps are read from an input of another name', "report.degraded.find((degraded) => degraded.key === 'observationRead')", "report.degraded.find((degraded) => degraded.key === 'observationReads')"],
+  ['lagrange', 'its withheld list shows the ship columns as stored', 'this.missingShipFields.map((field) => `the save lacks ${fieldWords(field)}`)', 'this.missingShipFields.map((field) => `the save lacks ${field}`)', ['a save without FCT_Ship.CurrentCrew names']],
+  ['commanders', 'its roster parses the bonuses without the blocked set', 'parseBonuses(commander.Bonuses, this.blockedBonuses)', 'parseBonuses(commander.Bonuses)', ['the roster has the bonus of a blocked ID']],
+  ['logistics', 'its fuel total adds the harvesters that have no figure', 'production: refineries === null || harvesters === null ? null : refineries + harvesters', 'production: (refineries ?? 0) + harvestersKnown', ['with the Mining bonus (6) blocked the harvested fuel']],
+  ['logistics', 'its fuel balance ignores an unknown harvested total', 'const fuelNet = fuel.production === null ? null : fuel.production - fuel.high', 'const fuelNet = fuel.refineries === null ? null : (fuel.refineries + fuel.harvestersKnown) - fuel.high', ['with the Mining bonus (6) blocked the fuel balance']],
+  ['logistics', 'its harvester rows are not gated by the blocked Mining bonus', '.then(([items]) => gateHarvesterRows(items, blocked))', '.then(([items]) => items)', ['with the Mining bonus (6) blocked every harvester']],
+  ['production', 'its research read leaves the blocked Research bonus alone', 'blocked.has(RESEARCH_BONUS) ? projects.map(', 'false ? projects.map(', ['with the Research bonus (3) blocked a project with a scientist']],
+  ['recovery', 'its observation names the columns as stored', 'return entry ? entry.fields.map(fieldWords) : []\n    },\n\n    recoveryCanObserve', 'return entry ? entry.fields : []\n    },\n\n    recoveryCanObserve', ['on a save without FCT_Lifepods.Crew']],
+  ['survey-progress', 'its observation names the columns as stored', 'return entry ? entry.fields.map(fieldWords) : []\n    },\n\n    // The observation can be chosen', 'return entry ? entry.fields : []\n    },\n\n    // The observation can be chosen', ['on a save without FCT_GroundUnitFormationElement.Units the observation chosen is offered']],
+  ['survey-progress', 'its observation ignores the columns of the capability report that the save lacks', 'return this.observable && this.observationGaps.length === 0', 'return this.observable', ['on a save without FCT_GroundUnitFormationElement.Units the observation chosen is offered']],
+  ['survey-progress', 'its observation gaps are read from an input of another name', "report.degraded.find((degraded) => degraded.key === 'observationRead')", "report.degraded.find((degraded) => degraded.key === 'observationReads')", ['on a save without FCT_GroundUnitFormationElement.Units the observation chosen is offered']],
 ]
 
 // The getters of store/capabilities.js over `result` as a page reads them ('capabilities/gates', ...), and a dispatch that records the actions and answers a check with `answer`. The dispatch answers by the table of calls of scripts/lib/store-routes.js: `capabilities/preflight` and `capabilities/retry`, root actions called by their full names with no options; any other dispatch is recorded as not accepted, answered with undefined and not settled, and `rejected()` lists those. Every store is kept in `created` for the check that none rejected a call.
@@ -303,7 +303,7 @@ const recoveryResults = async (context, fixtures, mutate) => {
 const PAGE_RESULTS = { recovery: recoveryResults, lagrange: lagrangeResults, commanders: commandersResults, production: productionResults, logistics: logisticsResults, 'survey-progress': surveyResults }
 
 // The pages' wiring on the real page code (every statement a check line) and, with one gate cut out of a page's script, on mutants that must fail. `context`: { mods: the utilities the script loaded, stubs, source, check, alteredCopy, preflightOf, capabilities }.
-const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf }) => {
+const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf, caughtValues }) => {
   const copies = []
   const context = { stubs, store: mods['../store/capabilities'], commanders: mods.commanders }
   const copy = async (name, statements) => {
@@ -345,10 +345,11 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
 
     check('pages: the stores of the pages record and reject, answering undefined, a dispatch that is not an action of the root store, a prefixed name and a call with options', JSON.stringify(answers) === JSON.stringify([undefined, undefined, undefined, null]) && JSON.stringify(probe.calls.map(({ type, accepted }) => [type, accepted])) === JSON.stringify([['not-an-action', false], ['peeks/capabilities/preflight', false], ['capabilities/preflight', false], ['capabilities/retry', true]]) && probe.rejected().length === 3 && probe.dispatched.join() === 'capabilities/retry')
 
-    for (const [page, label, from, to] of mutating() ? MUTATIONS : []) {
-      const broken = (await PAGE_RESULTS[page](context, fixtures, replacing(from, to))).filter(([, held]) => !held).map(([statement]) => statement)
+    for (const [page, label, from, to, fails] of mutating() ? MUTATIONS : []) {
+      refusePlanting(label)
+      const caught = await caughtValues(await PAGE_RESULTS[page](context, fixtures, replacing(from, to)), fails, label)
 
-      check(`pages: a copy of ${page}.vue in which ${label} fails a page check`, broken.length > 0)
+      check(`pages: a copy of ${page}.vue in which ${label} fails its named page check`, caught)
     }
   } finally {
     copies.forEach((file) => fs.rmSync(file, { force: true }))

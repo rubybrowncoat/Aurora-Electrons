@@ -16,6 +16,8 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -270,7 +272,7 @@ const mockSave = ({ GameID = 1, name = 'Campaign', template = 1, n, fork = null,
 
 const defineSuite = (m, prepared) => {
   const cases = []
-  const assert = require('./lib/bounded-assert')
+  const { assert } = require('./lib/fault-credit')
   const test = (group, name, run) => cases.push({ group, name, run })
   const near = (actual, expected, message, tolerance = 1e-6) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message}: ${actual} is not within ${tolerance} of ${expected}`)
   const statuses = (check) => check.windows.map((window) => window.status)
@@ -1083,6 +1085,8 @@ const runSuite = async (modules, prepared, only = null) => {
 const copySources = (copy) => fs.cpSync(path.join(src, 'renderer', 'utilities'), path.join(copy, 'renderer', 'utilities'), { recursive: true })
 
 const applyMutations = async (copy, prepared) => {
+  refusePlanting('the treasury-anchor faults')
+
   const results = []
 
   for (const mutation of MUTATIONS) {
@@ -1101,6 +1105,12 @@ const applyMutations = async (copy, prepared) => {
       const modules = await loadModules(copy)
       const wanted = mutation.fails.filter((start) => !start.startsWith('real saves') || prepared.scenarios['falryx one line'])
       const outcome = await runSuite(modules, prepared, wanted)
+      const invalid = outcome.find((entry) => entry.error && (kindOf(entry.error) !== 'assertion' || isSubjectThrow(entry.error)))
+
+      if (invalid) {
+        throw invalid.error
+      }
+
       const failed = outcome.filter((entry) => entry.error)
       const named = (entry, start) => `${entry.group}: ${entry.name}`.startsWith(start)
       const missed = wanted.filter((start) => !failed.some((entry) => named(entry, start)))
@@ -1154,7 +1164,7 @@ const main = async () => {
     reportOf(modules, prepared)
   }
 
-  if (!process.argv.includes('--no-mutations')) {
+  if (mutating()) {
     const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-anchors-'))
 
     try {

@@ -13,11 +13,11 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { plantedPatch } = require('./lib/mutant-source')
-const { mutating } = require('./lib/no-mutations')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const rows = fs.readFileSync(path.resolve(__dirname, '..', '.github', 'exports', 'DIM_EventType.csv'), 'utf8').trim().split(/\r?\n/).slice(1).map((line) => line.split(','))
 const EXPORT = rows.map(([id, , , , attack]) => ({ id: Number(id), attack: attack === '1' }))
@@ -206,6 +206,10 @@ const NAMES = { types: new Map(), colours: new Map(), systems: new Map(), coloni
 
 // The utilities, the Archive panel and the page as the app ships them, or with one fault planted in a utility (`utility` { file, find, replace }), in the panel (`panel` { find, replace }) or in the page (`page`, a `replacing` of its script).
 const loadGameMaster = async ({ utility = null, panel = null, page = null } = {}) => {
+  if (utility || panel || page) {
+    refusePlanting('the game-master event faults')
+  }
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-event-triage-'))
 
   try {
@@ -360,7 +364,7 @@ const failedOf = async (m) => {
     try {
       await body(m)
     } catch (error) {
-      failed.push({ name, message: error.message })
+      failed.push({ name, error, message: error.message, valueFailure: kindOf(error) === 'assertion' && !isSubjectThrow(error) })
     }
   }
 
@@ -393,7 +397,13 @@ const run = async () => {
 
     try {
       const failed = await failedOf(await loadGameMaster(mutant.load))
-      const missing = mutant.fails.filter((start) => !failed.some(({ name }) => name.startsWith(start)))
+      const invalid = failed.find(({ valueFailure }) => !valueFailure)
+
+      if (invalid) {
+        throw invalid.error
+      }
+
+      const missing = mutant.fails.filter((start) => !failed.some(({ name, valueFailure }) => valueFailure && name.startsWith(start)))
 
       if (missing.length) {
         throw new Error(`the check does not fail: ${missing.join(', ')}`)

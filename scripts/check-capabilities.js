@@ -30,6 +30,7 @@ const { chainChecks } = require('./lib/capability-chains')
 const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
@@ -77,6 +78,20 @@ const check = (message, condition, detail = '') => {
     failures += 1
     console.error(`FAIL  ${message}${detail ? `: ${detail}` : ''}`)
   }
+}
+
+// Credit only the declared checks' returned values; an exception while obtaining the values cannot enter this path.
+const caughtValues = async (results, fails, name) => {
+  const named = results.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+  const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+
+  if (absent.length) {
+    throw new Error(`${name}: no check begins ${absent.join('; ')}`)
+  }
+
+  const failed = judged(await runChecks(named.map(([id, held]) => ({ id, name: id, run: () => assert.ok(held === true, typeof held === 'string' ? held : `${id} returned ${held}`) })), {}), name)
+
+  return fails.every((start) => caughtBy(failed, named.filter(([id]) => id.startsWith(start)).map(([id]) => id), { name }))
 }
 
 const quote = (text) => `'${text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
@@ -893,16 +908,16 @@ const mutatedCopy = (file, from, to) => {
 }
 
 const MUTATIONS = [
-  ['a missing capacity term named by its column of the modifier row', 'mixins/production-modifiers.js', '.map((term) => TERM_WORDS[term] || term)', ''],
-  ['commanders.js reads a blocked bonus', 'utilities/commanders.js', 'blocked.has(Number(id)) || value === undefined', 'value === undefined'],
-  ['the production modifiers ignore a blocked bonus', 'mixins/production-modifiers.js', '(blocked.has(Number(id)) ? { ...gated, [column]: null } : gated)', 'gated'],
-  ['the capacity result ignores a blocked bonus', 'mixins/production-modifiers.js', 'const lookup = blocked.has(5) ?', 'const lookup = false ?'],
-  ['no assessment releases every bonus', 'utilities/capabilities.js', 'Object.entries(gates ? gates.bonuses : BONUS_NAMES)', 'Object.entries(gates ? gates.bonuses : {})'],
-  ['no assessment is read as confirmed lookup rows', 'utilities/capabilities.js', 'if (!gates) {\n    return [UNCONFIRMED]', 'if (!gates) {\n    return []'],
-  ['a retry clears the result of the same copy', 'store/capabilities.js', 'if (state.resultGeneration !== generation) {', 'if (true) {'],
-  ['the store returns a result of an earlier copy', 'store/capabilities.js', 'return state.resultGeneration === rootState.freshness.generation ? state.result : null', 'return state.result'],
-  ['the line counts a schema with some of the fourteen columns as one with none', 'utilities/capabilities.js', 'if (missing.length === LINE_SIGNATURE.length) {', 'if (missing.length > 0) {'],
-  ['the store refuses a copy on the result of an earlier copy', 'store/capabilities.js', "return getters.line !== null && getters.line.status === 'refused'", "return Boolean(_state.result && _state.result.line && _state.result.line.status === 'refused')"],
+  ['a missing capacity term named by its column of the modifier row', 'mixins/production-modifiers.js', '.map((term) => TERM_WORDS[term] || term)', '', ['a colony capacity with the Production bonus blocked or a rate not stored names']],
+  ['commanders.js reads a blocked bonus', 'utilities/commanders.js', 'blocked.has(Number(id)) || value === undefined', 'value === undefined', ['a roster bonus of a blocked ID']],
+  ['the production modifiers ignore a blocked bonus', 'mixins/production-modifiers.js', '(blocked.has(Number(id)) ? { ...gated, [column]: null } : gated)', 'gated', ['a modifier row of a blocked bonus loses']],
+  ['the capacity result ignores a blocked bonus', 'mixins/production-modifiers.js', 'const lookup = blocked.has(5) ?', 'const lookup = false ?', ['a colony capacity with the Production bonus blocked is unavailable']],
+  ['no assessment releases every bonus', 'utilities/capabilities.js', 'Object.entries(gates ? gates.bonuses : BONUS_NAMES)', 'Object.entries(gates ? gates.bonuses : {})', ['no assessment blocks every bonus ID']],
+  ['no assessment is read as confirmed lookup rows', 'utilities/capabilities.js', 'if (!gates) {\n    return [UNCONFIRMED]', 'if (!gates) {\n    return []', ['gateGaps without an assessment']],
+  ['a retry clears the result of the same copy', 'store/capabilities.js', 'if (state.resultGeneration !== generation) {', 'if (true) {', ['a retry that failed keeps']],
+  ['the store returns a result of an earlier copy', 'store/capabilities.js', 'return state.resultGeneration === rootState.freshness.generation ? state.result : null', 'return state.result', ['a result of an earlier copy']],
+  ['the line counts a schema with some of the fourteen columns as one with none', 'utilities/capabilities.js', 'if (missing.length === LINE_SIGNATURE.length) {', 'if (missing.length > 0) {', ['a schema with any of the fourteen']],
+  ['the store refuses a copy on the result of an earlier copy', 'store/capabilities.js', "return getters.line !== null && getters.line.status === 'refused'", "return Boolean(_state.result && _state.result.line && _state.result.line.status === 'refused')", ['the refusal of an earlier copy']],
 ]
 
 // The nodes of a page's script that `wanted(node)` accepts, and the script's text: { script, nodes }.
@@ -981,14 +996,14 @@ const consumerRun = async (mods, source, refusedFile) => {
   results.forEach(([statement, held]) => check(`consumers: ${statement}`, held))
 
   if (mutating()) {
-    for (const [label, file, from, to] of MUTATIONS) {
+    for (const [label, file, from, to, fails] of MUTATIONS) {
       const directory = mutatedCopy(file, from, to)
 
       try {
         const mutants = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
-        const broken = (await consumerResults(mutants, source, refusedFile)).filter(([, held]) => !held).map(([statement]) => statement)
+        const caught = await caughtValues(await consumerResults(mutants, source, refusedFile), fails, label)
 
-        check(`consumers: a copy of the code in which ${label} fails a consumer check`, broken.length > 0)
+        check(`consumers: a copy of the code in which ${label} fails its named consumer check`, caught)
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
@@ -1157,10 +1172,11 @@ const dependencyChecks = async (capabilities, source, scan) => {
 
       try {
         const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
-        const broken = (await dependencyResults(mutant, cases)).filter(([, held]) => !held).map(([statement]) => statement)
+        const broken = await dependencyResults(mutant, cases)
+        const caught = await caughtValues(broken, ['FCT_Population.ReserveDuranium dropped: exactly the reports whose inputs read it by name'], label)
 
-        console.log(`INFO  a copy of the code with the ${label} fails ${broken.length} of the dependency checks`)
-        check(`dependencies: a copy of the code with the ${label} fails a dependency check`, broken.length > 0)
+        console.log(`INFO  a copy of the code with the ${label} fails ${broken.filter(([, held]) => !held).length} of the dependency checks`)
+        check(`dependencies: a copy of the code with the ${label} fails its named dependency check`, caught)
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
@@ -1246,10 +1262,10 @@ const main = async () => {
     await rosterChecks(capabilities, mods.commanders, source)
 
     // The pages' own wiring of the result (scripts/lib/capability-pages.js): the real script of /lagrange, /commanders and /production on the result of real copies, and on copies of those pages with one gate cut out, which must fail.
-    await pageChecks({ mods, stubs: STUBS, source, check, alteredCopy, preflightOf })
+    await pageChecks({ mods, stubs: STUBS, source, check, alteredCopy, preflightOf, caughtValues })
 
     // What the missing naval admin ranks and a blocked Mining bonus leave unknown (scripts/lib/capability-chains.js).
-    await chainChecks({ check, stubs: STUBS, source, alteredCopy, mutatedCopy, preflightOf, capabilities })
+    await chainChecks({ check, stubs: STUBS, source, alteredCopy, mutatedCopy, preflightOf, capabilities, caughtValues })
   } else {
     console.log('SKIP  altered copies: AuroraDB_270_base.db is not there (not run)')
   }

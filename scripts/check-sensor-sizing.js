@@ -17,9 +17,10 @@
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -43,6 +44,7 @@ const loadAll = async (mutation = null) => {
   const sources = {}
 
   if (mutation) {
+    refusePlanting(mutation.name || mutation.file)
     sources[mutation.file.replace(/\.js$/, '')] = patched(mutation.file, fs.readFileSync(path.join(utilitiesDirectory, mutation.file), 'utf8'), mutation.find, mutation.replace)
     sources.provenance = `${fs.readFileSync(path.join(utilitiesDirectory, 'provenance.js'), 'utf8')}\n// planted fault ${++planted}\n`
   }
@@ -1817,7 +1819,7 @@ const MUTATIONS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { mutations: true }
+  const options = { mutations: mutating() }
 
   for (const argument of argv) {
     if (argument === '--no-mutations') {
@@ -1840,7 +1842,7 @@ const attempt = async (entry, m) => {
 
     return isSkip(result) ? { state: 'skip', reason: result.skipped } : { state: 'pass', lines: (result && result.lines) || [] }
   } catch (error) {
-    return { state: 'fail', reason: String(error.message).split('\n').join(' | ') }
+    return { state: 'fail', reason: String(error.message).split('\n').join(' | '), valueFailure: kindOf(error) === 'assertion' && !isSubjectThrow(error) }
   }
 }
 
@@ -1867,6 +1869,8 @@ const report = (state, name, detail = '') => {
 
 // A planted fault: the checks it names run on the faulty copy, and each name must have a check that fails (or only skipped ones, which skip the fault as well).
 const runMutation = async (mutation) => {
+  refusePlanting(mutation.name)
+
   let m
 
   try {
@@ -1891,7 +1895,13 @@ const runMutation = async (mutation) => {
       outcomes.push(await attempt(entry, m))
     }
 
-    if (outcomes.some((outcome) => outcome.state === 'fail')) {
+    const invalid = outcomes.find((outcome) => outcome.state === 'fail' && !outcome.valueFailure)
+
+    if (invalid) {
+      return { state: 'fail', reason: `a named check failed without an own value assertion: ${invalid.reason}` }
+    }
+
+    if (outcomes.some((outcome) => outcome.state === 'fail' && outcome.valueFailure)) {
       caught++
     } else if (!outcomes.every((outcome) => outcome.state === 'skip')) {
       missed.push(start)

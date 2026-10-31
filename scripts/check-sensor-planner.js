@@ -18,6 +18,8 @@
 */
 const fs = require('fs')
 const path = require('path')
+const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 
@@ -60,11 +62,15 @@ const check = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `  [${typeof result === 'string' ? result : 'false'}]`}`)
 }
 
-const settle = async (test) => {
+const settle = async (test, valueOnly = false) => {
   try {
     return await test()
   } catch (error) {
-    return `threw ${error.message}`
+    if (valueOnly && (kindOf(error) !== 'assertion' || isSubjectThrow(error))) {
+      throw error
+    }
+
+    return valueOnly ? error.message : `threw ${error.message}`
   }
 }
 
@@ -604,6 +610,8 @@ const MUTATIONS = [
 ]
 
 const runMutations = async (stock) => {
+  refusePlanting('the page faults')
+
   for (const { name, find, replace, fails } of MUTATIONS) {
     let outcome
 
@@ -618,7 +626,7 @@ const runMutations = async (stock) => {
         const results = []
 
         for (const [statement, test] of named) {
-          results.push([statement, await settle(test)])
+          results.push([statement, await settle(test, true)])
         }
 
         const held = results.filter(([, result]) => result === true).map(([statement]) => statement)
@@ -634,7 +642,7 @@ const runMutations = async (stock) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {
