@@ -59,4 +59,25 @@ const urlOfSource = (source) => {
   return written.get(key)
 }
 
-module.exports = { urlOfSource }
+// One independent ESM graph. A tree's private paths give equal source text separate module instances; relative imports keep the emitted text identical across trees and processes, so Bun reuses its transpiled copies. Logical names distinguish two modules with equal source within a tree, while repeated imports of one name keep one identity.
+const moduleTree = () => {
+  const directory = fs.mkdtempSync(path.join(folderOfProcess(), 'tree-'))
+  const urls = new Map()
+  const prefix = `${pathToFileURL(directory).href}/`
+
+  return (source, name) => {
+    const text = source.split(prefix).join('./')
+    const key = crypto.createHash('sha1').update(name).update('\0').update(text).digest('hex')
+
+    if (!urls.has(key)) {
+      const file = path.join(directory, `${key}.mjs`)
+
+      fs.writeFileSync(file, text)
+      urls.set(key, pathToFileURL(file).href)
+    }
+
+    return urls.get(key)
+  }
+}
+
+module.exports = { urlOfSource, moduleTree }
