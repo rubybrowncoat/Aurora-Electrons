@@ -685,6 +685,8 @@ const alteredChecks = async (capabilities, source) => {
 }
 
 const STUBS = {
+  // Logistics reaches history through fleet-stations; its persistence dependency stays in memory here, as in the fleet-stations check.
+  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
