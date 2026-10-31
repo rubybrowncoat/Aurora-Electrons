@@ -133,9 +133,9 @@ const reportChecks = (rank, check) => {
 }
 
 // `ctx`: { check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities }.
-const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities, caughtValues }) => {
+const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities, caughtValues, openConsumer, removeOwnedCopy, rememberFailure }) => {
   const copy = await alteredCopy(source, 'navalrank', ['alter table FCT_Commander drop column RankID'])
-  const sequelize = new Sequelize({ dialect: 'sqlite', storage: copy, logging: false, dialectOptions: { mode: OPEN_EXISTING } })
+  const sequelize = openConsumer(copy, () => new Sequelize({ dialect: 'sqlite', storage: copy, logging: false, dialectOptions: { mode: OPEN_EXISTING } }))
   const database = { query: (sql) => sequelize.query(sql, { raw: true }) }
 
   try {
@@ -167,9 +167,12 @@ const chainChecks = async ({ check, stubs, source, alteredCopy, mutatedCopy, pre
         fs.rmSync(directory, { recursive: true, force: true })
       }
     }
+  } catch (error) {
+    rememberFailure(error)
+    throw error
   } finally {
     await sequelize.close()
-    fs.rmSync(copy, { force: true })
+    removeOwnedCopy(copy)
   }
 }
 

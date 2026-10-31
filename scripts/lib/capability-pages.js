@@ -303,7 +303,7 @@ const recoveryResults = async (context, fixtures, mutate) => {
 const PAGE_RESULTS = { recovery: recoveryResults, lagrange: lagrangeResults, commanders: commandersResults, production: productionResults, logistics: logisticsResults, 'survey-progress': surveyResults }
 
 // The pages' wiring on the real page code (every statement a check line) and, with one gate cut out of a page's script, on mutants that must fail. `context`: { mods: the utilities the script loaded, stubs, source, check, alteredCopy, preflightOf, capabilities }.
-const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf, caughtValues }) => {
+const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf, caughtValues, removeOwnedCopy, rememberFailure }) => {
   const copies = []
   const context = { stubs, store: mods['../store/capabilities'], commanders: mods.commanders }
   const copy = async (name, statements) => {
@@ -351,8 +351,11 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
 
       check(`pages: a copy of ${page}.vue in which ${label} fails its named page check`, caught)
     }
+  } catch (error) {
+    rememberFailure(error)
+    throw error
   } finally {
-    copies.forEach((file) => fs.rmSync(file, { force: true }))
+    copies.forEach(removeOwnedCopy)
   }
 }
 
