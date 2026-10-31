@@ -42,27 +42,51 @@ const STALE_STARTER = [
   "require('./run-check.js')",
   '',
 ].join('\n')
-// Holds the initial pre-publication snapshot across startup expiry, but only after the supervisor has published its child, so a timeout decision on that snapshot would kill legitimate work.
+// The supervisor waits for this wrapper to capture the initial snapshot. The child stays alive until the starter reads again after confronting that snapshot across the real startup deadline, so scheduler delays cannot skip the race or let the child finish before a faulty kill.
 const EXPIRED_STARTER = [
   "const fs = require('fs')",
+  "const path = require('path')",
   'const read = fs.readFileSync',
   'const held = new Int32Array(new SharedArrayBuffer(4))',
+  "const marker = (name) => path.join(__dirname, '..', name)",
   'let first = true',
   'fs.readFileSync = (file, ...rest) => {',
   '  const text = read(file, ...rest)',
-  "  if (first && String(file).endsWith('status.json') && !JSON.parse(text).supervisor) {",
-  '    first = false',
-  '    const until = Date.now() + 10000',
-  "    while (Date.now() < until && !JSON.parse(read(file, 'utf8')).child) {",
-  '      Atomics.wait(held, 0, 0, 25)',
+  "  if (String(file).endsWith('status.json')) {",
+  '    if (first && !JSON.parse(text).supervisor) {',
+  '      first = false',
+  "      fs.writeFileSync(marker('expired.snapshot'), '')",
+  '      const until = Date.now() + 10000',
+  "      while (Date.now() < until && !JSON.parse(read(file, 'utf8')).child) {",
+  '        Atomics.wait(held, 0, 0, 25)',
+  '      }',
+  "      const live = JSON.parse(read(file, 'utf8'))",
+  "      console.log('held after publication: ' + Boolean(live.supervisor && live.child))",
+  '      while (Date.now() - Date.parse(JSON.parse(text).started) <= 3000) {',
+  '        Atomics.wait(held, 0, 0, 25)',
+  '      }',
+  "      console.log('held across startup deadline: true')",
+  '    } else if (!first) {',
+  "      fs.writeFileSync(marker('expired.release'), '')",
   '    }',
-  "    const live = JSON.parse(read(file, 'utf8'))",
-  "    console.log('held after publication: ' + Boolean(live.supervisor && live.child))",
-  '    Atomics.wait(held, 0, 0, 4000)',
   '  }',
   '  return text',
   '}',
   "require('./run-check.js')",
+  '',
+].join('\n')
+const EXPIRED_CHECK = [
+  "const fs = require('fs')",
+  "const path = require('path')",
+  "const released = () => fs.existsSync(path.join(__dirname, '..', 'expired.release'))",
+  'const until = Date.now() + 20000',
+  'const timer = setInterval(() => {',
+  '  if (released() || Date.now() >= until) {',
+  '    clearInterval(timer)',
+  "    console.log(released() ? '1 of 1 checks passed' : 'the starter never reconciled its held snapshot')",
+  '    process.exitCode = released() ? 0 : 2',
+  '  }',
+  '}, 25)',
   '',
 ].join('\n')
 // The child the check script of `tree` holds: HELD_BYTES, written, until it is ended.
@@ -130,7 +154,7 @@ const SUPERVISE = 'const supervise = async (name, script, args) => {\n'
 const PLANTS = {
   early: [[SUPERVISE, `${SUPERVISE}  throw new Error('a supervisor planted to end before its first write')\n`]],
   hung: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], [SUPERVISE, `${SUPERVISE}  await new Promise((resolve) => setTimeout(resolve, 20000))\n`]],
-  expired: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3']],
+  expired: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], [SUPERVISE, `${SUPERVISE}  const until = Date.now() + 10000\n\n  while (!fs.existsSync(path.join(ROOT, 'expired.snapshot')) && Date.now() < until) {\n    await pause(25)\n  }\n`]],
   publishing: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], ['  writeStatus(name, status)\n', '  await pause(20000)\n  writeStatus(name, status)\n']],
   cancelled: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], ['  writeStatus(name, status)\n', '  writeStatus(name, status)\n  await pause(4500)\n'], ['        killTree(supervisor.pid)\n', '        void supervisor.pid\n']],
   tree: [['$byParent = @{};', `${LISTING}$byParent = @{};`]],
@@ -144,7 +168,7 @@ const layoutOf = (source, need) => {
   fs.mkdirSync(path.join(scripts, 'lib'), { recursive: true })
   fs.writeFileSync(path.join(scripts, 'run-check.js'), (PLANTS[need] || []).reduce((text, [from, to]) => patched(RUN_CHECK, text, from, to), source))
   fs.copyFileSync(path.join(__dirname, 'lib', 'check-pool.js'), path.join(scripts, 'lib', 'check-pool.js'))
-  fs.writeFileSync(path.join(scripts, 'check-tiny.js'), TINY)
+  fs.writeFileSync(path.join(scripts, 'check-tiny.js'), need === 'expired' ? EXPIRED_CHECK : TINY)
   fs.writeFileSync(path.join(scripts, 'stale-starter.js'), STALE_STARTER)
   fs.writeFileSync(path.join(scripts, 'expired-starter.js'), EXPIRED_STARTER)
   fs.writeFileSync(path.join(scripts, 'check-tree.js'), TREE)
@@ -189,7 +213,7 @@ const SCENARIOS = {
     return { started, waited, status: statusOf(layout, 's') }
   },
   expired: async (layout) => {
-    const started = await command(layout, ['start', '--label=x', 'tiny'], { entry: 'expired-starter.js', env: { TINY_MS: '8000' } })
+    const started = await command(layout, ['start', '--label=x', 'tiny'], { entry: 'expired-starter.js' })
     const waited = await command(layout, ['wait', 'x'])
 
     return { started, waited, status: statusOf(layout, 'x'), log: fs.readFileSync(path.join(layout, '.check-runs', 'x', 'log.txt'), 'utf8') }
@@ -333,6 +357,7 @@ const CHECKS = [
     ran(expired.started, 'the held start')
     ran(expired.waited, 'wait')
     assert.ok(expired.started.stdout.includes('held after publication: true'), expired.started.stdout)
+    assert.ok(expired.started.stdout.includes('held across startup deadline: true'), expired.started.stdout)
     assert.equal(expired.started.code, 0, lastLine(expired.started.stderr))
     assert.equal(expired.status.state, 'done', `the run reads ${expired.status.state}`)
     assert.equal(expired.status.code, 0)
