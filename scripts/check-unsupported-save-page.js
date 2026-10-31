@@ -17,7 +17,7 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
-const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey, settled } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
@@ -146,45 +146,36 @@ const readScreen = () => {
   }
 }
 
-// The reads the page makes of the database, counted: the requests in flight and when the last one began or ended (the app is settled once none is out and none has been for a while), and how many asked for the schema of the save.
+// Count requests that ask the database for the save's schema, so the retry control can prove that it started a fresh read.
 const track = (page) => {
-  const state = { inFlight: 0, last: Date.now(), schemaReads: 0 }
+  const state = { schemaReads: 0 }
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
 
   page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-
-      if (/pragma_table_xinfo/.test(request.postData() || '')) {
-        state.schemaReads++
-      }
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
+    if (isDatabaseCall(request) && /pragma_table_xinfo/.test(request.postData() || '')) {
+      state.schemaReads++
     }
   })
 
   return state
 }
 
-// The page the route mounted is still working, or none is mounted (the layout draws the notice in its place) and nothing is: pageLoading says a missing page is working, so it is asked only of a mounted one.
-const MOUNTED_LOADING = `(() => { const match = window.$app.$route.matched[0]; return Boolean(match && match.instances.default) && (${pageLoading})() })()`
+// A report page is still working when it is mounted and has an async read or a progress bar. A refused save has no mounted report page because the layout shows the notice in its place.
+const MOUNTED_LOADING = () => {
+  const match = window.$app.$route.matched[0]
+  const page = match && match.instances.default
 
-const settle = async (page, state) => {
-  const started = Date.now()
-
-  while (state.inFlight > 0 || Date.now() - state.last < 1500 || await page.evaluate(MOUNTED_LOADING)) {
-    if (Date.now() - started > TIMEOUT) {
-      throw new Error(`the app did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-    }
-
-    await page.waitForTimeout(250)
+  if (!page) {
+    return false
   }
+
+  const updating = Object.values(page.$asyncComputed || {}).some((state) => state.updating)
+  const working = [...document.querySelectorAll('.v-main .v-progress-linear')].some((bar) => bar.offsetParent && bar.querySelector('.v-progress-linear__indeterminate--active'))
+
+  return updating || working
 }
+
+const settledPage = (page) => settled(page, { limit: TIMEOUT, loading: MOUNTED_LOADING })
 
 // The screen as the check judges it: what the page draws, with the status line read part by part back to the reason whose words it says (the time of the last read it carries changes, so the words themselves are not kept), and the card of the notice as whether it is on screen (its prose is not a decision).
 const read = async (page, t) => {
@@ -194,12 +185,12 @@ const read = async (page, t) => {
 }
 
 // The route opened by the app's own router, until it is there and either its page is mounted or the layout has drawn the notice in its place.
-const visit = async (page, state, target, t, step) => {
+const visit = async (page, target, t, step) => {
   step(`opening ${target}`)
   await page.evaluate((to) => window.$app.$router.push(to, () => {}, () => {}), target)
   await page.waitForFunction((to) => window.$app.$route.path === to, target, { timeout: TIMEOUT })
   await page.waitForFunction(`(${pageLoading.arrived})(${JSON.stringify(target)}) || document.querySelector('[data-unsupported-save]') !== null`, null, { timeout: TIMEOUT })
-  await settle(page, state)
+  await settledPage(page)
 
   return read(page, t)
 }
@@ -221,7 +212,7 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
   await installScreen(page)
   step('waiting for the check of the save')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.database) && window.$app.$store.getters['capabilities/line'] !== null, null, { timeout: TIMEOUT })
-  await settle(page, state)
+  await settledPage(page)
 
   const seen = { home: await read(page, t) }
 
@@ -249,8 +240,8 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
   step('waiting for the save of the race')
   // The recorder holds off while the save is refused, so no campaign is settled and no settings prefix is made for the race: a refused save is waited for by the race alone.
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && (Boolean(window.$app.$store.getters.racePrefix) || window.$app.$store.getters['capabilities/refused']), null, { timeout: TIMEOUT })
-  await settle(page, state)
-  seen.page = await visit(page, state, '/logistics', t, step)
+  await settledPage(page)
+  seen.page = await visit(page, '/logistics', t, step)
 
   if (scene.truth.reason === null) {
     return seen
@@ -264,12 +255,12 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
     await page.locator('[data-unsupported-retry]').click({ timeout: 30000 })
     await until(() => state.schemaReads > before, 15000)
     await page.waitForFunction(() => window.$app.$store.getters['capabilities/status'] !== 'checking', null, { timeout: TIMEOUT })
-    await settle(page, state)
+    await settledPage(page)
   }
 
   seen.retry = { asked: state.schemaReads > before, screen: await read(page, t) }
-  seen.settings = await visit(page, state, '/settings', t, step)
-  seen.about = await visit(page, state, '/about', t, step)
+  seen.settings = await visit(page, '/settings', t, step)
+  seen.about = await visit(page, '/about', t, step)
 
   return seen
 })
