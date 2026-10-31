@@ -9,7 +9,9 @@
 
   The saves are read through the page's own reads and checked against counts of the rows in the save: on the current basis nothing extra is read and every row is the Outlook's own, value for value; on the committed basis with nothing queued it is the same; with the queue every event is one of the colony's projects or yards, in the forecast's order, dated the way the rules above say, with no phantom installation from a paused, queued or stalled job. A check that needs a case the save does not hold prints UNSUPPORTED and is in neither the passes nor the failures.
 
-  The mutants load a temp copy of the utilities folder with one thing changed; each must fail the check named with it.
+  The yards aboard a ship run on the two saves that hold them, whatever saves are named (SHIP_YARD_SAVES, read-only; a copy is a temporary table over the save's own): the page's colonies read gives each colony the workers of the yards no ship holds, value for value against a sum worked out here from the save's yard and ship rows, and the colonies named for a yard aboard a ship read the figure worked out by hand; with the queue counted, an activity given to a yard aboard a ship in a copy is not read, and the workers the colony's activities change leave it out. A rewrite of both filters that says the same thing must leave those checks green.
+
+  The mutants load a temp copy of the utilities folder with one thing changed; each must fail the check named with it. The faults of the yards aboard a ship are planted in the page and must fail their checks by a value on every save that holds the case, never by a throw of the page.
 */
 const path = require('path')
 const fs = require('fs')
@@ -18,11 +20,18 @@ const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { patched, plantedPatch } = require('./lib/mutant-source')
+const { assert, boundary, caughtAll, judged, runChecks } = require('./lib/fault-credit')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
   { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+]
+// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In saves/AuroraDB.db (game 138, race 785) BEG-A2M9 XENO (49494, 92 M people) holds the repair yard Fix50 001 aboard a ship (50,000 t, 1.25 M workers were it counted) beside 0.00025 M of yards of its own; `activity` is that ship's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In saves/AuroraDB_270_unknown.db (game 140, race 784) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`).
+const SHIP_YARD_SAVES = [
+  { file: 'saves/AuroraDB.db', game: 138, race: 785, named: { 49494: 0.00025 }, activity: 6760 },
+  { file: 'saves/AuroraDB_270_unknown.db', game: 140, race: 784, named: { 49025: 0, 49026: 0 }, peopled: [49025, 49026] },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {
@@ -76,7 +85,7 @@ const parseArguments = (argv) => {
   return saves.length ? saves : DEFAULT_SAVES
 }
 
-// A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does, and counts the queries that name each table it is asked about.
+// A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does, and counts the queries that name each table it is asked about. `run(sql)` runs a statement on a temporary table that shadows one of the save's own, so the save itself is never written.
 const openSave = (file) => new Promise((resolve, reject) => {
   const resolved = path.resolve(root, file)
 
@@ -98,6 +107,7 @@ const openSave = (file) => new Promise((resolve, reject) => {
         database.queries.push(sql)
         raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))
       }),
+      run: (sql) => new Promise((resolve, reject) => raw.run(sql, (runError) => (runError ? reject(runError) : resolve()))),
       close: () => raw.close(),
     }
 
@@ -584,11 +594,11 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
   await production.runAsync('industry')
 
   const [{ projects: projectCount }] = await rowsOf(database, `select count(*) as projects from FCT_IndustrialProjects where GameID = ${save.game} and RaceID = ${save.race}`)
-  const [{ yards: yardCount }] = await rowsOf(database, `select count(*) as yards from FCT_Shipyard where TaskType <> 0 and GameID = ${save.game} and RaceID = ${save.race}`)
+  const [{ yards: yardCount }] = await rowsOf(database, `select count(*) as yards from FCT_Shipyard where TaskType <> 0 and GameID = ${save.game} and RaceID = ${save.race} and not exists (select 1 from FCT_Ship where FCT_Ship.ShipID = FCT_Shipyard.ParentShipID and FCT_Ship.GameID = FCT_Shipyard.GameID)`)
   const [{ types: typeCount }] = await rowsOf(database, 'select count(*) as types from DIM_PlanetaryInstallation')
   const order = (list) => list.map((project) => `${project.PopulationID}:${project.ID}`).join()
 
-  check(`${name}: with the queue counted the page reads every industrial project (${projectCount}), every shipyard activity (${yardCount}) and every installation type (${typeCount}) of the save, the projects in the order the Production page reads them`, vm.industry.length === projectCount && vm.yardActivities.length === yardCount && Object.keys(vm.installationTypes).length === typeCount && order(vm.industry) === order(production.industry) && vm.industry.every((project) => 'ProductionID' in project))
+  check(`${name}: with the queue counted the page reads every industrial project (${projectCount}), every activity of a shipyard no ship holds (${yardCount}) and every installation type (${typeCount}) of the save, the projects in the order the Production page reads them`, vm.industry.length === projectCount && vm.yardActivities.length === yardCount && Object.keys(vm.installationTypes).length === typeCount && order(vm.industry) === order(production.industry) && vm.industry.every((project) => 'ProductionID' in project))
 
   const emptied = instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race, data: { workerBasis: 'committed', colonies: vm.colonies, inbound: vm.inbound, populationProductionModifiers: vm.populationProductionModifiers, arks: vm.arks, industry: [], yardActivities: [], installationTypes: {} } })
 
@@ -661,6 +671,149 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
   console.log(`  ${name}: ${withQueue.length} colonies with events, ${installationEvents.length} installation events (${dated.length} dated), ${yardEvents.length} yard events, ${committedRows.filter((row) => row.laterRange).length} with a range at the horizon, ${committedRows.filter((row) => !row.committed).length} unavailable`)
 }
 
+// ---------- the yards aboard a ship ----------
+
+const PAGE_FILE = path.join('src', 'renderer', 'pages', 'colony-outlook.vue')
+// The page's two filters of the yards no ship holds: in the colonies read and in the shipyard activities read.
+const COLONY_YARDS_FILTER = ' and coalesce(FCT_Shipyard.ParentShipID, 0) <= 0 group by FCT_Shipyard.PopulationID'
+const ACTIVITIES_FILTER = 'where FCT_Shipyard.TaskType <> 0 and coalesce(FCT_Shipyard.ParentShipID, 0) <= 0 and'
+
+// The faults planted in the page's reads, each with the checks that must fail by a value on every save that holds the case.
+const SHIP_YARD_FAULTS = [
+  { name: 'the yards aboard a ship counted in the workers a colony needs', from: COLONY_YARDS_FILTER, to: ' group by FCT_Shipyard.PopulationID', fails: ['yards-colony'] },
+  { name: 'the activity of a yard aboard a ship read with the colony\'s', from: ACTIVITIES_FILTER, to: 'where FCT_Shipyard.TaskType <> 0 and', fails: ['yards-activity'] },
+]
+
+// Both filters said another way, as a parenthesised condition: every check of the yards aboard a ship must still hold.
+const SHIP_YARD_REWRITE = [
+  [COLONY_YARDS_FILTER, ' and (FCT_Shipyard.ParentShipID is null or FCT_Shipyard.ParentShipID <= 0) group by FCT_Shipyard.PopulationID'],
+  [ACTIVITIES_FILTER, 'where FCT_Shipyard.TaskType <> 0 and (FCT_Shipyard.ParentShipID is null or FCT_Shipyard.ParentShipID <= 0) and'],
+]
+
+// `work()` on a copy of the save in which each table of `edits` ({ [table]: [statement] }) is a temporary table made from the save's own and changed by its statements; the copies are dropped afterwards.
+const onCopy = async (database, edits, work) => {
+  const tables = Object.keys(edits)
+
+  for (const statement of tables.flatMap((table) => [`create temp table ${table} as select * from main.${table}`, ...edits[table]])) {
+    await database.run(statement)
+  }
+
+  try {
+    return await work()
+  } finally {
+    for (const table of tables) {
+      await database.run(`drop table temp.${table}`)
+    }
+  }
+}
+
+// What the race's yards need, worked out here from the save's rows the way the game counts them: a yard counts at its colony unless its ParentShipID names a ship of the game, with capacity x slipways / 4,000 at a naval yard (type 1) and a tenth of that at any other. { workers: { [PopulationID]: M workers }, aboard: { [PopulationID]: [ShipyardID] }, activities: [ShipyardID] of the yards no ship holds that have an activity, in order }.
+const yardOracle = async (database, save) => {
+  const yards = await rowsOf(database, `select ShipyardID, PopulationID, SYType, Slipways, Capacity, TaskType, ParentShipID from FCT_Shipyard where GameID = ${save.game} and RaceID = ${save.race}`)
+  const ships = new Set((await rowsOf(database, `select ShipID from FCT_Ship where GameID = ${save.game}`)).map((row) => row.ShipID))
+  const workers = {}
+  const aboard = {}
+
+  yards.forEach((yard) => {
+    if (ships.has(yard.ParentShipID)) {
+      (aboard[yard.PopulationID] = aboard[yard.PopulationID] || []).push(yard.ShipyardID)
+    } else {
+      workers[yard.PopulationID] = (workers[yard.PopulationID] || 0) + (yard.Capacity * yard.Slipways * (yard.SYType === 1 ? 1 : 0.1)) / 4000
+    }
+  })
+
+  return { workers, aboard, activities: yards.filter((yard) => Number.isFinite(yard.TaskType) && yard.TaskType !== 0 && !ships.has(yard.ParentShipID)).map((yard) => yard.ShipyardID).sort((a, b) => a - b) }
+}
+
+// The checks of one save that holds yards aboard a ship, as { id, name, run } for `runChecks` (scripts/lib/fault-credit.js): the page runs behind its `boundary`, so a read that throws is told apart from a wrong value.
+const shipYardChecks = (database, save) => {
+  const named = Object.entries(save.named).map(([id, workers]) => `${id} at ${workers} M`).join(', ')
+  const peopled = save.peopled ? { FCT_Population: [`update FCT_Population set Population = 10 where PopulationID in (${save.peopled.join(', ')})`] } : {}
+  const checks = [{
+    id: 'yards-colony',
+    name: `${database.file}: each colony's shipyards need the workers of the yards no ship holds: the page's colonies read gives every colony the sum over its yards whose ParentShipID names no ship of the game (capacity x slipways / 4,000 at a naval yard, a tenth of it at any other), and the colonies that hold a yard aboard a ship read ${named}${save.peopled ? ' (on a copy that gives them 10 M people)' : ''}`,
+    run: ({ pageOptions, store }) => onCopy(database, peopled, async () => {
+      const oracle = await yardOracle(database, save)
+      const vm = instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race, boundary })
+      const colonies = await vm.runAsync('colonies')
+      const read = new Map(colonies.map((colony) => [colony.PopulationID, colony.YardWorkers]))
+      const wrong = colonies.filter((colony) => !near(colony.YardWorkers, oracle.workers[colony.PopulationID] || 0)).map((colony) => `${colony.PopName} (${colony.PopulationID}) reads ${colony.YardWorkers} M, its yards need ${oracle.workers[colony.PopulationID] || 0} M`)
+      const ids = Object.keys(save.named).map(Number)
+
+      assert.ok(ids.every((id) => (oracle.aboard[id] || []).length > 0 && near(oracle.workers[id] || 0, save.named[id])), `the save no longer holds the case: ${ids.map((id) => `${id} has ${(oracle.aboard[id] || []).length} yards aboard a ship and ${oracle.workers[id] || 0} M of its own`).join('; ')}`)
+      assert.ok(colonies.length > 0, 'the page reads no colony')
+      assert.ok(wrong.length === 0, `${wrong.length} of ${colonies.length} colonies: ${wrong.slice(0, 3).join('; ')}`)
+      assert.ok(ids.every((id) => read.has(id) && near(read.get(id), save.named[id])), `the named colonies read ${ids.map((id) => `${id}: ${read.has(id) ? `${read.get(id)} M` : 'no row'}`).join(', ')}`)
+    }),
+  }]
+
+  if (save.activity) {
+    checks.push({
+      id: 'yards-activity',
+      name: `${database.file}: with the queue counted, an activity of a yard aboard a ship adds no workers to its colony: on a copy in which the ship's yard ${save.activity} is adding a slipway, no yard aboard a ship is among the activities that change a colony's workers, and the page's shipyard activities read holds exactly the activities of the yards no ship holds`,
+      run: ({ pageOptions, store }) => onCopy(database, { FCT_Shipyard: [`update FCT_Shipyard set TaskType = 1, RequiredBP = 1000, CompletedBP = 0, PauseActivity = 0 where ShipyardID = ${save.activity}`] }, async () => {
+        const oracle = await yardOracle(database, save)
+        const aboard = new Set(Object.values(oracle.aboard).flat())
+        const vm = instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race, boundary })
+
+        vm.workerBasis = 'committed'
+        await vm.runAsync('colonies')
+
+        const activities = (await vm.runAsync('yardActivities')).map((yard) => yard.ShipyardID).sort((a, b) => a - b)
+        const changing = Object.values(vm.workforceNeedsByColony).flatMap((needs) => needs.yards).filter(({ yard }) => aboard.has(yard.ShipyardID)).map(({ yard, delta }) => `yard ${yard.ShipyardID} at ${yard.PopulationID} adds ${delta} M`)
+
+        assert.ok(aboard.has(save.activity), `the copy does not hold the case: yard ${save.activity} is aboard no ship`)
+        assert.deepStrictEqual(changing, [], `yards aboard a ship change a colony's workers: ${changing.join('; ')}`)
+        assert.deepStrictEqual(activities, oracle.activities, `the activities read are yards ${activities.join(', ') || 'none'}, those of the yards no ship holds ${oracle.activities.join(', ') || 'none'}`)
+      }),
+    })
+  }
+
+  return checks
+}
+
+// The yards aboard a ship on the saves that hold them: the head checks and, in a full run, the rewrite that must leave them green and each fault, which must fail its checks by a value on every save that holds the case.
+const shipYardCases = async (pageOptions, store) => {
+  const opened = []
+
+  for (const save of SHIP_YARD_SAVES) {
+    const database = await openSave(save.file)
+
+    if (database) {
+      opened.push({ database, save })
+    } else {
+      unsupportedNote(`${save.file}: the yards aboard a ship`, 'the save is not there')
+    }
+  }
+
+  try {
+    const list = opened.flatMap(({ database, save }) => shipYardChecks(database, save))
+    const head = await runChecks(list, { pageOptions, store })
+
+    head.forEach((result) => check(result.name, result.ok, result.detail))
+
+    if (!mutating() || !list.length) {
+      return
+    }
+
+    const text = fs.readFileSync(path.join(root, PAGE_FILE), 'utf8')
+    const load = (source) => loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: { 'pages/colony-outlook': source } })
+    const rewritten = judged(await runChecks(list, { pageOptions: await load(SHIP_YARD_REWRITE.reduce((source, [from, to]) => patched(PAGE_FILE, source, from, to), text)), store }), 'the rewrite of the filters')
+
+    check('both filters of the yards aboard a ship, rewritten as a parenthesised condition, leave every check of them green', rewritten.length === 0, rewritten.map((result) => `${result.id}: ${result.detail}`).join('; '))
+
+    for (const fault of SHIP_YARD_FAULTS) {
+      const own = (results) => results.filter((result) => fault.fails.includes(result.id))
+      const results = await runChecks(list, { pageOptions: await load(plantedPatch(PAGE_FILE, text, fault.from, fault.to)), store })
+
+      judged(results, fault.name)
+      check(`${fault.name} fails ${fault.fails.join(', ')} by a value on each save that holds the case`, own(head).length > 0 && own(head).every((result) => result.ok) && caughtAll(own(results), fault), own(results).map((result) => `${result.name.split(':')[0]} ${result.id}: ${result.detail || 'holds'}`).join('; '))
+    }
+  } finally {
+    opened.forEach(({ database }) => database.close())
+  }
+}
+
 const valueOrZero = (result) => (result && result.status !== 'unavailable' ? result.value : 0)
 
 const main = async () => {
@@ -714,6 +867,9 @@ const main = async () => {
       database.close()
     }
   }
+
+  console.log('\n== the yards aboard a ship ==')
+  await shipYardCases(pageOptions, store)
 
   console.log(`\n${checks - failures}/${checks} checks passed; ${unsupported} unsupported (the save holds no case)`)
   process.exit(failures ? 1 : 0)

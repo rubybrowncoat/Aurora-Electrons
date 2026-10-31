@@ -91,8 +91,8 @@ registerRule({
   versions: COLONY_VERSIONS,
   units: 'M workers',
   verification: 'confirmed',
-  structure: ['FCT_Population.Population', 'FCT_PopulationInstallations, DIM_PlanetaryInstallation.Workers', 'FCT_Shipyard.Capacity, Slipways, SYType', 'the colony cost rule'],
-  note: 'Services take (population over 1,000 M) to the 0.25 power of the people, at most 70%; agriculture and environment 5% plus 5% per point of colony cost; the rest can work, against what installations and shipyards need. The efficiency it implies matched the stored one of all 66 colonies of the modded save and the stock sample save, 19 of them below 1, the largest difference 0.0027. A figure at the horizon rests on the projected population and is an estimate.',
+  structure: ['FCT_Population.Population', 'FCT_PopulationInstallations, DIM_PlanetaryInstallation.Workers', 'FCT_Shipyard.Capacity, Slipways, SYType, ParentShipID', 'the colony cost rule'],
+  note: 'Services take (population over 1,000 M) to the 0.25 power of the people, at most 70%; agriculture and environment 5% plus 5% per point of colony cost; the rest can work, against what installations and shipyards need. A shipyard aboard a ship needs no workers from the colony. The efficiency it implies matched the stored one of all 66 colonies of the modded save and the stock sample save, 19 of them below 1, the largest difference 0.0027. A figure at the horizon rests on the projected population and is an estimate.',
 })
 
 registerRule({
@@ -198,7 +198,7 @@ export const infrastructureCostResult = (colony, needed) => {
 // The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density). A low-gravity body needs twice the infrastructure at the same colony cost (docs `planetary-installations`), and ReqInf holds that factor.
 export const colonyCostResult = (colony) => derive({ rule: 'colonies.colonyCost', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population', 'PopulationDensityModifier', 'LowGravity'] : [])], compute: () => (colony.ReqInf > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100 * (colony.LowGravity ? 2 : 1)) : 0) })
 
-// Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%; agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work. Required: installations and shipyards, today's unless `required` gives the figure of a later day. Reproduces the save's stored Efficiency on the sample.
+// Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%; agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work. Required: installations and the shipyards no ship holds (a yard aboard a ship needs no colony workers), today's unless `required` gives the figure of a later day. Reproduces the save's stored Efficiency on the sample.
 export const workerSplit = (colony, population, cost, required = colony.InstallationWorkers + colony.YardWorkers) => {
   const service = population > 0 ? Math.min(0.7, (population / 1000) ** 0.25) : 0
   const agriculture = 0.05 + cost * 0.05
