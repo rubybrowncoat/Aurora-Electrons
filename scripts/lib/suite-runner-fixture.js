@@ -1,4 +1,4 @@
-// A suite for scripts/check-suite-runner.js, run from a copy of the layout: variants that pass, fail, hang, spin, crash, throw and end late, a control over a state the reset after each variant puts back, and sets for resuming a run, for workers that keep dying, for a worker whose reset and close fail, for variants that say their steps and stall, for a setup that waits for a child, for a group of faults planted together (`groups`, `groups-control`) and for groups the runner refuses (`declared`). `--set=<name>` picks the set (`all`, `control`, `late`, `closing`, `resume`, `deaths`, `steps`, `prepared`, `groups`, `groups-control`, `declared`). FAKE_GROUP_HANG=<key> makes the run that holds that member of the group hang, FAKE_GROUP picks the declaration the set `declared` refuses. FAKE_LEAKY leaves the state planted after a variant, FAKE_SETUP_FAIL fails the setup of every worker, FAKE_RESET_FAIL=<key> fails the reset after that variant, FAKE_CLOSE_SLOW=<key> makes the close of the worker whose queue starts with that variant take 10 s, FAKE_CLOSE_FAIL fails every close after 2 s, FAKE_BETWEEN=<seconds> sets the `between` deadline (15 s, as the setup's, when not given), FAKE_EXTRA adds a variant to the set `resume`, FAKE_CHILD=<ms> is how long the child of the set `prepared` waits, FAKE_LIMIT=<ms> is its limit and FAKE_LAZY has the first variant of a worker of that set wait for the child instead of its setup. The suite reads saves/input.db (its inputs). Each variant notes its key and the process it runs in, as it starts, in ledger.txt at the root of the layout. The setup and the reset read the variants they are handed by the keys the suite gave them, as a suite's setup reads what to start from them, and fail on any other key. `--sleep=<ms>` runs the fixture as that child: it waits that long, says so and ends.
+// A suite for scripts/check-suite-runner.js, run from a copy of the layout: variants that pass, fail, hang, spin, crash, throw and end late, a control over a state the reset after each variant puts back, and sets for resuming a run, for workers that keep dying, for a worker whose reset and close fail, for variants that say their steps and stall, for a setup that waits for a child, for a group of faults planted together (`groups`, `groups-control`) and for groups the runner refuses (`declared`). `--set=<name>` picks the set (`all`, `control`, `late`, `closing`, `resume`, `deaths`, `steps`, `prepared`, `groups`, `groups-control`, `declared`). FAKE_GROUP_HANG=<key> makes the run that holds that member of the group hang, FAKE_GROUP picks the declaration the set `declared` refuses. FAKE_LEAKY leaves the state planted after a variant, FAKE_SETUP_FAIL fails the setup of every worker, FAKE_RESET_FAIL=<key> fails the reset after that variant, FAKE_CLOSE_SLOW=<key> makes the close of the worker whose queue starts with that variant take 10 s, FAKE_CLOSE_FAIL fails every close; FAKE_BARRIER=r4|closing holds that phase of the single run named by FAKE_RUN_ID until its parent interrupts it, FAKE_BETWEEN=<seconds> sets the `between` deadline (15 s, as the setup's, when not given), FAKE_EXTRA adds a variant to the set `resume`, FAKE_CHILD=<ms> is how long the child of the set `prepared` waits, FAKE_LIMIT=<ms> is its limit and FAKE_LAZY has the first variant of a worker of that set wait for the child instead of its setup. The suite reads saves/input.db (its inputs). Each variant notes its key and the process it runs in, as it starts, in ledger.txt at the root of the layout. The setup and the reset read the variants they are handed by the keys the suite gave them, as a suite's setup reads what to start from them, and fail on any other key. `--sleep=<ms>` runs the fixture as that child: it waits that long, says so and ends.
 const fs = require('fs')
 const path = require('path')
 const { runSuite, runnerArgs, step, CONTROL_KEY } = require('./suite-runner')
@@ -23,9 +23,27 @@ const check = (key, ok) => {
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 // A promise that never settles, with a timer that keeps the process alive, as a wait that never ends does.
 const never = () => new Promise(() => { setInterval(() => { state.beats++ }, 1000) })
+// A causal interruption window, unique to one run. Normal and resumed invocations use another identity with no barrier, so neither inherits a release marker or an incidental delay.
+const phaseBarrier = async (phase) => {
+  if (process.env.FAKE_BARRIER !== phase) {
+    return
+  }
+
+  const run = process.env.FAKE_RUN_ID
+
+  if (!/^[a-f0-9-]{36}$/.test(run || '')) {
+    throw new Error('a fixture barrier has no private run identity')
+  }
+
+  const file = path.join(__dirname, '..', '..', `phase-${run}.json`)
+
+  fs.writeFileSync(`${file}.next`, JSON.stringify({ run, phase, pid: process.pid, at: Date.now() }))
+  fs.renameSync(`${file}.next`, file)
+  await never()
+}
 // A browser that is only enough of one for `observe` of scripts/lib/browser-observe.js: its page hears nothing and waits.
 const FAKE_BROWSER = { newContext: async () => ({ newPage: async () => ({ on: () => {}, waitForTimeout: pause }), close: async () => {} }) }
-const variant = (key, run, extra = {}) => ({ key, name: `variant ${key}`, pool: 'suite', deadline: 3, run: async () => { fs.appendFileSync(LEDGER, `${key} ${process.pid}\n`); await run() }, ...extra })
+const variant = (key, run, extra = {}) => ({ key, name: `variant ${key}`, pool: 'suite', deadline: 3, run: async () => { fs.appendFileSync(LEDGER, `${key} ${process.pid}\n`); if (process.env.FAKE_DEADLINE_PROBE === key) { await phaseBarrier('deadline') }; await run() }, ...extra })
 const passing = (key, ms = 0) => variant(key, async () => { await pause(ms); check(key, true) })
 const crashing = (key) => variant(key, async () => { process.exit(9) })
 const head = () => variant('head', async () => check('head', !state.planted), { head: true })
@@ -103,8 +121,8 @@ const SETS = {
   // A variant that ends half a second after its deadline of 1 s.
   late: () => [{ ...passing('late', 1500), deadline: 1 }, passing('after-late')],
   closing: () => [passing('x1'), passing('x2')],
-  // r4 takes 4 s, so that a run ended once r3 has printed is ended in it even on a loaded machine.
-  resume: () => [passing('r1'), passing('r2'), passing('r3'), { ...passing('r4', 4000), deadline: 10 }, passing('r5'), passing('r6'), ...(process.env.FAKE_EXTRA ? [passing('r7')] : [])],
+  // The interrupted run holds r4 only after it begins; other runs complete it without a timing window.
+  resume: () => [passing('r1'), passing('r2'), passing('r3'), variant('r4', async () => { await phaseBarrier('r4'); check('r4', true) }, { deadline: 10 }), passing('r5'), passing('r6'), ...(process.env.FAKE_EXTRA ? [passing('r7')] : [])],
   // The first worker finishes a variant before it crashes; the three after it crash before finishing one.
   deaths: () => [passing('ok'), ...['c1', 'c2', 'c3', 'c4'].map(crashing), passing('d5')],
   // Variants that say their steps (`step` of scripts/lib/suite-runner.js, and `observe` of scripts/lib/browser-observe.js for its work) and stall. The setup of each worker says a step of its own, so `quiet-stall`, the first of its worker, stalls with a step said before it began and none of its own; `stepped` says its steps and passes; `parallel-stall` runs two observations side by side, of which one stalls and the other ends; `closed`, the last of the set, says a step and passes, and its worker's close is the one FAKE_CLOSE_SLOW names.
@@ -179,7 +197,7 @@ const main = async () => {
       }
 
       if (process.env.FAKE_CLOSE_FAIL) {
-        await pause(2000)
+        await phaseBarrier('closing')
         throw new Error('a close planted to fail')
       }
     },
