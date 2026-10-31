@@ -100,7 +100,7 @@ export const exportModel = ({ chart, series, annotations = [], annotated = true,
     window: races ? racesWindowText(window.span, races, date) : windowText(window, date),
     coverage: races ? `Sampling, race by race: ${races.map((race) => `${race.label}: ${race.retention}`).join(' ')} ${COVERAGE_TEXT}` : `Sampling: ${retention} ${COVERAGE_TEXT}`,
     missing: MISSING_TEXT,
-    annotations: annotated ? `Annotations: ${annotations.length} drawn in this window, each at its own exact game time, which is not a sample time; the nearest sample${races ? ', one of the selected race\'s,' : ''} is named beside it. ${unseen} more kept for this race and branch are not exported because this view does not draw them (outside the window, or made at a later game time than this save).` : 'Annotations: this view does not draw them, so none is exported.',
+    annotations: annotated ? `Annotations: ${annotations.length} drawn in this window, each at its own exact game time, which is not a sample time; the nearest sample${races ? ', one of the selected race\'s,' : ''} is named beside it. ${unseen} more kept for the race and branch are not exported because this view does not draw them (outside the window, or made at a later game time than this save).` : 'Annotations: this view does not draw them, so none is exported.',
   }
   const placed = annotations.map((entry) => ({ id: entry.id, t: entry.t, date: dateTime(entry.t), type: entry.type, text: entry.text, link: entry.link || '', nearest: entry.nearest || null })).sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 

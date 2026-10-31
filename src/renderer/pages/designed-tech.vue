@@ -110,7 +110,7 @@
                     </tr>
                   </tbody>
                 </v-simple-table>
-                <div v-else-if="item.classCount === 0" class="body-2 text--secondary">No class of this race mounts it.</div>
+                <div v-else-if="item.classCount === 0" class="body-2 text--secondary">No class of the race mounts it.</div>
                 <div v-else class="body-2 text--secondary">Usage unknown: {{ item.usageGaps.join(', ') }}.<provenance-mark :result="cellOf(usageColumn, item).result" /></div>
               </td>
             </template>
@@ -165,7 +165,7 @@
             </tbody>
           </v-simple-table>
           <div class="panel-foot caption text--secondary">
-            <div>A row is tinted when the designs differ in it. Where a figure has a better side, the best value is marked green and the worst red, each with an arrow and a label. Higher is better for damage, range, strength, sensitivity, capacity, power, output and hit points. Lower is better for size, cost, crew, reload time, fuel use, explosion risk and cloak rating. Best and worst are marked only among designs of one component type.</div> <div class="mt-1">Arrows without a colour mark the highest and lowest value of a figure with no better side, such as a sensor's resolution. A raw total trades against size and cost, so the per hull space and per build point rows rank designs of different sizes. The picks are kept for each category and race, and a design that is no longer known drops out of them.</div>
+            <div>Use it to weigh what a design gains in one row against what it costs in another, and to pick the design that suits a ship. A row is tinted when the designs differ in it. Where a figure has a better side, the best value is marked green and the worst red, each with an arrow and a label. Higher is better for damage, range, strength, sensitivity, capacity, power, output and hit points. Lower is better for size, cost, crew, reload time, fuel use, explosion risk and cloak rating. Best and worst are marked only among designs of one component type.</div> <div class="mt-1">Arrows without a colour mark the highest and lowest value of a figure with no better side, such as a sensor's resolution. A raw total trades against size and cost, so the per hull space and per build point rows rank designs of different sizes. The picks are kept for each category and race, and a design that is no longer known drops out of them.</div>
           </div>
         </v-card>
 
@@ -230,7 +230,7 @@ const normaliseCompare = (stored) => {
 
 const MINERAL_COLUMNS = MINERALS.map((mineral) => `FCT_ShipDesignComponents.${mineral.name}`).join(', ')
 
-const RULE_NOTE = 'Lists the designs the race knows, which are the researched ones and the base components it starts with. Used on counts the classes of the race that mount a component, obsolete classes included, and the ships of those classes still in service. A component marked obsolete is only kept out of the design pickers. Classes that mount it keep it. Commercial means a component that is not a military system, and a jump drive counts only if it was built as a commercial drive. Civilian means a component made for a shipping line. Baseline means a component from the base data every game starts with. One hull space is 50 tons.'
+const RULE_NOTE = 'Use it to find which known designs are in use and which are not, and to pick designs to compare. The table lists the designs the race knows, which are the researched ones and the base components it starts with. Used on counts the classes of the race that mount a component, obsolete classes included, and the ships of those classes still in service. A component marked obsolete is only kept out of the design pickers. Classes that mount it keep it. Commercial means a component that is not a military system, and a jump drive counts only if it was built as a commercial drive. Civilian means a component made for a shipping line. Baseline means a component from the base data every game starts with. One hull space is 50 tons.'
 
 export default {
   name: 'DesignedTechPage',

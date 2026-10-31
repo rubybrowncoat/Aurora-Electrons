@@ -2,7 +2,7 @@
   <div>
     <v-container v-if="!historyRecorded" fluid class="history-page">
       <v-alert type="info" outlined dense>
-        The app doesn't keep Empire History for this race. It's one of Aurora's special factions (such as the Precursors, Invaders or Rakhas), which have no empire to chart. History is kept for player races and NPR empires.
+        The app doesn't keep Empire History for the race. It's one of Aurora's special factions (such as the Precursors, Invaders or Rakhas), which have no empire to chart. History is kept for player races and NPR empires.
       </v-alert>
     </v-container>
 
@@ -91,7 +91,7 @@
       </v-card>
 
       <v-alert v-if="!allSnapshots.length" type="info" outlined dense class="mt-3">
-        No history for this race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <router-link to="/finances">Finances</router-link>.
+        No history for the race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <router-link to="/finances">Finances</router-link>.
       </v-alert>
 
       <template v-else>
@@ -221,7 +221,7 @@
               </div>
             </div>
           </div>
-          <div v-else-if="milestoneScope && yearKnown && !milestoneRead.error" class="caption text--secondary mt-3" data-milestone-empty>No milestones yet for this race{{ milestoneRead.notes.length ? ', apart from ' + milestoneRead.notes.length + ' that this version cannot read' : '' }}.</div>
+          <div v-else-if="milestoneScope && yearKnown && !milestoneRead.error" class="caption text--secondary mt-3" data-milestone-empty>No milestones yet for the race{{ milestoneRead.notes.length ? ', apart from ' + milestoneRead.notes.length + ' that this version cannot read' : '' }}.</div>
           <div v-for="note in milestoneRead.notes" :key="note.uuid" class="caption text--secondary mt-1" data-milestone-note>{{ note.reason }}</div>
           <div v-if="milestoneAttached.error" class="caption text--secondary mt-3" data-milestone-attached-error>The milestones of attached campaigns cannot be listed here: {{ milestoneAttached.error.message }}</div>
           <div v-else-if="milestoneAttached.entries.length || milestoneAttached.refused.length" class="mt-4" data-milestone-attached>
@@ -243,7 +243,7 @@
             <div v-for="source in milestoneAttached.refused" :key="source.campaignId" class="caption text--secondary mt-1" data-milestone-attached-refused>The scenario file of an attached campaign cannot be read ({{ source.message }}), so its milestones are not listed.</div>
           </div>
 
-          <div class="caption text--secondary mt-2" data-milestone-limits>A marker is drawn at the exact game time, not at a sample, and only within the span the charts have samples for; a milestone made at a later game time than this save is listed and not drawn until the save reaches it or it is moved here. A rewound save is a branch: a milestone kept for the campaign shows on every branch, one kept for a branch only on that branch. A link on the branch of the open save is checked against that save each time and is never moved to another object by its name, so renaming an object leaves it linked and an object that is gone stays unresolved. An ID can come back for another object after a rewind, so a link reads linked only for a ship, a fleet or a system whose creation or discovery time is the one captured when the link was made, which on another branch must also be before the two branches parted. A colony has no date in the save and one body can hold several, so a link to a colony reads not checked, and changed only where its system, body or species differ. A log event is named by its increment, what it says and the place it names, and one the log holds several times over is ambiguous.</div>
+          <div class="caption text--secondary mt-2" data-milestone-limits>Use it to check where a milestone marker lands and whether its link still points at the same object. A marker is drawn at the exact game time, not at a sample, and only within the span the charts have samples for; a milestone made at a later game time than this save is listed and not drawn until the save reaches it or it is moved here. A rewound save is a branch: a milestone kept for the campaign shows on every branch, one kept for a branch only on that branch. A link on the branch of the open save is checked against that save each time and is never moved to another object by its name, so renaming an object leaves it linked and an object that is gone stays unresolved. An ID can come back for another object after a rewind, so a link reads linked only for a ship, a fleet or a system whose creation or discovery time is the one captured when the link was made, which on another branch must also be before the two branches parted. A colony has no date in the save and one body can hold several, so a link to a colony reads not checked, and changed only where its system, body or species differ. A log event is named by its increment, what it says and the place it names, and one the log holds several times over is ambiguous.</div>
         </div>
       </v-card>
 
@@ -257,11 +257,11 @@
           <span class="caption text--secondary">{{ retentionView.sampling }}</span>
         </div>
         <div class="panel-body">
-          <div class="history-retention__row"><span class="history-retention__label">Samples</span><span class="history-retention__value" data-retention-samples><span data-retention-count>{{ count(retentionView.stats.count, 0) }}</span> kept for this race; the {{ retentionView.profile.label }} profile keeps at most {{ count(retentionView.profile.cap, 0) }} per series<template v-if="retentionView.over">. This series is above that, and is thinned when the recorder next saves it</template></span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Samples</span><span class="history-retention__value" data-retention-samples><span data-retention-count>{{ count(retentionView.stats.count, 0) }}</span> kept for the race; the {{ retentionView.profile.label }} profile keeps at most {{ count(retentionView.profile.cap, 0) }} per series<template v-if="retentionView.over">. This series is above that, and is thinned when the recorder next saves it</template></span></div>
           <div class="history-retention__row"><span class="history-retention__label">Time covered</span><span class="history-retention__value">{{ duration(retentionView.stats.seconds) }}<template v-if="retentionView.stats.first !== null"> ({{ date(retentionView.stats.first) }} to {{ date(retentionView.stats.last) }})</template></span></div>
           <div class="history-retention__row"><span class="history-retention__label">Time between samples</span><span class="history-retention__value" data-retention-gaps>largest {{ duration(retentionView.stats.gaps.largest) }}, typical {{ duration(retentionView.stats.gaps.typical) }}</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Thinning</span><span class="history-retention__value" data-retention-thinning :data-status="retentionView.status">{{ retentionView.thinning }}.</span></div>
-          <div class="history-retention__row"><span class="history-retention__label">Size, measured</span><span class="history-retention__value" data-retention-measured>{{ size(retentionView.measured) }} for this race's series, {{ size(retentionView.file) }} for the whole branch file. Measured as compact JSON; the file on disk is larger by its indentation.</span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Size, measured</span><span class="history-retention__value" data-retention-measured>{{ size(retentionView.measured) }} for the race's series, {{ size(retentionView.file) }} for the whole branch file. Measured as compact JSON; the file on disk is larger by its indentation.</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Size, predicted</span><span class="history-retention__value" data-retention-predicted>About {{ size(retentionView.current.bytesAtCap) }} for this series once it holds {{ count(retentionView.profile.cap, 0) }} samples, predicted from the average size of its samples.</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Colony series</span><span class="history-retention__value" data-retention-colonies>{{ colonyBudgetText }}</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Event archive</span><span class="history-retention__value" data-retention-events>{{ eventBudgetText }} Turning it on or off is on the <router-link to="/log">Game Log</router-link> page.</span></div>
@@ -286,7 +286,7 @@
             </table>
           </div>
 
-          <div class="caption text--secondary mt-2" data-retention-limits>A retention profile caps the samples one series keeps, and applies only to samples that are observed or still kept. The record covers the colony series, the game log's event archive and the observation record kept beside it. A cap on the events the archive keeps cuts the oldest ones when the race is next captured. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed. A backup taken before a clear still holds what the clear removed. A Merge restore brings back the removed snapshots and any event archive or observation record the clear removed whole; a record of either that the clear only cut is kept as it is under Merge and comes back with a Replace restore.</div>
+          <div class="caption text--secondary mt-2" data-retention-limits>Use it to judge what a retention profile keeps and what a change of profile or a clear removes. A retention profile caps the samples one series keeps, and applies only to samples that are observed or still kept. The record covers the colony series, the game log's event archive and the observation record kept beside it. A cap on the events the archive keeps cuts the oldest ones when the race is next captured. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed. A backup taken before a clear still holds what the clear removed. A Merge restore brings back the removed snapshots and any event archive or observation record the clear removed whole; a record of either that the clear only cut is kept as it is under Merge and comes back with a Replace restore.</div>
 
           <v-alert v-if="retentionChange" type="warning" outlined dense class="mt-3" data-retention-confirm>
             <div>Change the retention profile from {{ retentionChange.current.label }} ({{ count(retentionChange.current.cap, 0) }}) to {{ retentionChange.picked.label }} ({{ count(retentionChange.picked.cap, 0) }})?</div>
@@ -473,7 +473,7 @@
 
       <v-dialog v-model="confirmClear" max-width="480">
         <v-card data-clear-dialog>
-          <v-card-title>Clear this race's history?</v-card-title>
+          <v-card-title>Clear the race's history?</v-card-title>
           <v-card-text>
             <v-radio-group v-model="clearYears" hide-details dense class="mt-0 pt-0">
               <v-radio v-for="option in clearOptions" :key="option.value" :value="option.value" :label="option.text" :data-clear-option="option.value" />
@@ -1214,7 +1214,7 @@ export default {
         return 'Not kept: the event archive is for player races only.'
       }
 
-      const state = budget.on ? 'On for this race in this campaign' : 'Off for this race in this campaign, so nothing more is captured'
+      const state = budget.on ? 'On for the race in this campaign' : 'Off for the race in this campaign, so nothing more is captured'
       const kept = budget.events === null ? `none kept yet, at most ${this.count(budget.cap, 0)}` : `${this.count(budget.events, 0)} events kept of at most ${this.count(budget.cap, 0)}`
       const measured = budget.measured === null ? 'none recorded yet' : `${this.size(budget.measured)} measured as compact JSON`
       const gaps = budget.gaps === null ? '' : ` ${this.count(budget.gaps, 0)} ${budget.gaps === 1 ? 'stretch' : 'stretches'} between captures ${budget.gaps === 1 ? 'was' : 'were'} not observed, as was the time before the first capture.`
@@ -1288,7 +1288,7 @@ export default {
         return 'Not kept: the observation record is for player races only.'
       }
 
-      const state = budget.kinds.length ? `On for this race in this campaign (${budget.kinds.map((kind) => OBSERVED_KINDS[kind].label.toLowerCase()).join(', ')})` : 'Off for this race in this campaign, so nothing more is captured'
+      const state = budget.kinds.length ? `On for the race in this campaign (${budget.kinds.map((kind) => OBSERVED_KINDS[kind].label.toLowerCase()).join(', ')})` : 'Off for the race in this campaign, so nothing more is captured'
       const kept = budget.objects === null ? `none kept yet, at most ${this.count(CAPTURES_KEPT, 0)} captures` : `${this.count(budget.objects, 0)} ${budget.objects === 1 ? 'object' : 'objects'} and ${this.count(budget.captures, 0)} ${budget.captures === 1 ? 'capture' : 'captures'} kept`
       const measured = budget.measured === null ? 'none recorded yet' : `${this.size(budget.measured)} measured as compact JSON`
       const predicted = budget.predicted === null ? '' : `; about ${this.size(budget.predicted)} predicted once ${this.count(CAPTURES_KEPT, 0)} captures are held, at about ${OBJECT_BYTES} bytes an object and ${CAPTURE_BYTES} a capture`
@@ -1319,7 +1319,7 @@ export default {
       const races = Object.entries(record.file.races).map(([RaceID, entry]) => ({ RaceID, dropped: capRecord(entry, cap).dropped }))
       const shown = races.filter(({ RaceID }) => RaceID === String(this.RaceID)).reduce((sum, race) => sum + race.dropped, 0)
       const others = races.filter(({ RaceID }) => RaceID !== String(this.RaceID)).reduce((sum, race) => sum + race.dropped, 0)
-      const own = shown ? `In the shown branch, the next capture of this race cuts ${this.count(shown, 0)} of its oldest events (whole increments, so a little more than the excess can go).` : 'In the shown branch, the next capture of this race cuts none of its events.'
+      const own = shown ? `In the shown branch, the next capture of the race cuts ${this.count(shown, 0)} of its oldest events (whole increments, so a little more than the excess can go).` : 'In the shown branch, the next capture of the race cuts none of its events.'
       const rest = others ? ` The archives of other races in this branch lose ${this.count(others, 0)} events in all when each is next captured.` : ''
 
       return { cap, text: `${scope} ${own}${rest} Other branches and campaigns are not counted here.` }

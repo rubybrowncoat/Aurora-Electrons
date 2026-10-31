@@ -18,11 +18,11 @@
             <v-checkbox v-model="collapseRepeats" label="Collapse daily repeats" dense hide-details />
             <div class="caption text--secondary mt-1">The same type on one game day folds into an expandable row. No message is removed.</div>
             <v-checkbox v-model="hideNonCustomized" label="Only custom-coloured events" dense hide-details />
-            <div class="caption text--secondary mt-1">Types with a colour entry in this race's game settings, including black.</div>
+            <div class="caption text--secondary mt-1">Types with a colour entry in the race's game settings, including black.</div>
             <template v-if="canArchive">
               <v-divider class="my-3" />
               <v-switch :input-value="archiveChoice" label="Keep an event archive" dense hide-details class="mt-0" @change="setArchive" />
-              <div class="caption text--secondary mt-1">Records this race's events on this branch, so the ones a later save no longer holds stay readable. Up to {{ count(eventCap) }} events are kept, about {{ capSize }} as stored (an estimate). Switching it off keeps what was recorded.</div>
+              <div class="caption text--secondary mt-1">Records the race's events on this branch, so the ones a later save no longer holds stay readable. Up to {{ count(eventCap) }} events are kept, about {{ capSize }} as stored (an estimate). Switching it off keeps what was recorded.</div>
               <div v-if="archiveMessage" class="caption error--text mt-1" role="alert">{{ archiveMessage }}</div>
             </template>
             <v-btn small text class="mt-3" @click="resetFilters">Reset filters</v-btn>
@@ -93,9 +93,9 @@
             </v-list-item>
           </template>
         </window-virtual-scroll>
-        <div v-else class="pa-6 text--secondary">{{ listPending ? 'Reading the archive.' : listEvents.length ? 'No events match these filters.' : archiveListed ? 'The archive holds no events of this race.' : 'This race has no events in the save.' }}</div>
+        <div v-else class="pa-6 text--secondary">{{ listPending ? 'Reading the archive.' : listEvents.length ? 'No events match these filters.' : archiveListed ? 'The archive holds no events of the race.' : 'The race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
-          Rows keep this race's custom alert and text colours. Click a message to read it in full, expand a daily repeat to read each message, or pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment that the previous visit to this page saw on this branch. The first visit to a branch inherits what its parent saw up to the fork.
+          Use it to pick out new and important events among the rows. Rows keep the race's custom alert and text colours. Click a message to read it in full, expand a daily repeat to read each message, or pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment that the previous visit to this page saw on this branch. The first visit to a branch inherits what its parent saw up to the fork.
         </div>
       </v-card>
     </template>
@@ -322,7 +322,7 @@ export default {
     },
 
     pinUnavailable() {
-      return this.pinsKey && !this.pinStore.store && this.pinStore.key === this.pinsKey ? 'what is stored for this race is not a pin store this version reads.' : ''
+      return this.pinsKey && !this.pinStore.store && this.pinStore.key === this.pinsKey ? 'what is stored for the race is not a pin store this version reads.' : ''
     },
 
     branchPins() {

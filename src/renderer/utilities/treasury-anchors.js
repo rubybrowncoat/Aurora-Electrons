@@ -100,7 +100,7 @@ const windowOf = (from, to, log) => {
   const unknown = (reason) => blockedWindow(from, to, reason)
 
   if (!log.length) {
-    return unknown('the save logs no wealth for this race')
+    return unknown('the save logs no wealth for the race')
   }
 
   if (log[0].t > from.t) {
@@ -163,14 +163,14 @@ export const reconcileTreasury = ({ settled, anchors, live, log, ledger = null }
   }
 
   if (!live || !finite(live.t) || !finite(live.wealth)) {
-    return none('The save stores no treasury for this race')
+    return none('The save stores no treasury for the race')
   }
 
   const recorded = anchors.filter((anchor) => anchor.t !== live.t).map((anchor) => ({ anchor, reason: refusal(anchor, { live, ledger }) }))
   const ordered = [...recorded, { anchor: { t: live.t, wealth: live.wealth }, reason: null }].sort((a, b) => a.anchor.t - b.anchor.t)
 
   if (ordered.length < 2) {
-    return none('No earlier snapshot of this race is recorded on this save\'s branch')
+    return none('No earlier snapshot of the race is recorded on this save\'s branch')
   }
 
   const sorted = log.slice().sort((a, b) => a.t - b.t)

@@ -88,7 +88,7 @@
                 <div class="panel-body">
                   <div v-if="treasurySeriesMissing" class="caption text--secondary">{{ treasurySeriesMissing }}</div>
                   <chart-canvas v-else type="line" :data="treasuryChart" :options="treasuryOptions" :height="280" label="Treasury balance over the window, worked back from today" />
-                  <div class="caption text--secondary mt-2">Worked back from today's treasury through each cycle's net, so it holds only what the game logs as income or spending. What it leaves out shows as a residual under Treasury against the log, where earlier snapshots of this race are recorded.</div>
+                  <div class="caption text--secondary mt-2">Worked back from today's treasury through each cycle's net, so it holds only what the game logs as income or spending. What it leaves out shows as a residual under Treasury against the log, where earlier snapshots of the race are recorded.</div>
                 </div>
               </v-card>
             </v-col>
@@ -115,7 +115,7 @@
               </v-data-table>
             </template>
           </div>
-          <div class="panel-foot caption text--secondary">Stored change is the later snapshot's treasury less the earlier one's. Logged net is income less spending over the cycles after the earlier snapshot, up to and including the later one. The residual is the difference: what the log does not hold, with no cause named. A residual of 0 means the log accounts for the whole change. Only snapshots of this race on this branch are compared. A snapshot counts only when it carries a digest of the ledger it was taken on and this save's own ledger reproduces it, so it is an earlier point of this save. A dash means the span cannot be compared. The causes are a snapshot recorded before the app kept that digest, one taken on another branch, a merged history or a replayed past, one later than this save, or a log that does not cover the span.</div>
+          <div class="panel-foot caption text--secondary">Use it to find spans where the treasury moved by something the log does not hold. Stored change is the later snapshot's treasury less the earlier one's. Logged net is income less spending over the cycles after the earlier snapshot, up to and including the later one. The residual is the difference: what the log does not hold, with no cause named. A residual of 0 means the log accounts for the whole change. Only snapshots of the race on this branch are compared. A snapshot counts only when it carries a digest of the ledger it was taken on and this save's own ledger reproduces it, so it is an earlier point of this save. A dash means the span cannot be compared. The causes are a snapshot recorded before the app kept that digest, one taken on another branch, a merged history or a replayed past, one later than this save, or a log that does not cover the span.</div>
         </v-card>
 
         <v-card class="panel" data-summary="Estimate civilian shipping-line payouts using rates per unit carried and per billion km." elevation="1">
@@ -186,7 +186,7 @@
             <div class="mt-1">Net cost of shipping-line payouts to the treasury: <span class="font-weight-medium">{{ netCost.value === null ? '—' : signed(netCost.value) }}</span><provenance-mark :result="netCost" label /></div>
             <div class="caption text--secondary">{{ netCost.value === null ? limitationText(netCost) : 'The window\'s logged payout uses less the logged taxes on them.' }}</div>
           </div>
-          <div class="panel-foot caption text--secondary">A shipping-line payout is what a line earns for a trip at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. A computer-run empire's lines are paid half of it. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them. Nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending and no net cost is worked out. The estimate is shown only where the rates are published.</div>
+          <div class="panel-foot caption text--secondary">Use it to read a payout against the logged civilian flows without mixing the two. A shipping-line payout is what a line earns for a trip at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. A computer-run empire's lines are paid half of it. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them. Nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending and no net cost is worked out. The estimate is shown only where the rates are published.</div>
         </v-card>
 
         <shipping-runway :ledger="ledger" :treasury="treasury" :wealth="wealth" :window-days="windowDays" :window-options="windowOptions" :formula-version="formulaVersion" :npr="shippingTax ? shippingTax.npr : null" :tax="shippingTax" :tax-state="shippingTaxState" :date="date" :separator="separator" :history-recorded="historyRecorded" @retry="retryShippingTax" />
@@ -354,7 +354,7 @@ export default {
     // The treasury against the log: the windows between recorded snapshots and the open save, each with its residual or the reason it cannot be compared.
     anchorCheck() {
       if (!this.historyRecorded) {
-        return { reason: 'Empire History does not record this race, so no snapshot of its treasury is kept to compare with the log', windows: [], total: null }
+        return { reason: 'Empire History does not record the race, so no snapshot of its treasury is kept to compare with the log', windows: [], total: null }
       }
 
       return reconcileTreasury({ settled: !!this.resolved, anchors: this.recordedAnchorList, live: this.treasury ? { t: this.treasury.GameTime, wealth: this.treasury.WealthPoints } : null, log: this.treasuryLog, ledger: this.treasuryLedger })
@@ -398,7 +398,7 @@ export default {
       const { missing } = this.ledger
 
       if (missing === 'wealth history') {
-        return 'The save has no wealth history for this race yet. Aurora logs income and spending every production cycle.'
+        return 'The save has no wealth history for the race yet. Aurora logs income and spending every production cycle.'
       }
 
       if (missing === 'wealth amounts') {

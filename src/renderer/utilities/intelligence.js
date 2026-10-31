@@ -485,7 +485,7 @@ const treatyMask = (row, prefix, name) => {
   const flags = TREATY_FLAGS.map((flag) => row[`${prefix}${flag}`])
 
   if (prefix && !isNumber(row.TheirRecordID)) {
-    return unavailable({ rule, missing: ['the alien race\'s own record of this race'] })
+    return unavailable({ rule, missing: ['the alien race\'s own record of the race'] })
   } else if (flags.some((flag) => flag === null || flag === undefined)) {
     return unavailable({ rule, missing: [name] })
   }
@@ -493,7 +493,7 @@ const treatyMask = (row, prefix, name) => {
   return ofRule({ rule, value: flags.reduce((mask, flag, index) => mask + (flag ? 2 ** index : 0), 0), inputs: { present: [name] } })
 }
 
-export const treatiesGranted = (row) => treatyMask(row, '', 'the treaties this race grants')
+export const treatiesGranted = (row) => treatyMask(row, '', 'the treaties the race grants')
 
 export const treatiesReceived = (row) => treatyMask(row, 'Their', 'the treaties the alien race grants')
 

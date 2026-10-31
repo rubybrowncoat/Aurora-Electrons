@@ -440,7 +440,7 @@ const suite = (m) => {
     assert.match(text, /aggregate figures only/)
     assert.match(text, /not a continuous record/)
     assert.match(text, /it is not 0/)
-    assert.match(text, /2 more kept for this race and branch are not exported/)
+    assert.match(text, /2 more kept for the race and branch are not exported/)
   })
 
   check('caption', 'the rules are listed once each with their status and standing assumptions, and the notes of the chart under their own heading', () => {
@@ -769,7 +769,7 @@ const pageSuite = async (m, { mutate = null, saves = null, sources = {} } = {}) 
     assert.deepEqual(rows.map((row) => Number(row[ANNOTATION_TIME])), [atSample, between])
     assert.deepEqual(rows.map((row) => row['Annotation ID']), vm.milestoneEntries.filter((entry) => entry.drawn).sort((a, b) => a.t - b.t).map((entry) => entry.uuid))
     assert.deepEqual(rows.map((row) => row['Annotation type']), ['Discovery', 'Battle'])
-    assert.ok(table.rows.some((row) => /2 drawn in this window.*1 more kept for this race and branch are not exported/.test(row.Note)))
+    assert.ok(table.rows.some((row) => /2 drawn in this window.*1 more kept for the race and branch are not exported/.test(row.Note)))
     assert.equal(table.text.includes('Ahead of the save'), false)
     assert.equal(samplesOf(table).some((row) => Number(row[SAMPLE_TIME]) === between), false, 'an annotation time is not a sample time')
     KEYS.forEach((key) => assert.equal(csvOf(vm, key).rows.filter((row) => row.Record === 'annotation').length, 2, key))

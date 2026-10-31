@@ -1356,7 +1356,7 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
     const gaps = textOf(find(root, 'data-retention-gaps'))
     const thinning = find(root, 'data-retention-thinning')
 
-    assert.match(samples, /^5 kept for this race; the Standard profile keeps at most 2'000 per series$/)
+    assert.match(samples, /^5 kept for the race; the Standard profile keeps at most 2'000 per series$/)
     assert.equal(gaps, 'largest 100 d, typical 25 d')
     assert.equal(thinning.data.attrs['data-status'], 'unknown')
     assert.match(textOf(thinning), /^Thinning unknown/)
@@ -1379,7 +1379,7 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
     const headers = nodesOf(root, (node) => node.tag === 'th').map(textOf)
 
     assert.notEqual(history.bytesText(history.measuredBytes(twoFile.races[7])), history.bytesText(history.measuredBytes(twoFile)), 'the series and the file differ in size')
-    assert.ok(measured.startsWith(`${history.bytesText(history.measuredBytes(twoFile.races[7]))} for this race's series, ${history.bytesText(history.measuredBytes(twoFile))} for the whole branch file.`), measured)
+    assert.ok(measured.startsWith(`${history.bytesText(history.measuredBytes(twoFile.races[7]))} for the race's series, ${history.bytesText(history.measuredBytes(twoFile))} for the whole branch file.`), measured)
     assert.match(measured, /Measured as compact JSON; the file on disk is larger by its indentation\.$/)
     assert.doesNotMatch(measured, /redict/)
     assert.match(predicted, /^About .* for this series once it holds 2'000 samples, predicted from the average size of its samples\.$/)
@@ -1817,7 +1817,7 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
     const { vm, tree } = mount({ file: { gameName: 'Game', races: { 7: { raceName: 'Test Race', npr: false, snapshots: [] } } } })
     const root = tree()
 
-    assert.match(textOf(find(root, 'data-retention-samples')), /^0 kept for this race/)
+    assert.match(textOf(find(root, 'data-retention-samples')), /^0 kept for the race/)
     assert.equal(textOf(find(root, 'data-retention-gaps')), 'largest —, typical —')
     assert.match(textOf(find(root, 'data-retention-predicted')), /^About — for this series/)
     assert.equal(vm.recording, null)

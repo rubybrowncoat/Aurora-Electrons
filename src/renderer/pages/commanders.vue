@@ -53,7 +53,7 @@
               <div v-if="unratedMore(visibleUnratedGovernors)">and {{ count(unratedMore(visibleUnratedGovernors)) }} more</div>
             </div>
             <div class="panel-foot caption text--secondary">
-              Only unassigned administrators are considered. A candidate must have the colony's required bonus, as the game ranks governors. Candidates rank by that bonus, then the secondary bonus, then the tertiary bonus, as set on the Governor tab of the Economics window.
+              Use it to check why a candidate is suggested for a colony. Only unassigned administrators are considered. A candidate must have the colony's required bonus, as the game ranks governors. Candidates rank by that bonus, then the secondary bonus, then the tertiary bonus, as set on the Governor tab of the Economics window.
             </div>
           </template>
 
@@ -93,7 +93,7 @@
               <div v-if="unratedMore(shipAssessment.unrated)">and {{ count(unratedMore(shipAssessment.unrated)) }} more</div>
             </div>
             <div class="panel-foot caption text--secondary">
-              Terraformers and miners use the captain's full bonus. Survey ships with a Science Department use the science officer's bonus, and that post is one rank below the captain. Other survey ships use half the captain's bonus. Candidates are unassigned naval officers of exactly the post's rank, as automatic assignment requires. Officers under "other ranks" would need a promotion or a manual assignment.
+              Use it to check why an officer is suggested for a ship. Terraformers and miners use the captain's full bonus. Survey ships with a Science Department use the science officer's bonus, and that post is one rank below the captain. Other survey ships use half the captain's bonus. Candidates are unassigned naval officers of exactly the post's rank, as automatic assignment requires. Officers under "other ranks" would need a promotion or a manual assignment.
             </div>
           </template>
 
@@ -124,7 +124,7 @@
               <div v-if="unratedMore(researchAssessment.unrated)">and {{ count(unratedMore(researchAssessment.unrated)) }} more</div>
             </div>
             <div class="panel-foot caption text--secondary">
-              A scientist's Research bonus counts four times in their own field (+15% becomes +60%) and once outside it. A candidate must be of the project's field and run at least its labs (Research Administration).
+              Use it to check how a scientist is weighed for a project. A scientist's Research bonus counts four times in their own field (+15% becomes +60%) and once outside it. A candidate must be of the project's field and run at least its labs (Research Administration).
             </div>
           </template>
         </v-card>
@@ -205,7 +205,7 @@
           <div v-if="unassignedOnly && counts.noPost" class="panel-body caption text--secondary">{{ count(counts.noPost) }} commanders with no stored post are not shown: whether they are unassigned is not known.<provenance-mark :result="counts.idleResult" /></div>
           <div v-if="rosterNotRated" class="panel-body caption text--secondary" data-roster-not-rated>{{ rosterNotRated }}</div>
           <div class="panel-foot caption text--secondary">
-            Age is the species' graduation age plus the years since the commander's career began, to one decimal; the age range is inclusive. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
+            Use it to read the Age and Health risk columns and to set the Age from and Age to range. Age is the species' graduation age plus the years since the commander's career began, to one decimal; the age range is inclusive. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
           </div>
         </v-card>
 
@@ -270,10 +270,10 @@
               </td>
             </template>
           </v-data-table>
-          <div v-else class="panel-body caption text--secondary">No commander of this race is a prisoner, retired or dead in the save, and the race holds no prisoners.</div>
+          <div v-else class="panel-body caption text--secondary">No commander of the race is a prisoner, retired or dead in the save, and the race holds no prisoners.</div>
           <div v-if="unsettled" class="panel-body caption text--secondary">{{ count(unsettled) }} commanders have no stored retirement or prisoner flag, so they are in neither the roster nor these groups and the counts are lower bounds.<provenance-mark :result="formerGroups[0].result" /></div>
           <div class="panel-foot caption text--secondary">
-            The game deletes a commander who retires or dies when the game is saved, unless Retain is pressed for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as the race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
+            Use it to see which former commanders the game keeps and which it deletes. The game deletes a commander who retires or dies when the game is saved, unless Retain is pressed for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as the race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
           </div>
         </v-card>
 
@@ -853,7 +853,7 @@ export default {
       if (this.focusCommanderId) {
         return this.focusPerson ? `Roster: ${this.focusPerson.Name} only` : 'No serving commander has this ID'
       } else if (this.focusColonyId) {
-        return this.focusColony ? `Governor suggestions: ${this.focusColony.PopName}, governed by ${this.focusGovernor ? this.focusGovernor.Name : 'no one'}` : 'No colony of this race has this ID'
+        return this.focusColony ? `Governor suggestions: ${this.focusColony.PopName}, governed by ${this.focusGovernor ? this.focusGovernor.Name : 'no one'}` : 'No colony of the race has this ID'
       }
 
       return null
@@ -890,7 +890,7 @@ export default {
       const stats = this.governorStats
 
       if (this.focusColonyId) {
-        return this.focusColony ? `No governor improvement for ${this.focusColony.PopName}. The filter is limited to this colony.` : 'No colony of this race has this ID.'
+        return this.focusColony ? `No governor improvement for ${this.focusColony.PopName}. The filter is limited to this colony.` : 'No colony of the race has this ID.'
       }
 
       return stats.colonies ? `No governor improvements for any colony. ${this.colonyCount(stats.assigned)} with a governor, ${stats.vacant} vacant.` : 'No governor improvements: the race has no colonies.'

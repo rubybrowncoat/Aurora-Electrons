@@ -816,7 +816,7 @@ const BROWSER_BENIGN = [
       [HISTORY_FILE, '<v-radio-group v-model="clearYears" hide-details dense class="mt-0 pt-0">', '<v-radio-group :value="clearYears" hide-details dense class="mt-0 pt-0" @change="clearYears = $event">'],
       [HISTORY_FILE, 'data-clear-open @click="openClear"', 'data-clear-open v-on:click="openClear"'],
       [HISTORY_FILE, ':disabled="clearView.removed === 0" data-clear-confirm', ':disabled="(clearView.removed === 0)" data-clear-confirm'],
-      [HISTORY_FILE, '</span> kept for this race', '</span> retained for this race'],
+      [HISTORY_FILE, '</span> kept for the race', '</span> retained for the race'],
       [HISTORY_FILE, '`${CLEAR_WORDS.older} ${years} ${CLEAR_WORDS.years}`', '`Snapshots ${CLEAR_WORDS.older.toLowerCase()} ${years} ${CLEAR_WORDS.years}`'],
       [HISTORY_FILE, 'and recording goes on at the next save.', 'and recording resumes at the next save.'],
     ],

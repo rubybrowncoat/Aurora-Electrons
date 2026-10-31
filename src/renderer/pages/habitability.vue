@@ -1014,7 +1014,7 @@ export default {
       return cmcNote(row.cmcSite)
     },
     groundSurveyText(body) {
-      return `No geological survey by this race yet. Ground survey potential: ${GROUND_SURVEY[body.GroundMineralSurvey] || 'unknown'}.`
+      return `No geological survey by the race yet. Ground survey potential: ${GROUND_SURVEY[body.GroundMineralSurvey] || 'unknown'}.`
     },
   },
   asyncComputed: {

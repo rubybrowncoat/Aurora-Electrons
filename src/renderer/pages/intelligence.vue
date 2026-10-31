@@ -2,7 +2,7 @@
   <div>
     <v-container v-if="!historyRecorded" fluid class="intelligence-page">
       <v-alert type="info" outlined dense>
-        The app doesn't keep intelligence for this race. It's one of Aurora's special factions (such as the Precursors, Invaders or Rakhas). Intelligence is kept for player races and NPR empires.
+        The app doesn't keep intelligence for the race. It's one of Aurora's special factions (such as the Precursors, Invaders or Rakhas). Intelligence is kept for player races and NPR empires.
       </v-alert>
     </v-container>
 
@@ -11,12 +11,12 @@
 
       <template v-if="ready">
         <v-alert v-if="!rows.length" type="info" outlined dense>
-          This race hasn't met another race yet. Alien races appear here once they're detected.
+          The race hasn't met another race yet. Alien races appear here once they're detected.
         </v-alert>
 
         <template v-else>
           <div class="caption text--secondary mb-2">
-            Only what this race has observed: tracked ships aren't the alien fleet, and a colony's details show once intelligence on it is high enough. History is recorded each time Aurora saves while the app is open, when something has changed.
+            Only what the race has observed: tracked ships aren't the alien fleet, and a colony's details show once intelligence on it is high enough. History is recorded each time Aurora saves while the app is open, when something has changed.
           </div>
 
           <stat-tiles :tiles="tiles" />

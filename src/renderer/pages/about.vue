@@ -91,7 +91,7 @@
                 <div class="path">{{ historyFile }}</div>
               </template>
             </div>
-            <div class="panel-foot caption text--secondary">The app only reads the save. The one exception is the Galaxy Map's Save Positions button, which writes system positions back to it. Settings can reset the views the pages remember.</div>
+            <div class="panel-foot caption text--secondary">Use it to check which of these files the app changes. The app only reads the save. The one exception is the Galaxy Map's Save Positions button, which writes system positions back to it. Settings can reset the views the pages remember.</div>
           </v-card>
         </v-col>
 
