@@ -1,7 +1,7 @@
 /*
   Checks that the check scripts leave nothing in Bun's runtime transpiler cache for what their child processes load (scripts/lib/check-pool.js, runChild) or for the modules they generate (scripts/lib/module-files.js).
 
-  bun scripts/check-transpiler-cache.js [--no-mutations]
+  bun scripts/check-transpiler-cache.js [--no-mutations] [--only=<mutation label>]
 
   Bun keeps a transpiled copy of every source file over 4 KB that it loads, found by the file's text alone and never removed: in ~/.bun/install/cache/@t@, or in the folder BUN_RUNTIME_TRANSPILER_CACHE_PATH names, while "0" turns the cache off. Only the environment a process starts with counts. Each check points the cache of the processes it starts at a folder of its own and counts the files they add:
   - a child that runChild starts adds nothing, even when the caller hands it a cache folder;
@@ -22,11 +22,12 @@ const PADDING = `// ${'x'.repeat(6000)}\n`
 const filesIn = (folder) => fs.readdirSync(folder, { recursive: true }).filter((entry) => fs.statSync(path.join(folder, entry)).isFile()).length
 
 // --load: builds the leaf, the middle and the root through urlOfSource, imports the root and prints the sum it exports.
-const load = async () => {
-  const { urlOfSource } = require('./lib/module-files')
-  const leaf = urlOfSource(`export const values = [${Array.from({ length: LEAF_VALUES }, (_value, index) => index).join(',')}]\n`)
-  const middle = urlOfSource(`${PADDING}import { values } from '${leaf}'\nexport const sum = values.reduce((total, value) => total + value, 0)\n`)
-  const root = urlOfSource(`import { sum } from '${middle}'\nexport default sum\n`)
+const load = async (scoped = false) => {
+  const { urlOfSource, moduleTree } = require('./lib/module-files')
+  const sourceUrl = scoped ? moduleTree() : urlOfSource
+  const leaf = sourceUrl(`export const values = [${Array.from({ length: LEAF_VALUES }, (_value, index) => index).join(',')}]\n`, 'leaf')
+  const middle = sourceUrl(`${PADDING}import { values } from '${leaf}'\nexport const sum = values.reduce((total, value) => total + value, 0)\n`, 'middle')
+  const root = sourceUrl(`import { sum } from '${middle}'\nexport default sum\n`, 'root')
   const loaded = await import(root)
 
   console.log(`loaded ${loaded.default}`)
@@ -89,6 +90,23 @@ const CHECKS = [
 
     return added === 0 ? true : `the second process added ${added} file(s)`
   })],
+  ['scoped loaded trees reuse generated-text cache across processes', () => withFolder((folder) => {
+    const first = inProcess(['--load-scoped'], folder)
+    const afterFirst = filesIn(folder)
+    const second = inProcess(['--load-scoped'], folder)
+    const added = filesIn(folder) - afterFirst
+
+    if (first !== EXPECTED || second !== EXPECTED) {
+      return `the scoped processes printed "${first}" and "${second}", expected "${EXPECTED}"`
+    }
+
+    if (afterFirst === 0) {
+      return 'the first scoped process kept no transpiled file, so the cache was not measured'
+    }
+
+    return added === 0 ? true : `the second scoped process added ${added} file(s)`
+  })],
+
 ]
 
 const runChecks = () => CHECKS.map(([name, run]) => {
@@ -108,6 +126,7 @@ const MUTATIONS = [
   ['runChild hands the child the caller environment unchanged', 'check-pool.js', ", ...env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' }", ', ...env }', ['a child that runChild starts']],
   ['the caller environment overrides the cache setting of runChild', 'check-pool.js', "CHECK_JOBS: '1', ...env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' }", "CHECK_JOBS: '1', BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0', ...env }", ['a child that runChild starts']],
   ['a generated file keeps the URL of the folder of its process', 'module-files.js', 'const text = folder === null ? source :', 'const text = source ||', ['a second process']],
+  ['scoped generated text keeps private tree paths', 'module-files.js', "const text = source.split(prefix).join('./')", 'const text = source', ['scoped loaded trees']],
   ['equivalent: runChild turns the cache off with an empty value', 'check-pool.js', "BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' }", "BUN_RUNTIME_TRANSPILER_CACHE_PATH: '' }", []],
   ['equivalent: the folder is tested for absence by falsiness', 'module-files.js', 'const text = folder === null ? source :', 'const text = !folder ? source :', []],
 ]
@@ -192,9 +211,10 @@ const settled = async (work) => {
 
 const main = async () => {
   const results = runChecks()
+  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length)
 
   if (!process.argv.includes('--no-mutations')) {
-    for (const [label, file, from, to, fails] of MUTATIONS) {
+    for (const [label, file, from, to, fails] of MUTATIONS.filter(([label]) => !only || label.includes(only))) {
       results.push([`${fails.length ? 'fault caught' : 'rewrite passes'}: ${label}`, await settled(async () => {
         const run = await runCopy(file, from, to)
 
@@ -202,7 +222,7 @@ const main = async () => {
       })])
     }
 
-    for (const [label, file, from, to, fails = CHECKS.map(([name]) => name)] of BROKEN_COPIES) {
+    for (const [label, file, from, to, fails = CHECKS.map(([name]) => name)] of BROKEN_COPIES.filter(([label]) => !only || label.includes(only))) {
       results.push([`refused as a rewrite and as a fault: ${label}`, await settled(async () => {
         const run = await runCopy(file, from, to)
         const accepted = [['an equivalent rewrite that passes', equivalence(run)], ['a caught fault', caught(run, fails)]].filter(([, verdict]) => verdict === true)
@@ -220,8 +240,8 @@ const main = async () => {
   process.exit(passed === results.length ? 0 : 1)
 }
 
-if (process.argv[2] === '--load') {
-  load().catch((error) => {
+if (['--load', '--load-scoped'].includes(process.argv[2])) {
+  load(process.argv[2] === '--load-scoped').catch((error) => {
     console.error(error)
     process.exit(2)
   })
