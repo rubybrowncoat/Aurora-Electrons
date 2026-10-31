@@ -819,6 +819,15 @@ const valueOrZero = (result) => (result && result.status !== 'unavailable' ? res
 
 const main = async () => {
   const saves = parseArguments(process.argv.slice(2))
+  const explicitSaves = process.argv.includes('--save')
+  const quickDefault = !explicitSaves && !mutating()
+  const stockRepresentative = DEFAULT_SAVES.find(({ file }) => file === 'saves/AuroraDB_271_skoormit_saved.db')
+
+  if (quickDefault && !fs.existsSync(path.resolve(root, stockRepresentative.file))) {
+    throw new Error(`quick mode requires its stock representative save: ${stockRepresentative.file}`)
+  }
+
+  const ordinarySaves = quickDefault ? [stockRepresentative] : saves
   const apps = await loadUtilities(UTILITIES, { stubs: STUBS })
   const pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB } })
   const productionOptions = await loadPage('pages/production', { stubs: STUBS })
@@ -853,7 +862,7 @@ const main = async () => {
     check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${[...new Set(broken)].join(', ')}`)
   }
 
-  for (const save of saves) {
+  for (const save of ordinarySaves) {
     const database = await openSave(save.file)
 
     if (!database) {
