@@ -1734,9 +1734,35 @@ const expectedSeed = (record, t) => {
 
 const snapshotCount = (branch) => branch.races[FALRYX_RACE].snapshots.length
 const RECORDER_SCHEDULES = ['rthrow', 'rsuperseded']
+const PREFIX_RECORDER_FAULTS = new Set([11, 22, 48, 50, 105, 107, 114])
+const PREFIX_RECORDER_CHECKS = new Set(['rnochoice', 'rstatements', 'rfile', 'rrepeat'])
+const validateRecorderPrefix = (only) => {
+  if (!Array.isArray(only) || !only.length || only.some((id) => !checks.some((entry) => entry.key === id))) {
+    throw new HarnessError('a recorder prefix requires a nonempty selection of known check IDs')
+  }
+  const readers = checks.filter((entry) => entry.needs === 'recorder' && only.includes(entry.key))
+
+  if (!readers.length || readers.some((entry) => !PREFIX_RECORDER_CHECKS.has(entry.key))) {
+    throw new HarnessError('a recorder prefix cannot omit a scenario read by its named checks')
+  }
+}
+const recorderModeOf = (mutation) => {
+  if (!PREFIX_RECORDER_FAULTS.has(MUTATIONS.indexOf(mutation))) {
+    return 'full'
+  }
+  validateRecorderPrefix(mutation.fails)
+
+  return 'prefix'
+}
 const recorderSchedules = (only, schedules = RECORDER_SCHEDULES) => schedules.filter((key) => only === null || only.includes(key))
 
-const recorder = async (m, only = null) => {
+const recorder = async (m, only = null, projection = 'full') => {
+  if (!['full', 'prefix'].includes(projection)) {
+    throw new HarnessError('unknown recorder scenario projection: ' + projection)
+  }
+  if (projection === 'prefix') {
+    validateRecorderPrefix(only)
+  }
   const files = falryxOrder()
 
   if (!files) {
@@ -1785,6 +1811,11 @@ const recorder = async (m, only = null) => {
 
   await recordOf(restarted, inst, files[1])
   result.restart = { writes: inst.eventWrites(), events: events('b1') }
+
+  // These four named consumers read only the initial/off/on/repeat/restart fields. The full head and every suffix consumer still run all scenarios below.
+  if (projection === 'prefix') {
+    return result
+  }
 
   await recordOf(m, inst, files[3])
   result.beforeFork = { events: events('b1'), writes: inst.eventWrites() }
@@ -2494,8 +2525,8 @@ const memo = (work) => {
 }
 
 // The context a check runs in for one set of modules; a scenario is run once, on its first use.
-const contextOf = (m, only = null, scheduleKeys = RECORDER_SCHEDULES) => {
-  const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m, only)) }
+const contextOf = (m, only = null, scheduleKeys = RECORDER_SCHEDULES, projection = 'full') => {
+  const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m, only, projection)) }
 
   return {
     run: async ({ needs, run }) => {
@@ -2534,7 +2565,7 @@ const judge = async (mutation, { modulesOf = loadModules, entries = checks, cont
   refusePlanting(mutation.name)
   const started = Date.now()
   const sources = mutation.schedules ? {} : planted(mutation)
-  const mutant = context(await modulesOf(utilitiesDirectory, sources), mutation.fails, mutation.schedules)
+  const mutant = context(await modulesOf(utilitiesDirectory, sources), mutation.fails, mutation.schedules, recorderModeOf(mutation))
   const named = entries.filter((entry) => mutation.fails.includes(entry.key))
   const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
   const outcomes = []
