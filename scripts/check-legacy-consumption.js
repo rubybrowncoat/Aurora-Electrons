@@ -3,7 +3,7 @@
 
   node scripts/check-legacy-consumption.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a later copy of the stock save (saves/AuroraDB.db, game 138, race 785). A save that is not there is skipped and said so. A save is never written: the fallback is run on a copy of the stock save in the temp folder whose mineral ledger is emptied, deleted afterwards.
+  With no options a full run checks the repository's modded save (AuroraDB.db, game 140, race 784), the stock save (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a later copy (saves/AuroraDB.db, game 138, race 785). --no-mutations checks only stock, which covers the same supported ledger and shipyard assertion groups as the later copy with fewer unsupported cases (2 versus 4 in the baseline). The passive campaign remains a separate full set of snapshots in either mode. Explicit --save arguments are always used as given. A save is never written: the fallback is run on a copy of the stock save in the temp folder whose mineral ledger is emptied, deleted afterwards.
 
   What is compared. The ledger logs, once per production tick and colony, the tonnes each purpose used: fuel refining (MineralDataType 14, Sorium), maintenance supplies (16, Duranium, Uridium and Gallicite), shipbuilding (5) and shipyard activities (9). For the last production tick (the years between the last two ticks of the ledger's construction rows) the check sets what the model gives a colony, worked out from the save's installations, tasks and race rates alone, against what the ledger logged for it: the fuel and maintenance rules as the page applies them, and the shipbuilding and activity rules at one tick (a task's build points rounded to 4 decimals each tick, as the game does; the utility's year is a forecast and is compared with the tick within the rounding bound). A task with no build points done may have been added after the tick and is left out of the comparison, said so. The ledger's continual-upgrade rows are compared as estimates (the saved capacity is the one after the tick's growth).
 
@@ -134,7 +134,17 @@ const parseArguments = (argv) => {
     }
   }
 
-  return saves.length ? saves : DEFAULT_SAVES
+  if (saves.length) {
+    return saves
+  }
+
+  const selected = mutating() ? DEFAULT_SAVES : [DEFAULT_SAVES[1]]
+
+  if (!mutating() && !fs.existsSync(path.resolve(root, selected[0].file))) {
+    throw new Error(`quick representative save is missing: ${selected[0].file}`)
+  }
+
+  return selected
 }
 
 // The rows of the saves' queries are kept for the length of one run, in a folder the first process makes (LEGACY_CACHE, which the processes it starts inherit) and removes at its end: a mutation re-reads the same save with the same statements, and a save does not change under a run. An entry is named by the save (path, size and time of last change) and the exact statement, so a statement a mutation changes never meets another's rows; a process without the folder queries the save every time.
