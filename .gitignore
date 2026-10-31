@@ -9,6 +9,9 @@ node_modules
 AuroraDB*.db
 docs/
 CLAUDE.md
+AGENTS.md
+.agents/
+.claude/
 artifacts/
 saves/
 __pycache__/
