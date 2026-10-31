@@ -25,6 +25,7 @@ const { observe, validate, describe, HarnessError, installScreen } = require('./
 const { assert, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -136,7 +137,7 @@ const readAbout = () => {
 const NARROW = { viewport: { width: 960, height: 720 }, stored: { appearanceFont: { family: 'verdana', scale: 1.25 } } }
 
 // The About page open, read and left; one record of `observe`. `narrow` opens it as NARROW says.
-const observeAbout = (browser, url, narrow = false) => observe(browser, async ({ page, step }) => {
+const observeAbout = (browser, url, narrow = false, waitUntil = 'commit') => observe(browser, async ({ page, step }) => {
   step('opening the app')
 
   if (narrow) {
@@ -151,7 +152,7 @@ const observeAbout = (browser, url, narrow = false) => observe(browser, async ({
   }
 
   await installScreen(page)
-  await page.goto(url, { timeout: TIMEOUT })
+  await page.goto(url, { timeout: TIMEOUT, waitUntil })
   await page.waitForFunction(() => Boolean(window.$app && window.$app.$store), null, { timeout: TIMEOUT })
   step('opening About')
   await page.evaluate(() => window.$app.$router.push('/about', () => {}, () => {}))
@@ -161,6 +162,60 @@ const observeAbout = (browser, url, narrow = false) => observe(browser, async ({
 
   return page.evaluate(readAbout)
 }, narrow ? { viewport: NARROW.viewport } : {})
+
+// An unrelated load remains pending until About arrives. Once the app is ready, the fixture allows ten seconds for navigation (over five times the measured 1.7 s opening); at that bound it releases the resource normally and records the blocked route. Thus a restored load barrier finishes with a wrong observed ordering, rather than receiving credit for a timeout or crash.
+const OPENING_NAVIGATION_MS = 10000
+const loadGateBrowser = (browser, gate) => ({
+  async newContext (options) {
+    const context = await browser.newContext(options)
+    const create = context.newPage.bind(context)
+
+    context.newPage = async () => {
+      const page = await create()
+
+      await page.route('**/__check-version-line-load-gate', async (route) => {
+        gate.requested = true
+        gate.asset = route.request().url()
+        gate.resource = route.request().resourceType()
+
+        try {
+          if (gate.asset !== gate.expectedAsset || gate.resource !== 'image') {
+            throw new Error(`the fixture intercepted another request: ${gate.resource} ${gate.asset}`)
+          }
+          await page.waitForFunction(() => Boolean(window.$app && window.$app.$store), null, { timeout: TIMEOUT })
+          gate.appReady = await page.evaluate(() => Boolean(window.$app && window.$app.$store))
+
+          try {
+            await page.waitForFunction(() => window.$app.$route.path === '/about', null, { timeout: OPENING_NAVIGATION_MS })
+          } catch (error) {
+            if (error.name !== 'TimeoutError') {
+              throw error
+            }
+
+            gate.blocked = true
+            gate.route = await page.evaluate(() => window.$app.$route.path)
+          }
+
+          await route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+          gate.released = true
+        } catch (error) {
+          gate.error = String(error.message).split('\n')[0]
+        }
+      })
+      await page.addInitScript(() => document.addEventListener('DOMContentLoaded', () => {
+        const image = document.createElement('img')
+
+        image.src = '/__check-version-line-load-gate'
+        image.hidden = true
+        document.body.appendChild(image)
+      }, { once: true }))
+
+      return page
+    }
+
+    return context
+  },
+})
 
 // The runs of the page at its usual size, one for each serving of the constant.
 const aboutRuns = (ctx) => {
@@ -366,6 +421,39 @@ const checkAboutHead = async () => {
   reportResults(await judgeAbout(null, 'the page'))
 }
 
+const OPENING_FAULT = { name: 'opening waits for the window load event while an unrelated resource is held', waitUntil: 'load', fails: ['about-opening'] }
+
+const judgeOpening = async (waitUntil = 'commit') => {
+  const gate = { expectedAsset: new URL('/__check-version-line-load-gate', ENV.server.url).href, asset: null, resource: null, requested: false, appReady: false, released: false, blocked: false, route: null, error: null }
+  const observation = told('About with an unrelated resource held until navigation', await observeAbout(loadGateBrowser(ENV.chrome, gate), ENV.server.url, false, waitUntil))
+
+  validate(observation, 'About with an unrelated resource held until navigation')
+
+  if (gate.error || unobserved(observation) || observation.failed.length || observation.unexpected.length) {
+    throw new HarnessError(`the opening fixture did not get through: ${gate.error || observation.error || observation.failed.join('; ')}`)
+  }
+
+  return runChecks([check('about-opening', 'About opens while an unrelated resource still holds the window load event', () => {
+    assert.equal(gate.requested, true, 'the unrelated resource was never requested')
+    assert.equal(gate.asset, gate.expectedAsset, 'the held resource was not the fixture image')
+    assert.equal(gate.resource, 'image')
+    assert.equal(gate.appReady, true, 'the app/store were not witnessed ready before the blocked observation')
+    assert.equal(gate.released, true, 'the unrelated resource was not released')
+    assert.equal(gate.blocked, false, `About was blocked at route ${gate.route} while the ready app waited for the unrelated resource`)
+    assert.deepEqual(observation.unexpected, [], 'the page raised errors')
+    assert.deepEqual(observation.value.line.filter((line) => line.on).map((line) => line.text), [`For Aurora ${ENV.stated} saves`])
+  })], {})
+}
+
+const checkOpeningHead = async () => {
+  reportResults(await judgeOpening())
+}
+
+const checkOpeningFault = async () => {
+  refusePlanting(OPENING_FAULT.name)
+  reportFault(OPENING_FAULT, judged(await judgeOpening(OPENING_FAULT.waitUntil), OPENING_FAULT.name))
+}
+
 const checkAboutFault = async (fault) => {
   reportFault(fault, judged(await judgeAbout(fault.change, `the page with the fault "${fault.name}"`), `the fault "${fault.name}"`))
 }
@@ -384,6 +472,8 @@ const variantsOf = (mutating) => [
   { key: 'head', name: 'the head: the package version and the stated line', head: true, heading: 'The version of the app and the Aurora line it states (package.json, utilities/capabilities.js)', pool: 'suite', deadline: DEADLINES.version, run: checkVersionHead },
   ...(mutating ? VERSION_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the version and the line', pool: 'suite', deadline: DEADLINES.version, run: () => checkVersionFault(fault) })) : []),
   ...(mutating ? VERSION_BENIGN.map((variant, index) => ({ key: `benign:${index}`, name: `variant passes: ${variant.name}`, heading: '\nversions that keep the rule', pool: 'suite', deadline: DEADLINES.version, run: () => checkVersionBenign(variant) })) : []),
+  { key: 'opening', name: 'the head: About before the window load event', head: true, browser: true, heading: '\nOpening About while an unrelated resource is pending', pool: 'suite', deadline: DEADLINES.about, run: checkOpeningHead },
+  ...(mutating ? [{ key: 'opening-fault', name: `fault caught: ${OPENING_FAULT.name}`, browser: true, heading: '\nThe opening check rejects a restored window load barrier', pool: 'suite', deadline: DEADLINES.about, run: checkOpeningFault }] : []),
   { key: 'about', name: 'the head: the About page as it is', head: true, browser: true, heading: '\nThe About page in a browser (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.about, run: checkAboutHead },
   ...(mutating ? ABOUT_FAULTS.map((fault, index) => ({ key: `about-fault:${index}`, name: `fault caught: ${fault.name}`, browser: true, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.about, run: () => checkAboutFault(fault) })) : []),
   ...(mutating ? ABOUT_BENIGN.map((variant, index) => ({ key: `about-benign:${index}`, name: `variant passes: ${variant.name}`, browser: true, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.about, run: () => checkAboutBenign(variant) })) : []),
