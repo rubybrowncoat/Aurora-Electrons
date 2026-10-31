@@ -5,7 +5,7 @@
 
   --no-mutations runs the head and the saves alone: no mutant part is started and no fault is planted. The head still loads the calculator with its range scan cut to one hundredth (`narrowedUtilities`), a configuration of the real calculator for the search-limited cases and not a fault.
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
+  With no options a full run checks the repository's modded save (AuroraDB.db, game 140, race 784) and the stock save (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only. --no-mutations checks only stock, which has 1,804 class-component rows across 179 classes versus 1,476 rows across 59 classes in the modded save. Explicit --save arguments are always used as given.
 
   Worked cases on synthetic rows (labelled so) run the real functions: the stock of a component is taken once and never per hull, whole units are built, the components built with the hull stay out of the share, a project out of the queue holds its share whether running or paused, a batch is split by build points, an infeasible deadline reports the shortfall and the share needed against the share free and never allocates more than is free, a shortage of minerals is reported apart from a shortage of components, the batch's own forecast is the engine's (the share found is the least that finishes by the deadline, checked against the engine's own run of the same rows), and a change of hulls, deadline or stock gives a new answer from the same input with nothing read.
 
@@ -75,7 +75,13 @@ const parseArguments = (argv) => {
     }
   }
 
-  return { saves: saves.length ? saves : DEFAULT_SAVES, part }
+  const selected = saves.length ? saves : mutating() ? DEFAULT_SAVES : [DEFAULT_SAVES[1]]
+
+  if (!saves.length && !mutating() && !fs.existsSync(path.resolve(root, selected[0].file))) {
+    throw new Error(`quick representative save is missing: ${selected[0].file}`)
+  }
+
+  return { saves: selected, part }
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.

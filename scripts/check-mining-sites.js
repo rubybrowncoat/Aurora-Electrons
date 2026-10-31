@@ -3,7 +3,7 @@
 
   node scripts/check-mining-sites.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785).
+  With no options a full run checks the repository's modded save (AuroraDB.db, game 140, race 784) and the stock save (AuroraDB_271_skoormit_saved.db, game 138, race 785). --no-mutations checks only stock, which has 25 colonies and 32 qualifying mining fleets versus 36 colonies and no qualifying fleets in modded. Explicit --save arguments are always used as given.
 
   It proves: every verdict of the model on fixtures (a deposit never surveyed against one empty or exhausted, the orbital diameter limit, crew, the colony at the body and the assignment, the workforce of manned mines, radiation and mine production, each way minerals leave a colony, a productive isolated site being delivery-blocked and never idle, a save with no version making the rules read from the game unknown), then on each save that the sites join the same colonies and fleets as a direct query, that each warning lists only the sites its verdict names and that every row names what it lacks and links the colony or fleet to fix. A reader that hides every colony and fleet must make the comparison fail (a self-check, left out by --no-mutations).
 */
@@ -55,7 +55,17 @@ const parseArguments = (argv) => {
     }
   }
 
-  return saves.length ? saves : DEFAULT_SAVES
+  if (saves.length) {
+    return saves
+  }
+
+  const selected = mutating() ? DEFAULT_SAVES : [DEFAULT_SAVES[1]]
+
+  if (!mutating() && !fs.existsSync(path.resolve(root, selected[0].file))) {
+    throw new Error(`quick representative save is missing: ${selected[0].file}`)
+  }
+
+  return selected
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.
