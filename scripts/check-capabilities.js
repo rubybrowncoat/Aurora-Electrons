@@ -1197,6 +1197,12 @@ const main = async () => {
     process.exit(2)
   }
 
+  const quickStock = REAL.find(({ label }) => label === 'stock 2.7.1 save')
+
+  if (!mutating() && !fs.existsSync(path.resolve(repo, quickStock.file))) {
+    throw new Error(`quick mode requires its stock representative save: ${quickStock.file}`)
+  }
+
   const { navigation } = await loadUtilities(['navigation']).then((modules) => ({ navigation: modules.navigation }))
   const scan = scanReads(navigation.PAGES.map((page) => page.route))
   const expected = generated(scan)
@@ -1214,7 +1220,9 @@ const main = async () => {
   scannerChecks(scan)
   await markerChecks(capabilities)
 
-  for (const save of REAL) {
+  const realSaves = mutating() ? REAL : REAL.filter(({ label }) => label === 'stock 2.7.1 save')
+
+  for (const save of realSaves) {
     await realSaveChecks(capabilities, save)
   }
 

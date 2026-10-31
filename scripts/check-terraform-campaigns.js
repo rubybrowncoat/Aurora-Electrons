@@ -771,10 +771,23 @@ const main = async () => {
     skip('passive', passiveFiles)
   }
 
-  for (const [label, file, game, race, within, outside] of [
+  const climateCases = [
     ['Egg', 'saves/AuroraDB.db', 138, 785, 127, 0],
     ['Falryx', falryx(2930673230), 141, 791, 206, 3],
-  ]) {
+  ]
+  const hiddenCases = [
+    ['Egg later', 'saves/AuroraDB.db', 138, 229, 7],
+    ['Egg earlier', 'saves/AuroraDBSaveBackup.db', 138, 125, 17],
+    ['Falryx last', falryx(2930673230), 141, 372, 43],
+    ['passive snapshot 13', passive(13), 139, 48, 10],
+  ]
+  const quickRepresentative = falryx(2930673230)
+
+  if (!mutating() && !present(quickRepresentative)) {
+    throw new Error(`the required quick climate and hidden representative is not there: ${quickRepresentative}`)
+  }
+
+  for (const [label, file, game, race, within, outside] of (mutating() ? climateCases : climateCases.filter(([label]) => label === 'Falryx'))) {
     if (!present(file)) {
       skip(`climate ${label}`, [file])
       continue
@@ -789,12 +802,7 @@ const main = async () => {
     })
   }
 
-  for (const [label, file, game, bodies, hidden] of [
-    ['Egg later', 'saves/AuroraDB.db', 138, 229, 7],
-    ['Egg earlier', 'saves/AuroraDBSaveBackup.db', 138, 125, 17],
-    ['Falryx last', falryx(2930673230), 141, 372, 43],
-    ['passive snapshot 13', passive(13), 139, 48, 10],
-  ]) {
+  for (const [label, file, game, bodies, hidden] of (mutating() ? hiddenCases : hiddenCases.filter(([label]) => label === 'Falryx last' || label === 'passive snapshot 13'))) {
     if (!present(file)) {
       skip(`hidden ${label}`, [file])
       continue
