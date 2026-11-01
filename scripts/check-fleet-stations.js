@@ -33,6 +33,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { compiledTemplate: compiled, renderTree: rendered, treeOf, attrsOf } = require('./lib/vue-render')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -114,16 +115,7 @@ const descriptorOf = (source) => {
   return parsed.descriptor || parsed
 }
 
-// A template compiles to the same result whenever its text is the same, and the checks only read what it gives: each text is compiled once in a process, however many times it is rendered or read.
-const compilations = new Map()
-const compiled = (source) => {
-  if (!compilations.has(source)) {
-    compilations.set(source, require('vue/compiler-sfc').compileTemplate({ source: descriptorOf(source).template.content, filename: 'component.vue', id: 'component' }))
-  }
-
-  return compilations.get(source)
-}
-
+// A template compiles to the same result whenever its text is the same, and the checks only read what it gives: each text is compiled once in a process, however many times it is rendered or read (scripts/lib/vue-render.js keeps that one).
 const templateErrors = (source) => compiled(source).errors.map(String)
 
 const templateAst = (source) => compiled(source).ast
@@ -1310,22 +1302,6 @@ const pure = (ctx) => {
 
 // ---------- the panel ----------
 
-const treeOf = (node) => {
-  const found = []
-  const visit = (entry) => {
-    if (Array.isArray(entry)) {
-      entry.forEach(visit)
-    } else if (entry && typeof entry === 'object') {
-      found.push(entry)
-      visit(entry.children)
-    }
-  }
-
-  visit(node)
-
-  return found
-}
-
 // The text a record of a render holds, its children's included.
 const textOf = (node) => {
   if (Array.isArray(node)) {
@@ -1339,39 +1315,7 @@ const textOf = (node) => {
   return typeof node === 'string' ? node : ''
 }
 
-const attrsOf = (node) => (node && node.data && node.data.attrs) || {}
-
 const marksIn = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').map((node) => attrsOf(node))
-
-// The render function of a compiled template, made once for each text of it: it keeps nothing between calls, as every record it makes comes from the helpers of the call.
-const renders = new Map()
-const renderOf = (componentText) => {
-  const { code } = compiled(componentText)
-
-  if (!renders.has(code)) {
-    renders.set(code, require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {}))
-  }
-
-  return renders.get(code)
-}
-
-// What a compiled template renders for a mounted instance: the render function of the component's own template runs with the instance as its scope. Each element it creates is a record { tag, data, children }; the scoped slots are functions of the record of the table, to be called with a row.
-const rendered = (componentText, vm) => {
-  const render = renderOf(componentText)
-  const tags = []
-  const texts = []
-  const make = (tag, data, children) => {
-    const hasData = !Array.isArray(data)
-
-    tags.push(tag)
-
-    return { tag, data: (hasData ? data : null) || {}, children: (hasData ? children : data) || [] }
-  }
-  const helpers = { _self: { _c: make }, _l: (list, each) => (list || []).map(each), _v: (text) => text, _s: (value) => { texts.push(String(value)); return String(value) }, _e: () => null, _u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn])), _m: () => null }
-  const tree = render.call(new Proxy(vm, { get: (target, key) => (key in helpers ? helpers[key] : target[key]) }))
-
-  return { tags, texts, tree }
-}
 
 const READY = { loading: false, failed: '', error: '' }
 

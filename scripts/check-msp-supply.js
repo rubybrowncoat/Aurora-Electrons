@@ -19,6 +19,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { compiledTemplate: compiled, renderTree: rendered, treeOf } = require('./lib/vue-render')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -87,14 +88,7 @@ const same = (actual, expected) => {
 
 const near = (actual, expected, tolerance = 1e-6) => typeof actual === 'number' && Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected))
 
-const compiled = (source) => {
-  const compiler = require('vue/compiler-sfc')
-  const parsed = compiler.parse({ source })
-  const descriptor = parsed.descriptor || parsed
-
-  return compiler.compileTemplate({ source: descriptor.template.content, filename: 'component.vue', id: 'component' })
-}
-
+// Each text is compiled once in a process, however many times it is rendered or read (scripts/lib/vue-render.js keeps that one).
 const templateErrors = (source) => compiled(source).errors.map(String)
 
 // The root element of a compiled template, and every element in document order (the branches of a v-if chain included).
@@ -694,47 +688,9 @@ const ctxRulesRegistered = (m) => ['mspSupply.stockOnly', 'mspSupply.supplied', 
 
 // ---------- the panel ----------
 
-const treeOf = (node) => {
-  const found = []
-  const visit = (entry) => {
-    if (Array.isArray(entry)) {
-      entry.forEach(visit)
-    } else if (entry && typeof entry === 'object') {
-      found.push(entry)
-      visit(entry.children)
-    }
-  }
-
-  visit(node)
-
-  return found
-}
-
 // The results the provenance marks of a render are bound to, and every mark (a rule's too).
 const marksIn = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').map((node) => node.data.attrs && node.data.attrs.result).filter((result) => result !== undefined)
 const markCount = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').length
-
-// What a compiled template renders for a mounted instance: the render function of the component's own template runs with the instance as its scope. Each element it creates is a record { tag, data, children } and each interpolated text is recorded; the scoped slots are functions of the record of the table, to be called with a row.
-const rendered = (componentText, vm, overrides = {}) => {
-  const compiler = require('vue/compiler-sfc')
-  const parsed = compiler.parse({ source: componentText })
-  const descriptor = parsed.descriptor || parsed
-  const { code } = compiler.compileTemplate({ source: descriptor.template.content, filename: 'component.vue', id: 'component' })
-  const render = require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {})
-  const tags = []
-  const texts = []
-  const make = (tag, data, children) => {
-    const hasData = !Array.isArray(data)
-
-    tags.push(tag)
-
-    return { tag, data: (hasData ? data : null) || {}, children: (hasData ? children : data) || [] }
-  }
-  const helpers = { _self: { _c: make }, _l: (list, each) => (list || []).map(each), _v: (text) => text, _s: (value) => { texts.push(String(value)); return String(value) }, _e: () => null, _u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn])), _m: () => null }
-  const tree = render.call(new Proxy(vm, { get: (target, key) => (key in overrides ? overrides[key] : key in helpers ? helpers[key] : target[key]) }))
-
-  return { tags, texts, tree }
-}
 
 const panel = (ctx) => {
   const w = world(ctx.m)
