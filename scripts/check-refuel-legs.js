@@ -2811,29 +2811,32 @@ const DEADLINES = { pure: 120, real: 300, page: 360, pageHead: 900, setup: 900 +
 // The page fault that is read in one session alone, and the checks that head reads in that session alone: the control of the warm page server runs the one and then the other.
 const WARM_CHECKS = ['tankers', 'orders', 'no-errors']
 const CONTROL_FAULT = 'a tanker that cannot serve is drawn as giving'
+// The gate's grouped pass: the declared groups run, and no solo fault or rewrite does (owner, 2026-11-01, D1 option B).
+const GROUPS_ONLY = process.argv.includes('--groups')
 
 const variantsOf = (mutating) => {
   validatePageGroups()
+  const plants = mutating && !GROUPS_ONLY
   const args = runnerArgs()
   const requested = new Set([...(args.variants || []), ...(args.worker || [])])
-  const aliases = mutating ? [...PAGE_GROUP_OF].filter(([index]) => requested.has('page-fault:' + index)).map(([index, group]) => ({ key: 'page-fault:' + index, name: 'fault caught: ' + PAGE_FAULTS[Number(index)].name, pool: 'suite', needs: sessionsOf(group.keys), deadline: DEADLINES.page, run: () => pageGroup(group, [group.members.find((member) => member.key === index)]) })) : []
+  const aliases = plants ? [...PAGE_GROUP_OF].filter(([index]) => requested.has('page-fault:' + index)).map(([index, group]) => ({ key: 'page-fault:' + index, name: 'fault caught: ' + PAGE_FAULTS[Number(index)].name, pool: 'suite', needs: sessionsOf(group.keys), deadline: DEADLINES.page, run: () => pageGroup(group, [group.members.find((member) => member.key === index)]) })) : []
 
   return [
     { key: 'pure', name: 'the head: the ledger over constructed ships and sites', head: true, heading: 'The fuel ledger (utilities/fuel-ledger.js)', deadline: DEADLINES.pure, run: headOf(PURE_CHECKS, 'the module') },
-    ...(mutating ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
-    ...(mutating ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
+    ...(plants ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
+    ...(plants ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
     { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: headOf(REAL_CHECKS, 'the saves') },
     { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', needs: VARIANTS, deadline: DEADLINES.pageHead, run: pageHeadOf(null, 'the page') },
-    ...(mutating ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
-    ...(mutating ? PAGE_FAULTS.flatMap((fault, index) => PAGE_GROUP_OF.has(String(index)) ? [] : [{ key: 'page-fault:' + index, name: 'fault caught: ' + fault.name, heading: '\nplanted faults of the page', pool: 'suite', needs: sessionsOf(neededBy(fault.fails, { least: true })), deadline: DEADLINES.page, run: pageFault(fault) }]) : []),
+    ...(plants ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
+    ...(plants ? PAGE_FAULTS.flatMap((fault, index) => PAGE_GROUP_OF.has(String(index)) ? [] : [{ key: 'page-fault:' + index, name: 'fault caught: ' + fault.name, heading: '\nplanted faults of the page', pool: 'suite', needs: sessionsOf(neededBy(fault.fails, { least: true })), deadline: DEADLINES.page, run: pageFault(fault) }]) : []),
     ...(mutating ? PAGE_GROUPS.map((group) => ({ key: group.key, name: 'page group: ' + group.members.map((member) => member.name).join(' | '), members: group.members, pool: 'suite', needs: sessionsOf(group.keys), deadline: DEADLINES.page, run: (members) => pageGroup(group, members) })) : []),
-    ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', needs: sessionsOf(neededBy(rewrite.checks, { least: true })), deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
+    ...(plants ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', needs: sessionsOf(neededBy(rewrite.checks, { least: true })), deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
     ...aliases,
   ]
 }
 
 const main = async () => {
-  const mutating = mayMutate()
+  const mutating = mayMutate() || GROUPS_ONLY
   const totals = await runSuite({
     script: __filename,
     inputs: [SAVES.falryx, SAVES.egg, FALRYX],
@@ -2863,7 +2866,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page-warm', heading: '\nthe control of the warm page server' } : null,
+    control: mutating && !GROUPS_ONLY ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page-warm', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 
