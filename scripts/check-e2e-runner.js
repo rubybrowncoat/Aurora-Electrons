@@ -108,6 +108,36 @@ const CHECKS = [
     },
   },
   {
+    id: 'closure',
+    name: 'a spec past its deadline has its page closed, so no live page outlives the width',
+    run: async () => {
+      const live = { now: 0, peak: 0, closed: 0 }
+      const page = { on: () => {}, addInitScript: async () => {}, goto: async () => null, evaluate: async () => null, locator: () => ({ click: async () => {}, filter: () => ({ click: async () => {} }) }), getByText: () => ({ click: async () => {} }), close: async () => {} }
+      const browser = {
+        newContext: async () => {
+          live.now += 1
+          live.peak = Math.max(live.peak, live.now)
+          let open = true
+
+          return { newPage: async () => page, close: async () => { if (open) { open = false; live.now -= 1; live.closed += 1 } } }
+        },
+      }
+      let seenBySecond = null
+      const specs = [
+        { key: 'slow', name: 'a spec past its deadline', run: () => new Promise(() => {}) },
+        { key: 'next', name: 'the spec after it', run: () => { seenBySecond = live.now; return 'ran' } },
+      ]
+      const results = await runE2e(specs, { base: BASE, chrome: browser, workers: 1, limit: 60 })
+      const byKey = Object.fromEntries(results.map((result) => [result.key, result]))
+
+      assert.equal(byKey.slow.timedOut, true, 'the spec past its deadline')
+      assert.equal(byKey.slow.closed, 1, 'the page it held, closed at its deadline')
+      assert.equal(live.peak, 1, 'the pages open at once')
+      assert.equal(seenBySecond, 1, 'the pages open when the next spec began: its own alone')
+      assert.equal(live.now, 0, 'the pages open after the run')
+    },
+  },
+  {
     id: 'base',
     name: 'every spec reads the endpoint the caller gave',
     run: async () => {
@@ -150,6 +180,7 @@ const FAULTS = [
   { key: 'no-deadline', name: 'a spec is awaited past its deadline instead of bounded', file: 'e2e-runner.js', edits: [['    outcome = await Promise.race([seen, deadline])', '    outcome = await seen']], fails: ['deadline'] },
   { key: 'reverse', name: 'the results are kept in the reverse of the declared order', file: 'e2e-runner.js', edits: [['        results[index] = await one(specs[index], browser, address, perSpec, opened[index])', '        results[specs.length - 1 - index] = await one(specs[index], browser, address, perSpec, opened[index])']], fails: ['order'] },
   { key: 'wrong-base', name: 'every spec reads an endpoint of the runner instead of the caller', file: 'e2e-runner.js', edits: [['        results[index] = await one(specs[index], browser, address, perSpec, opened[index])', "        results[index] = await one(specs[index], browser, 'http://127.0.0.1:1', perSpec, opened[index])"]], fails: ['base'] },
+  { key: 'keep-context', name: 'a timed out spec keeps its page open', file: 'e2e-runner.js', edits: [['        await context.close()', '        void context']], fails: ['closure'] },
 ]
 
 const faultResults = async (fault) => {

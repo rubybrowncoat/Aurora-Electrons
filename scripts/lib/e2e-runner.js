@@ -48,14 +48,11 @@ const limitOf = (limit) => {
 
 // One spec, watched and bounded. A spec is `{ key, name, route, expected?, run }`: `run` receives `{ page, step, base, route }` and its value is the result's `value`. Nothing a spec does is thrown out of here: a throw, a page error and a missed deadline are all findings about that spec, and the others still run.
 const one = async (spec, browser, base, limit, opened) => {
-  const watched = { ...browser, newContext: async (options) => { opened.contexts += 1; return browser.newContext(options) } }
+  const made = []
+  const watched = { ...browser, newContext: async (options) => { opened.contexts += 1; const context = await browser.newContext(options); made.push(context); return context } }
   const seen = observe(watched, async ({ page, step }) => spec.run({ page, step, base, route: spec.route }), { expected: spec.expected || [] })
   let timer = null
   const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), limit) })
-
-  if (timer.unref) {
-    timer.unref()
-  }
 
   let outcome = null
 
@@ -66,10 +63,19 @@ const one = async (spec, browser, base, limit, opened) => {
   }
 
   if (outcome === TIMED_OUT) {
-    return { key: spec.key, name: spec.name, ok: false, timedOut: true, threw: false, detail: `the spec passed its ${limit} ms deadline`, phase: 'bounded by its deadline', value: null, error: null, base, contexts: opened.contexts }
+    // An abandoned spec keeps awaiting its own work: its context is closed here, so a page it still holds never counts against the width of the next spec. The work it may still do is why a spec's own steps must not touch state a later spec reads.
+    for (const context of made) {
+      try {
+        await context.close()
+      } catch {
+        // A context that will not close is reported by the observation of its own spec, not here.
+      }
+    }
+
+    return { key: spec.key, name: spec.name, ok: false, timedOut: true, threw: false, detail: `the spec passed its ${limit} ms deadline`, phase: 'bounded by its deadline', value: null, error: null, base, contexts: opened.contexts, closed: made.length }
   }
 
-  return { key: spec.key, name: spec.name, ok: !outcome.error, timedOut: false, threw: Boolean(outcome.error), detail: outcome.error || '', phase: outcome.phase, value: outcome.value, error: outcome.error, base, contexts: opened.contexts }
+  return { key: spec.key, name: spec.name, ok: !outcome.error, timedOut: false, threw: Boolean(outcome.error), detail: outcome.error || '', phase: outcome.phase, value: outcome.value, error: outcome.error, base, contexts: opened.contexts, closed: 0 }
 }
 
 const runE2e = async (specs, { save, root, server = null, chrome = null, base = null, workers = null, limit = null } = {}) => {
