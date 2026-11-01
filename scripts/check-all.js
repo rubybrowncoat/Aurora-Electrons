@@ -12,13 +12,16 @@ const path = require('path')
 const { cores, inParallel, runChild } = require('./lib/check-pool')
 
 const SKIPPED = new Set(['check-engines.js', 'check-harvesters.js'])
+// The one script no default run covers: its cases read a running web server by BASE_URL (scripts/check-typography.js), so it runs only when one is started and --browser is passed. Named here so that "122 of 122" is read as every script the gate selects, not every script in the directory.
 const BROWSER = new Set(['check-typography.js'])
 // Scripts whose cases wait on watchers and timers within fixed limits, or time their work against a budget in wall time: they run after the others, one at a time with the whole budget, because a machine saturated by the other scripts' mutants can starve those waits past their limits and stretch those timings several times over (check-peeks: 36 ms where it measures 4.6 ms alone).
 const ALONE = new Set(['check-save-switching.js', 'check-peeks.js'])
 // The suites that test the harness itself (scripts/lib), and cost more than the sweep can carry: they stay in the full gate, where they localise a harness fault to one file, and the pre-commit sweep leaves them out, because a harness fault that matters fails the suites that use it, and the diff-scoped run selects these when their own files change (owner, 2026-11-01: a check the sweep does not need is removable from it). Their measured sweep times were 88.2, 41.8 and 13.2 s of a 551.7 s run. The cheap harness self-tests stay in the sweep.
 const SWEEP_EXCLUDED = new Set(['check-suite-runner.js', 'check-run-check.js', 'check-browser-observe.js'])
 // A script that drives Chromium. The pre-commit sweep leaves those out: its job is the in-process work, and the pages a diff touches are covered by the diff-scoped run (scripts/affected-checks.js selects them) and by the full gate, which runs every script (owner, 2026-11-01, D1 option B; stack-feasibility report: quick is in-process only, plus the e2e heads of the pages the diff touches).
-const drivesBrowser = (name) => /require\('playwright'\)|startPageServer|chromium\.launch/.test(fs.readFileSync(path.join(__dirname, name), 'utf8'))
+const drivesBrowser = (name) => /require\('playwright'\)|startPageServer\(|chromium\.launch\(/.test(fs.readFileSync(path.join(__dirname, name), 'utf8'))
+// A script supports the grouped pass when it reads the flag itself. Matching the call rather than the word means a comment about the flag cannot change how the gate runs a script.
+const supportsGroups = (source) => /process\.argv\.includes\('--groups'\)/.test(source)
 // The slowest scripts start first, so the longest one does not begin last and run on alone.
 const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-history-backup.js', 'check-map-hierarchy.js', 'check-warning-snoozes.js', 'check-legacy-consumption.js']
 const ARGS = { 'check-design-rules.js': ['--fixtures'] }
@@ -59,7 +62,7 @@ const main = async () => {
     // The pre-commit sweep runs heads only; so does the full gate for a script that drives Chromium, because a browser fault costs 10 to 50 s and the gate's displayed-binding credit is the grouped e2e pass (owner, 2026-11-01, D1 option B: the full gate keeps a grouped pass rather than one fault per binding).
     const heads = quick || drivesBrowser(name)
     // A browser script that declares groups runs them in the full gate: the grouped pass is the gate's displayed-binding credit, one page open for every member of a group (owner, 2026-11-01, D1 option B).
-    const groups = !quick && heads && source.includes('--groups')
+    const groups = !quick && heads && supportsGroups(source)
     const args = [...(ARGS[name] || []), ...(groups ? ['--groups'] : heads && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
     const begun = Date.now()
     const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(heads && !groups ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
