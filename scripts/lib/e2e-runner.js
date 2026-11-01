@@ -46,10 +46,48 @@ const limitOf = (limit) => {
   return wanted
 }
 
+const BOUND = Symbol('the close of a page did not settle')
+const CLOSE_LIMIT = 2000
+
+// A close that never settles must not hold the lane: it is raced against a bound, and a close that times out counts as a page not closed.
+const closeWithin = async (context, limit) => {
+  let timer = null
+  const bound = new Promise((resolve) => { timer = setTimeout(() => resolve(BOUND), limit) })
+
+  try {
+    const outcome = await Promise.race([context.close(), bound])
+
+    if (outcome === BOUND) {
+      throw new Error('the close of the page did not settle')
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // One spec, watched and bounded. A spec is `{ key, name, route, expected?, run }`: `run` receives `{ page, step, base, route }` and its value is the result's `value`. Nothing a spec does is thrown out of here: a throw, a page error and a missed deadline are all findings about that spec, and the others still run.
 const one = async (spec, browser, base, limit, opened) => {
   const made = []
-  const watched = { ...browser, newContext: async (options) => { opened.contexts += 1; const context = await browser.newContext(options); made.push(context); return context } }
+  let abandoned = false
+  const watched = {
+    ...browser,
+    newContext: async (options) => {
+      const context = await browser.newContext(options)
+
+      opened.contexts += 1
+
+      // The spec was given up while this page was opening: it is closed here rather than handed to work that will not be watched, so a late context can neither run the abandoned spec nor count against the next one's width.
+      if (abandoned) {
+        await closeWithin(context, CLOSE_LIMIT).catch(() => {})
+
+        throw new Error('the spec was given up while its page was opening')
+      }
+
+      made.push(context)
+
+      return context
+    },
+  }
   const seen = observe(watched, async ({ page, step }) => spec.run({ page, step, base, route: spec.route }), { expected: spec.expected || [] })
   let timer = null
   const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), limit) })
@@ -63,19 +101,24 @@ const one = async (spec, browser, base, limit, opened) => {
   }
 
   if (outcome === TIMED_OUT) {
-    // An abandoned spec keeps awaiting its own work: its context is closed here, so a page it still holds never counts against the width of the next spec. The work it may still do is why a spec's own steps must not touch state a later spec reads.
+    // An abandoned spec keeps awaiting its own work: its page is closed here, so it never counts against the width of the next spec. The work it may still do is why a spec's own steps must not touch state a later spec reads, and why `closed` counts closes that returned rather than closes that were asked for.
+    abandoned = true
+
+    let closed = 0
+
     for (const context of made) {
       try {
-        await context.close()
+        await closeWithin(context, CLOSE_LIMIT)
+        closed += 1
       } catch {
-        // A context that will not close is reported by the observation of its own spec, not here.
+        // A page that will not close is reported as leaked below, because the lane is reused and the next spec must not be told the width was kept when it was not.
       }
     }
 
-    return { key: spec.key, name: spec.name, ok: false, timedOut: true, threw: false, detail: `the spec passed its ${limit} ms deadline`, phase: 'bounded by its deadline', value: null, error: null, base, contexts: opened.contexts, closed: made.length }
+    return { key: spec.key, name: spec.name, ok: false, timedOut: true, threw: false, detail: `the spec passed its ${limit} ms deadline`, phase: 'bounded by its deadline', value: null, error: null, base, contexts: opened.contexts, closed, leaked: made.length - closed }
   }
 
-  return { key: spec.key, name: spec.name, ok: !outcome.error, timedOut: false, threw: Boolean(outcome.error), detail: outcome.error || '', phase: outcome.phase, value: outcome.value, error: outcome.error, base, contexts: opened.contexts, closed: 0 }
+  return { key: spec.key, name: spec.name, ok: !outcome.error, timedOut: false, threw: Boolean(outcome.error), detail: outcome.error || '', phase: outcome.phase, value: outcome.value, error: outcome.error, base, contexts: opened.contexts, closed: 0, leaked: 0 }
 }
 
 const runE2e = async (specs, { save, root, server = null, chrome = null, base = null, workers = null, limit = null } = {}) => {

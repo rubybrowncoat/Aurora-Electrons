@@ -18,10 +18,36 @@ const BROWSER = new Set(['check-typography.js'])
 const ALONE = new Set(['check-save-switching.js', 'check-peeks.js'])
 // The suites that test the harness itself (scripts/lib), and cost more than the sweep can carry: they stay in the full gate, where they localise a harness fault to one file, and the pre-commit sweep leaves them out, because a harness fault that matters fails the suites that use it, and the diff-scoped run selects these when their own files change (owner, 2026-11-01: a check the sweep does not need is removable from it). Their measured sweep times were 88.2, 41.8 and 13.2 s of a 551.7 s run. The cheap harness self-tests stay in the sweep.
 const SWEEP_EXCLUDED = new Set(['check-suite-runner.js', 'check-run-check.js', 'check-browser-observe.js'])
-// A script that drives Chromium. The pre-commit sweep leaves those out: its job is the in-process work, and the pages a diff touches are covered by the diff-scoped run (scripts/affected-checks.js selects them) and by the full gate, which runs every script (owner, 2026-11-01, D1 option B; stack-feasibility report: quick is in-process only, plus the e2e heads of the pages the diff touches).
-const drivesBrowser = (name) => /require\('playwright'\)|startPageServer\(|chromium\.launch\(/.test(fs.readFileSync(path.join(__dirname, name), 'utf8'))
-// A script supports the grouped pass when it reads the flag itself. Matching the call rather than the word means a comment about the flag cannot change how the gate runs a script.
-const supportsGroups = (source) => /process\.argv\.includes\('--groups'\)/.test(source)
+// The scripts that drive Chromium. Declared, not inferred: a text match made fixture strings and comments authoritative — `check-affected-checks.js` held `startPageServer({})` in a fixture and lost its 170 fault checks in the gate (Sol, 2026-11-01, reproduced). A suite missing from this list is safe: it simply runs fully in both runs. A suite wrongly on it loses fault coverage, which is the direction this list must be kept right by hand, with the fifteen-minute cost of the sweep as the check.
+const BROWSER_SCRIPTS = new Set([
+  'check-appearance-late-read.js',
+  'check-commanders-page.js',
+  'check-elapsed-time-pages.js',
+  'check-formation-composition.js',
+  'check-formation-observations.js',
+  'check-fuel-donors.js',
+  'check-history-clear.js',
+  'check-jump-infrastructure.js',
+  'check-log-diagnostics.js',
+  'check-maintenance-pools.js',
+  'check-mission-briefs.js',
+  'check-recovery-ledger.js',
+  'check-refuel-legs.js',
+  'check-resource-ledger.js',
+  'check-route-signatures.js',
+  'check-sensor-modes.js',
+  'check-shipyard-growth.js',
+  'check-specialist-deployments.js',
+  'check-system-jump-points.js',
+  'check-unsupported-save-page.js',
+  'check-version-line.js',
+  'check-warning-idle-fleets.js',
+  'check-warning-intruders.js',
+])
+// The scripts that run their declared groups in the full gate, and so read the flag in their own code.
+const GROUPS_SCRIPTS = new Set(['check-elapsed-time-pages.js', 'check-log-diagnostics.js', 'check-refuel-legs.js', 'check-resource-ledger.js'])
+const drivesBrowser = (name) => BROWSER_SCRIPTS.has(name)
+const supportsGroups = (name) => GROUPS_SCRIPTS.has(name)
 // The slowest scripts start first, so the longest one does not begin last and run on alone.
 const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-history-backup.js', 'check-map-hierarchy.js', 'check-warning-snoozes.js', 'check-legacy-consumption.js']
 const ARGS = { 'check-design-rules.js': ['--fixtures'] }
@@ -62,7 +88,7 @@ const main = async () => {
     // The pre-commit sweep runs heads only; so does the full gate for a script that drives Chromium, because a browser fault costs 10 to 50 s and the gate's displayed-binding credit is the grouped e2e pass (owner, 2026-11-01, D1 option B: the full gate keeps a grouped pass rather than one fault per binding).
     const heads = quick || drivesBrowser(name)
     // A browser script that declares groups runs them in the full gate: the grouped pass is the gate's displayed-binding credit, one page open for every member of a group (owner, 2026-11-01, D1 option B).
-    const groups = !quick && heads && supportsGroups(source)
+    const groups = !quick && heads && supportsGroups(name)
     const args = [...(ARGS[name] || []), ...(groups ? ['--groups'] : heads && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
     const begun = Date.now()
     const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(heads && !groups ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
