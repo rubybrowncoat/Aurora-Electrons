@@ -3,7 +3,7 @@
 
   node scripts/check-history-milestones.js [--no-mutations]
 
-  MILESTONES_SAVES=<folder> points the saves check at another folder of saves (or at none: a folder that is not there skips it). A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
+  MILESTONES_SAVES=<folder> points the saves check at another folder of saves (or at none: a folder that is not there skips it). A check that needs the owner's saves and does not find them is reported as skipped and is not counted; a mutant naming that check is rejected, never credited with a reduced mapping.
 
   Groups:
   - time: a milestone between two samples keeps its exact time to the last digit, its marker is drawn at that time whatever the samples are (another set of samples, a span, a thinned history), it never snaps to a sample, the nearest sample is only reported beside it, the time survives a restart, and a typed date is the calendar date of the game's own clock;
@@ -22,7 +22,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createRequire } = require('module')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
@@ -364,6 +364,12 @@ const suite = (m) => {
     assert.equal(after.t, 950)
     assert.equal(after.type, 'discovery')
     assert.equal(after.text, 'Landing, corrected')
+    const linkedIds = after.links.map((link) => `${link.type}:${link.id}`)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE milestone linked object IDs after editing:', JSON.stringify(linkedIds))
+    }
+    assert.deepEqual(linkedIds, ['colony:5'], 'the milestone keeps the linked colony identity')
     assert.equal(after.link.id, 5)
     assert.equal(after.link.status, 'unknown')
     assert.equal(after.policy, 'campaign')
@@ -753,6 +759,9 @@ const suite = (m) => {
     const database = fakeSave(saveOf([logEvent(1, 10, 100, 5, 'a')]), { failing: ['FCT_Fleet'] })
     const { objects, failed } = await milestones.loadObjects(database, { GameID: 1, RaceID: 7 })
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE colony and event counts after a fleet read fails:', JSON.stringify([objects.colony.size, objects.event.size]))
+    }
     assert.deepEqual(Object.keys(failed), ['fleet'])
     assert.match(failed.fleet, /the save lacks the fleet data/)
     assert.equal(objects.fleet, undefined)
@@ -1550,6 +1559,12 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
     assert.ok(guides.length >= 6)
     guides.forEach((guide) => {
+      const count = guide && Array.isArray(guide.markers) ? guide.markers.length : 0
+
+      if (process.argv.includes('--detail')) {
+        console.log('VALUE milestone markers drawn per chart:', count)
+      }
+      assert.equal(count, 1, 'the chart draws one milestone marker')
       assert.equal(guide.markers.length, 1)
       assert.equal(guide.markers[0].x, START_YEAR + (15 * DAY + 777) / YEAR)
       assert.equal(guide.markers[0].label, 'Battle')
@@ -1567,7 +1582,7 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     vm.milestoneRevision += 1
 
     const x = START_YEAR + (45 * DAY + 5) / YEAR
-    const xs = () => guidesOf(vm).map((guide) => guide.markers.map((marker) => marker.x))
+    const xs = () => guidesOf(vm).map((guide) => (guide && Array.isArray(guide.markers) ? guide.markers : []).map((marker) => marker.x))
 
     assert.deepEqual(xs(), guidesOf(vm).map(() => [x]))
 
@@ -1575,7 +1590,12 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
     const percent = vm.charts.find((chart) => chart.key === 'minerals').options.plugins.guides
 
-    assert.deepEqual(percent.markers.map((marker) => marker.x), [x])
+    const positions = (percent && Array.isArray(percent.markers) ? percent.markers : []).map((marker) => marker.x)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE percent-scale milestone marker positions:', JSON.stringify(positions))
+    }
+    assert.deepEqual(positions, [x], 'the percent-scale chart draws the milestone at its own time')
     assert.deepEqual(percent.levels, [{ y: 0 }])
     assert.deepEqual(xs(), guidesOf(vm).map(() => [x]))
 
@@ -1859,6 +1879,11 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
 // ---- Mutants ---------------------------------------------------------------------------------------------------------
 
+// TFIN-03 catalog audit: zero-based combined utility/page indices and mapped checks are unchanged; a replacement is not proof of its retired operator.
+// [32] Old: "a failed read of one kind of object stops the others"; new: "a failed fleet read clears the other loaded objects".
+// The original throw in the kind catch (history-milestones.js:212) rejects getContext before any returned context can be observed.
+// Replacement class: successful milestone-link maps are cleared after a failed kind. Original unhandled-kind-rejection class currently has no credited fault.
+
 const UTILITY_MUTATIONS = [
   { name: 'a marker is drawn at the nearest sample', file: 'history-milestones.js', find: 'x: position(entry.t), label', replace: 'x: position(nearestSample(snapshots, entry.t).sampleT), label', fails: ['time: a milestone between two samples keeps its exact position', 'time: the marker x is a function of the exact time alone'] },
   { name: 'the time is rounded to the second when it is kept', file: 'history-milestones.js', find: "const payload = { t: typeof t === 'string' && t.trim() !== '' ? Number(t) : t,", replace: "const payload = { t: Math.round(typeof t === 'string' && t.trim() !== '' ? Number(t) : t),", fails: ['time: the exact time, fractions included', 'backup: milestones round-trip'] },
@@ -1892,7 +1917,7 @@ const UTILITY_MUTATIONS = [
   { name: 'an adopted milestone is offered again', file: 'history-milestones.js', find: 'adopted: copyOfItem(item) !== null, adoptedOn: copyOfItem(item) })', replace: 'adopted: false, adoptedOn: null })', fails: ['attached: after an attach in the mode same', 'attached: after an attach in the mode new-branch'] },
   { name: 'a source file that cannot be read is not named', file: 'history-milestones.js', find: 'refused: listed.refused,', replace: 'refused: [],', fails: ['attached: a source file that cannot be read is named'] },
   { name: 'rows the log holds twice are counted once', file: 'history-milestones.js', find: 'found.get(key).copies += 1', replace: 'found.get(key).copies += 0', fails: ['links: a row the log holds twice is one event that counts its copies'] },
-  { name: 'a failed read of one kind of object stops the others', file: 'history-milestones.js', find: 'failed[type] = error && error.message ? error.message : String(error)', replace: 'throw error', fails: ['links: a kind of object the save cannot give is named as failed'] },
+  { name: 'a failed fleet read clears the other loaded objects', file: 'history-milestones.js', find: '  return { objects, failed, GameID, RaceID }', replace: '  if (Object.keys(failed).length) {\n    Object.keys(objects).forEach((type) => { objects[type] = new Map() })\n  }\n\n  return { objects, failed, GameID, RaceID }', fails: ['links: a kind of object the save cannot give is named as failed'] },
   { name: 'an object that gives no time is certified', file: 'history-milestones.js', find: 'return UNVERIFIED_TEXT.untimed', replace: 'return null', fails: ['links: a fleet is the same one only with the creation time', 'links: a ship is the same one only with the construction time'] },
   { name: 'a fleet is told by its ID alone', file: 'history-milestones.js', find: "fingerprint: (row) => ['fleet', present(row.created)].join('|'),", replace: "fingerprint: () => 'fleet',", fails: ['links: a fleet is the same one only with the creation time'] },
   { name: 'an object is certified without its time before the branches parted', file: 'history-milestones.js', find: 'return shared !== null && created < shared ? null : UNVERIFIED_TEXT.parted', replace: 'return shared !== null ? null : UNVERIFIED_TEXT.parted', fails: ['links: a fleet is the same one only with the creation time', 'links: a ship is the same one only with the construction time', 'links: a system on another branch is the same one only where', 'links: the game time two branches share'] },
@@ -1992,7 +2017,7 @@ const runChecks = async (list, only = null) => {
         results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
       }
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false, { kind: kindOf(error), threw: isSubjectThrow(error) }])
     }
   }
 
@@ -2000,8 +2025,15 @@ const runChecks = async (list, only = null) => {
 }
 
 const caught = (mutant, results) => {
-  const expected = mutant.fails.filter((start) => !results.some(([name, , , skip]) => skip && name.startsWith(start)))
-  const survived = expected.filter((start) => !results.some(([name, result]) => name.startsWith(start) && result !== true))
+  const expected = mutant.fails
+  const skipped = results.filter(([name, , , skip]) => skip && expected.some((start) => name.startsWith(start)))
+  const invalid = results.find(([, result, , , failure]) => result !== true && (!failure || failure.kind !== 'assertion' || failure.threw))
+
+  if (skipped.length || invalid) {
+    return skipped.length ? `missing fixture for ${skipped.map(([name]) => name).join('; ')}` : `not an own value assertion: ${invalid[0]}: ${invalid[1]}`
+  }
+
+  const survived = expected.filter((start) => !results.some(([name, result, , , failure]) => name.startsWith(start) && result !== true && failure.kind === 'assertion' && !failure.threw))
   const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
 
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
@@ -2041,7 +2073,7 @@ const mutantEntries = async ({ mutant, page }) => {
       results = await runChecks(suite(await loadModules(directory)), mutant.fails)
     }
 
-    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results)] }]
+    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results), process.argv.includes('--detail') ? results.filter(([, result]) => result !== true).map(([name, result]) => `${name}: ${result}`).join('; ') : ''] }]
   } catch (error) {
     return [{ show: [`mutant caught: ${mutant.name}`, error.message] }]
   } finally {

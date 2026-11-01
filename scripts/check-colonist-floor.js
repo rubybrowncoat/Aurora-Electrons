@@ -15,8 +15,7 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const assert = require('./lib/bounded-assert')
-const { loadUtilities } = require('./lib/utilities')
-const { loadPage, instantiate } = require('./lib/page-loader')
+const { loadPage, loadModules, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 
@@ -36,11 +35,11 @@ const SAVES = [
 ]
 
 const STUBS = {
+  // The page's history helpers need session storage; aurora.js imports dayjs, its UTC plugin and romanum.
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
-  'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "", inkMuted: "", primary: "" }); export const withAlpha = (color) => color; export const patternImage = () => null; export const seriesIdentity = () => null'
 // The persisted view stood in by a module that records the fields a component declares, the table's among them, for a check of how the panel keeps its view.
@@ -1262,13 +1261,14 @@ const stackedSources = () => BENIGN.reduce((sources, edit) => applied(sources, e
 
 const contextOf = async (sources) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
-  const sourcesFor = changed(U) ? { 'colonist-floor': sources[U] } : {}
   const utilitySources = changed(U) ? { 'utilities/colonist-floor': sources[U] } : {}
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
   const options = await loadPage('components/colonies/ColonistFloor', { stubs: STUBS, modules: { 'mixins/persisted-view': RECORDER }, sources: { 'components/colonies/ColonistFloor': sources[V], ...utilitySources } })
   const persisted = globalThis.__persistedFields
   const pageSources = { 'pages/colony-outlook': sources[P], ...utilitySources }
-  const pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+  // Keep the page and the utilities it imports in one graph: the NO_* defaults are objects, not cross-session singletons.
+  const pageModules = await loadModules([...NAMES.map((name) => `utilities/${name}`), 'pages/colony-outlook'], { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+  const loaded = Object.fromEntries(NAMES.map((name) => [name, pageModules[`utilities/${name}`]]))
+  const pageOptions = pageModules['pages/colony-outlook'].default
   const livePageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
 
   return { m: { cf: loaded['colonist-floor'], col: loaded.colonies, provenance: loaded.provenance }, options, persisted, pageOptions, livePageOptions, componentText: sources[V], pageText: sources[P] }

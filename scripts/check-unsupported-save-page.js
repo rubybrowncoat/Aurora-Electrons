@@ -212,7 +212,7 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
   await page.goto(url, { timeout: TIMEOUT })
   await installScreen(page)
   step('waiting for the check of the save')
-  await page.waitForFunction(() => Boolean(window.$app.$store.getters.database) && window.$app.$store.getters['capabilities/line'] !== null, null, { timeout: TIMEOUT })
+  await page.waitForFunction(() => Boolean(window.$app && window.$app.$store && window.$app.$store.getters.database) && window.$app.$store.getters['capabilities/line'] !== null, null, { timeout: TIMEOUT })
   await settledPage(page)
 
   const seen = { home: await read(page, t) }

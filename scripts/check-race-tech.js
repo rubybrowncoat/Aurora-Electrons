@@ -17,7 +17,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
@@ -455,7 +455,9 @@ const syntheticChecks = (m) => {
     const tech = await loaded(2, ['create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer)', 'insert into FCT_RaceTech values (1, 2, 9), (1, 2, 10), (1, 3, 10)'])
     const engines = tech.lines[ENGINE]
 
-    return same([engines.levels.map((item) => [item.id, item.obsolete]), engines.pick.id], [[[9, null], [10, null]], 10])
+    assert.deepEqual([engines.levels.map((item) => [item.id, item.obsolete]), engines.pick.id], [[[9, null], [10, null]], 10])
+
+    return true
   })
 
   add('loader: a save with FCT_RaceTech.Obsolete gives the flag of each level', async () => {
@@ -804,7 +806,7 @@ const PAGE_MUTATIONS = [
 const MUTATIONS = [
   { name: 'the hypothetical assumptions of a result taken with the others', file: 'tech-scenarios.js', find: 'result.assumptions.filter((assumption) => assumption.startsWith(HYPOTHETICAL_PREFIX))))]', replace: 'result.assumptions))]', fails: ['marking: the hypothetical assumptions of some results are listed once'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the obsolete flag read by its table column', file: 'race-tech.js', find: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `null as ${name}`)', replace: '`${RACE_TECH_TABLE}.${name} as ${name}`', fails: ['loader: a save without'] },
+  { name: 'an absent obsolete column supplies a set flag', file: 'race-tech.js', find: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `null as ${name}`)', replace: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `1 as ${name}`)', fails: ['loader: a save without'] },
   { name: 'an absent obsolete flag read as false', file: 'race-tech.js', find: 'obsolete: row.Obsolete === null ? null : Boolean(row.Obsolete),', replace: 'obsolete: Boolean(row.Obsolete),', fails: ['loader: a save without'] },
   { name: 'the game\'s pick taken by the highest figure', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.info > best.info ? item : best', fails: ['pick: where development order and figure disagree'] },
   { name: 'the game\'s pick taken by the lowest figure', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.info < best.info ? item : best', fails: ['pick: the game designs with the researched level of the highest development cost', 'pick: where development order and figure disagree'] },

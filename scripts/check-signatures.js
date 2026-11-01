@@ -933,13 +933,14 @@ const MUTATIONS = [
   { name: 'the largest ship of a cloak read from its size', file: 'design-data.js', find: 'maxShipHS: part.ComponentValue', replace: 'maxShipHS: part.Size', fails: ['saves: ClassThermal'] },
   { name: 'the classes of every race read', file: 'design-data.js', find: 'where sc.GameID = :GameID and sc.RaceID = :RaceID order by sc.ClassName', replace: 'where sc.GameID = :GameID order by sc.ClassName', fails: ['saves: ClassThermal'] },
   { name: 'the engine and fuel tech types swapped', file: 'design-data.js', find: 'engine: techIdOfType(part, techTypes, ENGINE_TECH_TYPE), fuel: techIdOfType(part, techTypes, FUEL_TECH_TYPE)', replace: 'engine: techIdOfType(part, techTypes, FUEL_TECH_TYPE), fuel: techIdOfType(part, techTypes, ENGINE_TECH_TYPE)', fails: ['reduction (save): an engine'] },
-  { name: 'the levels ordered by the development cost column of the table', file: 'design-data.js', find: 'order by DevelopCost, t.TechSystemID', replace: 'order by t.DevelopCost, t.TechSystemID', fails: ['reduction (missing column): a save without'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the missing development cost of a level becomes 0', file: 'design-data.js', find: "${selectedColumns('t', levelColumns, ['Name', 'AdditionalInfo', 'AdditionalInfo2', 'DevelopCost'])}", replace: "${selectedColumns('t', levelColumns, ['Name', 'AdditionalInfo', 'AdditionalInfo2', 'DevelopCost']).replace('null as DevelopCost', '0 as DevelopCost')}", fails: ['reduction (missing column): a save without'] },
   { name: 'the levels not ordered by id on a tie', file: 'design-data.js', find: 'order by DevelopCost, t.TechSystemID', replace: 'order by DevelopCost', fails: ['reduction (missing column): the levels come'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the obsolete flag of a level read by its table column', file: 'design-data.js', find: "${selectedColumns('r', raceTechColumns, ['Obsolete'])}", replace: 'r.Obsolete as Obsolete', fails: ['reduction (missing column): a save without'] },
+  { name: 'the absent obsolete flag of a level is set', file: 'design-data.js', find: "${selectedColumns('r', raceTechColumns, ['Obsolete'])}", replace: "${selectedColumns('r', raceTechColumns, ['Obsolete']).replace('null as Obsolete', '1 as Obsolete')}", fails: ['reduction (missing column): a save without'] },
   { name: 'the obsolete flag listed as a read of /sensors', file: 'capability-reads.js', find: "tech: { label: 'the tech', reads: 'DIM_TechType(Description FieldID TechTypeID) FCT_EligibleProjects(GameID RaceID TechSystemID) FCT_PausedResearch(GameID PointsAccumulated RaceID TechSystemID) FCT_Population(PopulationID RaceID) FCT_RaceTech(GameID RaceID TechID)", replace: "tech: { label: 'the tech', reads: 'DIM_TechType(Description FieldID TechTypeID) FCT_EligibleProjects(GameID RaceID TechSystemID) FCT_PausedResearch(GameID PointsAccumulated RaceID TechSystemID) FCT_Population(PopulationID RaceID) FCT_RaceTech(GameID Obsolete RaceID TechID)", fails: ['capability: /sensors is supported'] },
   { name: 'the class name not listed as a read of /sensors', file: 'capability-reads.js', find: 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_ShipClass(ClassName GameID RaceID ShipClassID)', replace: 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_ShipClass(GameID RaceID ShipClassID)', fails: ['capability: /sensors is unsupported'] },
-  { name: 'the passive sensors read with a fire control column the page does not use', file: 'design-data.js', find: 'FCT_ShipDesignComponents.ComponentValue from FCT_ShipDesignComponents inner join', replace: 'FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.FCRangeModifier from FCT_ShipDesignComponents inner join', fails: ['loaders: the three reads'] },
+  { name: 'the passive sensors\' figure is discarded without a fire control column', file: 'design-data.js', find: 'FCT_ShipDesignComponents.ComponentValue from FCT_ShipDesignComponents inner join', replace: "case when exists (select 1 from pragma_table_info('FCT_ShipDesignComponents') where name = 'FCRangeModifier') then FCT_ShipDesignComponents.ComponentValue else 0 end as ComponentValue from FCT_ShipDesignComponents inner join", fails: ['loaders: the three reads'] },
   { name: 'the passive sensors read with the active sensors', file: 'design-data.js', find: 'const PASSIVE_SENSOR_TYPE_IDS = Object.freeze([SENSOR_COMPONENT_TYPES.thermal, SENSOR_COMPONENT_TYPES.em])', replace: 'const PASSIVE_SENSOR_TYPE_IDS = Object.freeze([SENSOR_COMPONENT_TYPES.thermal, SENSOR_COMPONENT_TYPES.em, SENSOR_COMPONENT_TYPES.active])', fails: ['loaders: the three reads'] },
   { name: 'the passive sensors of every race read', file: 'design-data.js', find: 'and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game, race } })\n\n  return rows\n}\n\nconst wholeIds', replace: 'and FCT_RaceTech.GameID = :game order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game } })\n\n  return rows\n}\n\nconst wholeIds', fails: ['loaders: the three reads'] },
 ]
@@ -993,7 +994,7 @@ const report = (state, name, detail = '') => {
   console.log(`${state === 'pass' ? 'PASS' : 'FAIL'}  ${name}${state === 'pass' ? '' : `  [${detail}]`}`)
 }
 
-// A planted fault: the checks it names run on the faulty copy, and each name must have a check that fails (or only skipped ones, which skip the fault as well).
+// A planted fault: every name must have a check that fails by an own value assertion; no missing fixture drops a mapping.
 const runMutation = async (mutation) => {
   refusePlanting(mutation.name)
 
@@ -1021,6 +1022,12 @@ const runMutation = async (mutation) => {
       outcomes.push(await attempt(entry, m))
     }
 
+    const absentFixture = outcomes.find((outcome) => outcome.state === 'skip')
+
+    if (absentFixture) {
+      return { state: 'fail', reason: `a named check has no fixture: ${start}: ${absentFixture.reason}` }
+    }
+
     const invalid = outcomes.find((outcome) => outcome.state === 'fail' && !outcome.valueFailure)
 
     if (invalid) {
@@ -1029,7 +1036,7 @@ const runMutation = async (mutation) => {
 
     if (outcomes.some((outcome) => outcome.state === 'fail' && outcome.valueFailure)) {
       caught++
-    } else if (!outcomes.every((outcome) => outcome.state === 'skip')) {
+    } else {
       missed.push(start)
     }
   }
@@ -1038,7 +1045,7 @@ const runMutation = async (mutation) => {
     return { state: 'fail', reason: `these checks did not fail: ${missed.join('; ')}` }
   }
 
-  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'skip', reason: 'the checks it names read a save that is not there' }
+  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'fail', reason: 'no named check failed by an own value assertion' }
 }
 
 const run = async () => {

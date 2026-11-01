@@ -650,6 +650,8 @@ check('research: the planner lines are registered tech types of the sensor famil
 
   assert.deepEqual(Object.keys(lines).sort(), ['distance', 'eccm', 'em', 'hardening', 'singleWeapon', 'speed', 'strength', 'thermal'])
 
+  assert.equal(lines.singleWeapon, 268, 'the single weapon line keeps its own tech type')
+
   for (const [role, typeId] of Object.entries(lines)) {
     assert.ok(m.rt.RACE_TECH_TYPES.includes(typeId), `${role} (${typeId}) is no registered tech type`)
     assert.ok(m.rt.SENSOR_TECH_TYPES.includes(typeId), `${role} (${typeId}) is not of the sensor family`)
@@ -787,6 +789,8 @@ check('research: the single weapon switch is offered only for a level the race h
   const chosen = planOf(m, { choices: { [SINGLE]: 2072 } }).st
   const none = planOf(m, { levels: without(LEVELS, SINGLE) }).st
 
+  assert.equal(base.singleWeapon.typeId, 268, 'the single weapon choice reads its own tech type')
+
   assert.equal(base.singleWeapon.offersSingle, false)
   assert.equal(base.singleWeapon.weapons.single, null)
   assert.equal(base.singleWeapon.weapons.unrestricted.number, 1)
@@ -872,6 +876,8 @@ check('beam: a range above the cap claims no reach, a multiplier past the cap is
 check('beam: a single weapon control halves the size and the cost and carries special function 6, the two always told apart', (m) => {
   const levels = researchedAlso(LEVELS, 2072)
   const st = beamTech(m, { levels })
+  assert.equal(st.singleWeapon.typeId, 268, 'the beam control reads the single weapon tech type')
+
   const unrestricted = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 10000, tech: st })
   const single = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 10000, tech: st, singleWeapon: true })
 
@@ -1787,7 +1793,7 @@ const MUTATIONS = [
   { name: 'the single weapon switch always offered', file: 'sensor-planner.js', find: 'offersSingle: weapons.single !== null', replace: 'offersSingle: true', fails: ['research: the single weapon'] },
   { name: 'the single weapon number taken from any level', file: 'sensor-planner.js', find: 'entry.level.info > 0 && entry.level.info < 1', replace: 'entry.level.info > 0', fails: ['research: the single weapon', 'beam: a single weapon'] },
   { name: 'the single weapon tech not of the sensor family', file: 'race-tech.js', find: "'Single Weapon Fire Control', 'sensor', 'none'", replace: "'Single Weapon Fire Control', 'armour', 'none'", fails: ['research: the planner lines'] },
-  { name: 'the single weapon line under another type', file: 'race-tech.js', find: 'family(SINGLE_WEAPON_TECH_TYPE, ', replace: 'family(SINGLE_WEAPON_TECH_TYPE + 1000, ', fails: ['research: the planner lines', 'research: the single weapon', 'beam: a single weapon'] },
+  { name: 'the single weapon line under another type', file: 'race-tech.js', find: 'singleWeapon: SINGLE_WEAPON_TECH_TYPE', replace: 'singleWeapon: FIRE_CONTROL_RANGE_TECH_TYPE', fails: ['research: the planner lines', 'research: the single weapon', 'beam: a single weapon'] },
   { name: 'the distance line read as the speed line', file: 'race-tech.js', find: 'distance: FIRE_CONTROL_RANGE_TECH_TYPE, speed: FIRE_CONTROL_SPEED_TECH_TYPE', replace: 'distance: FIRE_CONTROL_SPEED_TECH_TYPE, speed: FIRE_CONTROL_SPEED_TECH_TYPE', fails: ['research: the planner lines', 'beam: the range and the tracking'] },
   { name: 'the range cap not applied to the reach', file: 'sensor-planner.js', find: 'reachKm: sized ? (isRange ? Math.min(cap, value.multiplier * rating.info)', replace: 'reachKm: sized ? (isRange ? value.multiplier * rating.info', fails: ['beam: a range above the cap'] },
   { name: 'a range above the cap not beyond it', file: 'sensor-planner.js', find: 'const beyondCap = isRange && wanted !== null && wanted > cap', replace: 'const beyondCap = isRange && wanted !== null && wanted > cap * 2', fails: ['beam: a range above the cap'] },
@@ -1804,13 +1810,13 @@ const MUTATIONS = [
   { name: 'the active sensors of every race read', file: 'design-data.js', find: 'c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    kind', replace: 'c.GameID in (0, :game) and r.GameID = :game order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    kind', fails: ['loaders: the active'] },
   { name: 'the beam fire controls of every race read', file: 'design-data.js', find: 'c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    sizeHS', replace: 'c.GameID in (0, :game) and r.GameID = :game order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    sizeHS', fails: ['loaders: the beam'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the optional columns of an active sensor read by their table', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL)}", replace: 'c.Cost as Cost, c.Crew as Crew, c.Uridium as Uridium, c.Corbomite as Corbomite, c.ComponentValue as ComponentValue, c.ECCM as ECCM, c.ElectronicCTD as ElectronicCTD', fails: ['loaders: a save without the optional'] },
+  { name: 'the absent optional columns of an active sensor become 0', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL)}", replace: "${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL).replace(/null as/g, '0 as')}", fails: ['loaders: a save without the optional'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the optional columns of a beam fire control read by their table', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL)}", replace: 'c.Cost as Cost, c.Crew as Crew, c.Uridium as Uridium, c.Corbomite as Corbomite, c.FCRangeModifier as FCRangeModifier, c.FCSpeedModifier as FCSpeedModifier, c.SpecialFunction as SpecialFunction, c.ECCM as ECCM, c.ElectronicCTD as ElectronicCTD', fails: ['loaders: a save without the optional'] },
+  { name: 'the absent optional columns of a beam fire control become 0', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL)}", replace: "${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL).replace(/null as/g, '0 as')}", fails: ['loaders: a save without the optional'] },
   { name: 'a fire control read as a search sensor', file: 'design-data.js', find: "kind: row.ComponentTypeID === SENSOR_COMPONENT_TYPES.missileFireControl ? 'fireControl' : 'search'", replace: "kind: row.ComponentTypeID === SENSOR_COMPONENT_TYPES.missileFireControl ? 'search' : 'fireControl'", fails: ['loaders: the active'] },
   { name: 'the tracking speed read from the speed multiplier', file: 'design-data.js', find: 'trackingKmS: row.TrackingSpeed,', replace: 'trackingKmS: row.FCSpeedModifier,', fails: ['loaders: the beam', 'saves: the beam'] },
   { name: 'the sensor range no required column', file: 'design-data.js', find: "'Size', 'MaxSensorRange', 'Resolution'])", replace: "'Size', 'Resolution'])", fails: ['loaders: a save without a column'] },
-  { name: 'the obsolete flag never read', file: 'design-data.js', find: "const SENSOR_RACE_TECH_OPTIONAL = Object.freeze(['Obsolete'])", replace: 'const SENSOR_RACE_TECH_OPTIONAL = Object.freeze([])', fails: ['loaders: the active', 'loaders: the beam'] },
+  { name: 'every sensor obsolete flag is treated as set', file: 'design-data.js', find: 'const storedFlag = (value) => (value === null || value === undefined ? null : Boolean(value))', replace: 'const storedFlag = () => true', fails: ['loaders: the active', 'loaders: the beam'] },
   { name: 'the reach of a saved sensor table drops the design of a proposed one', file: 'sensor-planner.js', find: "...(source ? { 'sensor design': source } : {}) }", replace: '}', fails: ['target: a reach of a proposed sensor'] },
   { name: 'the curve drops the design of a proposed sensor', file: 'sensor-planner.js', find: "parts: { reach, 'sensor design': source }, compute: (values) => values.reach, units: 'km' }) : reach)", replace: "parts: { reach }, compute: (values) => values.reach, units: 'km' }) : reach)", fails: ['target: a reach of a proposed sensor'] },
   { name: 'a stored beam range above the cap is not marked', file: 'sensor-planner.js', find: 'const aboveCap = cap !== null && known !== null && known > cap', replace: 'const aboveCap = false', fails: ['beam: a stored range above the cap'] },
@@ -1867,7 +1873,7 @@ const report = (state, name, detail = '') => {
   console.log(`${state === 'pass' ? 'PASS' : 'FAIL'}  ${name}${state === 'pass' ? '' : `  [${detail}]`}`)
 }
 
-// A planted fault: the checks it names run on the faulty copy, and each name must have a check that fails (or only skipped ones, which skip the fault as well).
+// A planted fault: every name must have a check that fails by an own value assertion; no missing fixture drops a mapping.
 const runMutation = async (mutation) => {
   refusePlanting(mutation.name)
 
@@ -1895,6 +1901,12 @@ const runMutation = async (mutation) => {
       outcomes.push(await attempt(entry, m))
     }
 
+    const absentFixture = outcomes.find((outcome) => outcome.state === 'skip')
+
+    if (absentFixture) {
+      return { state: 'fail', reason: `a named check has no fixture: ${start}: ${absentFixture.reason}` }
+    }
+
     const invalid = outcomes.find((outcome) => outcome.state === 'fail' && !outcome.valueFailure)
 
     if (invalid) {
@@ -1903,7 +1915,7 @@ const runMutation = async (mutation) => {
 
     if (outcomes.some((outcome) => outcome.state === 'fail' && outcome.valueFailure)) {
       caught++
-    } else if (!outcomes.every((outcome) => outcome.state === 'skip')) {
+    } else {
       missed.push(start)
     }
   }
@@ -1912,7 +1924,7 @@ const runMutation = async (mutation) => {
     return { state: 'fail', reason: `these checks did not fail: ${missed.join('; ')}` }
   }
 
-  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'skip', reason: 'the checks it names read a save that is not there' }
+  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'fail', reason: 'no named check failed by an own value assertion' }
 }
 
 const run = async () => {

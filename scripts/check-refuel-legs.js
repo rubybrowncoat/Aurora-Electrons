@@ -15,24 +15,26 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const { runSuite } = require('./lib/suite-runner')
+const { runSuite, runnerArgs, declaredGroup } = require('./lib/suite-runner')
+const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const { fuelFillTruth } = require('./lib/fuel-service-oracle')
-const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
+const { assert, subjectModule, runChecks, judged, judgedGroup, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { observe, validate, HarnessError, settled, installScreen, readFigure, rounded } = require('./lib/browser-observe')
 const pageLoading = require('./page-loading')
 const { loadUtilities } = require('./lib/utilities')
+const { plantedGroup } = require('./lib/mutant-source')
 
 const root = path.resolve(__dirname, '..')
 const MODULE = 'fuel-ledger'
 const DETAIL = process.argv.includes('--detail')
 
-const swap = (from, to) => (text) => {
+const swap = (from, to) => Object.assign((text) => {
   if (text.split(from).length !== 2) {
     throw new Error(`The variant must apply exactly once to the source: ${from}`)
   }
 
   return text.replace(from, () => to)
-}
+}, { find: from, to })
 
 // ---------- constructed ships and sites ----------
 
@@ -568,7 +570,7 @@ const MOTION_MODULES = ['route-position', 'route-plan', 'jump-graph', 'orbit-pro
 const rockOf = (id, distance, bearing, year) => ({ id, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance, bearing, year, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: distance * 149600000 * Math.cos(((bearing - 90) * Math.PI) / 180), ycor: distance * 149600000 * Math.sin(((bearing - 90) * Math.PI) / 180) })
 
 const motionOf = async (ctx) => {
-  const loaded = await loadUtilities(MOTION_MODULES)
+  const loaded = ctx.loaded
   const { page } = ctx
   const constantText = page.slice(page.indexOf('const stopOf ='), page.indexOf('\n', page.indexOf('const capitalised =')))
   // eslint-disable-next-line no-new-func
@@ -2656,6 +2658,62 @@ const pageResults = async (seen, { strict, ids = null, keys, label, env = ENV })
 // The keys the checks `ids` (all for null) read: for the head all they need, for a planted fault or a rewrite (`least`) the fewest their judgement holds in.
 const neededBy = (ids, { least = false } = {}) => [...new Set(PAGE_CHECKS.filter(({ id }) => !ids || ids.includes(id)).flatMap((check) => (least && check.least) || check.needs))]
 
+// Every member runs the full union of these scenes, including in --solo. Check membership is derived from complete least-reader requirements, never merely the check names a fault declares.
+const PAGE_GROUPS = [
+  { key: 'page-group:half-bindings', indices: [1, 6, 7, 26] },
+].map((group) => {
+  const members = group.indices.map((index) => ({ ...PAGE_FAULTS[index], key: String(index) }))
+  const keys = neededBy(members.flatMap((member) => member.fails), { least: true })
+  const ids = PAGE_CHECKS.filter((check) => neededBy([check.id], { least: true }).every((key) => keys.includes(key))).map((check) => check.id)
+
+  return { ...group, members, keys, ids }
+})
+const PAGE_GROUP_OF = new Map(PAGE_GROUPS.flatMap((group) => group.members.map((member) => [member.key, group])))
+const validatePageGroups = (groups = PAGE_GROUPS) => {
+  const known = new Set(PAGE_CHECKS.map((check) => check.id))
+
+  for (const group of groups) {
+    declaredGroup(group.key, group.members)
+    if (!group.keys.length || group.keys.some((key) => !Object.values(SESSION_KEYS).flat().includes(key)) || !group.ids.length || group.ids.some((id) => !known.has(id)) || PAGE_CHECKS.some((check) => neededBy([check.id], { least: true }).every((key) => group.keys.includes(key)) && !group.ids.includes(check.id))) {
+      throw new HarnessError('a refuel group must retain every applicable known check over known nonempty scenes')
+    }
+    const text = fs.readFileSync(path.join(root, PAGE), 'utf8')
+    const intervals = []
+
+    for (const member of group.members) {
+      const { find } = member.change
+      const start = text.indexOf(find)
+
+      if ((member.file && member.file !== PAGE) || member.fails.some((id) => !group.ids.includes(id)) || neededBy(member.fails, { least: true }).some((key) => !group.keys.includes(key)) || !find || text.split(find).length !== 2 || intervals.some((entry) => start < entry.end && entry.start < start + find.length)) {
+        throw new HarnessError('a refuel group must keep the union scenes, disjoint checks and unique nonoverlapping page anchors: ' + member.name)
+      }
+      intervals.push({ start, end: start + find.length })
+    }
+  }
+}
+const pageGroup = async (group, members) => {
+  refusePlanting(group.key)
+  validatePageGroups()
+  const known = new Map(group.members.map((member) => [member.key, member]))
+
+  if (!members.length || members.some((member) => !known.has(member.key) || known.get(member.key).name !== member.name)) {
+    throw new HarnessError('a refuel group must run known original members')
+  }
+  const changed = plantedGroup({ [PAGE]: fs.readFileSync(path.join(root, PAGE), 'utf8') }, members.map((member) => ({ name: member.name, file: PAGE, find: member.change.find, to: member.change.to })))
+  const variant = { name: group.key, file: PAGE, change: () => changed[PAGE] }
+  const seen = await view(variant, group.keys, group.key)
+  const results = await pageResults(seen, { strict: true, ids: group.ids, keys: group.keys, label: group.key })
+  const credits = judgedGroup(results, members, { what: group.key, alone: members.length === 1 })
+
+  for (const { member, failed } of credits) {
+    if (!member.fails.every((id) => failed.some((result) => result.id === id && result.kind === 'assertion' && !result.threw))) {
+      throw new HarnessError('a refuel member did not fail every named check by value: ' + member.name)
+    }
+    console.log('MEMBER_CREDIT ' + JSON.stringify({ group: group.key, key: member.key, name: member.name, mode: members.length === 1 ? 'solo' : 'grouped', failures: failed.map(({ id, kind, threw, detail }) => ({ id, kind, threw, detail })) }))
+    report('fault caught: ' + member.name, true, failed.map((result) => result.id + ' (value)').join(', '))
+  }
+}
+
 // The page as it is, read for the checks `ids` (all for null) in the sessions they need, and judged by them.
 const pageHeadOf = (ids, label) => async () => {
   const results = await pageResults(await view(null, neededBy(ids), label), { strict: false, ids, keys: neededBy(ids), label })
@@ -2665,10 +2723,14 @@ const pageHeadOf = (ids, label) => async () => {
 }
 
 const pageFault = (fault) => async () => {
-  const results = await pageResults(await view(fault, neededBy(fault.fails, { least: true }), `the page with "${fault.name}"`), { strict: true, ids: fault.fails, keys: neededBy(fault.fails, { least: true }), label: `the page with the fault "${fault.name}"` })
+  refusePlanting(fault.name)
+  const results = await pageResults(await view(fault, neededBy(fault.fails, { least: true }), `the page with "${fault.name}"`), { strict: true, ids: [...new Set([...fault.fails, 'no-errors'])], keys: neededBy(fault.fails, { least: true }), label: `the page with the fault "${fault.name}"` })
 
+  if (results.some((result) => result.id === 'no-errors' && !result.ok)) {
+    throw new HarnessError('an ordinary refuel fault raised an unexpected page exception: ' + fault.name)
+  }
   judged(results, fault.name)
-  reportFault(fault, results)
+  reportFault(fault, results.filter((result) => fault.fails.includes(result.id)))
 }
 
 // A rewrite must pass the checks that read the part of the page it changes (`checks`).
@@ -2713,10 +2775,13 @@ const moduleResults = async (list, change, file, ids) => {
   const onPage = file === 'page'
   const page = fs.readFileSync(path.join(root, PAGE), 'utf8')
   const sources = change && !onPage ? { [file]: change(fs.readFileSync(path.join(root, `src/renderer/utilities/${file}.js`), 'utf8')) } : {}
-  const loaded = await loadUtilities([MODULE, 'fleet-profile'], { sources })
+  const selected = list.filter(({ id }) => !ids || ids.includes(id))
+  // Extracted page methods and their provenance results must share one per-variant module tree.
+  const names = [...new Set([MODULE, 'fleet-profile', ...(selected.some(({ id }) => id === 'motion') ? MOTION_MODULES : [])])]
+  const loaded = await loadUtilities(names, { sources })
   const mod = subjectModule({ ...loaded[MODULE], loadFleetShips: loaded['fleet-profile'].loadFleetShips }, 'module')
 
-  return await runChecks(list.filter(({ id }) => !ids || ids.includes(id)), { mod, fp: loaded['fleet-profile'], page: change && onPage ? change(page) : page })
+  return await runChecks(selected, { mod, fp: loaded['fleet-profile'], loaded, page: change && onPage ? change(page) : page })
 }
 
 const headOf = (list, label) => async () => {
@@ -2727,6 +2792,7 @@ const headOf = (list, label) => async () => {
 }
 
 const faultOf = (fault) => async () => {
+  refusePlanting(fault.name)
   const results = await moduleResults(PURE_CHECKS, fault.change, fault.module || MODULE, fault.fails)
 
   judged(results, fault.name)
@@ -2746,19 +2812,28 @@ const DEADLINES = { pure: 120, real: 300, page: 360, pageHead: 900, setup: 900 +
 const WARM_CHECKS = ['tankers', 'orders', 'no-errors']
 const CONTROL_FAULT = 'a tanker that cannot serve is drawn as giving'
 
-const variantsOf = (mutating) => [
-  { key: 'pure', name: 'the head: the ledger over constructed ships and sites', head: true, heading: 'The fuel ledger (utilities/fuel-ledger.js)', deadline: DEADLINES.pure, run: headOf(PURE_CHECKS, 'the module') },
-  ...(mutating ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
-  ...(mutating ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
-  { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: headOf(REAL_CHECKS, 'the saves') },
-  { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', needs: VARIANTS, deadline: DEADLINES.pageHead, run: pageHeadOf(null, 'the page') },
-  ...(mutating ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
-  ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `page-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', needs: sessionsOf(neededBy(fault.fails, { least: true })), deadline: DEADLINES.page, run: pageFault(fault) })) : []),
-  ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', needs: sessionsOf(neededBy(rewrite.checks, { least: true })), deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
-]
+const variantsOf = (mutating) => {
+  validatePageGroups()
+  const args = runnerArgs()
+  const requested = new Set([...(args.variants || []), ...(args.worker || [])])
+  const aliases = mutating ? [...PAGE_GROUP_OF].filter(([index]) => requested.has('page-fault:' + index)).map(([index, group]) => ({ key: 'page-fault:' + index, name: 'fault caught: ' + PAGE_FAULTS[Number(index)].name, pool: 'suite', needs: sessionsOf(group.keys), deadline: DEADLINES.page, run: () => pageGroup(group, [group.members.find((member) => member.key === index)]) })) : []
+
+  return [
+    { key: 'pure', name: 'the head: the ledger over constructed ships and sites', head: true, heading: 'The fuel ledger (utilities/fuel-ledger.js)', deadline: DEADLINES.pure, run: headOf(PURE_CHECKS, 'the module') },
+    ...(mutating ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
+    ...(mutating ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
+    { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: headOf(REAL_CHECKS, 'the saves') },
+    { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', needs: VARIANTS, deadline: DEADLINES.pageHead, run: pageHeadOf(null, 'the page') },
+    ...(mutating ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
+    ...(mutating ? PAGE_FAULTS.flatMap((fault, index) => PAGE_GROUP_OF.has(String(index)) ? [] : [{ key: 'page-fault:' + index, name: 'fault caught: ' + fault.name, heading: '\nplanted faults of the page', pool: 'suite', needs: sessionsOf(neededBy(fault.fails, { least: true })), deadline: DEADLINES.page, run: pageFault(fault) }]) : []),
+    ...(mutating ? PAGE_GROUPS.map((group) => ({ key: group.key, name: 'page group: ' + group.members.map((member) => member.name).join(' | '), members: group.members, pool: 'suite', needs: sessionsOf(group.keys), deadline: DEADLINES.page, run: (members) => pageGroup(group, members) })) : []),
+    ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', needs: sessionsOf(neededBy(rewrite.checks, { least: true })), deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
+    ...aliases,
+  ]
+}
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const mutating = mayMutate()
   const totals = await runSuite({
     script: __filename,
     inputs: [SAVES.falryx, SAVES.egg, FALRYX],

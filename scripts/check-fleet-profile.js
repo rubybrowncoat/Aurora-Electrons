@@ -861,6 +861,9 @@ check('loader-runtime', 'the loader reads the clocks, stocks, grade, morale, cla
 
   const lacking = await read('alter table FCT_ShipClass drop column CommercialHangar;')
 
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE ship IDs without a hangar column:', JSON.stringify(ids(lacking)))
+  }
   assert.deepEqual(ids(lacking), ids(rows), 'a save whose classes have no hangar column still gives every ship')
   assert.ok(Object.values(lacking).every((row) => row.CarrierCommercialHangar === null && row.CommercialHangar === null), 'the hangar kind of a carrier is not known, never 0')
   assert.equal(lacking[6].MothershipID, 1, 'the carrier link itself is read')
@@ -1127,7 +1130,10 @@ const summaryOf = (node, scope) => {
   const stated = node.attrsList.find((attr) => attr.name === 'data-summary')
   const bound = node.attrsList.find((attr) => attr.name === ':data-summary')
 
-  return stated ? stated.value : bound ? evaluated(bound.value, scope) : undefined
+  // Vue resolves an undeclared template name to undefined; observe that value rather than a bare-name ReferenceError.
+  const templateScope = new Proxy(scope, { has: () => true, get: (target, key) => (key in target ? target[key] : globalThis[key]) })
+
+  return stated ? stated.value : bound ? evaluated(bound.value, templateScope) : undefined
 }
 
 // The page in each state its reads can be in, as `make(loadErrors)` builds it: every read ready, then each read in turn loading and failed with the others ready.
@@ -1241,6 +1247,9 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
       shown.forEach(({ label, scope }) => {
         const summary = summaryOf(panelNode, scope)
 
+        if (process.argv.includes('--detail')) {
+          console.log(`VALUE ${name} panel ${index} summary while ${label}:`, JSON.stringify(summary))
+        }
         assert.ok(typeof summary === 'string' && summary.trim().length > 0, `${name}: panel ${index} has a summary while ${label}`)
       })
     })
@@ -1396,6 +1405,11 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const DISTANCE_RESULT = /(pathResult: )(?:this\.pathOf\(reach\)|\(this\.pathOf\(reach\)\))(?=, savedPositions:)/
 
+// TFIN-03 catalog audit: expanded zero-based indices and mapped checks are unchanged; a replacement is not proof of its retired operator.
+// [100] Old: "a save without the carrier's hangar column drops its ships"; new: "a missing hangar column drops the carried ship rows".
+// Original forcing of the absent optional column into SELECT fails at fleet-profile.js:106-108 before any ship rows return.
+// Replacement class: missing hangar schema incorrectly drops carried rows. Original unsafe optional-column SQL-read class currently has no credited fault.
+
 const FAULTS = [
   ['a ship in a hangar or under tow is taken as under its own power', 'profile', 'const role = hangared ? \'hangared\' : towed ? \'towed\' : \'independent\'', 'const role = \'independent\'', ['carried']],
   ['the holds of carried and towed ships are counted', 'profile', 'const loaders = independent.filter((participant) => participant.cargoStatus === \'counted\').map((participant) => participant.ship)', 'const loaders = participants.filter((participant) => participant.cargoStatus !== \'none\').map((participant) => participant.ship)', ['carried', 'stop-bottleneck']],
@@ -1491,7 +1505,7 @@ const FAULTS = [
   ['the carrier\'s hangar kind is left out', 'profile', 'through(\'MothershipID\', `OTHER_CLASS.${CARRIER_CLASS_COLUMN}`)', 'through(\'MothershipID\', \'0\')', ['loader-runtime']],
   // eslint-disable-next-line no-template-curly-in-string
   ['the carrier\'s hangar kind is read as a named column of the class table', 'profile', 'through(\'MothershipID\', `OTHER_CLASS.${CARRIER_CLASS_COLUMN}`)', 'through(\'MothershipID\', \'OTHER_CLASS.CommercialHangar\')', ['guarded-column']],
-  ['a save without the carrier\'s hangar column drops its ships', 'profile', 'const carrierHangar = hasClassColumn(CARRIER_CLASS_COLUMN) ?', 'const carrierHangar = true ?', ['loader-runtime']],
+  ['a missing hangar column drops the carried ship rows', 'profile', 'return Object.freeze(rows)', 'return Object.freeze(hasClassColumn(CARRIER_CLASS_COLUMN) ? rows : rows.filter((row) => !row.MothershipID))', ['loader-runtime']],
   // eslint-disable-next-line no-template-curly-in-string
   ['a class column the save lacks reads as 0', 'profile', '(hasClassColumn(name) ? `FCT_ShipClass.${name}` : `null as ${name}`)', '(hasClassColumn(name) ? `FCT_ShipClass.${name}` : `0 as ${name}`)', ['loader']],
 ]

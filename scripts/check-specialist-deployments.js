@@ -2085,6 +2085,7 @@ const main = async () => {
 
   const totals = await runSuite({
     script: __filename,
+    workers: 4,
     inputs: FIXTURES.map((fixture) => fixture.file),
     variants: variantsOf(),
     counts: () => ({ checks, failures }),

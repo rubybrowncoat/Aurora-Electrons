@@ -908,7 +908,7 @@ const FAULTS = [
   ['the yard age rate carries the no-yard-task assumption', 'runtime', 'rule: YARD_AGE_RATE, value: 0, ', 'rule: YARD_AGE_RATE, value: 0, assumptions: [\'no yard task refits the ship, which would hold the age as it is\'], ', ['shipyard-tasks']],
   ['a task state the save does not show is taken as an ordinary ship', 'runtime', 'yardTask === null) {', 'yardTask === null && false) {', ['shipyard-tasks']],
   ['the version is taken as 2.7 without asking the save', 'runtime', 'version: formulaVersion, npr', 'version: \'2.7.x\', npr', ['version']],
-  ['the thresholds are ordered by the column the save may lack', 'runtime', 'order by ShipClassID, ChanceToHit, ComponentID', 'order by FCT_ShipClass.ShipClassID, FCT_ClassComponent.ChanceToHit, FCT_ClassComponent.ComponentID', ['old-schema-thresholds']],
+  ['a missing hit threshold is read as 1', 'runtime', "components.has('ChanceToHit') ? 'FCT_ClassComponent.ChanceToHit' : 'null'", "components.has('ChanceToHit') ? 'FCT_ClassComponent.ChanceToHit' : '1'", ['old-schema-thresholds']],
   ['an empty list of classes reads every class', 'runtime', 'classIds === null || classIds === undefined', 'classIds === null || classIds === undefined || classIds.length === 0', ['class-selection']],
   ['an id that is not a whole number is dropped without a word', 'runtime', '...asked.invalid, ', '', ['class-selection']],
   // eslint-disable-next-line no-template-curly-in-string

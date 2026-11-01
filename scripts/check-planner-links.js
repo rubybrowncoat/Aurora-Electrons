@@ -94,7 +94,11 @@ const same = (actual, expected) => {
   }
 }
 
-const when = (condition, detail) => (condition ? true : typeof detail === 'string' ? detail : short(detail))
+const when = (condition, detail) => {
+  assert.ok(condition, typeof detail === 'string' ? detail : short(detail))
+
+  return true
+}
 
 // ---------- the fixtures of the Missile Designer ----------
 
@@ -364,6 +368,8 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
       return when(!('sig' in query) && !('res' in query) && !('jam' in query) && query.msp === '9' && query.range === '3000000' && queryOf({ ...MANUAL, msp: null }).msp === undefined && queryOf({ ...MANUAL, range: NaN }).range === undefined, query)
     }],
     ['codec: a jammer of 0 is a figure and is kept, a blank one is not', () => {
+      assert.equal(m.dl.queryMissileTarget(queryOf(MANUAL)).target.jammer, null, 'a blank jammer stays unknown')
+
       return when(queryOf({ ...MANUAL, jammer: 0 }).jam === '0' && m.dl.queryMissileTarget(queryOf({ ...MANUAL, jammer: 0 })).target.jammer === 0 && m.dl.queryMissileTarget(queryOf(MANUAL)).target.jammer === null, 'a jammer of 0 was lost')
     }],
     ['codec: the links of the pages keep their shapes and a target opens Active mode', () => {
@@ -425,6 +431,8 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
     ['handoff: a reoptimised candidate hands over its evaluated size and range, no ID and its tech by ID and kind', () => {
       const handoff = m.pl.missileHandoff(reoptimised, SCENARIO)
       const levels = reoptimised.tech.map(({ type, id, kind }) => ({ type, id, kind }))
+
+      assert.equal(handoff.target.missile, null, 'a candidate carries no saved missile identity')
 
       return when(handoff.ok && handoff.target.missile === null && handoff.target.msp === reoptimised.figures.size.value && handoff.target.range === reoptimised.figures.maxRange.value && handoff.target.source === 'researched' && levels.length > 0 && same(handoff.target.tech, levels) === true && handoff.target.tech.every((level) => level.kind === 'researched' && Number.isInteger(level.id) && Number.isInteger(level.type)), handoff)
     }],
@@ -489,6 +497,8 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
     ['resolve: a saved missile not read yet is pending and decides nothing, one that could not be read is not applied', () => {
       const pending = m.pl.resolveMissileTarget({ target: SAVED, standing: undefined, tech })
       const unknown = m.pl.resolveMissileTarget({ target: SAVED, standing: { id: 7, state: 'unknown', name: '', text: 'The missile 7 could not be checked against the save (no table).' }, tech })
+
+      assert.deepEqual([pending.pending, pending.applies], [true, false], 'an unread saved missile stays pending, not applied')
 
       return when(pending.pending && !pending.applies && pending.origin === null && !unknown.pending && !unknown.applies && unknown.state === 'unknown' && /could not be checked/.test(unknown.problems[0]), [pending, unknown])
     }],
@@ -615,6 +625,8 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
 
       const own = row.result.assumptions || []
       const sibling = rows.signature.result.assumptions || []
+      assert.equal(row.result.status, 'assumed', 'the carried jammer keeps its scenario status')
+
       const marked = row.result.status === 'assumed' && row.result.value === SAVED.jammer && own.length === sibling.length + 1 && own.every((note) => typeof note === 'string' && note.trim() !== '') && row.unit !== ''
 
       return when(pending && vm.mode === 'active' && vm.targetKind === 'missile' && vm.targetMsp === '12.5' && vm.wantedRange === '4000000' && vm.resolutionPick === '20' && settled.jammer === '3' && settled.held && vm.handoffApplied === true && vm.handoffHeld && vm.jammerIdle === true && marked && vm.sizing.request.searchJammer === 0 && vm.sizing.request.fireControlJammer === 0 && vm.target.label === 'Hawk, 12.5 MSP' && vm.sizing.request.wantedRangeKm === 4000000, [vm.mode, vm.targetKind, vm.targetMsp, vm.wantedRange, vm.resolutionPick, settled, row])
@@ -854,6 +866,10 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
       const vm = designerPage({ baselineId: ORDINARY, alternatives: keyed([draftOf(m, context, ORDINARY)]), targetSignature: '25', embedResolution: '20', embedJammer: '2' })
       const links = vm.columnLinks
       const [baseline, alternative] = vm.comparison.columns
+      assert.equal(links[baseline.key].sensors.path, '/sensors', 'the saved column opens the Sensor Planner')
+      assert.equal(links[alternative.key].sensors.path, '/sensors', 'the candidate column opens the Sensor Planner')
+      assert.equal(links[alternative.key].sensors.query.missile, undefined, 'the candidate link carries no saved missile identity')
+
       const base = m.dl.queryMissileTarget(links[baseline.key].sensors.query)
       const alt = m.dl.queryMissileTarget(links[alternative.key].sensors.query)
 
@@ -1015,6 +1031,8 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
       const heldMissile = standing(8)
       const gone = m.pl.componentStanding({ id: 77, row: null })
 
+      assert.equal(text({ missile: '8' }, null), 'The missile 8 named by the link is being checked against the save.')
+
       return when(/being checked/.test(text({ missile: '8' }, null)) && /deleted/.test(text({ missile: '8' }, absent)) && /another race/.test(text({ missile: '8' }, other)) && /not researched/.test(text({ missile: '8' }, unresearched)) && /no row of this page holds it/.test(text({ missile: '8' }, heldMissile)) && /no component design with the ID 77/.test(text({ design: '77' }, gone)) && /not an ID/.test(text({ missile: 'abc' }, null)) && /not an ID/.test(text({ design: 'x' }, null)) && text({ missile: '7' }, null) === '', [text({ missile: '8' }, absent)])
     }],
     ['designed: a missile the save has no row of is read through the page and the notice names it', async () => {
@@ -1152,7 +1170,7 @@ const planted = (name, from, to) => ({ sources: { [name]: patched(`${name}.js`, 
 
 const MUTATIONS = [
   { name: 'a target with no size is read', utilities: planted('deep-links', "const msp = figure('msp', 'the missile size (msp)', { required: true })", "const msp = figure('msp', 'the missile size (msp)', { required: false })"), fails: ['codec: an unreadable target is refused whole'] },
-  { name: 'an unknown figure is written as 0', utilities: planted('deep-links', 'String(Number(value.toPrecision(12))) : null', "String(Number(value.toPrecision(12))) : '0'"), fails: ['codec: an unknown figure is left out', 'codec: a jammer of 0'] },
+  { name: 'an unknown figure is written as 0', utilities: planted('deep-links', 'jam: figureText(target.jammer)', "jam: figureText(target.jammer) || '0'"), fails: ['codec: an unknown figure is left out', 'codec: a jammer of 0'] },
   { name: 'a candidate with an ID is read', utilities: planted('deep-links', "} else if (source !== 'saved' && MISSILE_TARGET_SOURCES.includes(source) && given('missile')) {", '} else if (false) {'), fails: ['codec: an unreadable target is refused whole'] },
   { name: 'a hypothetical missile needs no hypothetical level', utilities: planted('deep-links', "if (source === 'hypothetical' && !tech.some((item) => item.kind === 'hypothetical')) {", 'if (false) {'), fails: ['codec: an unreadable target is refused whole'] },
   { name: 'a sensor link opens no mode for a target', utilities: planted('deep-links', "mode: target && !mode ? 'active' : mode", 'mode'), fails: ['codec: the links of the pages keep their shapes'] },
@@ -1172,7 +1190,7 @@ const MUTATIONS = [
   { name: 'a saved missile that is gone still applies', utilities: planted('planner-links', 'if (target.missile !== null && standing.state !== STANDING.HELD) {', 'if (false) {'), fails: ['resolve: a saved missile that is gone', 'sensors: a missile gone, of another race'] },
   { name: 'a saved missile that changed is taken for unchanged', utilities: planted('planner-links', 'if (changes.length) {', 'if (false) {'), fails: ['resolve: a saved missile whose size', 'sensors: a saved missile changed since the link'] },
   { name: 'a hypothetical level does not weaken the status', utilities: planted('planner-links', 'const status = weakened || levels.some((level) => level.hypothetical) ? STATUS.ASSUMED : getRule(SENSOR_RULES.detection).verification', 'const status = getRule(SENSOR_RULES.detection).verification'), fails: ['resolve: a candidate on researched tech', 'sizing: a candidate on hypothetical tech', 'sensors: a candidate on hypothetical tech'] },
-  { name: 'a saved missile not read yet is applied', utilities: planted('planner-links', 'if (target.missile !== null && (standing === undefined || standing === null)) {', 'if (false) {'), fails: ['resolve: a saved missile not read yet is pending'] },
+  { name: 'a saved missile not read yet is applied', utilities: planted('planner-links', 'return { ...base, pending: true }', 'return { ...base, pending: false, applies: true }'), fails: ['resolve: a saved missile not read yet is pending'] },
   { name: 'a standing read that fails is held', utilities: planted('planner-links', 'return { id, state: STANDING.UNKNOWN, name: \'\', text: `The missile $' + '{id} could not be checked', 'return { id, state: STANDING.HELD, name: \'\', text: `The missile $' + '{id} could not be checked'), fails: ['resolve: a standing read on a database that fails'] },
   { name: 'a name that is not the design\'s is taken for it', utilities: planted('planner-links', 'if (standing && standing.state === STANDING.HELD && name && standing.name !== name) {', 'if (false) {'), fails: ['resolve: the standing of a missile and of a component design'] },
   { name: 'the provenance of the handover is not carried into the signature', utilities: planted('sensor-planner', 'const seenBy = (value, text) => (origin ?', 'const seenBy = (value, text) => (false ?'), fails: ['sizing: a missile target of a saved missile', 'sensors: the range handed over is the wanted range'] },
@@ -1202,8 +1220,8 @@ const MUTATIONS = [
   { name: 'a later link keeps the earlier handover', sensors: mutated('this.handoff = parsed ? parsed.target : null', 'this.handoff = parsed ? parsed.target : this.handoff'), fails: ['sensors: a later link without a target gives the handover up'] },
   { name: 'the handover puts its jammer in the typed input', sensors: mutated('this.resolutionPick = String(target.resolution)\n      }\n', "this.resolutionPick = String(target.resolution)\n      }\n\n      if (target.jammer !== null) {\n        this.jammer = target.jammer === 0 ? '' : String(target.jammer)\n      }\n"), fails: ['sensors: a link with a held saved missile opens Active mode'] },
   { name: 'an edited jammer ends the handover of a missile', sensors: mutated('String(this.resolutionPick) === String(target.resolution))\n    },', "String(this.resolutionPick) === String(target.resolution)) && (target.jammer === null || (String(this.jammer).trim() === '' ? 0 : entered(this.jammer)) === target.jammer)\n    },"), fails: ['sensors: a link with a held saved missile opens Active mode'] },
-  { name: 'the carried jammer loses its scenario provenance', sensors: mutated("result: scenario(target.jammer, '', 'the jammer', [", "result: null, unused: scenario(target.jammer, '', 'the jammer', ["), fails: ['sensors: a link with a held saved missile opens Active mode'] },
-  { name: 'a column links to no Sensor Planner', missile: mutated('sensors: handoff.ok ? linkTo.sensors({ target: handoff.target }) : null', 'sensors: null'), fails: ['designer: every column links'] },
+  { name: 'the carried jammer loses its scenario provenance', sensors: mutated("result: scenario(target.jammer, '', 'the jammer', ['a missile target takes no jammer, so the figure is not applied to the sizing'])", "result: { ...scenario(target.jammer, '', 'the jammer', ['a missile target takes no jammer, so the figure is not applied to the sizing']), status: 'confirmed' }"), fails: ['sensors: a link with a held saved missile opens Active mode'] },
+  { name: 'a column links to the wrong planner', missile: mutated('sensors: handoff.ok ? linkTo.sensors({ target: handoff.target }) : null', 'sensors: handoff.ok ? linkTo.designedTech({ missile: column.savedId }) : null'), fails: ['designer: every column links'] },
   { name: 'a column links to no Designed Tech row', missile: mutated("designedTech: column.kind === 'saved' && column.savedId ? linkTo.designedTech({ missile: column.savedId }) : null", 'designedTech: null'), fails: ['designer: every column links'] },
   { name: 'a link pins a missile of another name', missile: mutated('choice && (!this.linkedMissileName || choice.name === this.linkedMissileName) ? choice : null', 'choice'), fails: ['designer: a link that names a missile with a name'] },
   { name: 'a link that names no listed missile says nothing', missile: mutated('} else if (this.linkedMissileId === null || this.linkedChoice || !this.ready) {', '} else if (true) {'), fails: ['designer: a link that names a missile that is gone'] },
@@ -1212,7 +1230,8 @@ const MUTATIONS = [
   { name: 'Designed Tech ignores the missile of a link', designed: mutated('this.focusMissileId = queryId(query.missile)', 'this.focusMissileId = null'), fails: ['designed: a link names a missile by its own key', 'designed: a design or a missile no row holds'] },
   { name: 'a missile row links to nothing', designed: mutated('item.CategoryID === MISSILE_CATEGORY_ID ? linkTo.missileDesigner({ missile: item.MissileID, name: item.Name }) : null', 'null'), fails: ['designed: a missile row links to its page'] },
   { name: 'a missile is written back as a design', designed: mutated('{ missile: this.focusRow.MissileID }', '{ design: this.focusRow.SDComponentID }'), fails: ['designed: a link names a missile by its own key'] },
-  { name: 'a design that no row holds is left unexplained', designed: mutated('} else if (!this.focusStanding || this.focusStanding.id !== id || this.focusStanding.kind !== kind) {', '} else if (false) {'), fails: ['designed: a design or a missile no row holds'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'a design that no row holds is left unexplained', designed: mutated('return `The ${kind} ${id} named by the link is being checked against the save.`', "return 'Nothing is focused.'"), fails: ['designed: a design or a missile no row holds'] },
 ]
 
 // The faults of the templates: each must be found by the template statements.

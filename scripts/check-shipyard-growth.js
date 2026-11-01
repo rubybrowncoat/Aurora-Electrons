@@ -3,20 +3,24 @@
 
   bun scripts/check-shipyard-growth.js [--no-mutations]
 
-  The utility is run on yards worked by hand: a slipway costs the capacity over 500 tons times 120 times the race's shipyard operations, a capacity step the slipways times 120 times the operations times 1, 2, 4, 10 or 20, a commercial or repair yard paying a tenth; the operations factor is the lowest multiplier among the levels held and a race holding none has no factor (never 1, never 0); a continual upgrade is priced per ton at the steps' rate and timed by the Production Recap's stepping rule, and a target that would take more than the most construction periods is refused at once; a task and an activity are timed as the Recap times them. The page is run as a pseudo instance over scripts/lib/page-loader.js on four yards (a naval yard with two tasks, a commercial one with a task and an upgrade, a repair yard with nothing, a full naval yard being retooled): every yard is one row, the filters and the link keys do what they say, and the tiles are the counts of the same yards. The text of the page, the Production Recap, the yard warnings and the Tech Tree components is read for the named links and the section summaries.
+  The utility is run on yards worked by hand: upgrade prices follow the capacity, slipways and the race's lowest held operations factor, with the commercial/repair discount; continual upgrades are priced on tons added and timed by the Recap's construction-period rule. The script/computed contracts run through page-loader on four independent yards. The actual app also runs in Chromium through page-server and browser-observe: visible titles, prose, view controls, task columns, capacity sort order and player-usable Production/Warnings/Tech Tree links are read with the shared opacity-aware readers. A disposable copy of the real save supplies three yards with low, high and unknown capacities; the owner's saves are never changed. The real persisted-view mixin and an in-memory settings store prove storage keys, scope and validation. Source/template syntax is not mutation credit; only a named check's own marked comparison of an observed value is.
 
   The loaders run on an in-memory save built in this script, and on the saves (saves/AuroraDB.db and saves/AuroraDB_271_skoormit_saved.db, read-only), whether or not the saves are there: a save that is not there is skipped. On the saves the stored build points of every yard activity of types 1 to 6 (the slipway and the five capacity steps) are compared with the rules' price: 64 of 64 are equal once the race's operations factor applies, 63 of them at a factor of 1; the stored build points of a continual activity are 0, so the continual price has no stored comparison; and no save holds an activity of the 500 or 2,000 ton steps, so those two rest on the pattern of the others.
+  A mapped mutation is rejected if a required save fixture is absent; it never drops that mapping. Page faults share one warm browser/server within their child section, and restore every source override before the next variant. Unreachable one-panel summary attributes and malformed-template compiler failures have been replaced with visible prose/title faults; their original classes are explicitly retired in the batch-two catalog ledger, not claimed retained.
 
   Each mutation of the utility, the loader, the page or the other sources must fail the checks it names. Exit code 1 when a check fails.
 */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const Vue = require('vue')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { observe, validate, HarnessError, installScreen, settled } = require('./lib/browser-observe')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
@@ -107,20 +111,269 @@ const short = (value) => {
 }
 
 const near = (actual, expected, tolerance = 1e-6) => typeof actual === 'number' && Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected))
-const same = (actual, expected) => (JSON.stringify(actual) === JSON.stringify(expected) ? true : `${short(actual)} != ${short(expected)}`)
-const sameNumber = (actual, expected) => (near(actual, expected) ? true : `${short(actual)} != ${short(expected)}`)
-const sameNumbers = (actual, expected) => (actual.length === expected.length && actual.every((value, index) => near(value, expected[index])) ? true : `${short(actual)} != ${short(expected)}`)
+// Only call these at comparisons of returned, rendered or persisted values.
+const same = (actual, expected) => { assert.deepEqual(actual, expected); return true }
+const sameNumber = (actual, expected) => { assert.ok(near(actual, expected), `${short(actual)} != ${short(expected)}`); return true }
+const sameNumbers = (actual, expected) => { assert.equal(actual.length, expected.length); actual.forEach((value, index) => sameNumber(value, expected[index])); return true }
 const finiteAll = (value) => (typeof value === 'number' ? Number.isFinite(value) : Array.isArray(value) ? value.every(finiteAll) : value !== null && typeof value === 'object' ? Object.values(value).every(finiteAll) : true)
+const BROWSER_KEYS = new Set(['page-template', 'named-links', 'labels'])
+const browserFault = (fault) => fault.fails.some((key) => BROWSER_KEYS.has(key))
+const PAGE_TIMEOUT = 60000
+let pageSession = null
 
-const templateErrors = (source) => {
-  const compiler = require('vue/compiler-sfc')
-  const parsed = compiler.parse({ source })
-  const descriptor = parsed.descriptor || parsed
+const closeBrowser = async () => {
+  const held = pageSession
 
-  return compiler.compileTemplate({ source: descriptor.template.content, filename: 'page.vue', id: 'page' }).errors.map(String)
+  pageSession = null
+
+  if (held) {
+    try {
+      if (held.browser) await held.browser.close()
+    } finally {
+      try {
+        if (held.server) {
+          try {
+            for (const file of held.replaced) held.server.replace(file, null)
+          } finally {
+            await held.server.stop()
+          }
+        }
+      } finally {
+        fs.rmSync(held.folder, { recursive: true, force: true })
+      }
+    }
+  }
 }
 
-const count = (text, find) => text.split(find).length - 1
+// Three real yards on a disposable copy give the table known low/high and
+// unknown capacities. No app value or component is substituted in the browser.
+const browserSession = async () => {
+  if (pageSession) return pageSession
+
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'growth-screen-'))
+  const file = path.join(folder, 'save.db')
+  const held = { folder, browser: null, server: null, current: null, replaced: [] }
+
+  pageSession = held
+
+  try {
+    const source = path.join(root, SAVES[1])
+
+    if (!fs.existsSync(source)) throw new HarnessError(`Required rendered-page fixture is absent: ${SAVES[1]}`)
+    fs.copyFileSync(source, file)
+
+    const raw = await new Promise((resolve, reject) => {
+      const database = new sqlite3.Database(file, (error) => error ? reject(error) : resolve(database))
+    })
+    const database = { query: rawQuery(raw) }
+
+    try {
+      const yards = await rowsOf(database, 'select ShipyardID from FCT_Shipyard where GameID = 138 and RaceID = 785 order by ShipyardID limit 3')
+
+      if (yards.length !== 3) throw new HarnessError('The rendered inventory fixture needs three own yards')
+
+      for (const [index, yard] of yards.entries()) {
+        await execOf(raw, `update FCT_Shipyard set ShipyardName = 'Growth probe ${['low', 'high', 'unknown'][index]}', Capacity = ${[1000, 2000, 'null'][index]} where ShipyardID = ${yard.ShipyardID}`)
+      }
+
+      const [task] = await rowsOf(database, 'select t.UnitName, t.ShipyardID, t.PopulationID, y.ShipyardName from FCT_ShipyardTask t join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.GameID = 138 and t.RaceID = 785 and t.TaskTypeID = 0 and t.Paused = 0 and (select sum(s.Slipways) from FCT_Shipyard s where s.PopulationID = t.PopulationID) > (select count(*) from FCT_ShipyardTask s where s.PopulationID = t.PopulationID) order by t.TaskID limit 1')
+      const [tech] = await rowsOf(database, 'select t.TechSystemID from FCT_TechSystem t join FCT_RaceTech r on r.TechID = t.TechSystemID where r.GameID = 138 and r.RaceID = 785 and t.TechTypeID = 30 order by t.TechSystemID limit 1')
+      const [obsolete] = await rowsOf(database, 'select count(*) as n from FCT_Shipyard y join FCT_ShipClass c on c.ShipClassID = y.BuildClassID where y.GameID = 138 and y.RaceID = 785 and c.Obsolete = 1')
+
+      if (!task || !tech || !obsolete.n) throw new HarnessError('The named-link fixture needs a construction task, idle capacity, an obsolete yard and researched build-rate tech')
+      held.truth = { task, tech }
+    } finally {
+      await new Promise((resolve, reject) => raw.close((error) => error ? reject(error) : resolve()))
+    }
+
+    const { startPageServer } = require('./lib/page-server')
+    const { chromium } = require('playwright')
+
+    held.server = await startPageServer({ save: file })
+    held.browser = await chromium.launch({ headless: true })
+    await held.server.warm(held.browser, { routes: ['/shipyards', '/production', '/warnings', '/technologies'] })
+
+    return held
+  } catch (error) {
+    await closeBrowser()
+    throw error
+  }
+}
+
+// Runs in Chromium. Hooks select elements; all prose and figures come through
+// the shared opacity-aware reader, and destinations are the anchors a player uses.
+const readRendered = ({ kind }) => {
+  const { visible, visibleText } = window.__screen
+  const routes = (node) => [...node.querySelectorAll('a[href]')].filter(visible).map((link) => {
+    const href = new URL(link.getAttribute('href'), window.location.href)
+    const url = href.hash.startsWith('#/') ? new URL(href.hash.slice(1), href) : href
+
+    return { path: url.pathname, query: Object.fromEntries(url.searchParams) }
+  }).filter((link) => link.path === '/shipyards' || link.path === '/production')
+  const panels = (root) => [...root.querySelectorAll('.panel')].filter(visible)
+
+  if (kind === 'panels') {
+    const root = document.querySelector('.shipyards-page')
+
+    return {
+      titles: panels(root).map((panel) => {
+        const title = panel.querySelector('.panel-head').firstElementChild
+
+        return visible(title) ? [...title.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim() : ''
+      }),
+      note: panels(root).map((panel) => visibleText(panel.querySelector('.panel-foot'))).join(' '),
+    }
+  } else if (kind === 'recap') {
+    const root = document.querySelector('.production-page')
+    const cards = panels(root)
+    const job = cards[0].querySelector('tbody tr')
+    const idle = cards.find((card) => visibleText(card.querySelector('.panel-head')).startsWith('Idle capacity by colony'))
+
+    return { job: { text: visibleText(job), links: job ? routes(job) : [] }, idleLinks: routes(idle).filter((link) => link.path === '/shipyards') }
+  } else if (kind === 'warnings') {
+    return Object.fromEntries(['idle-slipways', 'obsolete-shipyards'].map((key) => [key, [...document.querySelectorAll(`[data-check="${key}"] tr[data-row]`)].filter(visible).map((row) => ({ id: row.dataset.row, text: visibleText(row), links: routes(row) }))]))
+  } else if (kind === 'lines' || kind === 'path') {
+    return routes(document.querySelector(`.${kind}-view`))
+  }
+
+  throw new Error(`Unknown rendered read ${kind}`)
+}
+
+const observeScreen = async (ctx, kind) => {
+  const held = await browserSession()
+
+  if (held.current !== ctx) {
+    for (const file of held.replaced) held.server.replace(file, null)
+    held.replaced = []
+    await held.server.reset()
+
+    const real = sourcesOf(null)
+
+    for (const [key, file] of Object.entries(FILES)) {
+      if (ctx.sourceText[key] !== real[key]) {
+        const relative = path.relative(root, file).replace(/\\/g, '/')
+
+        held.replaced.push(relative)
+        held.server.replace(relative, ctx.sourceText[key])
+      }
+    }
+
+    held.current = ctx
+  }
+
+  const seen = await observe(held.browser, async ({ page, step }) => {
+    step(`opening the real ${kind} surface`)
+    await page.goto(held.server.url, { timeout: PAGE_TIMEOUT })
+    await installScreen(page)
+    await page.waitForFunction(() => Boolean(window.$app && window.$app.$store && window.$app.$store.getters.database) && window.$app.$store.state.empires.games.length > 0, null, { timeout: PAGE_TIMEOUT })
+    await page.evaluate(() => {
+      const store = window.$app.$store
+      const game = store.state.empires.games.find((entry) => entry.GameID === 138)
+
+      return store.dispatch('changeGame', { game, race: game.Races.find((entry) => entry.RaceID === 785) })
+    })
+    await page.waitForFunction(() => Boolean(window.$app.$store.getters.racePrefix), null, { timeout: PAGE_TIMEOUT })
+
+    const settlePage = () => settled(page, {
+      limit: PAGE_TIMEOUT,
+      loading: () => {
+        const match = window.$app.$route.matched[0]
+        const vm = match && match.instances.default
+
+        return !vm || vm.ready === false || Object.values(vm.$asyncComputed || {}).some((state) => state.updating)
+      },
+    })
+    const visit = async (target) => {
+      step(`reading ${target}`)
+      await page.evaluate((to) => window.$app.$router.push(to, () => {}, () => {}), target)
+      await page.waitForFunction((to) => window.$app.$route.path === to, target.split('?')[0], { timeout: PAGE_TIMEOUT })
+      await settlePage()
+    }
+    const read = (what) => page.evaluate(readRendered, { kind: what })
+
+    if (kind === 'yards') {
+      await visit('/shipyards')
+
+      const controls = page.locator('.shipyards-page > .row .v-btn-toggle').first()
+      const defaultView = await controls.locator('.v-btn--active').evaluate((button) => window.__screen.visibleText(button))
+      const views = await controls.locator('button').evaluateAll((buttons) => buttons.map((button) => window.__screen.visibleText(button)))
+
+      await controls.getByRole('button', { name: 'Yards', exact: true }).click()
+      await settlePage()
+
+      const yards = await read('panels')
+      const search = page.locator('.shipyards-page').getByLabel('Search', { exact: true })
+
+      await search.fill('Growth probe')
+      await settlePage()
+
+      const table = page.locator('.shipyards-page .v-data-table').first()
+      const headers = await table.locator('thead th').evaluateAll((cells) => cells.map((cell) => window.__screen.visibleText(cell)))
+
+      await table.locator('thead th').filter({ hasText: 'Capacity (t)' }).click()
+      await settlePage()
+
+      const sortedNames = await table.locator('tbody > tr').evaluateAll((rows) => rows.map((row) => window.__screen.visibleText(row.querySelector('td:nth-child(2) .font-weight-medium'))))
+
+      await search.fill(held.truth.task.ShipyardName)
+      await settlePage()
+      await table.locator('.v-data-table__expand-icon').first().click()
+      await page.locator('.yard-detail').waitFor()
+
+      const taskHeaders = await page.locator('.yard-detail .v-data-table').first().locator('thead th').evaluateAll((cells) => cells.map((cell) => window.__screen.visibleText(cell)))
+      const result = { defaultView: defaultView.trim(), views: views.map((text) => text.trim()), yards, headers, sortedNames, taskHeaders }
+
+      for (const [view, label] of [['growth', 'Growth'], ['refits', 'Refits'], ['classes', 'Class to yards']]) {
+        await controls.getByRole('button', { name: label, exact: true }).click()
+        await settlePage()
+        result[view] = await read('panels')
+      }
+
+      return result
+    } else if (kind === 'recap') {
+      await visit(`/production?colony=${held.truth.task.PopulationID}`)
+      await page.locator('.production-page').getByLabel('Search', { exact: true }).fill(held.truth.task.UnitName)
+      await settlePage()
+
+      return read('recap')
+    } else if (kind === 'warnings') {
+      await visit('/warnings')
+
+      return read('warnings')
+    } else if (kind === 'tech') {
+      await visit('/technologies?view=lines')
+
+      const toggle = page.locator('.lines-view .v-input--switch')
+
+      if (await toggle.locator('input').isChecked()) {
+        await toggle.getByText('Hide finished lines', { exact: true }).click()
+        await settlePage()
+      }
+
+      const lines = await read('lines')
+
+      await visit(`/technologies?tech=${held.truth.tech.TechSystemID}`)
+
+      return { lines, path: await read('path') }
+    }
+
+    throw new HarnessError(`Unknown screen ${kind}`)
+  })
+
+  validate(seen, `the ${kind} observation`)
+
+  if (seen.error) throw new HarnessError(`${kind}, ${seen.phase}: ${seen.error}\n${seen.scene || ''}`)
+
+  return seen.value
+}
+
+const screenOf = (ctx, kind) => {
+  ctx.screens = ctx.screens || {}
+
+  if (!ctx.screens[kind]) ctx.screens[kind] = observeScreen(ctx, kind)
+
+  return ctx.screens[kind]
+}
 
 // ---------- the fixtures worked by hand ----------
 
@@ -163,7 +416,7 @@ const pure = (ctx) => {
     const expected = { 'shipyardGrowth.operations': 'confirmed', 'shipyardGrowth.slipwayPrice': 'confirmed', 'shipyardGrowth.capacityStep': 'confirmed', 'shipyardGrowth.capacityStepPattern': 'estimated', 'shipyardGrowth.continualPrice': 'estimated' }
     const bad = Object.entries(expected).filter(([id, verification]) => { const rule = p.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('2.7.x') || rule.units !== (id === 'shipyardGrowth.operations' ? '' : 'BP') }).map(([id]) => id)
 
-    return bad.length ? `wrong or missing: ${bad.join(', ')}` : true
+    return same(bad, [])
   })
 
   // ----- the operations factor -----
@@ -229,7 +482,7 @@ const pure = (ctx) => {
   add('price: no price of any yard is NaN, infinite or below 0', () => {
     const rows = [naval, commercial, repair, { type: 1, capacity: 0, slipways: 0 }].flatMap((yard) => g.upgradePrices({ yard, operations, version }).map((row) => value(row.price)).filter((item) => item !== null))
 
-    return rows.length && finiteAll(rows) && rows.every((item) => item >= 0) ? true : short(rows)
+    return same([rows.length > 0, finiteAll(rows), rows.every((item) => item >= 0)], [true, true, true])
   })
 
   // ----- the continual upgrade -----
@@ -261,20 +514,24 @@ const pure = (ctx) => {
     const recap = production.shipyardContinualDays(MODIFIERS, { SYType: 1, Capacity: 5000, Slipways: 4, CapacityTarget: target })
     const nearer = g.continualTime(MODIFIERS, naval, 6000, g.continualPrice({ yard: naval, target: 6000, operations, version }))
 
-    return value(time.result) > value(nearer.result) && value(nearer.result) > 10 ? sameNumber(value(time.result), value(recap.result)) : `the days do not grow with the target: ${value(nearer.result)}, ${value(time.result)}`
+    assert.ok(value(time.result) > value(nearer.result) && value(nearer.result) > 10, `the days do not grow with the target: ${value(nearer.result)}, ${value(time.result)}`)
+
+    return sameNumber(value(time.result), value(recap.result))
   })
   add('continual: a target that would take more than the most construction periods is refused at once, naming the limit, not stepped', () => {
     const began = Date.now()
     const target = 1e12
     const time = g.continualTime(MODIFIERS, naval, target, g.continualPrice({ yard: naval, target, operations, version }))
 
-    return Date.now() - began < 2000 && time.result.status === 'unavailable' && missing(time.result).some((text) => text.includes('construction periods')) ? true : `${Date.now() - began} ms, ${short(time.result)}`
+    if (Date.now() - began >= 2000) return `${Date.now() - began} ms, ${short(time.result)}`
+
+    return same([time.result.status, missing(time.result).some((text) => text.includes('construction periods'))], ['unavailable', true])
   })
   add('continual: a target of a few hundred periods is timed, not refused', () => {
     const target = 15000
     const time = g.continualTime(MODIFIERS, naval, target, g.continualPrice({ yard: naval, target, operations, version }))
 
-    return time.result.status !== 'unavailable' && value(time.result) > 100 ? true : short(time.result)
+    return same([time.result.status !== 'unavailable', value(time.result) > 100], [true, true])
   })
   add('continual: with no price or no modifiers the time is unavailable and names what is missing', () => {
     const priceless = g.continualTime(MODIFIERS, naval, null, g.continualPrice({ yard: naval, target: null, operations, version }))
@@ -329,10 +586,10 @@ const pure = (ctx) => {
 
   // ----- the labels -----
   add('labels: the task and upgrade labels the Recap and the yards share', () => same([g.SHIPYARD_TASK_TYPES, g.SHIPYARD_UPGRADE_TYPES], [{ 0: 'Construction', 1: 'Repair', 2: 'Refit', 3: 'Scrap', 4: 'Auto refit' }, { 1: 'Add slipway', 2: 'Add 500 ton capacity', 3: 'Add 1,000 ton capacity', 4: 'Add 2,000 ton capacity', 5: 'Add 5,000 ton capacity', 6: 'Add 10,000 ton capacity', 7: 'Retool', 8: 'Continual capacity upgrade', 9: 'Spacemaster modification' }]))
-  add('labels: the Recap imports the labels and defines none of its own', () => {
-    const recap = ctx.sourceText.PR
+  add('labels: the Recap renders the shared construction task label beside its ship job', async () => {
+    const seen = await screenOf(ctx, 'recap')
 
-    return /import \{ SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES \} from '\.\.\/utilities\/shipyard-growth'/.test(recap) && !/const SHIPYARD_(TASK|UPGRADE)_TYPES =/.test(recap) ? true : 'the Recap defines the labels or does not import them'
+    return same(seen.job.text.includes('Construction'), true)
   })
 
   // ----- the Tech Tree lines -----
@@ -425,7 +682,7 @@ const loader = (ctx) => {
 // ---------- the page ----------
 
 const page = (ctx) => {
-  const { m, pageOptions, persistedOptions, pageText } = ctx
+  const { m, pageOptions, persistedOptions } = ctx
   const statements = []
   const add = (name, test) => statements.push([name, test])
   const make = (data = {}) => instantiate(pageOptions, {
@@ -521,12 +778,14 @@ const page = (ctx) => {
     const first = make({ yardId: null })
     const stale = make({ yardId: 99 })
 
+    assert.equal(first.growthYard.id, 1, 'with no pick the Growth panel prices the first yard')
+
     return same([picked.growthYard.id, first.growthYard.id, stale.growthYard, stale.growth, stale.growthHint, make({ yards: [], yardId: null }).growthHint], [2, 1, null, null, 'The yard named by the link is not one of the race\'s yards.', 'The race has no shipyard.'])
   })
   add('growth: with no operations factor the prices are unavailable and the rows say so, with no time of 0', () => {
     const growth = make({ shipyardOperationsHeld: [] }).growthOf(yardA, 15000)
 
-    return growth.rows.every((row) => row.price.status === 'unavailable' && row.days === null) ? true : short(growth.rows.map((row) => [row.key, row.price.status, row.days]))
+    return same(growth.rows.map((row) => [row.price.status, row.days]), growth.rows.map(() => ['unavailable', null]))
   })
 
   add('tiles: the Yards and Growth views\' tiles are the counts of the yards: 4 yards (2 naval, 1 commercial, 1 repair), 4 of 10 slipways free, 6 tasks and 2 activities, operations 0.8', () => {
@@ -576,7 +835,7 @@ const page = (ctx) => {
       return m.deepLinks.sameQuery(written, again) !== true || back.view !== data.view
     })
 
-    return bad.length ? `did not round trip: ${short(bad)}` : true
+    return same(bad, [])
   })
   add('links: the page is labelled by its focus: the yard of the Yards and Growth views', () => same([make({ view: 'growth', yardId: 2 }).linkLabel, make({ view: 'yards', yardId: 3 }).linkLabel, make({ view: 'yards', yardId: null }).linkLabel], ['Growth of Yard B', 'Yard C', null]))
   add('links: linkTo.shipyards writes the view, yard, colony, operation, from and to, class as the Class to yards view, and nothing for what is left out', () => {
@@ -585,40 +844,69 @@ const page = (ctx) => {
     return same([linkTo.shipyards({ yard: 5 }), linkTo.shipyards({ colony: 7 }), linkTo.shipyards({ view: 'growth' }), linkTo.shipyards({ from: 1, to: 2 }), linkTo.shipyards({ class: 9 }), linkTo.shipyards({ class: 9, operation: 'repair' }), linkTo.shipyards({ view: 'classes', operation: 'refit', from: 1, to: 2 }), linkTo.shipyards()], [{ path: '/shipyards', query: { yard: '5' } }, { path: '/shipyards', query: { colony: '7' } }, { path: '/shipyards', query: { view: 'growth' } }, { path: '/shipyards', query: { from: '1', to: '2' } }, { path: '/shipyards', query: { view: 'classes', to: '9' } }, { path: '/shipyards', query: { view: 'classes', operation: 'repair', to: '9' } }, { path: '/shipyards', query: { view: 'classes', operation: 'refit', from: '1', to: '2' } }, { path: '/shipyards', query: {} }])
   })
 
-  // ----- the page's text -----
-  const cards = pageText.match(/<v-card [^>]*class="panel"[^>]*>/g) || []
+  // These comparisons read the real renderer, not the spelling of its template.
+  add('page-template: Yards opens by default and the four view controls are in order', async () => {
+    const seen = await screenOf(ctx, 'yards')
 
-  add('page-template: the template compiles', () => { const errors = templateErrors(pageText); return errors.length ? errors.join('; ') : true })
-  add('page-template: every section panel carries a data-summary, and the two new panels\' summaries have no figure and no first or second person', () => {
-    const bare = cards.filter((card) => !/ :?data-summary="/.test(card))
-    const summaries = ['view === \'yards\'', 'view === \'growth\''].map((gate) => (cards.find((card) => card.includes(`v-if="${gate}"`)) || '').match(/ data-summary="([^"]*)"/))
-    const bad = summaries.map((match, index) => (!match ? `panel ${index} has none` : /\d/.test(match[1]) ? `panel ${index} has a figure` : /\b(I|me|my|mine|you|your|we|our)\b/i.test(match[1]) ? `panel ${index} is not impersonal` : '')).filter(Boolean)
-
-    return bare.length || bad.length ? `${bare.length} panels without, ${bad.join('; ')}` : cards.length >= 6 ? true : `only ${cards.length} panels found`
+    return same([seen.defaultView, seen.views], ['Yards', ['Yards', 'Growth', 'Refits', 'Class to yards']])
   })
-  add('page-template: the views are Yards, Growth, Refits and Class to yards, in that order, and Yards is the default', () => (/const VIEW_OPTIONS = \[\{ value: 'yards', label: 'Yards' \}, \{ value: 'growth', label: 'Growth' \}, \{ value: 'refits', label: 'Refits' \}, \{ value: 'classes', label: 'Class to yards' \}\]/.test(pageText) && make().view === 'yards' ? true : 'the views or the default differ'))
-  add('page-template: the Yards and Growth panels are only on their views, the eligibility and running panels only on Refits and Class to yards, the platform comparison only on Class to yards', () => {
-    const wanted = ['<v-card v-if="view === \'yards\'" class="panel"', '<v-card v-if="view === \'growth\'" class="panel"', '<v-card v-if="view === \'refits\' || view === \'classes\'" class="panel" :data-summary="yardsSummary"', '<v-card v-if="(view === \'refits\' || view === \'classes\') && runningRows.length" class="panel"', '<platform-paths v-if="view === \'classes\'"']
+  add('page-template: the Yards panel has its own visible title without a figure', async () => {
+    const seen = await screenOf(ctx, 'yards')
 
-    return wanted.filter((text) => !pageText.includes(text)).length ? `missing: ${wanted.filter((text) => !pageText.includes(text)).join(' | ')}` : true
+    return same(seen.yards.titles[0], 'Shipyards')
   })
-  add('page-template: the yard list is a table of one row per yard with the columns Yard, Type, Free slipways, Capacity, Tooled for, Tasks, Activity and Add slipway, an expandable row, and the unknown sorted last', () => {
-    const headers = (pageText.match(/const INVENTORY_HEADERS = \[([\s\S]*?)\n\]/) || ['', ''])[1].match(/text: '([^']+)'/g) || []
+  add('page-template: Growth has its visible title and an impersonal note that gives the commercial price factor', async () => {
+    const seen = await screenOf(ctx, 'yards')
 
-    return same(headers.map((text) => text.slice(7, -1)), ['Yard', 'Type', 'Free slipways', 'Capacity (t)', 'Tooled for', 'Tasks', 'Activity', 'Add slipway']) === true && pageText.includes(':items="inventoryRows"') && pageText.includes('show-expand') && /:items="inventoryRows"[^>]*:custom-sort="sortNullLast"/.test(pageText) ? true : 'the table differs'
+    return same([seen.growth.titles[0], /\b(I|me|my|mine|you|your|we|our)\b/i.test(seen.growth.note), seen.growth.note.includes('A commercial or repair yard pays a tenth.')], ['Yard growth', false, true])
   })
-  add('page-template: the task table has the Rate (BP/yr) column with the rate\'s mark, the yard rows and the growth panel say a ship-based yard cannot be modified', () => same([pageText.includes('<th class="text-right">Rate (BP/yr)</th>'), pageText.includes('<provenance-mark :result="line.rateResult" />'), count(pageText, 'does not let be modified: no upgrade is priced.'), pageText.includes('v-if="item.shipBased === true" x-small')], [true, true, 2, true]))
-  add('page-persist: the view parameters are kept under their keys: the yard, the class picks, the growth target and the yard search per race, the free-slipway filter and the yards table for the app, the earlier keys as they were', () => {
-    const keys = [...pageText.matchAll(/(?:key: '|tableView\(')(shipyards\w+)'/g)].map((match) => match[1]).sort()
-    const racewide = [...pageText.matchAll(/(\w+): \{ key: '(shipyards\w+)', default: [^}]*scope: 'race'/g)].map((match) => match[2]).sort()
+  add('page-template: the eligibility panel is absent from Yards and Growth and shown for Refits and Class to yards', async () => {
+    const seen = await screenOf(ctx, 'yards')
 
-    return same([keys, racewide], [['shipyardsFromClass', 'shipyardsGrowthTarget', 'shipyardsHideObsolete', 'shipyardsIdleOnly', 'shipyardsOperation', 'shipyardsRunningTable', 'shipyardsSearch', 'shipyardsShipsOnly', 'shipyardsSizeWindow', 'shipyardsToClass', 'shipyardsView', 'shipyardsYard', 'shipyardsYardSearch', 'shipyardsYardsList', 'shipyardsYardsTable'], ['shipyardsFromClass', 'shipyardsGrowthTarget', 'shipyardsSearch', 'shipyardsToClass', 'shipyardsYard', 'shipyardsYardSearch']])
+    return same([seen.yards.titles.length, seen.growth.titles.length, seen.refits.titles.some((title) => title.startsWith('Yards for')), seen.classes.titles.some((title) => title.startsWith('Yards for'))], [1, 1, true, true])
   })
-  add('page-persist: the yard, the class picks and the growth target are accepted only as a whole id above 0 and a number above 0 (or none)', () => {
-    const line = (name) => (pageText.match(new RegExp(`      ${name}: \\{[^\\n]*`)) || [''])[0]
-    const id = /valid: \(value\) => value === null \|\| \(Number\.isInteger\(value\) && value > 0\)/
+  add('page-template: the inventory draws its columns and sorts the unknown capacity after both known capacities', async () => {
+    const seen = await screenOf(ctx, 'yards')
 
-    return id.test(line('yardId')) && id.test(line('fromId')) && id.test(line('toId')) && /valid: \(value\) => value === null \|\| \(isNumber\(value\) && value > 0\)/.test(line('growthTarget')) ? true : 'the validity of the yard, a class or the target differs'
+    return same([seen.headers, seen.sortedNames], [['', 'Yard', 'Type', 'Free slipways', 'Capacity (t)', 'Tooled for', 'Tasks', 'Activity', 'Add slipway'], ['Growth probe low', 'Growth probe high', 'Growth probe unknown']])
+  })
+  add('page-template: an expanded task draws the Rate (BP/yr) column', async () => {
+    const seen = await screenOf(ctx, 'yards')
+
+    return same(seen.taskHeaders, ['Task', 'Subject', 'Left (BP)', 'Rate (BP/yr)', 'Time left'])
+  })
+  add('page-persist: the yard pick is stored for its race and the inventory sort under its own app key', async () => {
+    const mounted = mountPersisted()
+
+    mounted.vm.yardId = 2
+    mounted.vm.yardsList = { ...mounted.vm.yardsList, sortBy: ['capacity'], sortDesc: [true] }
+    await flush()
+
+    const saved = [mounted.config.get(`${KEY}.shipyardsYard`, null), mounted.config.get('shipyardsYardsList', null)]
+
+    mounted.store.getters.racePrefix = OTHER
+    mounted.store.getters.RaceID = 2
+    await flush()
+
+    const otherYard = mounted.vm.yardId
+
+    mounted.vm.$destroy()
+
+    return same([saved[0], saved[1] && saved[1].sortBy, saved[1] && saved[1].sortDesc, otherYard], [2, ['capacity'], [true], null])
+  })
+  add('page-persist: invalid stored yard and class IDs and a nonpositive target restore as none', async () => {
+    const config = new MemoryConfig()
+
+    for (const [key, value] of [['shipyardsYard', -1], ['shipyardsFromClass', -2], ['shipyardsToClass', 0], ['shipyardsGrowthTarget', -3]]) {
+      config.set(`${KEY}.${key}`, value)
+    }
+
+    const mounted = mountPersisted({ config })
+    const restored = [mounted.vm.yardId, mounted.vm.fromId, mounted.vm.toId, mounted.vm.growthTarget]
+
+    mounted.vm.$destroy()
+
+    return same(restored, [null, null, null, null])
   })
 
   // ----- the class picks of Refits and Class to yards, over the real persisted-view mixin and an in-memory settings store -----
@@ -746,32 +1034,29 @@ const page = (ctx) => {
 
 // ---------- the named links from the other pages ----------
 
-const links = (ctx) => {
-  const { sourceText } = ctx
-  const statements = []
-  const add = (name, test) => statements.push([name, test])
+const links = (ctx) => [
+  ['named-links: the rendered Production ship job links to its yard and its idle capacity links to the colony yards', async () => {
+    const seen = await screenOf(ctx, 'recap')
+    const { task } = (await browserSession()).truth
 
-  add('named-links: the Production Recap names the yard of each ship job and each yard job, and an idle-slipway row links to the colony\'s yards', () => {
-    const recap = sourceText.PR
-    const wanted = [':to="linkTo.shipyards({ yard: item.ShipyardID })"', ':to="linkTo.shipyards({ colony: item.PopulationID })"', 'ShipyardID: ship.ShipyardID,', 'ShipyardID: shipyard.ID,', 'FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name']
+    return same([seen.job.links, seen.idleLinks], [[{ path: '/shipyards', query: { yard: String(task.ShipyardID) } }], [{ path: '/shipyards', query: { colony: String(task.PopulationID) } }]])
+  }],
+  ['named-links: the rendered idle and obsolete warnings link to their own yards', async () => {
+    const seen = await screenOf(ctx, 'warnings')
 
-    return wanted.filter((text) => !recap.includes(text)).length ? `missing: ${wanted.filter((text) => !recap.includes(text)).join(' | ')}` : true
-  })
-  add('named-links: the idle-slipway and obsolete-yard warnings link to the yard, not its colony', () => {
-    const text = sourceText.W
-    const wanted = ['link: linkTo.shipyards({ yard: shipyard.ShipyardID }),\n          signature: signatureOf(bandOf(isKnownNumber(shipyard.Slipways)', 'caption: shipyard.PopName || undefined,\n          link: linkTo.shipyards({ yard: shipyard.ShipyardID }),']
+    for (const key of ['idle-slipways', 'obsolete-shipyards']) {
+      assert.ok(seen[key].length > 0, `${key} draws a warning row`)
+      seen[key].forEach((row) => assert.deepEqual(row.links, [{ path: '/shipyards', query: { yard: row.id.split(':')[1] } }], `${key} ${row.id}`))
+    }
 
-    return count(text, 'linkTo.shipyards({ yard: shipyard.ShipyardID })') === 2 && wanted.every((find) => text.includes(find)) ? true : 'the warnings do not link to the yard'
-  })
-  add('named-links: the Tech Tree\'s lines and path views link the build rate and shipyard operations lines to Yards and Growth', () => {
-    const wanted = [[sourceText.L, ':to="linkTo.shipyards({ view: techViews[line.typeId] })"'], [sourceText.PV, ':to="linkTo.shipyards({ view: techViews[tech.typeId] })"']]
-    const bad = wanted.filter(([text, find]) => !text.includes(find) || !text.includes('SHIPYARD_TECH_VIEWS') || !text.includes('techViews: SHIPYARD_TECH_VIEWS'))
+    return true
+  }],
+  ['named-links: the rendered Tech Tree lines and build-rate path link to the appropriate Shipyards view', async () => {
+    const seen = await screenOf(ctx, 'tech')
 
-    return bad.length ? `missing in ${bad.length} of the two` : true
-  })
-
-  return statements
-}
+    return same([seen.lines.map((link) => link.query.view).sort(), seen.path], [['growth', 'yards'], [{ path: '/shipyards', query: { view: 'yards' } }]])
+  }],
+]
 
 // ---------- the saves ----------
 
@@ -828,12 +1113,12 @@ const saveStatements = async (ctx, file) => {
   add(`save-stored: ${label}: every stored activity of types 1 to 6 has the build points the rules give once the race's operations factor applies`, () => {
     const bad = activities.filter((row) => !equal(row, row.expected))
 
-    return bad.length ? short(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.expected])) : true
+    return same(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.expected]), [])
   })
   add(`save-stored: ${label}: the activities that differ at a factor of 1 are those of a race that holds a better level, and only then`, () => {
     const bad = activities.filter((row) => !equal(row, row.atOne) && !(row.held < 1 && equal(row, row.expected)))
 
-    return bad.length ? short(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.atOne])) : true
+    return same(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.atOne]), [])
   })
   add(`save-operations: ${label}: the race's stored operations column is the lowest multiplier among the levels it holds`, async () => {
     const bad = []
@@ -847,13 +1132,13 @@ const saveStatements = async (ctx, file) => {
       }
     }
 
-    return bad.length ? short(bad) : true
+    return same(bad, [])
   })
   add(`save-continual: ${label}: a stored continual activity (type 8) stores no build points, so the continual price has no stored comparison`, async () => {
     const rows = await rowsOf(database, 'select ShipyardID, RequiredBP from FCT_Shipyard where TaskType = 8')
     const bad = rows.filter((row) => row.RequiredBP !== 0 && row.RequiredBP !== null)
 
-    return bad.length ? short(bad) : true
+    return same(bad, [])
   })
   add(`save-yards: ${label}: every yard of every race is read once with a task count that is the number of its task rows, and the tasks of the race are the stored ones`, async () => {
     const bad = []
@@ -872,7 +1157,7 @@ const saveStatements = async (ctx, file) => {
       }
     }
 
-    return bad.length ? short(bad) : true
+    return same(bad, [])
   })
   add(`save-ship-based: ${label}: the yards that belong to a ship are read as such and every price and time of each is unavailable and names why, while the yard stays a row`, async () => {
     const bad = []
@@ -897,7 +1182,9 @@ const saveStatements = async (ctx, file) => {
       })
     }
 
-    return bad.length ? short(bad) : same(found.sort((a, b) => a - b), SHIP_BASED_YARDS[label])
+    same(bad, [])
+
+    return same(found.sort((a, b) => a - b), SHIP_BASED_YARDS[label])
   })
   add(`save-tasks: ${label}: the time left of every stored task is the Production Recap's, the build points left over the colony's rate for the class (the shared rate and finish)`, async () => {
     const { g, production: pr, provenance: p } = m
@@ -923,7 +1210,7 @@ const saveStatements = async (ctx, file) => {
       }))
     }
 
-    return bad.length ? short(bad) : compared >= 0 ? true : 'none compared'
+    return same([bad, compared >= 0], [[], true])
   })
 
   return { skipped: false, statements, activities, close: () => database.close() }
@@ -992,7 +1279,7 @@ const MUTATIONS = [
   { name: 'a retool holding a slipway', file: P, find: 'const free = isNumber(yard.slipways) && isNumber(yard.tasks) ? yard.slipways - yard.tasks : null', replace: 'const free = isNumber(yard.slipways) && isNumber(yard.tasks) ? yard.slipways - yard.tasks - (yard.taskType === RETOOL_ACTIVITY ? 1 : 0) : null', fails: ['page-rows'] },
   { name: 'the default target 1,000 t above the capacity', file: P, find: 'const DEFAULT_GROWTH_TONS = 10000', replace: 'const DEFAULT_GROWTH_TONS = 1000', fails: ['growth'] },
   { name: 'a target of 0 accepted', file: P, find: 'Number.isFinite(number) && number > 0 ? number : null\n    },', replace: 'Number.isFinite(number) && number >= 0 ? number : null\n    },', fails: ['growth'] },
-  { name: 'the first yard not shown while none is picked', file: P, find: 'return pickedYard || (yardId === null && yards.length ? yards[0] : null)', replace: 'return pickedYard', fails: ['growth'] },
+  { name: 'the last yard shown while none is picked', file: P, find: 'return pickedYard || (yardId === null && yards.length ? yards[0] : null)', replace: 'return pickedYard || (yardId === null && yards.length ? yards[yards.length - 1] : null)', fails: ['growth'] },
   { name: 'the continual row not marked approximate', file: P, find: 'idle: time.idle, approx: true })', replace: 'idle: time.idle, approx: false })', fails: ['growth'] },
   { name: 'the continual row priced to the capacity, not the target', file: P, find: 'const price = continualPrice({ yard, target, operations, version: formulaVersion })', replace: 'const price = continualPrice({ yard, target: yard.capacity, operations, version: formulaVersion })', fails: ['growth'] },
   { name: 'the free slipways tile counting every slipway', file: P, find: 'known.reduce((total, yard) => total + yard.slipways - yard.tasks, 0)', replace: 'known.reduce((total, yard) => total + yard.slipways, 0)', fails: ['tiles'] },
@@ -1001,12 +1288,12 @@ const MUTATIONS = [
   { name: 'the yard pick kept for the app, not the race', file: P, find: 'yardId: { key: \'shipyardsYard\', default: null, scope: \'race\', valid', replace: 'yardId: { key: \'shipyardsYard\', default: null, valid', fails: ['page-persist'] },
   { name: 'the yards table kept under the eligibility table\'s key', file: P, find: 'tableView(\'shipyardsYardsList\'', replace: 'tableView(\'shipyardsYardsTable\'', fails: ['page-persist'] },
   { name: 'the yard pick accepted as any number', file: P, find: 'yardId: { key: \'shipyardsYard\', default: null, scope: \'race\', valid: (value) => value === null || (Number.isInteger(value) && value > 0) },', replace: 'yardId: { key: \'shipyardsYard\', default: null, scope: \'race\', valid: (value) => true },', fails: ['page-persist'] },
-  { name: 'the Yards summary with a figure', file: P, find: 'data-summary="Review each shipyard\'s tasks', replace: 'data-summary="Review each 1 shipyard\'s tasks', fails: ['page-template'] },
-  { name: 'the Growth panel without its summary', file: P, find: '<v-card v-if="view === \'growth\'" class="panel" data-summary="', replace: '<v-card v-if="view === \'growth\'" class="panel" data-sum="', fails: ['page-template'] },
-  { name: 'the Growth summary in the second person', file: P, find: 'Use it to compare the upgrades and to size a continual target.', replace: 'Use it to compare your upgrades and to size a continual target.', fails: ['page-template'] },
+  { name: 'the Yards title with a figure', file: P, find: '<span>Shipyards<provenance-mark', replace: '<span>Shipyards 1<provenance-mark', fails: ['page-template'] },
+  { name: 'the Growth panel without its visible title', file: P, find: '<span>Yard growth<provenance-mark', replace: '<span><provenance-mark', fails: ['page-template'] },
+  { name: 'the Growth note in the second person', file: P, find: 'Use it to compare the upgrades and to size a continual target.', replace: 'Use it to compare your upgrades and to size a continual target.', fails: ['page-template'] },
   { name: 'the eligibility panel on every view', file: P, find: '<v-card v-if="view === \'refits\' || view === \'classes\'" class="panel" :data-summary="yardsSummary"', replace: '<v-card class="panel" :data-summary="yardsSummary"', fails: ['page-template'] },
   { name: 'the yard table\'s unknown not sorted last', file: P, find: ':items="inventoryRows" item-key="id" :custom-sort="sortNullLast"', replace: ':items="inventoryRows" item-key="id"', fails: ['page-template'] },
-  { name: 'the page\'s card left unclosed', file: P, find: '        </v-card>\n\n        <v-card v-if="view === \'growth\'"', replace: '        </v-cardx>\n\n        <v-card v-if="view === \'growth\'"', fails: ['page-template'] },
+  { name: 'the Growth note gives the commercial yard a full price', file: P, find: 'A commercial or repair yard pays a tenth.', replace: 'A commercial or repair yard pays the full price.', fails: ['page-template'] },
   { name: 'the Recap\'s yard link dropped', file: PR, find: '<page-link v-if="item.ShipyardID" class="ml-1" :to="linkTo.shipyards({ yard: item.ShipyardID })" :name="item.yardName" />', replace: '', fails: ['named-links'] },
   { name: 'the Recap\'s ship jobs read without their yard', file: PR, find: 'FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name', replace: 'FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.UnitName as Name', fails: ['named-links'] },
   { name: 'the Recap\'s slipway link dropped', file: PR, find: '<page-link v-if="column.key === \'slipways\'" class="ml-1" :to="linkTo.shipyards({ colony: item.PopulationID })" :name="item.colonyName" />', replace: '', fails: ['named-links'] },
@@ -1069,14 +1356,16 @@ const runStatements = async (statements, keys = null) => {
     }
 
     let result
+    let valueFailure = false
 
     try {
       result = await test()
     } catch (error) {
       result = `threw ${error.message}`
+      valueFailure = kindOf(error) === 'assertion' && !isSubjectThrow(error)
     }
 
-    results.push([name, result])
+    results.push([name, result, valueFailure])
   }
 
   return results
@@ -1153,13 +1442,13 @@ const checkMutant = async (mutant) => {
     return
   }
 
-  const { statements, opened } = await statementsOf(ctx, mutant.fails.some((key) => key.startsWith('save-')), mutant.fails)
+  const { statements, opened, skipped } = await statementsOf(ctx, mutant.fails.some((key) => key.startsWith('save-')), mutant.fails)
   const absent = mutant.fails.filter((key) => !statements.some(([name]) => keyOf(name) === key))
   const results = await runStatements(statements, mutant.fails)
-  const missed = mutant.fails.filter((key) => !results.some(([name, result]) => keyOf(name) === key && result !== true))
+  const missed = mutant.fails.filter((key) => !results.some(([name, result, valueFailure]) => keyOf(name) === key && result !== true && valueFailure))
 
   opened.forEach((read) => read.close())
-  check(`mutation caught: ${mutant.name}`, absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  check(`mutation caught: ${mutant.name}`, skipped.length ? `required fixture absent: ${skipped.join(', ')}` : absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
 
 const parseArguments = (argv) => {
@@ -1185,19 +1474,28 @@ const run = async () => {
   if (options.part !== null) {
     const mutant = MUTANTS.find(({ id }) => id === options.part)
 
-    if (options.part === 'head') {
-      await checkHead()
-    } else if (mutant) {
-      await checkMutant(mutant)
-    } else {
-      throw new Error(`No part is named ${options.part}`)
+    try {
+      if (options.part === 'head') {
+        await checkHead()
+      } else if (options.part === 'browser') {
+        for (const fault of MUTANTS.filter(browserFault)) {
+          await checkMutant(fault)
+        }
+      } else if (mutant) {
+        await checkMutant(mutant)
+      } else {
+        throw new Error(`No part is named ${options.part}`)
+      }
+    } finally {
+      await closeBrowser()
     }
 
     endSection(checks, failures)
   }
 
   const wanted = options.mutations ? MUTANTS : []
-  const sections = await runSections(__filename, [{ args: ['--part', 'head'], weight: 30 }, ...wanted.map(({ id }) => ({ args: ['--part', id], weight: 3 }))])
+  const browserFaults = wanted.filter(browserFault)
+  const sections = await runSections(__filename, [{ args: ['--part', 'head'], weight: 30 }, ...(browserFaults.length ? [{ args: ['--part', 'browser'], weight: 90 }] : []), ...wanted.filter((fault) => !browserFault(fault)).map(({ id }) => ({ args: ['--part', id], weight: 3 }))])
   let at = 0
 
   const printed = () => {
@@ -1211,7 +1509,7 @@ const run = async () => {
 
   if (wanted.length) {
     console.log('\nMutations: each must fail the checks it names')
-    wanted.forEach(printed)
+    sections.slice(1).forEach(printed)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

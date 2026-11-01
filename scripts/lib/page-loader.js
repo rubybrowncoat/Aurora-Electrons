@@ -77,12 +77,21 @@ const moduleUrl = (name, context) => {
   return urls.get(name)
 }
 
-// A page's module, 'pages/lagrange', or any other module of the renderer folder, with its named exports. `sources` is { [module name]: source text } for modules (or the page itself, as the text of its .vue file) whose text is given instead of read from the folder, for a check that plants a fault in one of them; `texts` is a Map the caller keeps from call to call, so each file is read once: give it only where the files do not change between the calls.
-const loadModule = async (name, { directory = rendererDirectory, stubs = {}, modules = {}, mutate = null, sources = {}, texts = new Map(), namedComponents = false, dynamicImports = false } = {}) => {
+// The named modules of the renderer folder, with their exports, in one isolated graph. Request a page and its utilities together when a check compares their object identities; separate calls deliberately own separate instances. `sources` holds replacement source texts, and `texts` caches reads only while the files stay unchanged.
+const loadModules = async (names, { directory = rendererDirectory, stubs = {}, modules = {}, mutate = null, sources = {}, texts = new Map(), namedComponents = false, dynamicImports = false } = {}) => {
   const context = { urls: new Map(), urlOfSource: moduleTree(), directory, stubs, modules: { ...MODULE_STUBS, ...modules }, mutate, sources, texts, namedComponents, dynamicImports }
 
-  return import(moduleUrl(path.posix.normalize(name), context))
+  const loaded = {}
+
+  for (const name of names) {
+    loaded[name] = await import(moduleUrl(path.posix.normalize(name), context))
+  }
+
+  return loaded
 }
+
+// One module, 'pages/lagrange' or any other module of the renderer folder, with its named exports.
+const loadModule = async (name, options) => (await loadModules([name], options))[name]
 
 // The component options of a page: the default export of its module.
 const loadPage = async (name, options) => (await loadModule(name, options)).default
@@ -169,4 +178,4 @@ const instantiate = (options, { $store, database = null, GameID = null, RaceID =
   return vm
 }
 
-module.exports = { loadPage, loadModule, replacing, instantiate }
+module.exports = { loadPage, loadModule, loadModules, replacing, instantiate }

@@ -19,8 +19,10 @@
   - `repeated`: `--variants` that names a key again runs it again, each run a variant of its own (`pass#2`) counted once, in one worker, whose setup and reset are handed the variant the suite defined; resumed with only the last repeat left (its line of the record torn), the run runs that repeat alone, on a setup handed the variant of its key;
   - `prepared`: a setup that waits for a child (4.5 s, under the limit of 8 s that check-pool's `startChild` puts on it), longer than a variant's deadline (3 s) and within the setup's (15 s), as the setup of scripts/check-specialist-deployments.js waits for the cases it reads in children: a variant that comes first in a fresh worker (`--variants`) or in a resumed run passes, the same wait in the first variant instead fails it by name, and a child past its limit is ended and said to be;
   - `racing`: in a layout whose copy of check-pool waits 4 s before it ends a process, the setup's child, with a limit of 2 s, ends well at 3 s while it is being ended: it reads as a child that did not finish, never as one that succeeded;
+  - `widthDefault`, `widthExplicit`, `widthCap`, `widthOrdered`, `widthDeaths`, `widthInvalid`: in a layout whose copy of check-pool takes the machine for the threads FAKE_THREADS gives (8, so 4 cores, unless a scenario says 4) and notes in children.txt each worker the runner starts, with the variants it is handed, and ends, and whose suite names the width FAKE_WORKERS gives (JSON): a suite that names none runs as many workers as CHECK_JOBS says (2, not the 4 cores), the variants of its pool dealt round robin to them; one that names a width (3, with CHECK_JOBS=1) runs that many side by side, dealt round robin, with the totals and the record of each variant of the run in one worker, and no more than the cores (3 asked of 2); `--variants` still runs one worker, in its order, whatever the width; a worker that dies at a width of 2 is counted by the breaker, three in a row ending the rest of its queue by name; a width of 0, -2, 2.5 or "x" names none, and the run is the default's;
   - `grouped`: a group of faults planted together (a variant with `members`) runs once, handed all its members, under the key of the group, and is resumed by that key; `solo`: with `--solo` each member runs alone as a variant of its own (`group/member`), handed only itself, the record of such a run is a run of its own, and `--variants=group/member` runs one; `selected`: `--only` matches the names of the members, whole or with `--solo`; `groupControl`: a control that names a group runs it, also with `--solo`; `groupHang`: a group that hangs fails by name, and with `--solo` only the member that hangs; `declared`: a group the runner refuses (too few members, a key that cannot be told apart, no name, no list of checks, a key or a name twice, faults and rewrites together, one check named by two members) stops the run before anything starts.
   Each planted fault rewrites one line of the copy of the runner (or of browser-observe or check-pool) and must make a named check fail; each benign rewrite must make none of the checks of the scenarios it touches fail.
+  Invalid-width checks require a successful fixture exit, its complete six-variant totals and record, before judging the observed worker width. Their plants choose the cores instead of CHECK_JOBS for each invalid class, keeping the run complete; an invalid width that crashes the runner is a defect of the harness, never fault credit.
 
   --only=<scenario>,<scenario> runs those complete head contexts and only faults/rewrites whose declared contexts all appear in that list.
   Prints `N of N checks passed`; any failed check sets exit code 1.
@@ -47,6 +49,8 @@ const FIXTURE = 'suite-runner-fixture.js'
 const LIMIT = 45000
 // The scenarios whose layout ends a process that long (ms) after it is asked to.
 const KILL_DELAYS = { late: 1500, racing: 4000 }
+// The scenarios whose layout takes the machine for the threads FAKE_THREADS gives, notes each worker the runner starts and ends in children.txt, lets the suite name its width by FAKE_WORKERS (JSON) and holds the set `wide`.
+const WIDTHS = ['widthDefault', 'widthExplicit', 'widthCap', 'widthOrdered', 'widthDeaths', 'widthInvalid']
 
 // A value oracle for the private parent timer witness. Bounds come from the fixture, never from the timer being judged; no elapsed duration is synthesized here.
 const closeArmOf = (witness, expected) => {
@@ -238,8 +242,14 @@ const phaseAck = (phase) => `
             fs.renameSync(observed + '.next', observed)
           }
 `
-// A layout of its own: the runner, browser-observe and check-pool as given in `sources` (by RUNNER, OBSERVER and POOL; check-pool slow to end a process by `killDelay` ms) and the suite, a file of the tree and the suite's save.
-const layoutOf = (sources, killDelay, closeArm = false, finiteFailures = false) => {
+// check-pool as a layout of widths has it: the threads of the machine as FAKE_THREADS gives them (the cores are half), and a line in children.txt at the root of the layout for each worker the runner starts, as it starts with the variants it is handed, and as it ends.
+const countedPool = (pool) => patched(POOL, patched(POOL, pool, 'const threads = () => (os.availableParallelism', 'const threads = () => Number(process.env.FAKE_THREADS) || (os.availableParallelism'), '  return { pid: child.pid, kill: () => killTree(child.pid), done }\n', `  const note = (text) => require('fs').appendFileSync(require('path').join(__dirname, '..', '..', 'children.txt'), text + '\\n')\n\n  note('start ' + child.pid + ' ' + args.filter((argument) => argument.startsWith('--worker=')).join(''))\n  done.then(() => note('end ' + child.pid), () => note('end ' + child.pid))\n\n  return { pid: child.pid, kill: () => killTree(child.pid), done }\n`)
+
+// The suite as a layout of widths has it: the width its caller names in FAKE_WORKERS (JSON: 3, 0, "x"), and the set `wide`, which two workers are dealt round robin: the first holds the variants that die (c1, c2, c3) and the two after them, the second w1 to w4.
+const wideFixture = (fixture) => patched(FIXTURE, patched(FIXTURE, fixture, '    setup: 15,\n', "    setup: 15,\n    ...(process.env.FAKE_WORKERS ? { workers: JSON.parse(process.env.FAKE_WORKERS) } : {}),\n"), "  prepared: () => [prepared('p1'), prepared('p2'), prepared('p3')],\n", "  wide: () => [crashing('c1'), passing('w1'), crashing('c2'), passing('w2'), crashing('c3'), passing('w3'), passing('d4'), passing('w4'), passing('d5')],\n  prepared: () => [prepared('p1'), prepared('p2'), prepared('p3')],\n")
+
+// A layout of its own: the runner, browser-observe and check-pool as given in `sources` (by RUNNER, OBSERVER and POOL; check-pool slow to end a process by `killDelay` ms) and the suite, a file of the tree and the suite's save; with `widths`, the layout of the scenarios of widths.
+const layoutOf = (sources, killDelay, closeArm = false, finiteFailures = false, widths = false) => {
   const layout = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-suite-runner-'))
   const lib = path.join(layout, 'scripts', 'lib')
 
@@ -264,13 +274,19 @@ const layoutOf = (sources, killDelay, closeArm = false, finiteFailures = false) 
 
   fs.writeFileSync(path.join(lib, 'suite-runner.js'), observedRunner)
   fs.writeFileSync(path.join(lib, 'browser-observe.js'), sources[OBSERVER])
-  fs.writeFileSync(path.join(lib, 'check-pool.js'), killDelay ? patched(POOL, sources[POOL], 'const killTree = (pid) => {', `const killTree = (pid) => {\n  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${killDelay})`) : sources[POOL])
+  const pool = killDelay ? patched(POOL, sources[POOL], 'const killTree = (pid) => {', `const killTree = (pid) => {\n  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${killDelay})`) : sources[POOL]
+
+  fs.writeFileSync(path.join(lib, 'check-pool.js'), widths ? countedPool(pool) : pool)
   const fixture = fs.readFileSync(path.join(LIB, FIXTURE), 'utf8')
 
   let configured = closeArm ? patched(FIXTURE, fixture, '    close: async () => {\n', "    close: async () => {\n      if (process.env.FAKE_CLOSE_ARM) {\n        console.log('@@suite-runner close-probe ' + JSON.stringify({ run: process.env.FAKE_RUN_ID, pid: process.pid, phase: 'close-begin' }))\n      }\n") : fixture
 
   if (finiteFailures) {
     configured = patched(FIXTURE, patched(FIXTURE, configured, "variant('hang', never)", "crashing('hang')"), "variant('spin', async () => { while (Date.now() > 0) { state.beats++ } })", "crashing('spin')")
+  }
+
+  if (widths) {
+    configured = wideFixture(configured)
   }
 
   fs.writeFileSync(path.join(lib, FIXTURE), configured)
@@ -486,6 +502,37 @@ const recordOf = (layout) => {
   return file ? Object.fromEntries(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).slice(1).map((line) => JSON.parse(line)).filter((entry) => entry.key).map((result) => [result.key, result])) : {}
 }
 
+// The workers the runner started in the layout of widths after the first `from` lines of children.txt: the variants each was handed (sorted: they start together) and the most that ran at once; `lines` is how many lines the file holds.
+const workersOf = (layout, from = 0) => {
+  const file = path.join(layout, 'children.txt')
+  const lines = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : []
+  const queues = []
+  let running = 0
+  let peak = 0
+
+  for (const line of lines.slice(from)) {
+    const [event, , handed = ''] = line.split(' ')
+
+    if (event === 'start') {
+      queues.push(handed.slice('--worker='.length))
+      peak = Math.max(peak, ++running)
+    } else {
+      running--
+    }
+  }
+
+  return { lines: lines.length, queues: queues.sort(), peak }
+}
+
+// A run in a layout of widths, on a machine of eight threads (four cores) unless `env` says another: what it printed, its record and the lines of it after the header, and the workers the runner started.
+const widthRun = async (layout, args, env = {}) => {
+  const { lines } = workersOf(layout)
+  const run = await runIn(layout, args, { env: { FAKE_THREADS: '8', ...env } })
+  const file = recordFileOf(layout)
+
+  return { ...run, record: recordOf(layout), rows: file ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).length - 1 : 0, workers: workersOf(layout, lines) }
+}
+
 // A repaired record must be complete JSONL before another process is asked to read it. A malformed persisted line is an observed wrong value; an I/O/observer error still propagates as a harness failure.
 const recordIntegrityOf = (layout) => {
   const observerIO = (read) => {
@@ -537,7 +584,7 @@ const inLayout = async (sources, need, checks = null, context = null) => {
     return SCENARIOS[need](sources[SELF], sources[POOL])
   }
 
-  const layout = layoutOf(sources, KILL_DELAYS[need] || 0, context === 'close-arm', context === 'finite-failures')
+  const layout = layoutOf(sources, KILL_DELAYS[need] || 0, context === 'close-arm', context === 'finite-failures', WIDTHS.includes(need))
 
   try {
     return await SCENARIOS[need](layout, checks, context)
@@ -1300,6 +1347,43 @@ const SCENARIOS = {
 
     return runs
   },
+  widthDefault: (layout) => widthRun(layout, ['--set=resume'], { CHECK_JOBS: '2' }),
+  widthExplicit: async (layout, checks = null) => {
+    if (checks !== null && checks.some((id) => !['width-explicit', 'width-same'].includes(id))) {
+      throw new HarnessError(`unknown width observation mapping: ${checks.join(', ')}`)
+    }
+
+    const seen = {}
+
+    // The run in one worker is what the run at a width is compared with, and only that comparison needs it.
+    if (checks === null || checks.includes('width-same')) {
+      seen.one = await widthRun(layout, ['--set=resume'])
+    }
+
+    seen.wide = await widthRun(layout, ['--set=resume'], { FAKE_WORKERS: '3' })
+
+    return seen
+  },
+  widthCap: (layout) => widthRun(layout, ['--set=resume'], { FAKE_WORKERS: '3', FAKE_THREADS: '4' }),
+  widthOrdered: (layout) => widthRun(layout, ['--set=resume', '--variants=r3,r1,r2'], { FAKE_WORKERS: '3' }),
+  widthDeaths: (layout) => widthRun(layout, ['--set=wide'], { FAKE_WORKERS: '2' }),
+  widthInvalid: async (layout, checks = null) => {
+    const named = { 'width-zero': '0', 'width-text': '"x"', 'width-fraction': '2.5', 'width-negative': '-2' }
+
+    if (checks !== null && checks.some((id) => !Object.hasOwn(named, id))) {
+      throw new HarnessError(`unknown width observation mapping: ${checks.join(', ')}`)
+    }
+
+    const seen = {}
+
+    for (const [id, width] of Object.entries(named)) {
+      if (checks === null || checks.includes(id)) {
+        seen[id] = await widthRun(layout, ['--set=resume'], { CHECK_JOBS: '2', FAKE_WORKERS: width })
+      }
+    }
+
+    return seen
+  },
 }
 
 const observe = async (sources, needs, checks = null, contexts = {}) => {
@@ -1336,6 +1420,22 @@ const ran = (run, what) => {
   if (!run || run.error || run.timedOut || (!/^HARNESS \[.*\]$/m.test(run.stdout) && !/^(?:error|Error): --resume: /m.test(run.stderr))) {
     throw new HarnessError(`${what} did not produce a complete fixture result: ${run?.error || (run?.timedOut ? 'the outer safety watchdog expired' : run?.stderr?.trim().split('\n').slice(-3).join(' | ')) || 'no result'}`)
   }
+}
+// Invalid widths must be judged only after the fixture returned normally with every result. Missing workers after a crash are not an observed fallback width.
+const fellBack = (run, what) => {
+  ran(run, what)
+  const keys = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6']
+
+  if (run.code !== 0 || run.stderr.trim() || totalsOf(run.stdout) !== '6 of 6' || harnessOf(run.stdout).length || printed(run.stdout).join(',') !== keys.join(',') || run.rows !== keys.length || Object.keys(run.record).sort().join(',') !== keys.join(',') || keys.some((key) => {
+    const result = run.record[key]
+
+    return result.key !== key || result.checks !== 1 || result.failures !== 0 || result.harness || result.problem || !Array.isArray(result.output) || !result.output.includes(`PASS  ${key}`)
+  })) {
+    throw new HarnessError(`${what} did not return normal totals and a complete six-variant record; no invalid-width fault can be credited`)
+  }
+
+  assert.equal(run.workers.peak, 2, `${what} used ${run.workers.peak} workers side by side, expected CHECK_JOBS=2`)
+  assert.deepStrictEqual(run.workers.queues, ['r1,r3,r5', 'r2,r4,r6'])
 }
 const harnessHas = (run, key, start) => assert.ok(harnessOf(run.stdout).some((line) => line.startsWith(`${key}: ${start}`)), `no defect of the harness ${key}: ${start}… in ${JSON.stringify(harnessOf(run.stdout))}`)
 const problemOf = (run, start) => assert.ok(harnessOf(run.stdout).some((line) => line.startsWith(start)), `no defect of the run ${start}… in ${JSON.stringify(harnessOf(run.stdout))}`)
@@ -1735,9 +1835,56 @@ const CHECKS = [
       assert.equal(declared[what].started, 0, `${what}: a variant started`)
     }
   }],
+  ['width-default', ['widthDefault'], 'a suite that names no width runs as many workers as CHECK_JOBS gives it (2), not the cores of the machine (4): the variants of its pool are dealt round robin to them, in the order of the pool, and the workers run side by side', ({ widthDefault }) => {
+    ran(widthDefault, 'the run of a suite that names no width, with CHECK_JOBS=2')
+    assert.deepStrictEqual(widthDefault.workers.queues, ['r1,r3,r5', 'r2,r4,r6'])
+    assert.equal(widthDefault.workers.peak, 2, 'the two workers ran side by side')
+  }],
+  ['width-explicit', ['widthExplicit'], 'a suite that names a width (3) runs that many workers side by side whatever CHECK_JOBS says (1): the variants of its pool are dealt round robin to them, in the order of the pool', ({ widthExplicit }) => {
+    ran(widthExplicit.wide, 'the run of a suite that names a width of 3, with CHECK_JOBS=1')
+    assert.deepStrictEqual(widthExplicit.wide.workers.queues, ['r1,r4', 'r2,r5', 'r3,r6'])
+    assert.equal(widthExplicit.wide.workers.peak, 3, 'the three workers ran side by side')
+  }],
+  ['width-same', ['widthExplicit'], 'the totals and the record of each variant of a run at a named width are those of the run in one worker, each variant recorded once', ({ widthExplicit }) => {
+    const timeless = (record) => Object.fromEntries(Object.entries(record).map(([key, result]) => [key, { ...result, seconds: 0 }]))
+
+    ran(widthExplicit.one, 'the run in one worker')
+    ran(widthExplicit.wide, 'the run at a width of 3')
+    assert.equal(totalsOf(widthExplicit.wide.stdout), totalsOf(widthExplicit.one.stdout))
+    assert.deepStrictEqual(timeless(widthExplicit.wide.record), timeless(widthExplicit.one.record))
+    assert.equal(widthExplicit.wide.rows, widthExplicit.one.rows, 'a line of the record for each variant, none twice')
+  }],
+  ['width-cap', ['widthCap'], 'a named width is held to the cores of the machine: 3 workers asked of a machine of 4 threads (2 cores) are 2, the variants of the pool dealt round robin to them', ({ widthCap }) => {
+    ran(widthCap, 'the run of a suite that names a width of 3 on 2 cores')
+    assert.deepStrictEqual(widthCap.workers.queues, ['r1,r3,r5', 'r2,r4,r6'])
+  }],
+  ['width-ordered', ['widthOrdered'], '--variants runs its variants in one worker, in the order it gives them, whatever width the suite names (3)', ({ widthOrdered }) => {
+    ran(widthOrdered, 'the run of three variants of a suite that names a width of 3')
+    assert.deepStrictEqual(widthOrdered.workers.queues, ['r3,r1,r2'])
+  }],
+  ['width-deaths', ['widthDeaths'], 'a worker that dies at a width of 2 is counted as at one: after three workers in a row end without finishing a variant the rest of its queue fails by name, never started', ({ widthDeaths }) => {
+    ran(widthDeaths, 'the dying suite at a width of 2')
+    assert.deepStrictEqual(widthDeaths.workers.queues, ['c1,c2,c3,d4,d5', 'c2,c3,d4,d5', 'c3,d4,d5', 'w1,w2,w3,w4'])
+
+    for (const key of ['d4', 'd5']) {
+      harnessHas(widthDeaths, key, 'not run: 3 workers in a row ended')
+    }
+  }],
+  ['width-zero', ['widthInvalid'], 'a width of 0 names none: the run is the default\'s, as many workers as CHECK_JOBS gives it', ({ widthInvalid }) => {
+    fellBack(widthInvalid['width-zero'], 'the run of a suite that names a width of 0')
+  }],
+  ['width-text', ['widthInvalid'], 'a width that is no number ("x") names none: the run is the default\'s, as many workers as CHECK_JOBS gives it', ({ widthInvalid }) => {
+    fellBack(widthInvalid['width-text'], 'the run of a suite that names a width of "x"')
+  }],
+  ['width-fraction', ['widthInvalid'], 'a width with a fraction (2.5) names none: the run is the default\'s, as many workers as CHECK_JOBS gives it', ({ widthInvalid }) => {
+    fellBack(widthInvalid['width-fraction'], 'the run of a suite that names a width of 2.5')
+  }],
+  ['width-negative', ['widthInvalid'], 'a width below 0 (-2) names none: the run is the default\'s, as many workers as CHECK_JOBS gives it', ({ widthInvalid }) => {
+    fellBack(widthInvalid['width-negative'], 'the run of a suite that names a width of -2')
+  }],
 ]
 
-const EVERY = ['all', 'leaky', 'control', 'late', 'closing', 'interrupted', 'tornClose', 'deaths', 'setup', 'setupClose', 'resume', 'steps', 'repeated', 'prepared', 'racing', 'grouped', 'solo', 'selected', 'groupControl', 'groupHang', 'declared', 'deadlineClock', 'closeArmWitness', 'listWitness', 'childWitness']
+const EVERY = ['all', 'leaky', 'control', 'late', 'closing', 'interrupted', 'tornClose', 'deaths', 'setup', 'setupClose', 'resume', 'steps', 'repeated', 'prepared', 'racing', 'grouped', 'solo', 'selected', 'groupControl', 'groupHang', 'declared', 'deadlineClock', 'closeArmWitness', 'listWitness', 'childWitness', ...WIDTHS]
 
 /* eslint-disable no-template-curly-in-string */
 // [name, from, to, scenarios to run, the check ids one of which must fail, the file rewritten (the runner when not given)]
@@ -1809,6 +1956,26 @@ const MUTANTS = [
   ['a close timer registered by another dispatch is accepted', 'timer.delay === expected.betweenMS && timer.' + "dispatch === 'closing'", 'timer.delay === expected.betweenMS', ['closeArmWitness'], ['close-arm-witness'], SELF],
   ['duplicate solo names are accepted by the value witness', 'correct: unique && names.' + 'every((name, at) => name === expected[at])', 'correct: true', ['listWitness'], ['list-witness'], SELF],
   ['the child API witness accepts an unbounded child as bounded', 'correct: seen.registered.length === 1 && ' + "seen.registered[0] === 8000 && seen.killedByTimer && seen.result.timedOut && seen.result.code === null && seen.result.stderr.endsWith('the child did not finish in 8 s\\n')", 'correct: true', ['childWitness'], ['child-api-witness'], SELF],
+
+  ['a width the suite names is ignored', 'Number.isInteger(named) && named > 0 ? Math.min(named, cores()) : jobs()', 'jobs()', ['widthExplicit'], ['width-explicit']],
+  ['the workers run as many at once as CHECK_JOBS says though the suite names a width', 'const limit = ordered ? 1 : widthOf(width)', 'const limit = ordered ? 1 : jobs()', ['widthExplicit'], ['width-explicit']],
+  ['the queues are not dealt for the width the suite names', 'queuesOf(selected, ordered, width).filter(', 'queuesOf(selected, ordered).filter(', ['widthExplicit'], ['width-explicit']],
+  ['the width the suite names is not handed to the supervisor', 'between, width: workers, workerArgs', 'between, workerArgs', ['widthExplicit'], ['width-explicit']],
+  ['the variants of a pool are dealt to queues that overlap', 'place % count === at', 'place % count <= at', ['widthExplicit'], ['width-same']],
+  ['a named width is not held to the cores', 'Math.min(named, cores())', 'named', ['widthCap'], ['width-cap']],
+  ['a width that is not named falls back to the cores instead of CHECK_JOBS', 'Math.min(named, cores()) : jobs()', 'Math.min(named, cores()) : cores()', ['widthDefault'], ['width-default']],
+  ['the variants of a pool are dealt in blocks, not round robin', 'place % count === at', 'Math.floor(place * count / list.length) === at', ['widthDefault'], ['width-default']],
+  ['the workers run one at a time whatever the width', 'const limit = ordered ? 1 : widthOf(width)', 'const limit = 1', ['widthDefault'], ['width-default']],
+  ['--variants is dealt to the workers like a pool', 'if (ordered) {', 'if (false) {', ['widthOrdered'], ['width-ordered']],
+  ['the breaker never stops a queue whose workers keep dying, at a width of 2', 'if (rest.length && deaths >= DEATHS) {', 'if (false) {', ['widthDeaths'], ['width-deaths']],
+  ['the breaker stops a queue after two workers in a row that ended without finishing a variant, at a width of 2', 'if (rest.length && deaths >= DEATHS) {', 'if (rest.length && deaths >= 2) {', ['widthDeaths'], ['width-deaths']],
+  ['a width of 0 falls back to the cores instead of CHECK_JOBS', 'Math.min(named, cores()) : jobs()', 'Math.min(named, cores()) : named === 0 ? cores() : jobs()', ['widthInvalid'], ['width-zero']],
+  ['a width that is no number falls back to the cores instead of CHECK_JOBS', 'Math.min(named, cores()) : jobs()', 'Math.min(named, cores()) : Number.isNaN(named) ? cores() : jobs()', ['widthInvalid'], ['width-text']],
+  ['a width with a fraction falls back to the cores instead of CHECK_JOBS', 'Math.min(named, cores()) : jobs()', 'Math.min(named, cores()) : named > 0 && !Number.isInteger(named) ? cores() : jobs()', ['widthInvalid'], ['width-fraction']],
+  ['a width below 0 falls back to the cores instead of CHECK_JOBS', 'Math.min(named, cores()) : jobs()', 'Math.min(named, cores()) : named < 0 ? cores() : jobs()', ['widthInvalid'], ['width-negative']],
+  ['the totals count the variants of the first queue only', 'for (const variant of selected) {\n    const result', 'for (const variant of queues[0]) {\n    const result', ['widthExplicit'], ['width-same']],
+  ['the record keeps the variants of the first queue only', 'fs.appendFileSync(file, `${JSON.stringify(defect ? { ...result, problem: defect } : result)}\\n`)', 'queues[0].some(({ key }) => key === result.key) && fs.appendFileSync(file, `${JSON.stringify(defect ? { ...result, problem: defect } : result)}\\n`)', ['widthExplicit'], ['width-same']],
+  ['the rest of a queue whose workers keep dying is not said to be not run', 'not run: ${DEATHS} workers in a row ended without finishing a variant', 'the worker did not finish', ['widthDeaths'], ['width-deaths']],
 ]
 
 // Rewrites of the runner that change nothing a run does: each must leave every check of the scenarios it touches passing. [name, from, to, scenarios to run]
@@ -1816,6 +1983,7 @@ const BENIGN = [
   ['the trees compared the other way round', 'if (kept.tree !== header.tree) {', 'if (header.tree !== kept.tree) {', ['resume']],
   ['the deadline given as a number', 'arm(variant.deadline, `the variant ${variant.key}`)', 'arm(Number(variant.deadline), `the variant ${variant.key}`)', ['all', 'late']],
   ['a step kept to a longer cut', '.slice(0, 300)', '.slice(0, 400)', ['steps']],
+  ['the cap on a named width taken the other way round', 'Math.min(named, cores())', 'Math.min(cores(), named)', ['widthCap']],
 ]
 /* eslint-enable no-template-curly-in-string */
 

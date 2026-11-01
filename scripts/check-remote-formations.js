@@ -475,18 +475,36 @@ pageAdd('page-map-roles', 'the role filter of the map narrows the marked systems
 
 pageAdd('page-map-read', 'the map reads the ground formations only while the mark is on', async (ctx) => {
   const asked = []
-  const database = { query: async (sql) => { asked.push(sql); throw new Error('asked') } }
-  const off = mapView(ctx, { marks: [] })
+  const fixture = FIXTURES[2]
+  const source = await openSave(fixture.file)
 
-  off.database = database
-  assert.equal(await off.runAsync('groundFormations'), null)
-  assert.equal(asked.length, 0)
+  assert.ok(source, `the named save ${fixture.file} must be available`)
 
-  const on = mapView(ctx, { marks: ['remote'] })
+  try {
+    const database = { query: async (sql) => { asked.push(sql); return await source.query(sql) } }
+    const off = mapView(ctx, { marks: [] })
 
-  on.database = database
-  await assert.rejects(() => on.runAsync('groundFormations'))
-  assert.ok(asked.length > 0)
+    off.database = database
+    off.GameID = fixture.GameID
+    off.RaceID = fixture.RaceID
+    const idle = await off.runAsync('groundFormations')
+
+    assert.equal(idle ? idle.formations.length : 0, 0, 'no formation rows are read while the mark is off')
+    assert.equal(idle, null)
+    assert.equal(asked.length, 0)
+
+    const on = mapView(ctx, { marks: ['remote'] })
+
+    on.database = database
+    on.GameID = fixture.GameID
+    on.RaceID = fixture.RaceID
+    const read = await on.runAsync('groundFormations')
+
+    assert.equal(read.formations.length, fixture.formations, 'the mark reads the race\'s own formation rows')
+    assert.ok(asked.length > 0)
+  } finally {
+    await source.close()
+  }
 })
 
 pageAdd('page-map-panel', 'the panel of a marked system states its remote formations and opens them in the table, and an unmarked one says nothing', (ctx) => {
@@ -606,6 +624,7 @@ pageAdd('page-survey-reveal', 'a link to a system\'s formations scrolls to the p
   changed('ready')
   changed('ready')
   changed('formationAll')
+  assert.equal(scrolled.length, 1, 'the formations panel is revealed once')
   assert.deepEqual(scrolled, [panel.$el])
   assert.equal(vm.formationsPending, false)
 })
@@ -650,13 +669,13 @@ const MUTANTS = [
   ['a stored role that is no longer offered is kept', 'ROLE_KEYS.filter((role) => stored.includes(role))', 'stored', REMOTE_FILE, ['views']],
   ['a formation is listed twice', 'model.formations.map((node) => {', 'model.formations.flatMap((node) => [node, node]).map((node) => {', REMOTE_FILE, ['rows-once', 'select-roles']],
   ['the remote switch starts off', 'default: true })', 'default: false })', REMOTE_FILE, ['views']],
-  ['the map never draws the mark', 'return this.remoteModel ? remoteSystems(this.remoteModel, this.remoteRoles) : null', 'return null', MAP_FILE, ['page-map-mark', 'page-map-roles', 'page-map-panel']],
+  ['the map merges the remote marks into the first map system', 'return this.remoteModel ? remoteSystems(this.remoteModel, this.remoteRoles) : null', 'if (!this.remoteModel) { return null }\n      const grouping = remoteSystems(this.remoteModel, this.remoteRoles)\n      const ids = Object.keys(grouping.systems)\n      const first = this.systemRows[0]\n\n      return { ...grouping, systems: ids.length && first ? { [first.id]: grouping.systems[ids[ids.length - 1]] } : {} }', MAP_FILE, ['page-map-mark', 'page-map-roles', 'page-map-panel']],
   ['the map reads the formations whether or not the mark is on', "|| !this.marksSet.has('remote')) {\n          return null", ') {\n          return null', MAP_FILE, ['page-map-read']],
   ['the table shows every row whatever the filters say', 'selectRows(this.formationAll, { roles: this.remoteRoles, remoteOnly: this.remoteOnly })', 'this.formationAll', SURVEY_FILE, ['page-survey-table']],
   ['the table sorts the Where column by a key its rows lack', "{ text: 'Where', value: 'where' }", "{ text: 'Where', value: 'remoteSort' }", SURVEY_FILE, ['page-survey-sort']],
   ['the page forgets to wait for the naval admins', "  navalAdmins: 'naval admin commands',\n", '', SURVEY_FILE, ['page-survey-ready']],
   ['a link is cleared before the page draws the panel', 'if (this.formationsPending && this.formationAll.length && this.ready) {', 'if (this.formationsPending && this.formationAll.length) {\n        this.formationsPending = false', SURVEY_FILE, ['page-survey-reveal']],
-  ['the reveal is not retried when the page becomes ready', '    ready() {\n      this.revealFormations()\n    },\n', '', SURVEY_FILE, ['page-survey-reveal']],
+  ['the reveal is not retried when the page becomes ready', '    ready() {\n      this.revealFormations()\n    },\n', '    ready() {\n      this.formationsPending = false\n    },\n', SURVEY_FILE, ['page-survey-reveal']],
   ['a click on a formation\'s row opens its system on the map', 'no-data-text="No formation matches the roles and the scope chosen" @click:row="toggleRow"', 'no-data-text="No formation matches the roles and the scope chosen" @click:row="(item) => item.system && $router.push(linkTo.map(item.system.id))"', SURVEY_FILE, ['page-survey-row']],
   ['a click on a row opens its detail and never closes it', '    toggleRow(_item, { expand, isExpanded }) {\n      expand(!isExpanded)', '    toggleRow(_item, { expand }) {\n      expand(true)', SURVEY_FILE, ['page-survey-row']],
 ]

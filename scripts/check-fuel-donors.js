@@ -1420,6 +1420,8 @@ const main = async () => {
   const mutating = !process.argv.includes('--no-mutations')
   const totals = await runSuite({
     script: __filename,
+    // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
+    workers: 4,
     inputs: [SAVE],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),

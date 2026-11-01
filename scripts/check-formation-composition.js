@@ -2037,6 +2037,8 @@ const variantsOf = () => [
 const main = async () => {
   const totals = await runSuite({
     script: __filename,
+    // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
+    workers: 4,
     inputs: FIXTURES.map((fixture) => fixture.file),
     variants: variantsOf(),
     counts: () => ({ checks, failures }),

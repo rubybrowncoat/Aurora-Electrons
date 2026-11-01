@@ -28,9 +28,9 @@ const { chunksOf, spread } = require('./lib/mutant-chunks')
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
 
-// The packages the utilities import. The stores are given to the recorder by the checks, so electron-store only has to exist.
+// The recorder's stores are supplied by the checks. The imported settings store also answers the snapshot summary's ordinary read, with the same empty-file fallback.
 const STUBS = {
-  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
+  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} get(key, fallback) { return key.split(".").reduce((value, part) => value == null ? undefined : value[part], this.store) ?? fallback } update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
@@ -1019,6 +1019,10 @@ const defineSuite = (m) => {
     const state = storeHistory.state()
 
     storeHistory.mutations.resolved(state, { GameID: 1, resolution: { campaignId: 'c1', branchId: 'b1' }, generation: 4 })
+    assert.deepEqual(storeHistory.getters.snapshotSummary(state, {}, rootOf(1, 4))(1, 7), { count: 0, latest: null })
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE stale snapshot summary:', JSON.stringify(storeHistory.getters.snapshotSummary(state, {}, rootOf(1, 5))(1, 7)))
+    }
     assert.equal(storeHistory.getters.snapshotSummary(state, {}, rootOf(1, 5))(1, 7), null)
   })
 
@@ -1654,6 +1658,10 @@ const defineSuite = (m) => {
         return store
       })
 
+      if (process.argv.includes('--detail')) {
+        console.log('VALUE persisted map layer:', JSON.stringify(b.store.campaign.cA.race[7].mapLayer))
+      }
+      assert.equal(b.store.campaign.cA.race[7].mapLayer, 'minerals', 'the selected map layer is persisted after the other window writes')
       assert.equal(calls, 2, 'the change was not made again over what the other window wrote')
       assert.deepEqual(result.campaign.cA.race[7], { mapLayer: 'minerals', mapPinned: [1, 2] })
       assert.deepEqual(b.store, result)
@@ -1933,6 +1941,10 @@ const defineSuite = (m) => {
         const id = first.resolution.campaignId
         const settings = settingsOf(inst)
 
+        if (process.argv.includes('--detail')) {
+          console.log('VALUE migrated campaign IDs:', JSON.stringify(Object.keys(settings.campaign || {})))
+        }
+        assert.deepEqual(Object.keys(settings.campaign || {}), [id], `${label}: the migrated campaign IDs`)
         assert.equal(first.resolution.legacy.verdict, 'single', label)
         assert.deepEqual(settings.campaign[id], legacySettings(), `${label}: the campaign did not get the settings`)
         assert.ok(!Array.isArray(settings.campaign[id].race), `${label}: the race map was copied as a list`)
@@ -2159,6 +2171,12 @@ const runSuite = async (modules, only = null) => {
 }
 
 // Each mutation breaks one rule of a copy of the utilities; the named checks (by the start of their text) must fail, or the check that is meant to guard the rule does not.
+// TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; a replacement is not proof of its retired operator.
+// [12] Old: "a whole-store change is made only once"; new: "a stale whole-store change returns without being applied".
+// Original ATTEMPTS=1 exhausts at preload/store-client.js:70 and throws before returning a result.
+// Replacement class: a failed compare-and-swap is silently abandoned, observed in persisted mapLayer.
+// Original retry-exhaustion class currently has no credited fault. Its sole throw-only plant is retired, not credited by this replacement.
+
 const MUTATIONS = [
   { name: 'a host that writes the companion before it compares', file: 'main/store-host.js', find: 'if (JSON.stringify(store.store) !== base) {\n        return false\n      }\n\n      store.store = next\n', replace: 'if (also) {\n        put(storeOf(also), also.key, also.value)\n      }\n\n      if (JSON.stringify(store.store) !== base) {\n        return false\n      }\n\n      store.store = next\n', fails: ['an import that lost to another window'] },
   { name: 'a client that does not send the companion', file: 'preload/store-client.js', find: 'also ? { ...also.store.target, key: also.key, value: also.value } : undefined', replace: 'undefined', fails: ['an import that lost to another window'] },
@@ -2172,7 +2190,7 @@ const MUTATIONS = [
   { name: 'an attach copies the unattached settings as they are stored', file: 'campaign-attach.js', find: 'settings: campaignSettingsOf(settings), tip: null }', replace: 'settings: clone(settings), tip: null }', fails: ['a legacy history kept unattached whose settings'] },
   { name: 'the host writes a whole store without comparing it to what the caller read', file: 'main/store-host.js', find: 'if (JSON.stringify(store.store) !== base) {', replace: 'if (false) {', fails: ['a whole-store change that another window wrote under'] },
   { name: 'a whole-store change is written without the host\'s check', file: 'preload/store-client.js', find: "if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {", replace: "if (!this.call('write', next)) {", fails: ['a whole-store change that another window wrote under'] },
-  { name: 'a whole-store change is made only once', file: 'preload/store-client.js', find: 'const ATTEMPTS = 50', replace: 'const ATTEMPTS = 1', fails: ['a whole-store change that another window wrote under'] },
+  { name: 'a stale whole-store change returns without being applied', file: 'preload/store-client.js', find: "      if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {\n        return next\n      }", replace: "      if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {\n        return next\n      }\n\n      return this.call('read')", fails: ['a whole-store change that another window wrote under'] },
   { name: 'a path is set with the store\'s own set, which makes lists of numeric segments', file: 'main/store-host.js', find: '  const next = store.store\n\n  setPath(next, key, value)\n  store.store = next', replace: '  store.set(key, value)', fails: ['two windows share one settings store'] },
   { name: 'an error of the host is not thrown in the window', file: 'preload/store-client.js', find: 'if (!answer || !answer.ok) {', replace: 'if (false) {', fails: ['a write the store refuses'] },
   { name: 'an attach merges over the settings it read before', file: 'campaign-attach.js', find: 'mergeSettings(isObject(all.campaign) ? all.campaign[campaign.id] : undefined, source.settings).settings', replace: 'mergeSettings(undefined, source.settings).settings', fails: ['attaching a history from before campaigns keeps a setting'] },
@@ -2261,6 +2279,10 @@ const applyMutation = async (copy, mutation) => {
 
     const failed = outcome.filter((entry) => entry.error)
     const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
+
+    if (process.argv.includes('--detail')) {
+      failed.forEach((entry) => console.log(`CAUGHT ${mutation.name} by ${entry.name}: ${entry.error.message}`))
+    }
 
     return { group: 'mutations', name: `${mutation.name} (fails: ${mutation.fails.join('; ')})`, error: missed.length ? new Error(`the checks that guard this did not fail: ${missed.join('; ')}`) : null }
   } catch (error) {

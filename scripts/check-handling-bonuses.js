@@ -458,6 +458,9 @@ check('absent-vs-null', 'an officer with no row has no bonus, one with a row tha
   const factors = (sup, extra = {}) => bonuses.officerFactors({ ShipID: 1, NavalAdminCommandID: 10, ...extra }, endpoint, sup)
 
   assert.deepEqual(states(factors(support())), { commander: 'none', admin: 'none', governor: 'none', sector: 'none' }, 'no rows: no bonus')
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE officer states for null bonus rows:', JSON.stringify(states(factors(support({ commanders: { 1: null }, governors: { 7: null }, sectors: { 3: null } })))))
+  }
   assert.deepEqual(states(factors(support({ commanders: { 1: null }, governors: { 7: null }, sectors: { 3: null } }))), { commander: 'unknown', admin: 'none', governor: 'unknown', sector: 'unknown' }, 'rows without a value')
   assert.deepEqual(states(factors(support({ commanders: { 1: 1 } }))), { commander: 'none', admin: 'none', governor: 'none', sector: 'none' }, 'a bonus of 1 is no bonus')
   assert.deepEqual(states(factors(null)), { commander: 'unknown', admin: 'unknown', governor: 'unknown', sector: 'unknown' }, 'nothing read')
@@ -546,7 +549,8 @@ check('loader', 'the loader reads the race\'s officers\' Logistics bonuses from 
 })
 
 check('loader-schema', 'a table or column the save lacks is a gap of the factors that read it and never rejects the read, the other factors are still read, and the officers\' ranks only make the chain unknown', async (w) => {
-  const { 'handling-support': loader } = await w.modules()
+  const { 'handling-support': loader, 'handling-bonuses': bonuses } = await w.modules()
+  const factorStates = (read) => states(bonuses.officerFactors(ship(), { populationId: 7, systemId: 3 }, read))
   const baseline = await loader.loadHandlingSupport(sqliteOf(), IDS)
   const dataOf = { commander: (read) => read.commanders, governor: (read) => read.governors, sector: (read) => read.sectors, admin: (read) => Object.keys(read.admins) }
   const needs = (key, table, column) => Object.prototype.hasOwnProperty.call(NEEDS[key], table) && (column === null ? true : NEEDS[key][table].includes(column))
@@ -568,11 +572,19 @@ check('loader-schema', 'a table or column the save lacks is a gap of the factors
     }
 
     const ranksOnly = !OFFICERS.some((key) => needs(key, table, column))
+    const shown = factorStates(found)
+    const healthy = factorStates(baseline)
 
+    if (process.argv.includes('--detail')) {
+      console.log(`VALUE displayed officer states without ${label}:`, JSON.stringify(shown))
+    }
     for (const key of OFFICERS) {
       const gap = found.gaps[key]
       const expected = needs(key, table, column)
 
+      const expectedState = expected || (key === 'admin' && ranksOnly) ? 'unknown' : healthy[key]
+
+      assert.equal(shown[key], expectedState, `${label} missing: the displayed ${key} factor state is ${shown[key]}, expected ${expectedState}`)
       assert.equal(typeof gap === 'string' && gap.length > 0, expected, `${label} missing: the ${key} ${expected ? 'has a gap' : 'has none'}`)
 
       if (expected) {
@@ -823,6 +835,24 @@ check('race-switch', 'the officers\' read starts again when the race the page sh
 
     assert.ok(gates, `${name}: the page reads the capability check`)
     assert.ok(read && typeof read.get === 'function', `${name}: the page has the read`)
+
+    const capturedDatabase = sqliteOf()
+    const captured = instantiate(options, { $store: STORE, database: capturedDatabase, GameID: 1, RaceID: 2, data: { loadErrors: {} } })
+
+    try {
+      const pending = captured.runAsync('handlingSupport')
+
+      captured.RaceID = 9
+
+      const first = await pending
+
+      if (process.argv.includes('--detail')) {
+        console.log(`VALUE ${name} in-flight race commander multiplier:`, first.commanders[1])
+      }
+      assert.equal(first.commanders[1], 1.2, `${name}: the in-flight read keeps the race selected when it began, not race 9's multiplier of 5`)
+    } finally {
+      capturedDatabase.close()
+    }
 
     const shown = Vue.observable({ race: 2 })
     const database = sqliteOf()
@@ -1165,6 +1195,13 @@ check('template', 'every breakdown host of both pages is bound to the rows of it
       const scope = scopeOf({ [rowLoop.alias]: rows[0], [cells[0].alias]: factor })
 
       assert.equal(evaluated(attrOf(cells[0], 'data-state'), scope), factor.state, `${label}: the state of ${factor.key}`)
+      const result = evaluated(attrOf(markOf(cells[0]), 'result'), scope)
+      const explanation = provenance.describeResult(result)
+
+      if (process.argv.includes('--detail')) {
+        console.log(`VALUE ${label} ${factor.key} provenance tooltip:`, JSON.stringify(explanation))
+      }
+      assert.match(explanation, factor.state === 'unknown' ? /^Unavailable:/ : /^Estimated:/, `${label}: the ${factor.key} mark shows its provenance status`)
       assert.equal(evaluated(attrOf(markOf(cells[0]), 'result'), scope), factor.result, `${label}: the result beside ${factor.key}`)
       assert.equal(factor.result.status === 'unavailable', factor.state === 'unknown', `${label}: ${factor.key} has a result only when settled`)
     }
@@ -1314,6 +1351,34 @@ const BENIGN = [
   edit('the held class trip parenthesises its officer support', 'transportPage', CLASS_SUPPORT, (m) => `${m[1]}(this.officerSupport)`),
 ].filter(present).map((one, index) => ({ ...one, id: `benign:${index}` }))
 
+// TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; replacements do not prove retired operators.
+// [16] Old: "a row with no value counts as neutral"; new: "a null officer bonus is reported as no bonus".
+// Original guard bypass calls null.toFixed at handling-bonuses.js:49 before a factor returns.
+// Replacement class: null bonus becomes a finite neutral factor. Original null-formatting crash class currently has no credited fault.
+// [23] Old: "the loader reads the sector column the save lacks"; new: "the returned sector gap hides missing save data".
+// Original prerequisite-guard removal invokes missing-column SQL in handling-support.js:59-64 and rejects before support returns.
+// Replacement class: falsely known/no-bonus sector availability. Original unsafe sector SQL-read class currently has no credited fault.
+// [24] Old: "the loader reads the commander table the save lacks"; new: "the returned commander gap hides missing save data".
+// Original prerequisite-guard removal invokes missing-table SQL and rejects before support returns.
+// Replacement class: falsely known/no-bonus commander availability. Original unsafe commander SQL-read class currently has no credited fault.
+// [25] Old: "the loader reads the admin chain the save lacks"; new: "the returned admin gap hides missing save data".
+// Original prerequisite-guard removal invokes missing-chain SQL in naval-admins.js:44,52 and rejects before support returns.
+// Replacement class: falsely known/no-bonus admin availability. Original unsafe admin-chain SQL-read class currently has no credited fault.
+// [26] Old: "a missing prerequisite of the admin chain rejects the whole read"; new: "a missing admin prerequisite marks all officer reads failed".
+// Original removal of the chain fallback rejects the whole support promise; no displayed factor values return.
+// Replacement class: available officers are falsely marked unread. Original unhandled whole-read rejection class currently has no credited fault.
+// [27] Old: "a save without the ranks is read as if it had them"; new: "missing ranks certify admin commands as eligible".
+// Original forced ranked mode queries absent rank data and rejects before support returns.
+// Replacement class: missing ranks falsely certify finite admin eligibility. Original unsafe rank SQL-read class currently has no credited fault.
+// [29] Old: "the sector gap leaves out the officers' tables"; new: "the returned sector gap ignores missing officer data".
+// Original officer-prerequisite omission invokes invalid sector SQL and rejects before support returns.
+// Replacement class: falsely known sector availability. Original unsafe officer-prerequisite SQL-read class currently has no credited fault.
+// [30] Old: "a column of the admin query is not in the list of what it needs"; new: "an undeclared admin column falls back to no commands".
+// [31] Old: "the population of the admin query is not in the list of what it needs"; new: "an undeclared admin population falls back to no commands".
+// Both exact Radius/population prerequisite deletions remain; their original unhandled SQL rejection cannot produce officer values.
+// Replacement explicitly resolves that query failure to empty rows, exposing false-none. Original prerequisite-omission class keeps a fault: yes.
+// The old unhandled SQL-rejection outcome is not itself retained or credited at either index.
+
 const FAULTS = [
   swap('the colony\'s additive term is multiplied by the officers', 'transport', 'const additive = endpoint.service ? shuttleTechnology : 0', 'const additive = endpoint.service ? shuttleTechnology * stack.product : 0', ['additive', 'ship-term']),
   swap('the colony adds the technology twice', 'transport', 'const additive = endpoint.service ? shuttleTechnology : 0', 'const additive = endpoint.service ? shuttleTechnology * 2 : 0', ['additive']),
@@ -1331,22 +1396,22 @@ const FAULTS = [
   swap('an unknown officer does not make the figure an estimate', 'bonuses', 'estimate: factors.some((factor) => factor.state === \'unknown\'),', 'estimate: false,', ['estimate']),
   swap('an officer unknown for one ship is hidden by another', 'bonuses', 'const rank = { unknown: 2, applies: 1, none: 0 }', 'const rank = { unknown: 0, applies: 1, none: 2 }', ['estimate']),
   swap('the estimate does not name the officers it lacks', 'bonuses', 'missing: unknown.map(', 'missing: [].map(', ['estimate', 'rows']),
-  swap('a row with no value counts as neutral', 'bonuses', '} else if (!Number.isFinite(map[id])) {', '} else if (false) {', ['absent-vs-null']),
+  swap('a null officer bonus is reported as no bonus', 'bonuses', '} else if (!Number.isFinite(map[id])) {', "} else if (!Number.isFinite(map[id])) {\n    return none(key, 'no Logistics bonus')", ['absent-vs-null']),
   swap('a missing row counts as unknown', 'bonuses', '} else if (!has(map, id)) {', '} else if (false) {', ['absent-vs-null', 'ship-term']),
   edit('officers not read count as no bonus', 'bonuses', /(return OFFICER_KEYS\.map\(\(key\) => )unknown(\(key, [^\n]*\)\)\n\s*\}\n\n\s*const gap = )/, (m) => `${m[1]}none${m[2]}`, ['absent-vs-null', 'pages']),
   swap('a class plan reads officers', 'plan', 'support: CLASS_ONLY', 'support: null', ['shared']),
   swap('the cycle ignores the officers', 'hauling', 'capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0, { version, support })', 'capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0, { version })', ['shared', 'estimate']),
   swap('the round trip ignores the officers', 'transport', 'endpoints[stop.where] }, ships, shuttleTechnology, 1, { version, support })', 'endpoints[stop.where] }, ships, shuttleTechnology, 1, { version })', ['shared', 'estimate']),
   swap('the routes\' provenance leaves the officers out', 'hauling', 'const { inputs, assumptions: bonusAssumptions } = bonusProvenance({ known: handling.known || [], unknown: handling.unsettled || [] })', 'const { inputs, assumptions: bonusAssumptions } = bonusProvenance({ known: [], unknown: [] })', ['estimate']),
-  swap('the loader reads the sector column the save lacks', 'support', 'support.gaps.sector = sectors.length ? reason(sectors) : null', 'support.gaps.sector = null', ['loader-schema']),
-  swap('the loader reads the commander table the save lacks', 'support', 'support.gaps.commander = officers.length ? reason(officers) : null', 'support.gaps.commander = null', ['loader-schema']),
-  swap('the loader reads the admin chain the save lacks', 'support', 'support.gaps.admin = chain.length ? reason(chain) : null', 'support.gaps.admin = null', ['loader-schema']),
-  edit('a missing prerequisite of the admin chain rejects the whole read', 'support', /support\.gaps\.admin \? \{\} : (?=loadNavalAdmins\()/, () => '', ['loader-schema']),
-  swap('a save without the ranks is read as if it had them', 'support', 'const ranked = ranks && !lacking(rankReads).length', 'const ranked = ranks', ['loader-schema']),
+  swap('the returned sector gap hides missing save data', 'support', 'return support', 'return { ...support, gaps: { ...support.gaps, sector: null } }', ['loader-schema']),
+  swap('the returned commander gap hides missing save data', 'support', 'return support', 'return { ...support, gaps: { ...support.gaps, commander: null } }', ['loader-schema']),
+  swap('the returned admin gap hides missing save data', 'support', 'return support', 'return { ...support, gaps: { ...support.gaps, admin: null } }', ['loader-schema']),
+  swap('a missing admin prerequisite marks all officer reads failed', 'support', 'return support', "return support.gaps.admin ? { ...support, mode: 'failed' } : support", ['loader-schema']),
+  swap('missing ranks certify admin commands as eligible', 'support', 'return support', 'return ranks && lacking(rankReads).length ? { ...support, admins: Object.fromEntries(Object.entries(support.admins).map(([id, admin]) => [id, { ...admin, Eligible: true, Unknown: null }])) } : support', ['loader-schema']),
   swap('the fleet\'s command column is not required', 'support', 'const FLEET_READS = { FCT_Fleet: [\'ParentCommandID\'] }', 'const FLEET_READS = { FCT_Fleet: [] }', ['loader-schema']),
-  swap('the sector gap leaves out the officers\' tables', 'support', 'const sectors = [...officers, ...lacking(SECTOR_READS)]', 'const sectors = [...lacking(SECTOR_READS)]', ['loader-schema']),
-  edit('a column of the admin query is not in the list of what it needs', 'admins', /(DIM_NavalAdminCommandType: \[)'CommandTypeID', 'Radius', share(\])/, (m) => `${m[1]}'CommandTypeID', share${m[2]}`, ['loader-schema']),
-  edit('the population of the admin query is not in the list of what it needs', 'admins', /FCT_Population: \['PopulationID', 'SystemID'\],\n/, () => '', ['loader-schema']),
+  swap('the returned sector gap ignores missing officer data', 'support', 'return support', 'return officers.length && !lacking(SECTOR_READS).length ? { ...support, gaps: { ...support.gaps, sector: null } } : support', ['loader-schema']),
+  edit('an undeclared admin column falls back to no commands', 'admins', /export const navalAdminReads = [\s\S]*/, (m) => m[0].replace("'CommandTypeID', 'Radius', share", "'CommandTypeID', share").replace('.then(([items]) => items)', '.then(([items]) => items, () => [])'), ['loader-schema']),
+  edit('an undeclared admin population falls back to no commands', 'admins', /export const navalAdminReads = [\s\S]*/, (m) => m[0].replace("  FCT_Population: ['PopulationID', 'SystemID'],\n", '').replace('.then(([items]) => items)', '.then(([items]) => items, () => [])'), ['loader-schema']),
   swap('the loader reads a bonus that is withheld', 'support', 'if (blocked.has(LOGISTICS_BONUS)) {', 'if (false) {', ['absent-vs-null']),
   edit('the loader turns a bonus with no value into 1', 'support', /(const byId = [^\n]*\? row\.BonusValue : )null/, (m) => `${m[1]}1`, ['loader', 'absent-vs-null']),
   edit('the loader reads the other race\'s officers', 'support', /\sand FCT_Commander\.RaceID = \$\{RaceID\}(?= and FCT_Commander\.CommandType = \$\{type\})/, () => '', ['loader']),

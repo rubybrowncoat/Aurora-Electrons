@@ -2789,6 +2789,7 @@ const main = async () => {
   const options = { mutations: mayMutate(), browser: !process.argv.includes('--no-browser') }
   const totals = await runSuite({
     script: __filename,
+    workers: 4,
     variants: variantsOf(options),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

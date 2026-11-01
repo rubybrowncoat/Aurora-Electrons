@@ -31,7 +31,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
-const { inParallel, jobs, startChild } = require('./check-pool')
+const { cores, inParallel, jobs, startChild } = require('./check-pool')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const MARK = '@@suite-runner '
@@ -293,8 +293,15 @@ const work = async (queue, { counts, prepare, afterEach, close }) => {
 
 // ---------- the parent ----------
 
+// How many queues run at once: the suite's own width where it names one, else the share CHECK_JOBS gives this script. A suite whose variants are independent work of their own names a width, because CHECK_JOBS divides the machine between the scripts check-all runs side by side, and a full run of one script alone would otherwise run every variant of the suite one after another. A named width is held to the physical cores so one suite cannot ask for more workers than the machine has, and several suites run side by side stay bounded by that and by the number check-all runs at once (the default three suites at a named width of four is twelve workers). A suite that names none keeps exactly the share it had before.
+const widthOf = (width) => {
+  const named = Number(width)
+
+  return Number.isInteger(named) && named > 0 ? Math.min(named, cores()) : jobs()
+}
+
 // The queues of workers: the variants of each pool dealt round robin to as many workers as run at once, in their order, and each variant without a pool in a queue of its own; `--variants` puts its variants in one queue, in its order.
-const queuesOf = (selected, ordered) => {
+const queuesOf = (selected, ordered, width) => {
   if (ordered) {
     return [selected]
   }
@@ -311,7 +318,7 @@ const queuesOf = (selected, ordered) => {
   }
 
   for (const list of pools.values()) {
-    const count = Math.min(jobs(), list.length)
+    const count = Math.min(widthOf(width), list.length)
 
     queues.push(...Array.from({ length: count }, (_none, at) => list.filter((_variant, place) => place % count === at)))
   }
@@ -319,7 +326,7 @@ const queuesOf = (selected, ordered) => {
   return queues
 }
 
-const supervise = async ({ script, byKey, selected, args, ordered, resume, setup, between, workerArgs, inputs }) => {
+const supervise = async ({ script, byKey, selected, args, ordered, resume, setup, between, workerArgs, inputs, width }) => {
   const file = recordOf(script, args)
   const header = { script: path.relative(ROOT, script).replace(/\\/g, '/'), args, tree: treeHash(), inputs: inputsHash(inputs), variants: selected.map(({ key, name }) => [key, name]), began: new Date().toISOString() }
   const resumed = resume ? readRecord(file, header) : null
@@ -506,8 +513,8 @@ const supervise = async ({ script, byKey, selected, args, ordered, resume, setup
 
   flush()
 
-  const queues = queuesOf(selected, ordered).filter((queue) => queue.some(({ key }) => !results.has(key)))
-  const limit = ordered ? 1 : jobs()
+  const queues = queuesOf(selected, ordered, width).filter((queue) => queue.some(({ key }) => !results.has(key)))
+  const limit = ordered ? 1 : widthOf(width)
   const weight = (queue) => queue.reduce((total, variant) => total + variant.deadline, 0)
   const place = new Map(selected.map(({ key }, at) => [key, at]))
 
@@ -664,7 +671,7 @@ const runOf = (byKey, key) => {
   return variant && again ? { ...variant, key, name: `${variant.name} (run ${again[2]})`, of: variant } : variant
 }
 
-const runSuite = async ({ script, variants, counts, prepare = async () => {}, afterEach = async () => {}, close = async () => {}, control = null, inputs = [], deadline = 300, setup = 900, between = 900, argv = process.argv.slice(2) }) => {
+const runSuite = async ({ script, variants, counts, prepare = async () => {}, afterEach = async () => {}, close = async () => {}, control = null, inputs = [], deadline = 300, setup = 900, between = 900, workers = null, argv = process.argv.slice(2) }) => {
   const parsed = runnerArgs(argv)
   const { list, byKey } = listOf(variants, control, deadline, parsed.solo)
 
@@ -698,7 +705,7 @@ const runSuite = async ({ script, variants, counts, prepare = async () => {}, af
   const selected = parsed.variants ? numbered(parsed.variants).map((key) => runOf(byKey, key)) : parsed.only ? list.filter((variant) => variant.head || parsed.only.some((text) => variant.name.includes(text))) : list
   const args = [...parsed.rest, ...(parsed.only ? [`--only=${parsed.only.join('|')}`] : []), ...(parsed.variants ? [`--variants=${parsed.variants.join(',')}`] : []), ...(parsed.solo ? ['--solo'] : [])]
 
-  return supervise({ script, byKey: new Map([...byKey, ...selected.map((variant) => [variant.key, variant])]), selected, args, ordered: Boolean(parsed.variants), resume: parsed.resume, setup, between, workerArgs: [...parsed.rest, ...(parsed.solo ? ['--solo'] : [])], inputs })
+  return supervise({ script, byKey: new Map([...byKey, ...selected.map((variant) => [variant.key, variant])]), selected, args, ordered: Boolean(parsed.variants), resume: parsed.resume, setup, between, width: workers, workerArgs: [...parsed.rest, ...(parsed.solo ? ['--solo'] : [])], inputs })
 }
 
 module.exports = { runSuite, runnerArgs, step, treeHash, declaredGroup, RunnerError, CONTROL_KEY }

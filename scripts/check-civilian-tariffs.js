@@ -151,7 +151,10 @@ const synthetic = ({ tariff, provenance, finances }) => {
     const rate = rateOf('2.7.x', 'fuel')
     const result = estimate({ category: 'fuel', quantity: 1000, billionKm: 5 })
 
-    return noValue(rate) && noValue(result) && /fuel/.test(missingText(rate)) && /fuel/.test(missingText(result)) && result.value !== 0
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fuel rate and payout:', JSON.stringify([rate.value, result.value]))
+    }
+    return (noValue(rate) && noValue(result) && /fuel/.test(missingText(rate)) && /fuel/.test(missingText(result)) && result.value !== 0) || `fuel rate ${rate.value}, payout ${result.value}; expected both unavailable`
   })
   add('an unknown category has no rate and no estimate', () => [undefined, null, '', 'bogus', 'perSystem'].every((category) => noValue(rateOf('2.7.x', category)) && noValue(estimate({ category }))))
   add('a quantity that is not a number of 0 or more is unavailable and named', () => [null, undefined, NaN, -1, Infinity, '5'].every((quantity) => noValue(estimate({ quantity })) && /quantity/.test(missingText(estimate({ quantity })))))
@@ -207,7 +210,14 @@ const synthetic = ({ tariff, provenance, finances }) => {
 
     return (mapping.complete && close(valueOrNull(result), 1070) && result.status === 'estimated' && result.rule.id === 'civilianTariff.netCost') || `${valueOrNull(result)}`
   })
-  add('a fully placed mapping counts a use with nothing logged as 0', () => close(valueOrNull(netCostResult({ version: '2.7.x', mapping: treasuryMapping(placed(FULL)), totals: { 44: 1000 } })), 1000))
+  add('a fully placed mapping counts a use with nothing logged as 0', () => {
+    const value = valueOrNull(netCostResult({ version: '2.7.x', mapping: treasuryMapping(placed(FULL)), totals: { 44: 1000 } }))
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE net cost for absent totals:', value)
+    }
+    return close(value, 1000) || `net cost ${value}; expected 1000`
+  })
   add('a fully placed mapping still gives no net cost for an unsupported version', () => ['2.6.0', null, '3.0.0'].every((version) => noValue(netCostResult({ version, mapping: treasuryMapping(placed(FULL)), totals: TOTALS }))))
 
   add('the ledger the Finances page builds lists the civilian uses of its categories, in the table order, and leaves the others out', () => {
@@ -257,13 +267,18 @@ const attempt = (test) => test()
 
 // The pages' wiring, on the text of the pages: [[name, held]]. Each statement must hold of the real pages and fail of a page with one gate cut out.
 const wiring = ({ finances, information, utility, tariff, provenance }) => {
-  const panel = between(finances, '<v-card class="panel" data-summary="Estimate civilian shipping-line payouts', '</v-card>')
+  const heading = finances.indexOf('<span>Civilian shipping-line payouts')
+  const panel = between(finances.slice(finances.lastIndexOf('<v-card', heading)), '<v-card', '</v-card>')
+  const summary = (/\bdata-summary="([^"]*)"/.exec(panel) || [])[1]
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE civilian panel summary:', JSON.stringify(summary))
+  }
   const noteSource = between(information, 'payoutNote() {', 'problems() {')
   const estimateSource = between(finances, '    estimate() {', '    // The ledger\'s civilian uses')
   const all = []
   const add = (name, held) => all.push([name, typeof held === 'function' ? attempt(held) : held])
 
-  add('Finances: the panel has a data-summary and a head titled for civilian shipping-line payouts', /^<v-card class="panel" data-summary="[^"]{40,}" elevation="1">\s*<div class="panel-head">\s*<span>Civilian shipping-line payouts/.test(panel))
+  add('Finances: the panel has a data-summary and a head titled for civilian shipping-line payouts', (summary === 'Estimate civilian shipping-line payouts using rates per unit carried and per billion km.' && /^<v-card class="panel"[^>]*>\s*<div class="panel-head">\s*<span>Civilian shipping-line payouts/.test(panel)) || `panel summary ${JSON.stringify(summary)}; expected the civilian shipping-line payout summary`)
   add('Finances: the rates, the worked estimate and the net cost take the save\'s formula version', /rateOf\(this\.formulaVersion, category\.id\)/.test(finances) && /payoutEstimate\(\{ version: this\.formulaVersion,/.test(finances) && /netCostResult\(\{ version: this\.formulaVersion,/.test(finances))
   add('Finances: the formula version is read from the save\'s schema', /formulaVersion: \{\s*get: tracked\('formulaVersion', async function \(\) \{[\s\S]{0,200}?return await loadFormulaVersion\(this\.database\)/.test(finances) && /formulaVersion: 'the save\\'s schema'/.test(finances))
   add('Finances: the net cost is asked of the mapping the module ships, not of a mapping the page builds', /const TARIFF_MAPPING = treasuryMapping\(\)/.test(finances) && /mapping: TARIFF_MAPPING/.test(finances))
@@ -356,6 +371,14 @@ const mutatedCopy = (file, from, to) => {
   return directory
 }
 
+// TFIN-03 catalog audit: utility/page indices and mapped checks are unchanged; replacements do not prove retired operators.
+// [utility:21] Old: "an unknown rate falls through to a figure"; new: "an unknown rate is estimated as zero".
+// Removing the original null-rate guard sends null to ofRule at civilian-tariff.js:88, which throws before a figure returns.
+// Replacement class: an unpublished rate becomes a finite zero estimate. Original null-input guard-removal class currently has no credited fault.
+// [utility:40] Old: "a use with nothing logged is not counted as 0"; new: "an absent shipping total is estimated as one".
+// Removing the original absent-total default produces NaN, rejected at civilian-tariff.js:129-131 before net cost returns.
+// Replacement class: missing usage becomes one unit and a wrong finite net cost. Original NaN-producing guard-removal class currently has no credited fault.
+
 const MUTATIONS = [
   ['the colonist rate is the 2.6 one', 'unit: \'colonist\', rate: 0.00015', 'unit: \'colonist\', rate: 0.0001', ['colonist: 2000']],
   ['the passenger rate is the 2.6 one', 'unit: \'passenger\', rate: 0.006', 'unit: \'passenger\', rate: 0.004', ['passenger: 500']],
@@ -378,7 +401,7 @@ const MUTATIONS = [
   ['the rates are given to every game version', 'if (ruleSupports(\'civilianTariff.rates\', version) !== true) {', 'if (false) {', ['unsupported game version null']],
   ['the rules hold for any 2.x version', 'const TARIFF_VERSIONS = [\'2.7.x\']', 'const TARIFF_VERSIONS = [\'2.x\']', ['the rules are registered with the 2.7 versions']],
   ['the rules hold for 2.6 as well', 'const TARIFF_VERSIONS = [\'2.7.x\']', 'const TARIFF_VERSIONS = [\'2.7.x\', \'2.6.x\']', ['the rules are registered with the 2.7 versions']],
-  ['an unknown rate falls through to a figure', 'if (!category || category.rate === null) {', 'if (!category) {', ['fuel has no published rate']],
+  ['an unknown rate is estimated as zero', 'if (!category || category.rate === null) {', "if (category && category.rate === null) {\n    return ofRule({ rule: 'civilianTariff.rates', value: 0, inputs: { present: ['an assumed rate'] } })\n  }\n\n  if (!category || category.rate === null) {", ['fuel has no published rate']],
   ['an unavailable rate no longer stops the estimate', 'if (!isAvailable(rate)) {', 'if (false) {', ['unsupported game version null']],
   ['the quantity is not checked', 'finite(quantity) && quantity >= 0', 'true', ['a quantity that is not a number']],
   ['a negative quantity is allowed', 'finite(quantity) && quantity >= 0', 'finite(quantity)', ['a quantity that is not a number']],
@@ -397,7 +420,7 @@ const MUTATIONS = [
   ['the net cost holds for every version', 'if (ruleSupports(\'civilianTariff.netCost\', version) !== true) {', 'if (false) {', ['a fully placed mapping still gives no net cost']],
   ['the net cost adds the taxes', 'sum(\'payout\') - sum(\'tax\')', 'sum(\'payout\') + sum(\'tax\')', ['a fully placed mapping gives the logged payout']],
   ['the net cost leaves the taxes out', 'sum(\'payout\') - sum(\'tax\')', 'sum(\'payout\')', ['a fully placed mapping gives the logged payout']],
-  ['a use with nothing logged is not counted as 0', '(totals[use.id] || 0)', 'totals[use.id]', ['a fully placed mapping counts a use with nothing logged']],
+  ['an absent shipping total is estimated as one', '(totals[use.id] || 0)', '(totals[use.id] || 1)', ['a fully placed mapping counts a use with nothing logged']],
   ['the Civilian Contracts use is missing', '  { id: 44, label: \'Civilian Contracts\', side: \'spending\' },\n', '', ['the civilian uses are the expected ids']],
   ['a tax use is on the spending side', '{ id: 32, label: \'Tax on Shipping Trade Goods\', side: \'income\' }', '{ id: 32, label: \'Tax on Shipping Trade Goods\', side: \'spending\' }', ['the civilian uses are the expected ids']],
   ['civilian mining is counted as a shipping use', '  { id: 47, label: \'Tax on Civilian Fuel\', side: \'income\' },\n', '  { id: 47, label: \'Tax on Civilian Fuel\', side: \'income\' },\n  { id: 35, label: \'Tax on Civilian Mining\', side: \'income\' },\n', ['the civilian uses are the expected ids']],
@@ -450,6 +473,10 @@ const caughtValues = async (results, fails, name) => {
 
   const failed = judged(await runChecks(named.map(([id, held]) => ({ id, name: id, run: () => assert.ok(held === true, typeof held === 'string' ? held : `${id} returned ${held}`) })), {}), name)
 
+  if (process.argv.includes('--detail')) {
+    failed.forEach(({ id, detail }) => console.log(`CAUGHT ${name} by ${id}: ${detail}`))
+  }
+
   return fails.every((start) => caughtBy(failed, named.filter(([id]) => id.startsWith(start)).map(([id]) => id), { name }))
 }
 
@@ -460,7 +487,9 @@ const parseArguments = (argv) => {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
-    } else if (argv[index] === '--no-mutations') {
+    } else if (argv[index].startsWith('--only=')) {
+      options.only = argv[index].slice('--only='.length).split('|').filter(Boolean)
+    } else if (argv[index] === '--no-mutations' || argv[index] === '--detail') {
       continue
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
@@ -582,7 +611,7 @@ const run = async () => {
   if (mutating()) {
     console.log('\nMutations: each must fail at least one check')
 
-    for (const [label, from, to, fails] of MUTATIONS) {
+    for (const [label, from, to, fails] of MUTATIONS.filter(([name]) => !options.only || options.only.some((text) => name.includes(text)))) {
       let directory
 
       try {
@@ -602,7 +631,7 @@ const run = async () => {
       }
     }
 
-    for (const [label, page, from, to, fails] of PAGE_MUTATIONS) {
+    for (const [label, page, from, to, fails] of PAGE_MUTATIONS.filter(([name]) => !options.only || options.only.some((text) => name.includes(text)))) {
       refusePlanting(label)
       const source = pages[page]
 

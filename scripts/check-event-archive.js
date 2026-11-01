@@ -10,7 +10,7 @@
   - pins: a pin once per group, the limit, the pins a fork inherits, what a save says of a pin;
   - falryx: the saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and forks), read only: the figures of the reconciliation against SQL written here, a fork merged into one archive, the bytes an event costs, pins across saves whose rowids changed;
   - passive: the 150 snapshots of artifacts/passive-campaign-20261013 (game 139, its player race found by SQL), read only: every snapshot merged in order against the multiset union computed here.
-  A save that is not there skips its group and says so; nothing is read from it but SELECTs (the files are opened read only).
+  A save that is not there skips its head group and says so, but a mutation cannot be credited unless every named check has its required saves and fails by an observed value; nothing is read from a save but SELECTs (the files are opened read only).
 
   Everything else runs on in-memory stores. Each mutation of the utilities is planted in an isolated copy (scripts/lib/mutant-source.js) and must break the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
@@ -408,7 +408,10 @@ check('capture', 'a capture is the race\'s rows by increment as counted groups w
 
 check('readfail', 'a failed read is kept as { failed } and never thrown, and a window already read is not read again', 'unit', async ({ m }) => {
   const log = []
-  const failing = await m.a.readRaceEvents({ query: async (sql) => { log.push(sql); throw new Error('disk I/O error') } }, { GameID: 1, RaceID: 7, t: 5 })
+  const readError = new Error('disk I/O error')
+  const failing = await m.a.readRaceEvents({ query: async (sql) => { log.push(sql); throw readError } }, { GameID: 1, RaceID: 7, t: 5 })
+
+  assert.equal(failing.failed?.message ?? null, 'disk I/O error', 'the archive reports the read failure as a returned value')
 
   assert.ok(failing.failed instanceof Error)
   assert.equal(failing.capture, undefined)
@@ -1736,17 +1739,24 @@ const snapshotCount = (branch) => branch.races[FALRYX_RACE].snapshots.length
 const RECORDER_SCHEDULES = ['rthrow', 'rsuperseded']
 const PREFIX_RECORDER_FAULTS = new Set([11, 22, 48, 50, 105, 107, 114])
 const PREFIX_RECORDER_CHECKS = new Set(['rnochoice', 'rstatements', 'rfile', 'rrepeat'])
-const validateRecorderPrefix = (only) => {
+const FORK_RECORDER_FAULTS = new Set([40, 92, 110])
+const FORK_RECORDER_CHECKS = new Set(['rfork'])
+const validateRecorderPrefix = (only, allowed = PREFIX_RECORDER_CHECKS) => {
   if (!Array.isArray(only) || !only.length || only.some((id) => !checks.some((entry) => entry.key === id))) {
     throw new HarnessError('a recorder prefix requires a nonempty selection of known check IDs')
   }
   const readers = checks.filter((entry) => entry.needs === 'recorder' && only.includes(entry.key))
 
-  if (!readers.length || readers.some((entry) => !PREFIX_RECORDER_CHECKS.has(entry.key))) {
+  if (!readers.length || readers.some((entry) => !allowed.has(entry.key))) {
     throw new HarnessError('a recorder prefix cannot omit a scenario read by its named checks')
   }
 }
 const recorderModeOf = (mutation) => {
+  if (FORK_RECORDER_FAULTS.has(MUTATIONS.indexOf(mutation))) {
+    validateRecorderPrefix(mutation.fails, FORK_RECORDER_CHECKS)
+
+    return 'fork-prefix'
+  }
   if (!PREFIX_RECORDER_FAULTS.has(MUTATIONS.indexOf(mutation))) {
     return 'full'
   }
@@ -1757,11 +1767,14 @@ const recorderModeOf = (mutation) => {
 const recorderSchedules = (only, schedules = RECORDER_SCHEDULES) => schedules.filter((key) => only === null || only.includes(key))
 
 const recorder = async (m, only = null, projection = 'full') => {
-  if (!['full', 'prefix'].includes(projection)) {
+  if (!['full', 'prefix', 'fork-prefix'].includes(projection)) {
     throw new HarnessError('unknown recorder scenario projection: ' + projection)
   }
   if (projection === 'prefix') {
     validateRecorderPrefix(only)
+  }
+  if (projection === 'fork-prefix') {
+    validateRecorderPrefix(only, FORK_RECORDER_CHECKS)
   }
   const files = falryxOrder()
 
@@ -1836,6 +1849,11 @@ const recorder = async (m, only = null, projection = 'full') => {
 
   result.fork = { registry, writes: inst.eventValues(named('b2'), forkWrites), b1: events('b1'), b2: events('b2'), names: [...inst.files.keys()].filter((name) => name.includes('events')) }
   inst.afterFork = inst.copy()
+
+  // The fork reader consumes only the original first nine passes and their captured fields.
+  if (projection === 'fork-prefix') {
+    return result
+  }
 
   await recordOf(m, inst, files[5])
   result.continued = { b1: events('b1'), b2: events('b2'), writes: inst.eventWrites() }
@@ -2352,6 +2370,12 @@ check('recorder-schedules', 'the full head keeps both replay schedules and every
 
 // ---------- the mutations ----------
 
+// Retired fault classes: a replacement does not prove the original operator.
+// [6] Old name: "a failed read is thrown"; current name: "a failed read is returned with a null failure".
+// Original class: readRaceEvents lets a database-read failure escape as a thrown exception instead of returning { failed }.
+// Reason/coverage: the original plant rejects before returning a value, so the no-subject-throw credit rule excludes it; readfail still enforces the return contract, while fault 6 now covers a returned null failure report.
+// Original class loses its last fault: yes; no remaining credited fault in this suite covers an exception escaping readRaceEvents.
+
 const MUTATIONS = [
   { name: 'a missing value is kept as 0', file: 'event-archive.js', find: 'const numberOrNull = (value) => (isKnownNumber(value) ? Number(value) : null)', replace: 'const numberOrNull = (value) => (isKnownNumber(value) ? Number(value) : 0)', fails: ['fields', 'counts', 'capture'] },
   { name: 'the fingerprint leaves the increment out', file: 'event-archive.js', find: 'JSON.stringify([Number(IncrementID), ...fields])', replace: 'JSON.stringify([...fields])', fails: ['fields', 'counts', 'pin', 'pinstate'] },
@@ -2359,7 +2383,7 @@ const MUTATIONS = [
   { name: 'identical rows are counted once', file: 'event-archive.js', find: 'counts.set(key, (counts.get(key) || 0) + 1)', replace: 'counts.set(key, 1)', fails: ['counts', 'recon2', 'pinstate'] },
   { name: 'a capture counts identical rows once', file: 'event-archive.js', find: 'groups.set(key, groups.has(key) ? [groups.get(key)[0], groups.get(key)[1] + 1] : [fields, 1])', replace: 'groups.set(key, [fields, 1])', fails: ['capture', 'rows', 'recon1'] },
   { name: 'an orphan row is assigned to the first known increment instead of left out', file: 'event-archive.js', find: '      orphans++\n      return', replace: '      orphans++\n      const orphan = eventFields(row)\n      const groups = byIncrement.get(ids[0]) || new Map()\n      groups.set(JSON.stringify(orphan), [orphan, 1])\n      byIncrement.set(ids[0], groups)\n      return', fails: ['capture'] },
-  { name: 'a failed read is thrown', throws: true, file: 'event-archive.js', find: 'return { failed: error }', replace: 'throw error', fails: ['readfail'] },
+  { name: 'a failed read is returned with a null failure', file: 'event-archive.js', find: 'return { failed: error }', replace: 'return { failed: null }', fails: ['readfail'] },
   { name: 'the window is read again for each race', file: 'event-archive.js', find: 'const seen = window || (await readLogWindow(database, GameID, options))', replace: 'const seen = await readLogWindow(database, GameID, options)', fails: ['readfail'] },
   { name: 'the window starts after the log\'s oldest increment', file: 'event-archive.js', find: 'FCT_Increments.IncrementID >= $' + '{Number(first)}', replace: 'FCT_Increments.IncrementID > $' + '{Number(first)}', fails: ['window'] },
   { name: 'touching spans are not merged', file: 'event-archive.js', find: 'if (last && start <= last[1]) {', replace: 'if (last && start < last[1]) {', fails: ['span', 'append'] },
@@ -2529,13 +2553,13 @@ const contextOf = (m, only = null, scheduleKeys = RECORDER_SCHEDULES, projection
   const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m, only, projection)) }
 
   return {
-    run: async ({ needs, run }) => {
+    run: async ({ key, needs, run }) => {
       const f = needs === 'falryx' ? await scenarios.falryx() : null
       const s = needs === 'passive' ? await scenarios.passive() : null
       const r = needs === 'recorder' ? await scenarios.recorder() : null
 
       if ((needs === 'falryx' && !f) || (needs === 'passive' && !s) || (needs === 'recorder' && !r)) {
-        return 'skip'
+        return { skipped: true, reason: `${key}: required ${needs} fixture is missing or incomplete (${path.relative(root, needs === 'passive' ? PASSIVE : FALRYX)})` }
       }
 
       return run({ m, f, s, r, scheduleKeys })
@@ -2547,7 +2571,9 @@ const outcomeOf = async (context, entry) => {
   try {
     const outcome = await context.run(entry)
 
-    return { id: entry.key, ok: true, kind: null, threw: false, skipped: outcome === 'skip', detail: '' }
+    const skipped = outcome?.skipped === true
+
+    return { id: entry.key, ok: !skipped, kind: null, threw: false, skipped, detail: skipped ? outcome.reason : '' }
   } catch (error) {
     if (error instanceof HarnessError) {
       throw error
@@ -2562,7 +2588,11 @@ const planted = (mutation) => ({ [mutation.file.replace(/\.js$/, '')]: plantedPa
 
 // A mutation judged in this process, as `show` prints it: the result (true, or why it fails) and the detail of a pass.
 const judge = async (mutation, { modulesOf = loadModules, entries = checks, context = contextOf } = {}) => {
-  refusePlanting(mutation.name)
+  // Injected credit controls load no product source and plant no fault.
+  if (modulesOf === loadModules) {
+    refusePlanting(mutation.name)
+  }
+
   const started = Date.now()
   const sources = mutation.schedules ? {} : planted(mutation)
   const mutant = context(await modulesOf(utilitiesDirectory, sources), mutation.fails, mutation.schedules, recorderModeOf(mutation))
@@ -2574,17 +2604,16 @@ const judge = async (mutation, { modulesOf = loadModules, entries = checks, cont
     outcomes.push(await outcomeOf(mutant, entry))
   }
 
-  const skipped = outcomes.filter((outcome) => outcome.skipped).map((outcome) => outcome.id)
-  const ran = outcomes.filter((outcome) => !outcome.skipped)
-  const failed = judged(ran, `the event fault "${mutation.name}"`)
-  const caught = ran.length > 0 && caughtAll(ran, { name: mutation.name, throws: mutation.throws })
-  const details = failed.map(({ id, threw, detail }) => `${id}: ${threw ? 'subject throw' : 'value'}: ${detail.split('\n')[0]}`).join('; ')
+  const skipped = outcomes.filter((outcome) => outcome.skipped)
+  const failed = judged(outcomes, `the event fault "${mutation.name}"`)
+  const caught = caughtAll(outcomes, { name: mutation.name })
+  const details = failed.map(({ id, skipped, threw, detail }) => `${id}: ${skipped ? 'missing fixture' : threw ? 'subject throw' : 'value'}: ${detail.split('\n')[0]}`).join('; ')
 
-  return { result: absent.length ? `no check is keyed ${absent.join(', ')}` : !ran.length ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : !caught ? 'a named check did not fail by an allowed assertion' : true, detail: `${details}; ${((Date.now() - started) / 1000).toFixed(1)} s` }
+  return { result: absent.length ? `no check is keyed ${absent.join(', ')}` : skipped.length ? `required named checks could not run: ${skipped.map((outcome) => outcome.detail).join('; ')}` : !caught ? 'a named check did not fail by an allowed assertion' : true, detail: `${details}; ${((Date.now() - started) / 1000).toFixed(1)} s` }
 }
 
-// Exercise this suite's actual outcome and credit path with an independent one-check scenario, without planting a source or reading a save.
-check('credit-boundaries', 'event fault credit rejects harness exceptions and undeclared subject throws, credits a named wrong value, and permits an explicitly declared error-propagation contract', 'unit', async () => {
+// Exercise this suite's actual outcome and credit path independently, without planting a source or reading a save.
+check('credit-boundaries', 'event fault credit rejects harness exceptions, subject throws and missing required fixtures, and credits every named wrong value only when all required fixtures are available', 'unit', async () => {
   const fault = { name: 'credit probe', schedules: [], fails: ['probe'] }
   const entries = [{ key: 'probe', run: ({ m }) => m.a.probe() }]
   const context = (m) => ({ run: (entry) => entry.run({ m }) })
@@ -2595,12 +2624,26 @@ check('credit-boundaries', 'event fault credit rejects harness exceptions and un
   await assert.rejects(probe(() => { throw new assert.AssertionError({ message: 'subject assertion is not a check assertion' }) }), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
 
   const wrong = await judge(fault, { entries: [{ key: 'probe', run: () => assert.equal(2, 1, 'independent expected value') }], context, modulesOf: async () => ({}) })
-  const explicit = await probe(() => { throw new Error('declared propagation defect') }, true)
+  await assert.rejects(probe(() => { throw new Error('declared propagation defect') }, true), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
 
   assert.equal(wrong.result, true)
   assert.ok(wrong.detail.includes('probe: value:'), wrong.detail)
-  assert.equal(explicit.result, true)
-  assert.ok(explicit.detail.includes('probe: subject throw:'), explicit.detail)
+
+  const fixtureEntries = [...entries, { key: 'fixture-probe', needs: 'falryx', run: () => assert.equal(4, 3, 'independent fixture value') }]
+  const fixtureFault = { ...fault, fails: fixtureEntries.map((entry) => entry.key) }
+  const missingReason = 'fixture-probe: required falryx fixture is missing or incomplete'
+  const fixtureProbe = (available) => judge(fixtureFault, {
+    entries: fixtureEntries,
+    modulesOf: async () => ({ a: { probe: () => assert.equal(2, 1, 'independent unit value') } }),
+    context: (m) => ({ run: (entry) => !available && entry.needs === 'falryx' ? { skipped: true, reason: missingReason } : entry.run({ m }) }),
+  })
+  const missing = await fixtureProbe(false)
+  const complete = await fixtureProbe(true)
+
+  assert.notEqual(missing.result, true, 'one biting check cannot hide another named check whose fixture is missing')
+  assert.ok(missing.result.includes(missingReason), missing.result)
+  assert.equal(complete.result, true)
+  assert.ok(complete.detail.includes('probe: value:') && complete.detail.includes('fixture-probe: value:'), complete.detail)
 })
 
 // The mutations run in child processes, several side by side (CHECK_JOBS), each child judging its share one after another the way the whole run once did in one process: every mutation gets its source override and fresh scenarios; module identity remains governed by the utility loader, and a child holds only its own share of module copies in memory. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its verdicts.
@@ -2611,6 +2654,24 @@ const closeHandles = async () => {
   for (const handle of handles.values()) {
     ;(await handle).close()
   }
+}
+
+// Only the completed parent head owns these caches. Mutation children open their own connections and caches.
+// A close error stops main before any child starts; remove each closed handle so final cleanup cannot close it twice.
+const releaseHeadResources = async () => {
+  try {
+    for (const [file, opened] of handles) {
+      const handle = await opened
+
+      await new Promise((resolve, reject) => handle.close((error) => (error ? reject(error) : resolve())))
+      handles.delete(file)
+    }
+  } catch (error) {
+    throw new HarnessError(`completed event head resources could not be closed: ${error && error.message ? error.message : error}`)
+  }
+
+  readRows.clear()
+  independents.clear()
 }
 
 const childMain = async () => {
@@ -2655,8 +2716,8 @@ const main = async () => {
   }
 
   const began = Date.now()
-  const real = await loadModules(utilitiesDirectory)
-  const context = contextOf(real)
+  let real = await loadModules(utilitiesDirectory)
+  let context = contextOf(real)
 
   if (!falryxSaves()) {
     console.log(`  skip   ${path.relative(root, FALRYX)} is not here, so the falryx group is not run`)
@@ -2684,11 +2745,15 @@ const main = async () => {
 
   const checksTook = Date.now() - began
 
+  context = null
+  real = null
+  await releaseHeadResources()
+
   if (mayMutate()) {
     console.log('\nMutations: each must break the checks it names')
 
     const chunks = chunksOf(MUTATIONS.length)
-    const verdicts = spread(chunks, await inParallel(chunks, mutantChunk))
+    const verdicts = spread(chunks, await inParallel(chunks, mutantChunk, 4))
 
     MUTATIONS.forEach((mutation, index) => {
       const verdict = verdicts[index]

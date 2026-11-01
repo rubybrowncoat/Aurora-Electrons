@@ -2551,6 +2551,8 @@ const main = async () => {
   const options = parseArguments(runnerArgs().rest)
   const totals = await runSuite({
     script: __filename,
+    // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
+    workers: 4,
     inputs: options.saves ? selectedSaves(options).map(({ file }) => file) : [],
     variants: variantsOf(options),
     afterEach: (variant) => {

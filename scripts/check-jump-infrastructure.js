@@ -1210,6 +1210,7 @@ const main = async () => {
   const explicitSelection = process.argv.some((argument) => argument.startsWith('--variants=') || argument.startsWith('--only=') || argument.startsWith('--worker='))
   const totals = await runSuite({
     script: __filename,
+    workers: 4,
     inputs: [SAVE],
     variants: variantsOf(doMutations, !process.argv.includes('--no-lacking'), explicitSelection),
     counts: () => ({ checks, failures }),

@@ -2626,7 +2626,7 @@ const main = async () => {
   const chunks = [withReads, ...chunksOf(rest.length).map((list) => list.map((index) => rest[index]))].filter((list) => list.length)
   const tasks = [...groups.slice(0, 1).map((_keys, at) => ({ group: at })), ...chunks.slice(0, 1).map((_list, at) => ({ chunk: at })), ...groups.slice(1).map((_keys, at) => ({ group: at + 1 })), ...chunks.slice(1).map((_list, at) => ({ chunk: at + 1 }))]
   const argsOf = (task) => (task.group !== undefined ? ['--baseline', `--checks=${groups[task.group].join(',')}`, ...ARGS] : [`--mutants=${chunks[task.chunk].map((index) => VARIANTS.indexOf(variants[index])).join(',')}`, ...ARGS])
-  const outcomes = await inParallel(tasks, async (task) => lastJson(await runChild(__filename, argsOf(task), { limit: CHILD_LIMIT }), RESULT))
+  const outcomes = await inParallel(tasks, async (task) => lastJson(await runChild(__filename, argsOf(task), { limit: CHILD_LIMIT }), RESULT), 4)
   const groupOutcomes = groups.map((_keys, at) => outcomes[tasks.findIndex((task) => task.group === at)])
   // A defect of the harness, where a child met one, stops the run there.
   const replay = (entries) => entries.forEach((entry) => {

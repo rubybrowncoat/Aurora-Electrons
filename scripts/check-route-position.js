@@ -2623,6 +2623,7 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   assert.ok(row.legResults[1].inputs.missing.includes(rp.CONDITIONS['contact-motion']), 'a leg to the contact does')
   assert.ok(row.legResults[row.legResults.length - 1].inputs.missing.includes(rp.CONDITIONS['contact-motion']), 'and the one back from it')
   statesPositions(planned.best.result, ends(hauls[0].from, hauls[0].to), 'the best class\'s days')
+  assert.equal(planned.jumpsResult.value, hauls[0].jumps, 'the jump count result is the haul\'s own figure')
   assert.equal(planned.jumpsResult.rule.id, 'route.jumps', 'the jump count carries its own mark')
   assert.equal(planned.jumpsResult.status, 'confirmed', 'and it does not rest on a position')
 
@@ -2720,7 +2721,7 @@ const FAULTS = [
   ['the mode is always static', 'position', 'return propagated === 0 ? ROUTE_MODE.STATIC : propagated === subjects.length ? ROUTE_MODE.PROPAGATED : ROUTE_MODE.MIXED', 'return ROUTE_MODE.STATIC', ['gate-adapter']],
   ['a place that never moves takes part in the mode whatever an adapter did for it', 'position', 'const subjects = records.filter((record) => record.moves !== false && !record.departure)', 'const subjects = records.filter((record) => (record.moves !== false || record.basis === POSITION_BASIS.PROPAGATED) && !record.departure)', ['gate-adapter']],
   ['a switch that is off leaves an asteroid undecided', 'position', 'const moves = planets === false || group === \'static\' ? false : group', 'const moves = group === \'static\' ? false : group', ['motion-switch']],
-  ['an adapter that throws takes the route down', 'position', '} catch (error) {\n      found = null\n    }', '} catch (error) {\n      throw error\n    }', ['gate-adapter']],
+  ['a throwing adapter is reported propagated', 'position', '} catch (error) {\n      found = null\n    }', '} catch (error) {\n      found = { position: base.position, observedAt: base.observedAt, conditions: [] }\n    }', ['gate-adapter']],
   ['a position ahead of the game reads as its size', 'position', 'return seconds < 0 ? `${durationText(-seconds)} ahead` : durationText(seconds)', 'return durationText(Math.abs(seconds))', ['gate-adapter']],
   ['a position ahead of the game reads as current', 'position', '} else if (seconds === 0) {', '} else if (seconds <= 0) {', ['gate-adapter']],
   ['a fleet orbiting a body with no position follows it by default', 'position', 'when FCT_Fleet.OrbitBodyID > 0 and exists (select 1 from FCT_SystemBody where FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID and (FCT_SystemBody.Xcor is null or FCT_SystemBody.Ycor is null)) then null ', '', ['loader-schema']],
@@ -2730,7 +2731,7 @@ const FAULTS = [
   ['a Lagrange point is not keyed', 'position', 'key: point.LagrangePointID ? place.lagrange(point.LagrangePointID) : `lagrange:${point.SystemID}:${point.Xcor}:${point.Ycor}`', 'key: `lagrange:${point.SystemID}`', ['same-gate']],
   ['a caveat is stated with nothing to caveat', 'position', 'if (!result || !positions || !positions.caveat) {', 'if (!result || !positions) {', ['result-caveat']],
   ['an unavailable result is raised to an estimate', 'position', 'if (result.status === \'unavailable\') {', 'if (false) {', ['result-caveat']],
-  ['a result keeps its status', 'position', 'status: weakestStatus([result.status, \'estimated\'])', 'status: result.status', ['result-caveat', 'same-gate']],
+  ['a result is only assumed on uncertain positions', 'position', 'status: weakestStatus([result.status, \'estimated\'])', "status: 'assumed'", ['result-caveat', 'same-gate']],
   ['what is missing is not named', 'position', 'inputs: { present: result.inputs.present, missing: [...result.inputs.missing, ...positions.missing] }', 'inputs: { present: result.inputs.present, missing: result.inputs.missing }', ['result-caveat', 'same-gate']],
   ['a fleet is found by the wrong key', 'position', 'facts.fleets ? facts.fleets[endpoint.id] : null', 'facts.fleets ? facts.fleets[endpoint.key] : null', ['legs-own-age']],
   ['a fleet beside its body follows it', 'position', ' and FCT_SystemBody.Ycor = FCT_Fleet.Ycor', '', ['loader-schema']],
@@ -2743,7 +2744,7 @@ const FAULTS = [
   ['the plan caveats its jumps', 'plan', 'jumps: made(\'route.jumps\', plan.jumps)', 'jumps: withPositions(made(\'route.jumps\', plan.jumps), plan.positions)', ['result-caveat', 'pages-routes']],
   ['a leg leaves out the Lagrange points it jumps between', 'plan', ', ...viaEndpoints(route)], { facts, adapters: NO_ADAPTERS })', '], { facts, adapters: NO_ADAPTERS })', ['same-gate']],
   ['a leg is not given the facts', 'plan', ', ...viaEndpoints(route)], { facts, adapters: NO_ADAPTERS })', ', ...viaEndpoints(route)], { adapters: NO_ADAPTERS })', ['same-gate']],
-  ['a leg is given the adapters the plan was handed', 'plan', '{ facts, adapters: NO_ADAPTERS })', '{ facts, adapters })', ['same-gate']],
+  ['a leg is given the adapters the plan was handed', 'plan', 'const held = walkPlan(stops, { cycle, jumpPoints, facts, options, timing, flight: null })', 'const held = walkPlan(stops, { cycle, jumpPoints, facts, options, timing, flight: flightOf({ facts, adapters, speed }) })', ['same-gate']],
   ['the plan states only its first leg', 'plan', 'summarisePositions(legs.flatMap((leg) => (leg.positions ? leg.positions.records : [])), { merge: true })', 'summarisePositions(legs.slice(0, 1).flatMap((leg) => (leg.positions ? leg.positions.records : [])), { merge: true })', ['same-gate']],
   ['a running distance leaves out the positions', 'plan', 'value: total, inputs: { present: ROUTE_INPUTS } }), positions)', 'value: total, inputs: { present: ROUTE_INPUTS } }))', ['same-gate', 'result-caveat']],
   ['a distance leaves out the positions', 'plan', ': unavailable({ rule: \'route.distanceKm\', missing: [missing] }), positions)', ': unavailable({ rule: \'route.distanceKm\', missing: [missing] }))', ['same-gate', 'result-caveat']],
@@ -2885,7 +2886,7 @@ const FAULTS = [
   ['Hauling does not mark the distance of a leg', 'haulingPage', '<provenance-mark v-if="item.legResults[index].status !== \'confirmed\'" :result="item.legResults[index]" />', '', ['pages-hauling']],
   ['Hauling does not mark a delivery total', 'haulingPage', '<provenance-mark :result="item.result" />', '', ['pages-hauling']],
   ['Hauling marks the jump count with the distance\'s result', 'haulingPage', '<provenance-mark :result="item.jumpsResult" />', '<provenance-mark v-if="item.pathResult" :result="item.pathResult" />', ['pages-hauling']],
-  ['Hauling gives the jump count no result', 'haulingPage', 'jumpsResult: routeFigures({ jumps: haul.jumps, km: haul.km }).jumps,', 'jumpsResult: null,', ['pages-hauling']],
+  ['Hauling gives the jump count a zero result', 'haulingPage', 'jumpsResult: routeFigures({ jumps: haul.jumps, km: haul.km }).jumps,', 'jumpsResult: routeFigures({ jumps: 0, km: haul.km }).jumps,', ['pages-hauling']],
   ['Hauling leaves a leg\'s distance as it was', 'haulingPage', 'withPositions(distanceResult(leg.km), legPositions[index])', 'distanceResult(leg.km)', ['pages-hauling']],
   ['Hauling states a leg with the positions of its own start', 'haulingPage', 'orders[(index + 1) % orders.length]', 'orders[index]', ['pages-hauling']],
   ['Hauling\'s delivery totals leave out the positions of the fleets', 'haulingPage', 'total.records.push(...row.positions.records)', 'total.records.push()', ['pages-hauling']],

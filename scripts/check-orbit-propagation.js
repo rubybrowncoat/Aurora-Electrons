@@ -1111,7 +1111,7 @@ check('review-round-1-read', 'a Lagrange point of an unsurveyed system has none 
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  ['the empty read freezes the list the later reads add to', 'orbit', 'problems: Object.freeze([...problems])', 'problems: Object.freeze(problems)', ['unsurveyed-read']],
+  ['the empty read loses the later problems', 'orbit', 'hiddenPoints: Object.freeze(hiddenPoints), problems: Object.freeze(problems)', 'hiddenPoints: Object.freeze(hiddenPoints), problems: none.problems', ['unsurveyed-read']],
   ['the colony read names its columns', 'orbit', "'The save lacks the ID and body of the colonies, so the bodies of colonies could not be read'", "'FCT_Population has no PopulationID or SystemBodyID in this save, so the bodies of colonies could not be read'", ['unsurveyed-read']],
   ['the Lagrange point read names its columns', 'orbit', "'The save lacks the identity, system, parent body, distance, bearing, position or game of the Lagrange points, so the orbits of Lagrange points could not be read'", "'FCT_LagrangePoint has no LagrangePointID, SystemID, PlanetID, Distance, Bearing, Xcor, Ycor or GameID in this save, so the orbits of Lagrange points could not be read'", ['unsurveyed-read']],
   ['an arrival is solved only to a minute', 'orbit', 'export const ARRIVAL_TOLERANCE_SECONDS = 1', 'export const ARRIVAL_TOLERANCE_SECONDS = 60', ['circular-arrival', 'registration']],
@@ -1139,7 +1139,7 @@ const FAULTS = [
   ['a stop takes no time', 'plan', 'time = run.end.time + (hop.wait || 0)', 'time = run.end.time', ['successive-cycles']],
   ['a year that fell back is called propagated', 'plan', 'const status = unmoved || flownPositions.mode === ROUTE_MODE.STATIC ? \'static\' : \'propagated\'', 'const status = \'propagated\'', ['fallbacks']],
   ['a leg of a plan leaves at the time of the plan', 'plan', 'time = flight && flight.speed ? time + route.km / flight.speed : time', 'time = time', ['plan-gate']],
-  ['the plan keeps no figure on the saved positions', 'plan', 'static: { jumps: held.jumps, km: held.km, missing: held.missing, positions: held.positions }', 'static: undefined', ['plan-gate']],
+  ['the plan keeps a zero figure on the saved positions', 'plan', 'static: { jumps: held.jumps, km: held.km, missing: held.missing, positions: held.positions }', 'static: { jumps: held.jumps, km: 0, missing: held.missing, positions: held.positions }', ['plan-gate']],
   ['a Lagrange exit is where it was at the departure', 'graph', 'const left = motion.reach(exit, null, entered.time)', 'const left = motion.reach(exit, null, time)', ['lagrange-transfer']],
   ['the last leg of a transfer leaves at the departure', 'graph', 'const arrived = motion.reach(b, left, entered.time)', 'const arrived = motion.reach(b, left, time)', ['lagrange-transfer']],
   ['a transfer is taken whatever it saves', 'graph', 'if (km < best.km) {\n        best = { km, via: [entry, exit], end: arrived', 'if (true) {\n        best = { km, via: [entry, exit], end: arrived', ['lagrange-transfer']],

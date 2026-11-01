@@ -280,7 +280,15 @@ const seed = ({ campaignId = 'c1', branchId = 'b1', RaceID = 7, snapshots, serie
 // The digest's file of a campaign as the panel's store wrote it, and the store of one race in it.
 const digestDocument = (campaignId) => stores().get(`economy-digest/campaign-${campaignId}`)
 
-const digestRace = (campaignId, RaceID) => (digestDocument(campaignId) || { races: {} }).races[RaceID]
+const digestRace = (campaignId, RaceID) => {
+  assert.deepEqual([...stores().keys()].filter((key) => !key.startsWith('history/')).sort(), [`economy-digest/campaign-${campaignId}`], 'the persisted digest file names')
+
+  const document = digestDocument(campaignId)
+
+  assert.deepEqual(Object.keys(document.races).sort(), [String(RaceID)], 'the persisted digest race IDs')
+
+  return document.races[RaceID]
+}
 
 const CAMPAIGN = { campaignId: 'c1', branchId: 'b1', generation: 1 }
 
@@ -430,6 +438,9 @@ check('notes-changes', 'a project note added, removed or edited is a change, mat
 check('notes-unknown', 'notes that could not be read at the boundary or now, or are too many to keep, leave their changes unknown', ({ m }) => {
   const unreadAtAck = at(m, { record: { at: 1, snapshot: m.d.pickSnapshot(snap(1000)), colonies: {}, notes: null, items: {} }, notes: [entry('n1')] })
 
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE unknown project-note rows:', JSON.stringify(unreadAtAck.unknown.map((one) => one.key)))
+  }
   assert.deepEqual(unreadAtAck.unknown.map((one) => one.key), ['note:all'])
   assert.ok(!unreadAtAck.items.some((item) => item.kind === 'note'))
 
@@ -548,7 +559,11 @@ check('store-save', 'a write goes to the race of the file only, in one update, k
 
   const content = file.store
 
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE persisted digest race IDs:', JSON.stringify(Object.keys(content.races).sort()))
+  }
   assert.equal(content.other, 1)
+  assert.deepEqual(Object.keys(content.races).sort(), ['7', '8'], 'the persisted race IDs')
   assert.deepEqual(content.races[7], written)
   assert.deepEqual(content.races[8].branches.b1, keep7)
   assert.deepEqual(Object.keys(content.races).sort(), ['7', '8'])
@@ -579,6 +594,7 @@ check('store-guard', 'an acknowledgment made on a record that has changed since 
   const file = settingsOf({})
 
   m.d.saveDigest(file, 7, m.d.guarded('b1', null, (store) => m.d.withRecord(store, 'b1', record)))
+  assert.deepEqual(Object.keys(file.store.races), ['7'], 'the guarded record is persisted under its race ID')
   assert.deepEqual(file.store.races[7].branches.b1, record)
 
   const before = JSON.stringify(file.store)
@@ -594,6 +610,9 @@ check('store-file', 'the record lives in a file of its own per campaign, never i
   const again = m.d.digestStore('c1')
   const elsewhere = m.d.digestStore('c2')
 
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE digest campaign file names:', JSON.stringify([own.key, elsewhere.key]))
+  }
   assert.equal(own.key, 'economy-digest/campaign-c1')
   assert.equal(again.key, own.key)
   assert.notEqual(elsewhere.key, own.key)
@@ -611,6 +630,7 @@ check('store-file', 'the record lives in a file of its own per campaign, never i
   m.d.saveDigest(own, 7, (store) => m.d.withRecord(store, 'b1', record))
   assert.deepEqual(stores().get('/config'), { campaign: { c1: { race: { 7: { logPins: { keep: true } } } } } })
   assert.deepEqual([...stores().keys()].sort(), ['/config', 'economy-digest/campaign-c1'])
+  assert.deepEqual(Object.keys(stores().get('economy-digest/campaign-c1').races), ['7'], 'the digest file persists the selected race ID')
   assert.deepEqual(stores().get('economy-digest/campaign-c1').races[7].branches.b1, record)
 })
 
@@ -845,6 +865,9 @@ check('component-isolation', 'another branch, race or campaign never reads or re
 
   const other = mounted(options, { config: settings, campaign: { campaignId: 'c2', branchId: 'b1', generation: 1 }, gameTime: 3000 })
 
+  if (process.argv.includes('--detail')) {
+    console.log('VALUE other campaign digest state:', other.digest.state)
+  }
   assert.equal(other.digest.state, 'none')
 
   const race = mounted(options, { config: settings, raceId: 8, gameTime: 5000 })
@@ -1044,6 +1067,7 @@ check('web-interleave', 'two tabs of the web build never write over each other: 
       const outcome = await pending
       const file = (campaignId) => JSON.parse(storage.items.get(`aurora-electrons:economy-digest/campaign-${campaignId}`) || 'null')
 
+      assert.deepEqual([...storage.items.keys()].sort(), [...new Set(['c1', second.campaignId])].map((id) => `aurora-electrons:economy-digest/campaign-${id}`).sort(), 'the interleaved writes use their campaign file names')
       return { outcome, c1: file('c1'), c2: file('c2') }
     } finally {
       delete globalThis.localStorage
@@ -1053,17 +1077,21 @@ check('web-interleave', 'two tabs of the web build never write over each other: 
   const same = await interleaved({ campaignId: 'c1', RaceID: 7 })
 
   assert.equal(same.outcome, 'DigestChanged')
+  assert.deepEqual(Object.keys(same.c1.races), ['7'], 'the first race ID is persisted')
   assert.deepEqual(same.c1.races[7].branches.b1, recordA)
 
   const race = await interleaved({ campaignId: 'c1', RaceID: 8 })
 
   assert.equal(race.outcome, 'written')
+  assert.deepEqual(Object.keys(race.c1.races).sort(), ['7', '8'], 'both interleaved race IDs are persisted')
   assert.deepEqual(race.c1.races[7].branches.b1, recordA)
   assert.deepEqual(race.c1.races[8].branches.b1, recordB)
 
   const other = await interleaved({ campaignId: 'c2', RaceID: 8 })
 
   assert.equal(other.outcome, 'written')
+  assert.deepEqual(Object.keys(other.c1.races), ['7'])
+  assert.deepEqual(Object.keys(other.c2.races), ['8'])
   assert.deepEqual(other.c1.races[7].branches.b1, recordA)
   assert.deepEqual(other.c2.races[8].branches.b1, recordB)
 })
@@ -1104,6 +1132,10 @@ check('web-shared-document', 'a pin or a snooze written over an older copy of th
 
     const record = m.d.recordOf(reloaded.store, 'b1')
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE acknowledged changes hidden:', at(m, { from, snapshots: [from, to], record }).hidden)
+    }
+    assert.equal(at(m, { from, snapshots: [from, to], record }).hidden, 1, 'the acknowledged change remains hidden after the settings writes')
     assert.deepEqual(record, m.d.recordOf(m.d.withItem(m.d.withRecord(m.d.emptyStore(), 'b1', first.record), 'b1', item.key, item.signature), 'b1'))
     assert.deepEqual(race(settings().store).logPins, pins)
     assert.deepEqual(race(settings().store).warningsSnoozed, snoozed)
@@ -1158,6 +1190,13 @@ check('component-web', 'the panel in the web build writes only under the lock, i
 
     await locked.acknowledge()
     assert.equal(locked.message, '')
+    assert.deepEqual([...storage.items.keys()].sort(), [historyKey, 'aurora-electrons:economy-digest/campaign-c1'].sort(), 'the panel persists its acknowledgment in the campaign digest file')
+    const persisted = JSON.parse(storage.items.get('aurora-electrons:economy-digest/campaign-c1'))
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE web panel persisted race IDs:', JSON.stringify(Object.keys(persisted.races)))
+    }
+    assert.deepEqual(Object.keys(persisted.races), ['7'], 'the web panel persists the selected race ID')
     assert.deepEqual(Object.keys(JSON.parse(storage.items.get('aurora-electrons:economy-digest/campaign-c1')).races[7].branches), ['b1'])
     assert.equal(storage.items.has('aurora-electrons:config'), false)
   } finally {
@@ -1191,6 +1230,16 @@ check('component-queued', 'an acknowledgment that waits for the lock is made for
     globalThis.localStorage = storage
     Object.defineProperty(globalThis, 'navigator', { value: { locks }, configurable: true, writable: true })
     await mounted(options, { config: settingsOf({}), gameTime: 1000 }).acknowledge()
+    const digestKey = 'aurora-electrons:economy-digest/campaign-c1'
+    const persistedKeys = [...storage.items.keys()].filter((key) => key.startsWith('aurora-electrons:economy-digest/'))
+
+    assert.deepEqual(persistedKeys, [digestKey], 'the queued fixture acknowledgment uses its campaign digest file')
+    const persistedRaceIds = Object.keys(JSON.parse(storage.items.get(digestKey)).races)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE queued acknowledgment persisted race IDs:', JSON.stringify(persistedRaceIds))
+    }
+    assert.deepEqual(persistedRaceIds, ['7'], 'the queued fixture acknowledgment is persisted for the selected race')
 
     const vm = mounted(options, { config: settingsOf({}), gameTime: 3000 })
 
@@ -1670,6 +1719,13 @@ check('recording-gate', 'the digest compares and acknowledges only once the reco
 // ---- The planted faults ------------------------------------------------------------------------------------------------
 
 /* eslint-disable no-template-curly-in-string */
+// TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; a replacement is not proof of its retired operator.
+// [13] Old: "unreadable notes are compared"; new: "unreadable notes are normalized to empty notes".
+// The original guard removal processes null collections through Object.entries/map/indexing at economy-digest.js:525-555 and throws.
+// Replacement class: unreadable notes incorrectly become empty/known notes. Original null-shape exception class currently has no credited fault.
+// [24] "a race is written under another race" retains its original sole wrong-destination operator (TFIN-04), not the rejected write-to-both variant.
+// The own store-save assertion observes persisted IDs ["8"] instead of independently expected ["7","8"]. Original class keeps a fault: yes.
+
 const MUTANTS = [
   { name: 'an unknown figure is read as 0', target: 'digest', find: 'isKnownNumber(value) ? ofRule({ rule, value: Number(value), inputs: { present: [label] } }) : unavailable({ rule, missing: [label] }))', replace: 'ofRule({ rule, value: Number(value) || 0, inputs: { present: [label] } }))', fails: ['production-unknown'] },
   { name: 'an installation type a snapshot lacks is unknown, not none built', target: 'digest', find: ': ofRule({ rule: \'digest.installations\', value: 0, inputs: { present: [`${label} installations`] } })', replace: ': unavailable({ rule: \'digest.installations\', missing: [`${label} installations`] })', fails: ['production-net'] },
@@ -1684,7 +1740,7 @@ const MUTANTS = [
   { name: 'a note is edited when the name of its object changes', target: 'digest', find: ' || old.origin !== fields.origin ? [', replace: ' || old.origin !== fields.origin || old.name !== fields.name ? [', fails: ['notes-changes', 'notes-relink'] },
   { name: 'a note is not found by its uuid', target: 'digest', find: 'if (!hasOwn(before, entry.uuid)) {', replace: 'if (!Object.values(before).some((old) => old.title === entry.title)) {', fails: ['notes-changes'] },
   { name: 'notes beyond the record\'s size are kept', target: 'digest', find: 'entries.length <= MAX_NOTES', replace: 'entries.length <= MAX_NOTES + 1000', fails: ['notes-unknown'] },
-  { name: 'unreadable notes are compared', target: 'digest', find: 'if (before === null || entries === null) {', replace: 'if (before === undefined) {', fails: ['notes-unknown'] },
+  { name: 'unreadable notes are normalized to empty notes', target: 'digest', find: 'if (before === null || entries === null) {', replace: 'before = before || {}\n  entries = entries || []\n\n  if (before === undefined) {', fails: ['notes-unknown'] },
   { name: 'a note about a body is not grouped with its colony', target: 'digest', find: 'const target = colony ? { type: \'colony\', id: Number(colony.id), name: colony.name } : own', replace: 'const target = own', fails: ['groups'] },
   { name: 'an acknowledged change is never hidden', target: 'digest', find: 'acknowledged: hasOwn(record.items, item.key) && record.items[item.key] === signature', replace: 'acknowledged: false', fails: ['acknowledge-item', 'acknowledge-signature'] },
   { name: 'an acknowledged change is hidden whatever it moved to', target: 'digest', find: 'acknowledged: hasOwn(record.items, item.key) && record.items[item.key] === signature', replace: 'acknowledged: hasOwn(record.items, item.key)', fails: ['acknowledge-signature'] },
@@ -1695,6 +1751,8 @@ const MUTANTS = [
   { name: 'a damaged record is read', target: 'digest', find: 'const damaged = Object.entries(value.branches).find(([, record]) => !validRecord(record))', replace: 'const damaged = null', fails: ['store-read'] },
   { name: 'an unreadable store is written over', target: 'digest', find: 'if (!read.ok) {\n      throw new DigestUnreadable(read.reason)\n    }', replace: 'if (!read.ok) {\n      read.store = emptyStore()\n    }', fails: ['store-save', 'component-unreadable'] },
   { name: 'a write drops the other races of the file', target: 'digest', find: 'races: { ...document.races, [RaceID]: written }', replace: 'races: { [RaceID]: written }', fails: ['store-save', 'web-interleave'] },
+  // TFIN-04, index24: retain the original sole wrong-destination write, not a second write to both races.
+  // Its own store-save check observes persisted IDs ["8"] instead of independently expected ["7","8"].
   { name: 'a race is written under another race', target: 'digest', find: 'races: { ...document.races, [RaceID]: written }', replace: 'races: { ...document.races, [Number(RaceID) + 1]: written }', fails: ['store-save'] },
   { name: 'the record moves into the shared settings document', target: 'digest', find: 'return new Store({ cwd: DIGEST_FOLDER, name: `campaign-${campaignId}`, strict: true })', replace: 'return new Store({})', fails: ['store-file', 'web-shared-document', 'component-write', 'component-web'] },
   { name: 'the record moves into the history folder', target: 'digest', find: 'cwd: DIGEST_FOLDER,', replace: 'cwd: \'history\',', fails: ['store-file'] },
@@ -1803,7 +1861,9 @@ const main = async () => {
     }
   }
 
-  for (const mutant of mutating() ? MUTANTS : []) {
+  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split('|').filter(Boolean)
+
+  for (const mutant of mutating() ? MUTANTS.filter(({ name }) => !only.length || only.some((text) => name.includes(text))) : []) {
     const missing = mutant.fails.filter((key) => !unique.has(key))
 
     if (missing.length) {
@@ -1832,6 +1892,10 @@ const main = async () => {
     }
 
     const caught = mutant.fails.filter((key) => failed.has(key) && kindOf(failed.get(key)) === 'assertion' && !isSubjectThrow(failed.get(key)))
+
+    if (process.argv.includes('--detail')) {
+      caught.forEach((key) => console.log(`CAUGHT ${mutant.name} by ${key}: ${failed.get(key).message}`))
+    }
 
     results.push(caught.length === mutant.fails.length ? { ok: true, label: `fault "${mutant.name}" fails ${mutant.fails.join(', ')}` } : { ok: false, label: `fault "${mutant.name}"`, detail: `expected to fail ${mutant.fails.join(', ')}; failed: ${[...failed.keys()].join(', ') || 'nothing'}` })
   }

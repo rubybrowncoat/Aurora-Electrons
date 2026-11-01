@@ -15,7 +15,7 @@ const { runChild } = require(path.join(ROOT, 'scripts/lib/check-pool'))
 const { mutating, refusePlanting } = require(path.join(ROOT, 'scripts/lib/no-mutations'))
 const { moduleTree } = require('./lib/module-files')
 const { loadUtilities } = require('./lib/utilities')
-const { loadModule } = require('./lib/page-loader')
+const { loadModule, loadModules } = require('./lib/page-loader')
 const LIBRARY = path.join(__dirname, 'lib')
 const WORK = path.join(ROOT, '.check-runs')
 const PREFIX = '@@loader-isolation '
@@ -105,6 +105,26 @@ const CHECKS = [
     },
   },
   {
+    id: 'multiple',
+    name: 'pages and explicitly requested dependencies share one graph, isolated from another call',
+    run: async () => {
+      const names = ['pages/isolation', 'mixins/isolation', 'utilities/provenance', './utilities/provenance']
+      const first = await loadModules(names, pageOptions)
+      const second = await loadModules(names, pageOptions)
+      const page = first['pages/isolation']
+      const provenance = first['utilities/provenance']
+
+      assert.strictEqual(page.state, first['mixins/isolation'].default, 'the page and requested mixin disagree')
+      assert.strictEqual(page.registerRule, provenance.registerRule, 'the page and requested utility disagree')
+      assert.strictEqual(provenance, first['./utilities/provenance'], 'an equivalent requested path changed identity')
+      page.registerRule(rule)
+      page.state.value = 11
+      assert.equal(provenance.getRule(rule.id).id, rule.id, 'the requested utility did not see its page registration')
+      assert.equal(second['utilities/provenance'].getRule(rule.id), null, 'a second multi-module call saw the first rule')
+      assert.equal(second['mixins/isolation'].default.value, 0, 'a second multi-module call saw the first state')
+    },
+  },
+  {
     id: 'generated',
     name: 'private tree paths produce equal generated text and distinct module instances',
     run: async () => {
@@ -138,6 +158,7 @@ const FAULTS = [
   { key: 'page-override-leak', name: 'a page module override uses shared text identity', file: 'page-loader.js', edits: [["const { moduleTree } = require('./module-files')", "const { moduleTree, urlOfSource: sharedSource } = require('./module-files')"], ['urlOfSource(modules[name], `module:${name}`)', 'sharedSource(modules[name])']], fails: ['pages'] },
   { key: 'page-stub-leak', name: 'a page package stub uses shared text identity', file: 'page-loader.js', edits: [["const { moduleTree } = require('./module-files')", "const { moduleTree, urlOfSource: sharedSource } = require('./module-files')"], ['urlOfSource(stub, `package:${specifier}`)', 'sharedSource(stub)']], fails: ['pages'] },
   { key: 'page-component-leak', name: 'a page component stub uses shared text identity', file: 'page-loader.js', edits: [["const { moduleTree } = require('./module-files')", "const { moduleTree, urlOfSource: sharedSource } = require('./module-files')"], ['urlOfSource(VUE_STUB(specifier, namedComponents), `component:${path.posix.join(path.posix.dirname(name), specifier)}`)', 'sharedSource(VUE_STUB(specifier, namedComponents))']], fails: ['pages'] },
+  { key: 'split-roots', name: 'each requested page module receives a separate tree', file: 'page-loader.js', edits: [['moduleUrl(path.posix.normalize(name), context)', 'moduleUrl(path.posix.normalize(name), { ...context, urls: new Map(), urlOfSource: moduleTree() })']], fails: ['multiple'] },
   { key: 'logical-identity', name: 'equal text collapses distinct logical module names', file: 'module-files.js', edits: [[".update(name).update('\\0').update(text)", '.update(text)']], fails: ['identity'] },
   { key: 'generated-path', name: 'generated text retains the private absolute tree path', file: 'module-files.js', edits: [["const text = source.split(prefix).join('./')", 'const text = source']], fails: ['generated'] },
 ]

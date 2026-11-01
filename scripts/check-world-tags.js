@@ -28,7 +28,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createRequire } = require('module')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
@@ -265,6 +265,33 @@ const fakeSave = (save, { failing = [] } = {}) => {
 
       throw new Error(`the fake save does not answer ${sql}`)
     },
+  }
+}
+
+// A writable SQLite mirror of one body, never the owner's file: a read that writes must change a
+// persisted figure here, rather than earn credit by hitting a fake's missing handler or a read-only error.
+const assertBodyReadOnly = async (tags, row, { GameID = 1, RaceID = 7 } = {}) => {
+  const raw = new (localRequire('sqlite3').Database)(':memory:')
+  const run = (sql, parameters = []) => new Promise((resolve, reject) => raw.all(sql, parameters, (error, rows) => (error ? reject(error) : resolve(rows))))
+
+  try {
+    await run('create table FCT_SystemBody (SystemBodyID integer, SystemID integer, GameID integer, BodyClass integer, BodyTypeID integer, PlanetNumber integer, OrbitNumber integer, StarID integer)')
+    await run('create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, GameID integer, Name text, DiscoveredTime integer)')
+    await run('create table FCT_SystemBodySurveys (SystemBodyID integer, RaceID integer, GameID integer)')
+    await run('create table FCT_Star (StarID integer, Component integer)')
+    await run('create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, GameID integer, Name text)')
+    await run('insert into FCT_SystemBody values (?, ?, ?, ?, ?, ?, ?, ?)', [row.id, row.systemId, GameID, row.bodyClass, row.bodyType, row.planet, row.orbit, 1])
+    await run('insert into FCT_RaceSysSurvey values (?, ?, ?, ?, ?)', [row.systemId, RaceID, GameID, 'System', 1])
+    await run('insert into FCT_Star values (1, 1)')
+    await run('insert into FCT_SystemBodyName values (?, ?, ?, ?)', [row.id, RaceID, GameID, 'Body'])
+    const database = { query: async (sql, { replacements = {} } = {}) => [await run(sql, Object.fromEntries([...new Set([...sql.matchAll(/:(\w+)/g)].map((match) => match[1]))].map((name) => [`:${name}`, replacements[name]])))] }
+
+    await tags.loadBodies(database, { GameID, RaceID, bodyIds: [row.id] })
+    const [persisted] = await run('select PlanetNumber from FCT_SystemBody where SystemBodyID = ?', [row.id])
+
+    assert.equal(persisted.PlanetNumber, row.planet, 'reading a body leaves its persisted planet number unchanged')
+  } finally {
+    await new Promise((resolve) => raw.close(resolve))
   }
 }
 
@@ -736,6 +763,9 @@ const suite = (m) => {
     assert.equal(unread[0].link.status, 'unknown')
     assert.equal(unread[0].place.systemName, 'Sol')
     assert.equal(unread[0].place.lastKnown, false)
+    const failedRead = await open(SAVE(), scope(), { failing: ['FCT_SystemBody'] }).catch(() => null)
+
+    assert.equal(list(w, scope(), failedRead)[0].link.status, 'unknown', 'a failed body read leaves the visible link unchecked')
     await assert.rejects(() => open(SAVE(), scope(), { failing: ['FCT_SystemBody'] }), /FCT_SystemBody/)
   })
 
@@ -970,6 +1000,7 @@ const suite = (m) => {
   // ---- reads --------------------------------------------------------------------------------------------------------
 
   check('reads', 'every query is a select, and keeping, changing and clearing a tag sends nothing to the save', async () => {
+    await assertBodyReadOnly(tags, SAVE().bodies[0])
     const w = world(m)
     const context = await open(SAVE())
     const sent = () => context.database.sent.length
@@ -1116,6 +1147,9 @@ const suite = (m) => {
       const [moon] = await save.run(`select FCT_SystemBody.SystemBodyID as id, planet.SystemBodyID as planetId from FCT_SystemBody inner join FCT_SystemBody as planet on planet.GameID = FCT_SystemBody.GameID and planet.SystemID = FCT_SystemBody.SystemID and planet.PlanetNumber = FCT_SystemBody.PlanetNumber and planet.BodyClass = 1 ${KNOWN.replace('FCT_SystemBody.BodyClass in (1, 2, 3, 5)', 'FCT_SystemBody.BodyClass = 2')} limit 1`, { GameID: GAME, RaceID: RACE })
 
       assert.ok(plain && hidden && moon, 'the line holds a body that was never surveyed, a body of an unknown system and a moon with its planet')
+      const [sourceRow] = await save.run('select SystemBodyID as id, SystemID as systemId, PlanetNumber as planet, OrbitNumber as orbit, BodyClass as bodyClass, BodyTypeID as bodyType from FCT_SystemBody where SystemBodyID = :id', { id: moon.id })
+
+      await assertBodyReadOnly(tags, sourceRow, { GameID: GAME, RaceID: RACE })
 
       const context = await contextOfSave(save, [plain.id, hidden.id, moon.id, moon.planetId])
       const w = world(m)
@@ -1389,6 +1423,7 @@ const pageSuite = async (m, { target = null, find = null, replace = null } = {})
 
     const mount = await reads(mixinMounted(options, { inst, failing: ['FCT_SystemBody'] }))
 
+    assert.equal(mount.vm.tagEntries[0].link.status, 'unknown', 'a failed read leaves the listed body unchecked, not missing')
     assert.equal(mount.vm.tagBodiesRead.bodies, null)
     assert.match(mount.vm.tagBodiesRead.error, /the save lacks the system body data/)
     assert.equal(mount.vm.tagContext, null)
@@ -1824,7 +1859,7 @@ const UTILITY_MUTATIONS = [
   { name: 'a tag is on any kind of object', file: 'world-tags.js', find: "if (type !== 'body') {\n      throw new Error(`#{type} is not a kind of object a tag is about`)\n    }\n\n    return noteAdapter", replace: 'return noteAdapter', fails: ['backup: the adapter is for bodies only'] },
   { name: 'a tag that names another kind of object is valid', file: 'world-tags.js', find: "target.type === 'body' && (isText(target.id)", replace: '(isText(target.id)', fails: ['backup: the adapter is for bodies only'] },
   { name: 'keeping a tag writes to the save', file: 'world-tags.js', find: "    if (target && !(isObject(target) && target.type === 'body' && isObject(target.row))) {", replace: "    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0')\n    }\n\n    if (target && !(isObject(target) && target.type === 'body' && isObject(target.row))) {", fails: ['reads: every query is a select'] },
-  { name: 'a write is sent to the save with the bodies', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID')\n\n  return bodies\n}", fails: ['reads: every query is a select', 'saves: on the owner\'s saves a body that was never surveyed'] },
+  { name: 'a write is sent to the save with the bodies', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set PlanetNumber = 0')\n\n  return bodies\n}", fails: ['reads: every query is a select', 'saves: on the owner\'s saves a body that was never surveyed'] },
   { name: 'a tag whose body is gone is rebound to the body with the same content', file: 'economy-notes.js', find: 'return objects.get(link.id) || null', replace: 'return objects.get(link.id) || [...objects.values()].find((row) => targetOf(link.type).fingerprint(row) === link.fingerprint) || null', fails: ['stale: a tag whose body is gone is never relinked'] },
   { name: 'a body is not told by its place', file: 'economy-notes.js', find: "present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "present(row.discovered)].join('|'),", fails: ['stale: an ID that another body holds now reads changed', 'scope: a tag is made only for a body that is there as it was picked'] },
   { name: 'a body is told by its name', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId),", replace: "fingerprint: (row) => ['body', row.name, present(row.systemId),", fails: ['stale: no fingerprint holds a name', 'stale: a renamed body keeps its tag linked'] },
@@ -1850,7 +1885,7 @@ const PAGE_MUTATIONS = [
   { name: 'the bodies the tags link to are not read', target: MIXIN, find: 'const bodyIds = this.tagBodyIds', replace: 'const bodyIds = []', fails: ['mixin: the bodies the tags link to are read by the page'] },
   { name: 'a read of the bodies made for other IDs counts', target: MIXIN, find: ' && this.tagBodyIds.every((id) => bundle.requested.has(id))', replace: '', fails: ['mixin: a read of the bodies made for other IDs'] },
   { name: 'a read of the bodies for another save is used', target: MIXIN, find: 'bundle && bundle.database === this.database && bundle.GameID === this.GameID && bundle.RaceID === this.RaceID && ', replace: 'bundle && ', fails: ['mixin: a read of the bodies made for other IDs'] },
-  { name: 'a failed read of the bodies is taken for no bodies', target: MIXIN, find: 'bodies: null, error: error && error.message', replace: 'bodies: new Map(), error: error && error.message', fails: ['mixin: a read of the bodies that failed'] },
+  { name: 'a failed read of the bodies is taken for no bodies', target: MIXIN, find: 'bodies: null, error: failureWords(error)', replace: 'bodies: new Map(), error: failureWords(error)', fails: ['mixin: a read of the bodies that failed'] },
   { name: 'a form is saved for the scope it was not filled in for', target: MIXIN, find: 'if (scopeKey !== undefined && scopeKey !== this.tagScopeKey) {', replace: 'if (false) {', fails: ['mixin: a form filled in for another'] },
   { name: 'the picker offers the bodies of no system the host picked', target: MIXIN, find: 'bundle && bundle.bodies && Number.isInteger(this.tagSystemId) ? tagChoices(bundle.bodies, this.tagSystemId) : []', replace: 'bundle && bundle.bodies ? tagChoices(bundle.bodies, 1) : []', fails: ['mixin: only the bodies of the picked system'] },
   { name: 'keeping a tag changes the clusters of the map', target: MIXIN, find: "      return this.tagRun(scopeKey, () => saveTag(this.tagRepository, this.tagScope, { tag, target: { type: 'body', row }, expected, context: this.tagContext }), 'The tag is kept.')", replace: "      this.groups = []\n\n      return this.tagRun(scopeKey, () => saveTag(this.tagRepository, this.tagScope, { tag, target: { type: 'body', row }, expected, context: this.tagContext }), 'The tag is kept.')", fails: ['map: tagging, changing and clearing'] },
@@ -1866,7 +1901,7 @@ const PAGE_MUTATIONS = [
   { name: 'a save that is a conflict drops the draft of the form', target: 'component', find: 'if (await this.save({ row: this.pick.row, tag: this.text, expected, scopeKey: this.filledFor === null ? this.scopeKey : this.filledFor })) {', replace: "if (await this.save({ row: this.pick.row, tag: this.text, expected, scopeKey: this.filledFor === null ? this.scopeKey : this.filledFor }) !== 'never') {", fails: ['component: the top form of the Notebook with the body tagged when another window', 'component: the top form of the Notebook with the body untagged when another window', 'component: the top form of the Notebook with the body tagged when it was picked'] },
   { name: 'a body that is no longer offered stays picked', target: 'component', find: 'if (this.pick && !choices.some((choice) => choice.id === this.pick.id)) {', replace: 'if (false) {', fails: ['component: the form is dropped'] },
   { name: 'the map never says a system holds only stale tags', target: 'map', find: "names.push(this.tagSystems[row.id].stale ? 'tags-stale' : 'tags')", replace: "names.push('tags')", fails: ['map: a system with a tagged body'] },
-  { name: 'the map marks the systems the filter lets out', target: 'map', find: "if (marks.has('tags') && this.tagSystems[row.id]) {", replace: "if (marks.has('tags') && this.tagAllSystems[row.id]) {", fails: ['map: the tag filter marks'] },
+  { name: 'the map marks the systems the filter lets out', target: 'map', find: "if (marks.has('tags') && this.tagSystems[row.id]) {\n        names.push(this.tagSystems[row.id].stale ? 'tags-stale' : 'tags')", replace: "if (marks.has('tags') && this.tagAllSystems[row.id]) {\n        names.push(this.tagAllSystems[row.id].stale ? 'tags-stale' : 'tags')", fails: ['map: the tag filter marks'] },
   { name: 'the map marks a system with no mark on', target: 'map', find: "if (marks.has('tags') && this.tagSystems[row.id]) {", replace: 'if (this.tagSystems[row.id]) {', fails: ['map: a system with a tagged body'] },
   { name: 'the map does not fade the systems the filter lets out', target: 'map', find: '(this.tagFilterValue !== ALL_TAGS && !this.tagSystems[row.id]) || ', replace: '', fails: ['map: the tag filter marks'] },
   { name: 'choosing a tag does not turn the mark on', target: 'map', find: "if (value !== ALL_TAGS && !this.marksSet.has('tags')) {", replace: 'if (false) {', fails: ['map: choosing a tag turns the mark'] },
@@ -1940,7 +1975,7 @@ const runChecks = async (list, only = null) => {
         results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
       }
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false, kindOf(error) === 'assertion' && !isSubjectThrow(error)])
     }
   }
 
@@ -1948,9 +1983,9 @@ const runChecks = async (list, only = null) => {
 }
 
 const caught = (mutant, results) => {
-  const expected = mutant.fails.filter((start) => !results.some(([name, , , skip]) => skip && name.startsWith(start)))
-  const survived = expected.filter((start) => !results.some(([name, result]) => name.startsWith(start) && result !== true))
-  const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
+  const expected = mutant.fails
+  const survived = expected.filter((start) => !results.some(([name, result, , skip, valueFailure]) => name.startsWith(start) && !skip && result !== true && valueFailure))
+  const missing = expected.filter((start) => !results.some(([name, , , skip]) => name.startsWith(start) && !skip))
 
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
 }

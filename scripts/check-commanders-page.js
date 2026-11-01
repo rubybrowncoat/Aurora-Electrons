@@ -874,6 +874,7 @@ const main = async () => {
   const mutating = mutationsEnabled()
   const totals = await runSuite({
     script: __filename,
+    workers: 4,
     inputs: [SAVE],
     variants: variantsOf(mutating, !process.argv.includes('--no-lacking')),
     counts: () => ({ checks, failures }),

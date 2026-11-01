@@ -502,6 +502,9 @@ const defineSuite = (m, prepared) => {
   test('worked', 'a snapshot recorded without a witness, or with a malformed one, is refused as not verified', () => {
     const none = reconcile({ anchors: [snap(100, 1000, { chain: null }), snap(300, 1060)] })
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE treasury statuses without a witness:', JSON.stringify(statuses(none)))
+    }
     assert.deepEqual(statuses(none), ['unknown', 'known'])
     assert.ok(/recorded before/.test(none.windows[0].reason))
 
@@ -546,6 +549,9 @@ const defineSuite = (m, prepared) => {
   })
 
   test('worked', 'a snapshot is not verified when the open save\'s ledger is not read, and an empty ledger verifies nothing', () => {
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE treasury statuses without a ledger:', JSON.stringify(statuses(reconcile({ ledger: null }))))
+    }
     assert.deepEqual(statuses(reconcile({ ledger: null })), ['unknown', 'unknown'])
     assert.ok(/not read/.test(reconcile({ ledger: null }).windows[0].reason))
     assert.deepEqual(statuses(reconcile({ rows: [] })), ['unknown', 'unknown'])
@@ -1018,11 +1024,19 @@ const FORK_LENGTH = 'real saves: falryx order played: the two real forks'
 const DEAD_END = 'real saves: falryx order played: a snapshot of the dead end'
 
 // `from` must occur once in `file` (a utility of the copy); `fails` are the starts of the full names ("group: name") of the checks that must fail.
+// TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; replacements do not prove retired operators.
+// [3] Old: "a snapshot with no witness is let through"; new: "an unwitnessed snapshot is accepted without verification".
+// Original guard removal dereferences anchor.chain.n at treasury-anchors.js:66 before reconciliation returns.
+// Replacement class: an unwitnessed anchor is explicitly accepted as known. Original null-chain guard-removal class currently has no credited fault.
+// [15] Old: "a snapshot is verified without reading the save's ledger"; new: "a snapshot is accepted without a ledger".
+// Original guard removal dereferences ledger.count at treasury-anchors.js:66 before reconciliation returns.
+// Replacement class: an anchor is explicitly accepted without a ledger. Original null-ledger guard-removal class currently has no credited fault.
+
 const MUTATIONS = [
   { name: 'the residual is folded into the net', file: 'treasury-anchors.js', from: 'const storedChange = to.wealth - from.wealth\n  const difference', to: 'const storedChange = to.wealth - from.wealth\n  loggedNet = storedChange\n  const difference', fails: [SIGN, ZERO, LINE] },
   { name: 'the residual has the wrong sign', file: 'treasury-anchors.js', from: 'const difference = storedChange - loggedNet', to: 'const difference = loggedNet - storedChange', fails: [SIGN, PLAYED] },
   { name: 'the witness is not compared with the open save\'s ledger', file: 'treasury-anchors.js', from: 'if (ledger.exact[anchor.chain.n] !== anchor.chain.digest) {', to: 'if (false) {', fails: [OTHER_LEDGER, OWN_COUNT, REWIND_LIFE, MERGE_LIFE, OTHER_BRANCHES, DEAD_END] },
-  { name: 'a snapshot with no witness is let through', file: 'treasury-anchors.js', from: 'if (!anchor.chain) {', to: 'if (false) {', fails: [NO_WITNESS, LEGACY_LIFE] },
+  { name: 'an unwitnessed snapshot is accepted without verification', file: 'treasury-anchors.js', from: 'if (!anchor.chain) {', to: 'if (!anchor.chain) return null\n\n  if (!anchor.chain) {', fails: [NO_WITNESS, LEGACY_LIFE] },
   { name: 'a snapshot taken after more increments than the save holds is not told apart', file: 'treasury-anchors.js', from: 'if (anchor.chain.n > ledger.count) {', to: 'if (false) {', fails: [OTHER_LEDGER, 'worked: a save that holds fewer increments'] },
   { name: 'the witness is read at the checkpoint below the snapshot\'s increment count', file: 'treasury-anchors.js', from: 'anchors.filter((anchor) => anchor.chain).map((anchor) => anchor.chain.n)', to: 'anchors.filter((anchor) => anchor.chain).map((anchor) => Math.floor(anchor.chain.n / 64) * 64)', fails: [OWN_COUNT, LINE] },
   { name: 'a malformed witness is kept', file: 'treasury-anchors.js', from: 'chain: isChain(snapshot.chain) ? { n: snapshot.chain.n, digest: snapshot.chain.digest } : null', to: 'chain: snapshot.chain || null', fails: [NO_WITNESS] },
@@ -1034,7 +1048,7 @@ const MUTATIONS = [
   { name: 'the log window leaves out the cycle at the later snapshot', file: 'treasury-anchors.js', from: 'log[index].t <= to.t', to: 'log[index].t < to.t', fails: [ENDS, SIGN, LINE] },
   { name: 'the log window takes a cycle after the later snapshot', file: 'treasury-anchors.js', from: 'log[index].t <= to.t', to: 'log[index].t <= to.t + 100', fails: [ENDS, 'worked: a window\'s cycles stop at its later snapshot'] },
   { name: 'a snapshot after the open save is accepted', file: 'treasury-anchors.js', from: 'if (anchor.t > live.t) {', to: 'if (false) {', fails: ['worked: a snapshot after the open save is refused'] },
-  { name: 'a snapshot is verified without reading the save\'s ledger', file: 'treasury-anchors.js', from: 'if (!ledger || !(ledger.count > 0)) {', to: 'if (false) {', fails: ['worked: a snapshot is not verified when the open save\'s ledger is not read'] },
+  { name: 'a snapshot is accepted without a ledger', file: 'treasury-anchors.js', from: 'if (!ledger || !(ledger.count > 0)) {', to: 'if (!ledger || !(ledger.count > 0)) return null\n\n  if (!ledger || !(ledger.count > 0)) {', fails: ['worked: a snapshot is not verified when the open save\'s ledger is not read'] },
   { name: 'an unknown window reads as a residual of 0', file: 'treasury-anchors.js', from: 'storedChange: null, loggedNet: null, residual: null, balanced: false, cycles: 0, coverage: null, result: unknownResult(reason)', to: 'storedChange: null, loggedNet: null, residual: 0, balanced: false, cycles: 0, coverage: null, result: unknownResult(reason)', fails: [UNKNOWN, NO_TREASURY] },
   { name: 'a residual up to half a unit counts as balanced', file: 'treasury-anchors.js', from: 'export const BALANCE_TOLERANCE = 1e-6', to: 'export const BALANCE_TOLERANCE = 0.5', fails: [ZERO] },
   { name: 'no window is ever balanced', file: 'treasury-anchors.js', from: 'const balanced = Math.abs(difference) <= BALANCE_TOLERANCE\n', to: 'const balanced = false\n', fails: [ZERO, LINE] },
@@ -1089,7 +1103,9 @@ const applyMutations = async (copy, prepared) => {
 
   const results = []
 
-  for (const mutation of MUTATIONS) {
+  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split('|').filter(Boolean)
+
+  for (const mutation of MUTATIONS.filter(({ name }) => !only.length || only.some((text) => name.includes(text)))) {
     const target = path.join(copy, 'renderer', 'utilities', mutation.file)
     const original = fs.readFileSync(target, 'utf8')
     const parts = original.split(mutation.from)
@@ -1103,7 +1119,7 @@ const applyMutations = async (copy, prepared) => {
 
     try {
       const modules = await loadModules(copy)
-      const wanted = mutation.fails.filter((start) => !start.startsWith('real saves') || prepared.scenarios['falryx one line'])
+      const wanted = mutation.fails
       const outcome = await runSuite(modules, prepared, wanted)
       const invalid = outcome.find((entry) => entry.error && (kindOf(entry.error) !== 'assertion' || isSubjectThrow(entry.error)))
 
@@ -1115,6 +1131,10 @@ const applyMutations = async (copy, prepared) => {
       const named = (entry, start) => `${entry.group}: ${entry.name}`.startsWith(start)
       const missed = wanted.filter((start) => !failed.some((entry) => named(entry, start)))
       const absent = wanted.filter((start) => !outcome.some((entry) => named(entry, start)))
+
+      if (process.argv.includes('--detail')) {
+        failed.forEach((entry) => console.log(`CAUGHT ${mutation.name} by ${entry.group}: ${entry.name}: ${entry.error.message}`))
+      }
 
       results.push({ group: 'mutations', name: `${mutation.name} (fails: ${wanted.join('; ')})`, error: absent.length ? new Error(`no check is named ${absent.join('; ')}`) : missed.length ? new Error(`the checks that guard this did not fail: ${missed.join('; ')}`) : null })
     } catch (error) {

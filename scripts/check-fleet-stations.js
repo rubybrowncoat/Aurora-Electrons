@@ -28,7 +28,7 @@ const fs = require('fs')
 const path = require('path')
 const acorn = require('acorn')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
@@ -307,7 +307,9 @@ const fakeSave = (save, { failing = [] } = {}) => {
       const failed = failing.find((fragment) => sql.includes(fragment))
 
       if (failed) {
-        throw new Error(`no such table: ${failed}`)
+        const [table] = /(?:FCT|DIM)_\w+/.exec(failed) || [failed]
+
+        throw new Error(`no such table: ${table}`)
       }
 
       const bodyRow = (row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, Xcor: row.x, Ycor: row.y, Component: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered })
@@ -512,7 +514,12 @@ const pure = (ctx) => {
     const { shown } = await readOn(m, w, reissued)
     const row = rowOf(shown, 30)
     const [entry] = shown.review
+    const statuses = shown.review.map((item) => item.location.station.state)
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE reviewed fleet station status:', JSON.stringify(statuses))
+    }
+    assert.deepEqual(statuses, ['unknown'], 'an unconfirmed fleet has no observed station status')
     return row && row.entry === null && row.intent === null && row.location === null && shown.review.length === 1 && shown.archived.length === 0 && entry.fleetState === 'review' && entry.intent.fleet.verdict.basis === 'reused' && entry.location.station.state === 'unknown' && entry.location.base.state === 'unknown' && entry.intent.fleet.row.name === '9th Fleet' ? true : short([row && row.entry, shown.review.length, entry && entry.intent.fleet.verdict])
   })
   add('reuse: a fleet the save does not date is held by the player\'s confirmation of that very fleet, by name and ship classes, and by nothing else', async () => {
@@ -896,6 +903,12 @@ const pure = (ctx) => {
     const review = rowOf((await readOn(m, w, reused)).shown, 30)
     const bare = rowOf((await readOn(m, world(m), save)).shown, 31)
 
+    const repickCount = m.fs.checklistOf(gone).filter((step) => step.key === 'repick' && step.role === 'station').length
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE checklist steps to repick a gone station:', repickCount)
+    }
+    assert.equal(repickCount, 1, 'the checklist tells the player to pick the gone station again')
     return same(m.fs.checklistOf(position).map((step) => step.key), ['open', 'orbit', 'resupply']) === true && m.fs.checklistOf(gone).some((step) => step.key === 'repick' && step.role === 'station') && m.fs.checklistOf(review).some((step) => step.key === 'repick' && step.role === 'base') && !m.fs.checklistOf(gone).some((step) => step.key === 'move') && m.fs.checklistOf(bare).length === 0 ? true : short([m.fs.checklistOf(position), m.fs.checklistOf(gone), m.fs.checklistOf(review)])
   })
   add('checklist: the steps hold objects and keys, never a link or an explainer', async () => {
@@ -1119,6 +1132,11 @@ const pure = (ctx) => {
     } catch (error) {
       thrown = error.message
     }
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE failed population read explanation:', JSON.stringify(context.failed.colony || ''))
+    }
+    assert.match(context.failed.colony || '', /the save lacks the population data/, 'the failed population read retains its readable explanation')
 
     return context.failed.colony && !('colony' in context.objects) && context.objects.fleet instanceof Map && context.objects.waypoint instanceof Map && thrown !== null ? true : short([context.failed, Object.keys(context.objects), thrown])
   })
@@ -1856,7 +1874,18 @@ const page = (ctx) => {
       for (const data of [{ database: null, GameID: GAME, RaceID: RACE }, { database: { query: async () => { throw new Error('asked') } }, GameID: null, RaceID: RACE }, { database: { query: async () => { throw new Error('asked') } }, GameID: GAME, RaceID: null }]) {
         const vm = instantiate(ctx.livePageOptions, { $store: PAGE_STORE, ...data, data: { loadErrors: {} } })
 
-        results.push([key, await vm.runAsync(key)])
+        const value = await vm.runAsync(key)
+
+        if (key === 'stationOrders') {
+          const row = ctx.m.fs.stationRows({ fleets: [fleetRow()], entries: [], orders: value && value.orders }).rows[0]
+          const status = row.orders.read ? 'Read' : 'Not read'
+
+          if (process.argv.includes('--detail')) {
+            console.log('VALUE orders status without a selected save and race:', status)
+          }
+          assert.equal(status, 'Not read', 'saved orders are not shown as read without a selected save and race')
+        }
+        results.push([key, value])
       }
     }
 
@@ -2110,6 +2139,20 @@ const saveStatements = async (ctx, save) => {
 // ---------- the planted faults ----------
 
 /* eslint-disable no-template-curly-in-string */
+// TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; replacements do not prove retired operators.
+// [12] Old: "a fleet under review compared as the fleet named"; new: "an extant fleet under review is compared as the named fleet".
+// Original guard removal also compares deleted/null fleets in the required reuse cases and throws before their comparison returns.
+// Replacement keeps that safety guard for missing rows while falsely comparing an extant unconfirmed fleet.
+// Original named unconfirmed-comparison class keeps a fault: yes; the collateral null-fleet crash is not credited or claimed retained.
+// [24] Old: "a station that is gone given no step to pick it again"; new: "a gone station omits its repick checklist step".
+// Original verdict-guard removal reaches station.row.name at fleet-stations.js:684-689 for a gone row and throws before a checklist returns.
+// Replacement class: omit the repick push while preserving safety. Original unsafe-gone-row guard-removal class currently has no credited fault.
+// [29] Old/new: "a kind that cannot be read left out of what failed"; only messageOf -> failureWords anchors the same omitted assignment.
+// Original failed-kind omission class keeps a fault: yes; this is an anchor migration, not a replacement defect.
+// [40] Old: "the orders read with no database, game or race"; new: "orders are shown as read without a selected save or race".
+// Original scope-guard removal invokes a missing database/invalid scope before an orders result exists.
+// Replacement class: falsely loaded empty orders, observed as Read instead of Not read. Original invalid-connection class currently has no credited fault.
+
 const MUTATIONS = [
   { name: 'the orbit not taken for the identity of a fleet on station', file: U, at: /if \(anchor !== null && fleet\.orbitBodyId === anchor\) \{/, to: () => 'if (false) {', fails: ['orbit'] },
   { name: 'the tolerance taken as inclusive', file: U, at: /km < ON_STATION_KM/, to: () => 'km <= ON_STATION_KM', fails: ['orbit'] },
@@ -2123,7 +2166,7 @@ const MUTATIONS = [
   { name: 'a confirmation that ignores the name', file: U, at: /\s*&&\s*confirmed\.name === row\.name/, to: () => '', fails: ['reuse'] },
   { name: 'a confirmation that ignores the ship classes', file: U, at: /\(ref\.type !== 'fleet' \|\| overlaps\(confirmed\.classes, row\.classes\)\)/, to: () => 'true', fails: ['reuse'] },
   { name: 'a station under review compared as the one named', file: U, at: /if \(view\.verdict\.state === VERDICTS\.REVIEW\) \{/, to: () => 'if (false) {', fails: ['reuse'] },
-  { name: 'a fleet under review compared as the fleet named', file: U, at: /if \(!fleetHeld\) \{/, to: () => 'if (false) {', fails: ['reuse'] },
+  { name: 'an extant fleet under review is compared as the named fleet', file: U, at: /if \(!fleetHeld\) \{/, to: () => 'if (!fleetHeld && !fleet.row) {', fails: ['reuse'] },
   { name: 'a second note for one fleet kept', file: U, at: /if \(!entry && listedAt\(scope\.branchId\)\.length\) \{/, to: () => 'if (false) {', fails: ['reuse'] },
   { name: 'a held reference confirmed again', file: U, at: /view\.verdict\.state !== VERDICTS\.REVIEW \|\| !view\.row/, to: () => '!view.row', fails: ['reuse'] },
   { name: 'a kind that was not read taken for gone', file: U, at: /objects instanceof Map \? objects\.get\(link\.id\) \|\| null : UNREAD/, to: () => 'objects instanceof Map ? objects.get(link.id) || null : null', fails: ['unread'] },
@@ -2135,12 +2178,12 @@ const MUTATIONS = [
   { name: 'the last order said to end at the station whatever its destination', file: U, at: /const same = last\.destinationId === null \? null : last\.destinationId === station\.id/, to: () => 'const same = true', fails: ['orders'] },
   { name: 'an order to a waypoint with the ID of the body taken for an order to the body', file: U, at: /station\.type === 'body' \? BODY_DESTINATIONS\.includes\(last\.destinationType\) : last\.destinationType === WAYPOINT_DESTINATION/, to: () => 'true', fails: ['orders'] },
   { name: 'a fleet off station given no move step', file: U, at: /\} else if \(comparison && comparison\.state !== 'on'\) \{\n\s*steps\.push\(\{ key: 'move'/, to: (found0) => found0[0].replace(/\} else if \(comparison && comparison\.state !== 'on'\) \{/, '} else if (false) {'), fails: ['checklist'] },
-  { name: 'a station that is gone given no step to pick it again', file: U, at: /if \(station\.verdict\.state !== VERDICTS\.HELD\) \{/, to: () => 'if (false) {', fails: ['checklist'] },
+  { name: 'a gone station omits its repick checklist step', file: U, at: /steps\.push\(\{ key: 'repick', role: 'station', target: station\.name, reason: station\.verdict\.state \}\)/, to: () => 'void station', fails: ['checklist'] },
   { name: 'an unknown comparison given a result of the rule', file: U, at: /state === 'unknown' \? unavailable\(\{ rule: 'fleetStation\.onStation', missing, present \}\) : ofRule/, to: () => 'false ? unavailable({ rule: \'fleetStation.onStation\', missing, present }) : ofRule', fails: ['marks'] },
   { name: 'the distance given as a figure with no result', file: U, at: /(const distanceResult = \(km\) => \(km === null \? null : ofRule\(\{ rule: )'fleetStation\.distance'/, to: (found0) => `${found0[1]}'fleetStation.onStation'`, fails: ['marks'] },
   { name: 'a null coordinate read as 0', file: U, at: /x: numberOrNull\(source\.Xcor\),\n\s*y: numberOrNull\(source\.Ycor\),\n\s*classes/, to: (found0) => found0[0].replace('numberOrNull(source.Xcor)', 'Number(source.Xcor)'), fails: ['loaders'] },
   { name: 'a waypoint marked for deletion read', file: U, at: /\s+and FCT_Waypoint\.WaypointType != \$\{MARKED_FOR_DELETION\}/, to: () => '', fails: ['loaders'] },
-  { name: 'a kind that cannot be read left out of what failed', file: U, at: /failed\[key\] = messageOf\(error\)/, to: () => 'void error', fails: ['loaders'] },
+  { name: 'a kind that cannot be read left out of what failed', file: U, at: /failed\[key\] = failureWords\(error\)/, to: () => 'void error', fails: ['loaders'] },
   { name: 'a failed read of the bodies swallowed', file: U, at: /keep\(\(await database\.query\(bodiesByIdSql\(batch\), \{ replacements \}\)\)\[0\]\)/, to: () => 'keep(await database.query(bodiesByIdSql(batch), { replacements }).then((answer) => answer[0], () => []))', fails: ['loaders'] },
   { name: 'a note kept for an object picked from another race or branch', file: U, at: /if \(!checked\[role\]\.ok\) \{/, to: () => 'if (false) {', fails: ['write'] },
   { name: 'the fleet of a note changed by an edit', file: U, at: /if \(entry && fleet !== undefined\) \{/, to: () => 'if (false) {', fails: ['write'] },
@@ -2151,7 +2194,7 @@ const MUTATIONS = [
   { name: 'a note with no confirmation held', file: U, at: /isObject\(ref\.origin\) && isText\(ref\.origin\.campaignId\) && isText\(ref\.origin\.branchId\) && confirmedOk\(ref\.confirmed\)/, to: () => 'true', fails: ['payload'] },
   { name: 'the bundle of reads used for another race', file: X, at: /(stationObjectsBundle\(\)\s*\{[\s\S]*?)\s*&&\s*bundle\.RaceID === this\.RaceID/, to: (found0) => found0[1], fails: ['optional'] },
   { name: 'a fleet list that failed taken as loaded', file: X, at: /if \(loaded\.failed\.fleet\) \{/, to: () => 'if (false) {', fails: ['optional'] },
-  { name: 'the orders read with no database, game or race', file: X, at: /(stationOrders: \{[\s\S]*?)if \(!database \|\| !GameID \|\| !RaceID\) \{/, to: (found0) => `${found0[1]}if (false) {`, fails: ['page'] },
+  { name: 'orders are shown as read without a selected save or race', file: X, at: /(stationOrders: \{[\s\S]*?if \(!database \|\| !GameID \|\| !RaceID\) \{\s*)return null/, to: (found0) => `${found0[1]}return Object.freeze({ orders: new Map(), database, GameID, RaceID })`, fails: ['page'] },
   { name: 'the retry reading every read of the panel', file: X, at: /\[\.\.\.new Set\(\[\.\.\.this\.stationFailedKeys, \.\.\.partial\]\)\]\.forEach\(/, to: () => 'STATION_INPUTS.forEach(', fails: ['optional'] },
   { name: 'the panel loading while a read has failed', file: X, at: /loading: failed\.length === 0 && !current/, to: () => 'loading: !current', fails: ['optional'] },
   { name: 'the bodies used though the read did not ask for those the notes name', file: X, at: /this\.stationBodyWanted\.every\(\(id\) => bundle\.requested\.has\(id\)\)/, to: () => 'true', fails: ['optional'] },
@@ -2375,15 +2418,18 @@ const runStatements = async (statements, keys = null, ctx = {}) => {
     }
 
     let result
+    let failure = null
 
     try {
       ctx.reader = `check ${keyOf(name)}`
       result = await test()
+      assert.ok(result === true, typeof result === 'string' ? result : short(result))
     } catch (error) {
-      result = `threw ${error.message}`
+      result = error.message
+      failure = { kind: kindOf(error), threw: isSubjectThrow(error) }
     }
 
-    results.push([name, result])
+    results.push([name, result, failure])
   }
 
   return results
@@ -2480,9 +2526,14 @@ const checkMutant = async (mutant, composed = false) => {
   const present = (key) => statements.some(([name]) => keyOf(name) === key)
   const absent = required.filter((key) => !present(key))
   const results = await runStatements(statements, required)
-  const missed = required.filter((key) => !results.some(([name, result]) => keyOf(name) === key && result !== true))
+  const invalid = results.find(([, result, failure]) => result !== true && (!failure || failure.kind !== 'assertion' || failure.threw))
+  const missed = required.filter((key) => !results.some(([name, result, failure]) => keyOf(name) === key && result !== true && failure && failure.kind === 'assertion' && !failure.threw))
 
-  check(label, !required.length ? 'names no group of checks that needs no save' : absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  if (process.argv.includes('--detail')) {
+    results.filter(([, result]) => result !== true).forEach(([name, result]) => console.log(`CAUGHT ${mutant.name} by ${name}: ${result}`))
+  }
+
+  check(label, !required.length ? 'names no group of checks that needs no save' : absent.length ? `no check has the key ${absent.join(', ')}` : invalid ? `not an own value assertion: ${invalid[0]}: ${invalid[1]}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
 
 // An edit that changes no behaviour (wording, whitespace, the order of attributes or of a list) leaves every check that needs no save green: the checks look at what the sources do, not at how they are written.
@@ -2562,6 +2613,8 @@ const parseArguments = (argv) => {
       options.mutations = false
     } else if (argv[index] === '--no-saves') {
       options.saves = false
+    } else if (argv[index] === '--detail') {
+      continue
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -2602,7 +2655,7 @@ const run = async () => {
   const extra = options.saves ? [] : ['--no-saves']
   const stacked = options.mutations ? ['stacked'] : []
   const composed = options.mutations ? COMPOSED : []
-  const sections = await runSections(__filename, [{ args: ['--part', 'head', ...extra], weight: 30 }, ...[...wanted, ...benign].map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 })), ...stacked.map((id) => ({ args: ['--part', id, ...extra], weight: 5 })), ...composed.map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 }))])
+  const sections = await runSections(__filename, [{ args: ['--part', 'head', ...extra], weight: 30 }, ...[...wanted, ...benign].map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 })), ...stacked.map((id) => ({ args: ['--part', id, ...extra], weight: 5 })), ...composed.map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 }))], 4)
   let at = 0
 
   const printed = () => {

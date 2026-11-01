@@ -3,7 +3,7 @@
 
   node scripts/check-economy-notes.js [--no-mutations]
 
-  NOTES_FALRYX and NOTES_BOSCO point the saves checks at other folders of saves (or at none: a folder that is not there skips them). A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
+  NOTES_FALRYX and NOTES_BOSCO point the saves checks at other folders of saves. A baseline check that needs the owner's saves and does not find them is reported as skipped and is not counted; a mutant naming that check is rejected, never credited with a reduced mapping.
 
   Groups:
   - links: each kind of target is linked where the save shows it is the object that was linked (a body by the discovery time of its system, a fleet by its creation time, a catalogue tech anywhere) and not checked where nothing does (a colony, a designed tech), a rename keeps the link and shows the new name, an object that is gone or an ID that another object took is never rebound, and on another branch a body is linked only if its system was found strictly before the branches parted;
@@ -24,7 +24,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createRequire } = require('module')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
@@ -497,6 +497,9 @@ const suite = (m) => {
 
     const unread = notes.readNotes(w.repo, scope(), noTechs).entries
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fleet link after another read fails:', entryFor(unread, 'fleet').link.status)
+    }
     assert.equal(entryFor(unread, 'tech').link.status, 'unknown')
     assert.equal(entryFor(unread, 'tech').stale, false)
     assert.equal(entryFor(unread, 'fleet').link.status, 'linked')
@@ -859,6 +862,12 @@ const suite = (m) => {
     assert.equal(after.title, 'Terraform it')
     assert.equal(after.status, 'done')
     assert.equal(after.next, '')
+    const linkedIds = after.links.map((link) => `${link.type}:${link.id}`)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE note linked object IDs after editing:', JSON.stringify(linkedIds))
+    }
+    assert.deepEqual(linkedIds, ['body:101'], 'the note keeps the linked body identity')
     assert.equal(after.target.id, 101)
     assert.equal(after.link.status, 'linked')
     assert.equal(after.links.length, 1)
@@ -1084,6 +1093,12 @@ const suite = (m) => {
     await notes.saveNote(w.repo, scope(), { entry, title: 'Edited', status: 'done', next: '', context })
     await notes.deleteNote(w.repo, scope(), entriesOf(w, scope(), context)[0])
 
+    const writes = context.database.sent.filter(({ sql }) => /^(?:insert|update|delete|drop|alter|create|replace|attach|pragma)\b/i.test(sql)).length
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE write statements sent by the notebook:', writes)
+    }
+    assert.equal(writes, 0, 'the save receives no write statement from the notebook')
     assert.ok(context.database.sent.length >= 7)
     context.database.sent.forEach(({ sql }) => {
       assert.match(sql, /^select /)
@@ -1103,6 +1118,9 @@ const suite = (m) => {
     await notes.saveNote(w.repo, scope(), { entry, title: 'Edited', status: 'done', next: '', context })
     await notes.deleteNote(w.repo, scope(), entriesOf(w, scope(), context)[0])
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE save queries sent while editing notes:', context.database.sent.length - sentBefore)
+    }
     assert.equal(context.database.sent.length, sentBefore)
   })
 
@@ -1136,6 +1154,9 @@ const suite = (m) => {
     const database = fakeSave(SAVE(), { failing: ['FCT_Population'] })
     const loaded = await notes.loadNoteObjects(database, { GameID: 1, RaceID: 7 })
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fleets and systems after a colony read fails:', JSON.stringify([loaded.objects.fleet.size, loaded.systems.length]))
+    }
     assert.match(loaded.failed.colony, /the save lacks the population data/)
     assert.equal(loaded.objects.colony, undefined)
     assert.equal(loaded.objects.fleet.size, 2)
@@ -1465,6 +1486,12 @@ const suite = (m) => {
       const loaded = await notes.loadNoteObjects(save.database, { GameID: 141, RaceID: 791 })
       const bodies = await notes.loadBodies(save.database, { GameID: 141, RaceID: 791, bodyIds: [1988470, 1988471], systemId: first.SystemID })
 
+      const writes = save.sent.filter((sql) => /^(?:insert|update|delete|drop|alter|create|replace|attach|pragma)\b/i.test(sql)).length
+
+      if (process.argv.includes('--detail')) {
+        console.log('VALUE write statements sent to the real save:', writes)
+      }
+      assert.equal(writes, 0, 'the real save receives no write statement from the notebook')
       assert.deepEqual(loaded.failed, {})
       assert.ok(bodies.size >= 2)
       assert.ok(save.sent.length >= 7)
@@ -1739,6 +1766,10 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     mount.vm.draft.kind = 'fleet'
     mount.vm.draft.title = 'No object'
     await mount.vm.saveDraft(false)
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE notes kept without picking an object:', mount.vm.entries.length)
+    }
+    assert.equal(mount.vm.entries.length, 0, 'an unpicked object creates no note')
     assert.match(mount.vm.message, /Pick the object/)
     assert.equal(notes.readNotes(mount.w.repo, scope()).entries.length, 0)
   })
@@ -1772,6 +1803,9 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     assert.equal(mount.vm.draft.kind, 'keep')
     mount.vm.draft.status = 'done'
     await mount.vm.saveDraft(false)
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fleet note target after form-only editing:', mount.vm.entries[0].target.id)
+    }
     assert.equal(mount.vm.entries[0].target.id, 30)
     assert.equal(mount.vm.entries[0].statusText, 'Done')
 
@@ -1812,6 +1846,20 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 }
 
 // ---- Mutants ---------------------------------------------------------------------------------------------------------
+
+// TFIN-03 catalog audit: zero-based combined utility/page indices and mapped checks are unchanged; replacements do not prove retired operators.
+// [40] Old: "a failed read of one kind of object stops the others"; new: "a failed colony read clears the other loaded objects".
+// The original throw in the kind catch (economy-notes.js:135) rejects getContext before any returned context can be observed.
+// Replacement class: successful object maps are cleared after a failed kind. Original unhandled-kind-rejection class currently has no credited fault.
+// [41] Old/new: "a write is sent to the save". [42] Old/new: "keeping a note writes to the save".
+// Both exact original update/delete statements remain; only their rejected responses are handled so actual sent SQL counts can be asserted.
+// Defect class: unauthorized write attempts, not read-only/fake-save rejection. Original write-attempt class keeps a fault: yes, at both indices.
+// [57] Old: "the form relinks a note when it is only edited"; new: "a form-only edit relinks to the last loaded fleet".
+// The original accesses null draft.pick.row at notebook.vue:429, before try:433; no edited note is persisted.
+// Replacement class: a form-only edit persists a different existing fleet target. Original null-pick dereference class currently has no credited fault.
+// [58] Old: "a note is kept with no object picked"; new: "an unpicked note form chooses the first loaded object".
+// Removing the original no-pick guard accesses null draft.pick.row at notebook.vue:429 before any note is created.
+// Replacement class: an unpicked form silently chooses an object and saves a note. Original missing-pick guard-removal crash class currently has no credited fault.
 
 const UTILITY_MUTATIONS = [
   { name: 'a link whose object is gone is rebound to the object with the same content', file: 'economy-notes.js', find: 'return objects.get(link.id) || null', replace: 'return objects.get(link.id) || [...objects.values()].find((row) => targetOf(link.type).fingerprint(row) === link.fingerprint) || null', fails: ['links: a link is never rebound'] },
@@ -1854,9 +1902,9 @@ const UTILITY_MUTATIONS = [
   { name: 'the picker offers the bodies of every system', file: 'economy-notes.js', find: "(type !== 'body' || row.systemId === systemId)", replace: 'true', fails: ['picker: the bodies offered'] },
   { name: 'the bodies are read all at once', file: 'economy-notes.js', find: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), BODIES_PER_READ)) {', replace: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), 100000)) {', fails: ['reads: the bodies are read by ID in batches'] },
   { name: 'a failed read of the bodies is taken for no bodies', file: 'economy-notes.js', find: '    keep((await database.query(bodiesByIdSql(batch), { replacements }))[0])', replace: '    keep((await database.query(bodiesByIdSql(batch), { replacements }).catch(() => [[]]))[0])', fails: ['reads: a kind the save cannot give is named as failed'] },
-  { name: 'a failed read of one kind of object stops the others', file: 'economy-notes.js', find: 'failed[key] = messageOf(error)', replace: 'throw error', fails: ['reads: a kind the save cannot give is named as failed', 'links: a link read with no objects is not checked'] },
-  { name: 'a write is sent to the save', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID')\n\n  return bodies\n}", fails: ['reads: every query the notebook sends is a select', 'saves: on the owner\'s saves every query is a select'] },
-  { name: 'keeping a note writes to the save', file: 'economy-notes.js', find: '    const links = target ? [{ type: target.type, id: row.id, row }] : []', replace: "    const links = target ? [{ type: target.type, id: row.id, row }] : []\n\n    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0')\n    }", fails: ['reads: keeping, editing and deleting a note sends nothing to the save', 'reads: every query the notebook sends is a select'] },
+  { name: 'a failed colony read clears the other loaded objects', file: 'economy-notes.js', find: '  return { objects, systems, failed, GameID, RaceID }', replace: '  if (Object.keys(failed).length) {\n    Object.keys(objects).forEach((type) => { objects[type] = new Map() })\n    systems = []\n  }\n\n  return { objects, systems, failed, GameID, RaceID }', fails: ['reads: a kind the save cannot give is named as failed', 'links: a link read with no objects is not checked'] },
+  { name: 'a write is sent to the save', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID').catch(() => [[]])\n\n  return bodies\n}", fails: ['reads: every query the notebook sends is a select', 'saves: on the owner\'s saves every query is a select'] },
+  { name: 'keeping a note writes to the save', file: 'economy-notes.js', find: '    const links = target ? [{ type: target.type, id: row.id, row }] : []', replace: "    const links = target ? [{ type: target.type, id: row.id, row }] : []\n\n    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0').catch(() => [[]])\n    }", fails: ['reads: keeping, editing and deleting a note sends nothing to the save', 'reads: every query the notebook sends is a select'] },
 ]
 
 const PAGE_MUTATIONS = [
@@ -1874,8 +1922,8 @@ const PAGE_MUTATIONS = [
   { name: 'a draft is kept when what is shown changes', mutate: replacing('resetDraft() {\n      this.draft = blankDraft()', 'resetDraft() {\n      this.draft = this.draft'), fails: ['page: a draft belongs to the campaign'] },
   { name: 'an edit is made over the revision the list has now, so a stale one is written over', mutate: replacing('{ ...stored, revision: draft.revision }', 'stored'), fails: ['page: a stale edit of the form is not written over silently'] },
   { name: 'a note is kept for the campaign whatever the switch says', mutate: replacing("policy: draft.campaignWide ? 'campaign' : 'branch'", "policy: 'campaign'"), fails: ['page: another race and another branch never list a note'] },
-  { name: 'the form relinks a note when it is only edited', mutate: replacing("const target = draft.kind === 'keep' ? undefined : { type: draft.kind, row: draft.pick.row }", 'const target = { type: draft.kind, row: draft.pick.row }'), fails: ['page: an edit of the form keeps the link'] },
-  { name: 'a note is kept with no object picked', mutate: replacing("if (draft.kind !== 'keep' && !draft.pick) {", 'if (false) {'), fails: ['page: a note is not kept until an object is picked'] },
+  { name: 'a form-only edit relinks to the last loaded fleet', mutate: replacing("const target = draft.kind === 'keep' ? undefined : { type: draft.kind, row: draft.pick.row }", "const target = draft.kind === 'keep' ? { type: 'fleet', row: [...this.context.objects.fleet.values()].slice(-1)[0] } : { type: draft.kind, row: draft.pick.row }"), fails: ['page: an edit of the form keeps the link'] },
+  { name: 'an unpicked note form chooses the first loaded object', mutate: replacing("if (draft.kind !== 'keep' && !draft.pick) {", "if (draft.kind !== 'keep' && !draft.pick) {\n        draft.pick = { row: [...this.context.objects[draft.kind].values()][0] }\n      }\n\n      if (false) {"), fails: ['page: a note is not kept until an object is picked'] },
 ]
 
 const mutatedCopy = ({ file, find, replace }) => {
@@ -1944,7 +1992,7 @@ const runChecks = async (list, only = null) => {
         results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
       }
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false, { kind: kindOf(error), threw: isSubjectThrow(error) }])
     }
   }
 
@@ -1952,8 +2000,15 @@ const runChecks = async (list, only = null) => {
 }
 
 const caught = (mutant, results) => {
-  const expected = mutant.fails.filter((start) => !results.some(([name, , , skip]) => skip && name.startsWith(start)))
-  const survived = expected.filter((start) => !results.some(([name, result]) => name.startsWith(start) && result !== true))
+  const expected = mutant.fails
+  const skipped = results.filter(([name, , , skip]) => skip && expected.some((start) => name.startsWith(start)))
+  const invalid = results.find(([, result, , , failure]) => result !== true && (!failure || failure.kind !== 'assertion' || failure.threw))
+
+  if (skipped.length || invalid) {
+    return skipped.length ? `missing fixture for ${skipped.map(([name]) => name).join('; ')}` : `not an own value assertion: ${invalid[0]}: ${invalid[1]}`
+  }
+
+  const survived = expected.filter((start) => !results.some(([name, result, , , failure]) => name.startsWith(start) && result !== true && failure.kind === 'assertion' && !failure.threw))
   const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
 
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
@@ -1993,7 +2048,7 @@ const mutantEntries = async ({ mutant, page }) => {
       results = await runChecks(suite(await loadModules(directory)), mutant.fails)
     }
 
-    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results)] }]
+    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results), process.argv.includes('--detail') ? results.filter(([, result]) => result !== true).map(([name, result]) => `${name}: ${result}`).join('; ') : ''] }]
   } catch (error) {
     return [{ show: [`mutant caught: ${mutant.name}`, error.message] }]
   } finally {

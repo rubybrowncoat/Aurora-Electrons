@@ -13,8 +13,7 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const assert = require('./lib/bounded-assert')
-const { loadUtilities } = require('./lib/utilities')
-const { loadPage, instantiate } = require('./lib/page-loader')
+const { loadPage, loadModules, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 
@@ -37,11 +36,11 @@ const SAVES = [
 ]
 
 const STUBS = {
+  // The page's history helpers need session storage; aurora.js imports dayjs, its UTC plugin and romanum.
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
-  'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "", inkMuted: "" }); export const withAlpha = (color) => color; export const flowColor = () => ""'
 const MIXIN_STUB = 'export default { methods: {}, asyncComputed: {} }'
@@ -1138,12 +1137,13 @@ const sourcesOf = (mutant) => {
 
 const contextOf = async (sources) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
-  const sourcesFor = { ...(changed(U) ? { 'deficit-sites': sources[U] } : {}), ...(changed(C) ? { capabilities: sources[C] } : {}) }
   const utilitySources = { ...(changed(U) ? { 'utilities/deficit-sites': sources[U] } : {}), ...(changed(C) ? { 'utilities/capabilities': sources[C] } : {}) }
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
   const modules = { 'components/charts/theme': THEME_STUB, 'mixins/production-modifiers': MIXIN_STUB }
   const options = await loadPage('components/minerals/DeficitSites', { stubs: STUBS, sources: { 'components/minerals/DeficitSites': sources[V], ...utilitySources } })
-  const pageOptions = await loadPage('pages/mineral-outlook', { stubs: STUBS, modules, sources: { 'pages/mineral-outlook': sources[P], ...utilitySources } })
+  // Keep the page and the utilities it imports in one graph: the NO_* defaults are objects, not cross-session singletons.
+  const pageModules = await loadModules([...NAMES.map((name) => `utilities/${name}`), 'pages/mineral-outlook'], { stubs: STUBS, modules, sources: { 'pages/mineral-outlook': sources[P], ...utilitySources } })
+  const loaded = Object.fromEntries(NAMES.map((name) => [name, pageModules[`utilities/${name}`]]))
+  const pageOptions = pageModules['pages/mineral-outlook'].default
   const pageReal = await loadPage('pages/mineral-outlook', { stubs: STUBS, modules: { ...modules, 'mixins/load-state': null }, sources: { 'pages/mineral-outlook': sources[P], ...utilitySources } })
 
   return { m: { ds: loaded['deficit-sites'], ms: loaded['mineral-supply'], outlook: loaded['mineral-outlook'], minerals: loaded.minerals, colony: loaded['colony-minerals'], mining: loaded['mining-data'], provenance: loaded.provenance, graph: loaded['jump-graph'], capabilities: loaded.capabilities }, options, pageOptions, pageReal, componentText: sources[V], pageText: sources[P] }
