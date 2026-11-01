@@ -2769,24 +2769,26 @@ const DEADLINES = { memory: 120, head: 240, recorder: 300, page: 180, setup: 900
 const CONTROL_FAULT = 'a type draws its count negative'
 
 // The utilities' head and variants, then the page's, one pool: a worker runs them one after another, the page's on its one page server and browser.
+// The gate's grouped pass: the declared groups run and no solo fault or rewrite does (owner, 2026-11-01, D1 option B).
+const GROUPS_ONLY = process.argv.includes('--groups')
 const variantsOf = ({ mutations, browser }) => [
   { key: 'logic', name: 'the head: checklist calculation and watcher truth tables (in process)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkLogicHead },
-  ...(mutations ? [...LOGIC_MOVED.keys()].map((index) => ({ key: `logic-fault:${index}`, name: `in-process checklist fault: ${PAGE_FAULTS[index].name}`, pool: 'suite', deadline: DEADLINES.memory, run: () => checkLogicFault(index) })) : []),
+  ...(mutations && !GROUPS_ONLY ? [...LOGIC_MOVED.keys()].map((index) => ({ key: `logic-fault:${index}`, name: `in-process checklist fault: ${PAGE_FAULTS[index].name}`, pool: 'suite', deadline: DEADLINES.memory, run: () => checkLogicFault(index) })) : []),
   { key: 'units', name: 'the head: the checklist and the window states (in memory)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkUnitsHead },
-  ...(mutations ? UNIT_FAULTS.map((fault, index) => ({ key: `unit-fault:${index}`, name: `unit fault: ${fault.name}`, heading: '\nplanted faults in the utilities', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitFault(fault) })) : []),
-  ...(mutations ? UNIT_REWRITES.map((rewrite, index) => ({ key: `unit-rewrite:${index}`, name: `unit rewrite: ${rewrite.name}`, heading: '\nrewrites of the utilities that say the same thing', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitRewrite(rewrite) })) : []),
+  ...(mutations && !GROUPS_ONLY ? UNIT_FAULTS.map((fault, index) => ({ key: `unit-fault:${index}`, name: `unit fault: ${fault.name}`, heading: '\nplanted faults in the utilities', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitFault(fault) })) : []),
+  ...(mutations && !GROUPS_ONLY ? UNIT_REWRITES.map((rewrite, index) => ({ key: `unit-rewrite:${index}`, name: `unit rewrite: ${rewrite.name}`, heading: '\nrewrites of the utilities that say the same thing', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitRewrite(rewrite) })) : []),
   ...(browser ? [
     { key: 'guard:held-generation', name: 'the head: held log observation refuses a renewed save generation', head: true, pool: 'suite', deadline: DEADLINES.page, browser: true, run: checkHeldGeneration },
     { key: 'page', name: 'the head: the Game Log page in a browser', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkPageHead },
     { key: 'recorder', name: 'the head: the wait for the recorder', head: true, pool: 'suite', deadline: DEADLINES.recorder, run: checkRecorder },
   ] : []),
-  ...(browser && mutations ? PAGE_FAULTS.flatMap((fault, index) => BROWSER_MOVED.has(index) || fault.group ? [] : [{ key: `page-fault:${index}`, name: `page fault: ${fault.name}`, heading: '\nplanted faults in the page', pool: 'suite', deadline: DEADLINES.page, browser: true, run: () => checkPageFault(fault) }]) : []),
+  ...(browser && mutations && !GROUPS_ONLY ? PAGE_FAULTS.flatMap((fault, index) => BROWSER_MOVED.has(index) || fault.group ? [] : [{ key: `page-fault:${index}`, name: `page fault: ${fault.name}`, heading: '\nplanted faults in the page', pool: 'suite', deadline: DEADLINES.page, browser: true, run: () => checkPageFault(fault) }]) : []),
   ...(browser && mutations ? [...faultGroups()].map(([group, members]) => ({ key: `page-group:${group}`, name: `page group ${group}: ${members.map((member) => member.name).join(' | ')}`, pool: 'suite', deadline: DEADLINES.page, browser: true, members, run: (handed) => checkPageGroup(group, handed) })) : []),
-  ...(browser && mutations ? PAGE_REWRITES.map((rewrite, index) => ({ key: `page-rewrite:${index}`, name: `page rewrite: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.page, browser: true, baseline: rewriteKind(rewrite), run: () => checkPageRewrite(rewrite) })) : []),
+  ...(browser && mutations && !GROUPS_ONLY ? PAGE_REWRITES.map((rewrite, index) => ({ key: `page-rewrite:${index}`, name: `page rewrite: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.page, browser: true, baseline: rewriteKind(rewrite), run: () => checkPageRewrite(rewrite) })) : []),
 ]
 
 const main = async () => {
-  const options = { mutations: mayMutate(), browser: !process.argv.includes('--no-browser') }
+  const options = { mutations: mayMutate() || GROUPS_ONLY, browser: !process.argv.includes('--no-browser') }
   const totals = await runSuite({
     script: __filename,
     workers: 4,
@@ -2804,7 +2806,7 @@ const main = async () => {
       }
     },
     close: closeScreen,
-    control: options.browser && options.mutations ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page', heading: '\nthe control of the warm page server' } : null,
+    control: options.browser && options.mutations && !GROUPS_ONLY ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 

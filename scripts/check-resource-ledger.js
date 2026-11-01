@@ -3107,6 +3107,8 @@ const parseArguments = (argv) => {
       // Read by DETAIL.
     } else if (argument === '--no-mutations') {
       options.mutations = false
+    } else if (argument === '--groups') {
+      // The gate's grouped pass, read by GROUPS_ONLY: the declared browser groups run and no solo mutant does.
     } else {
       console.error(`Unknown argument: ${argument}`)
       process.exit(2)
@@ -3121,18 +3123,20 @@ const DEADLINES = { head: 240, screen: 180, memory: 120, setup: 900 }
 const MUTATIONS_HEADING = '\nMutations: each planted fault must fail the checks it names, each equivalent rewrite must keep them passing'
 // The planted fault the control runs before the head: one the head's reading of the screen catches.
 const CONTROL_FAULT = 'a panel whose lowest balance is shown with the sign turned over'
+// The gate's grouped pass: the declared browser groups run and no solo mutant does (owner, 2026-11-01, D1 option B).
+const GROUPS_ONLY = process.argv.includes('--groups')
 
 // The head and every planted fault and equivalent rewrite, one pool: a worker runs them one after another, those that read the screen on its one page server and browser and the others on its loaded modules (`contextOf`).
 const variantsOf = (options) => {
   validateBrowserGroups()
   const args = runnerArgs()
   const requested = new Set([...(args.variants || []), ...(args.worker || [])])
-  const aliases = options.mutations ? [...BROWSER_GROUP_OF].filter(([index]) => requested.has('mutant:' + index)).map(([index, group]) => ({ key: 'mutant:' + index, name: 'planted fault: ' + MUTATIONS[Number(index)].name, pool: 'suite', browser: true, deadline: DEADLINES.screen, run: () => checkBrowserGroup(group, [group.members.find((member) => member.key === index)]) })) : []
+  const aliases = options.mutations && !GROUPS_ONLY ? [...BROWSER_GROUP_OF].filter(([index]) => requested.has('mutant:' + index)).map(([index, group]) => ({ key: 'mutant:' + index, name: 'planted fault: ' + MUTATIONS[Number(index)].name, pool: 'suite', browser: true, deadline: DEADLINES.screen, run: () => checkBrowserGroup(group, [group.members.find((member) => member.key === index)]) })) : []
 
   return [
     { key: 'head', name: 'the head: the checks of the sources as they are', head: true, pool: 'suite', browser: true, deadline: DEADLINES.head, run: checkHead },
-    ...(options.mutations ? [{ key: 'head-warm', name: 'the head: the browser checks over the fixture minerals of the panel alone, as the control of the warm page server reads it', head: true, heading: '\nThe head over one table, for the control of the warm page server', pool: 'suite', browser: true, deadline: DEADLINES.screen, run: checkWarmHead }] : []),
-    ...(options.mutations ? MUTATIONS.flatMap((mutation, index) => BROWSER_GROUP_OF.has(String(index)) ? [] : [{ key: 'mutant:' + index, name: (mutation.benign ? 'equivalent rewrite' : 'planted fault') + ': ' + mutation.name, heading: MUTATIONS_HEADING, pool: 'suite', browser: mutation.fails.some(isBrowserKey), deadline: mutation.fails.some(isBrowserKey) ? DEADLINES.screen : DEADLINES.memory, run: () => checkMutant(mutation) }]) : []),
+    ...(options.mutations && !GROUPS_ONLY ? [{ key: 'head-warm', name: 'the head: the browser checks over the fixture minerals of the panel alone, as the control of the warm page server reads it', head: true, heading: '\nThe head over one table, for the control of the warm page server', pool: 'suite', browser: true, deadline: DEADLINES.screen, run: checkWarmHead }] : []),
+    ...(options.mutations && !GROUPS_ONLY ? MUTATIONS.flatMap((mutation, index) => BROWSER_GROUP_OF.has(String(index)) ? [] : [{ key: 'mutant:' + index, name: (mutation.benign ? 'equivalent rewrite' : 'planted fault') + ': ' + mutation.name, heading: MUTATIONS_HEADING, pool: 'suite', browser: mutation.fails.some(isBrowserKey), deadline: mutation.fails.some(isBrowserKey) ? DEADLINES.screen : DEADLINES.memory, run: () => checkMutant(mutation) }]) : []),
     ...(options.mutations ? BROWSER_GROUPS.map((group) => ({ key: group.key, name: 'browser group: ' + group.members.map((member) => member.name).join(' | '), members: group.members, pool: 'suite', browser: true, deadline: DEADLINES.screen, run: (members) => checkBrowserGroup(group, members) })) : []),
     ...aliases,
   ]
@@ -3157,7 +3161,7 @@ const run = async () => {
       }
     },
     close: closeScreen,
-    control: options.mutations ? { fault: `mutant:${MUTATIONS.findIndex((mutation) => mutation.name === CONTROL_FAULT)}`, head: 'head-warm', heading: '\nThe control of the warm page server' } : null,
+    control: options.mutations && !GROUPS_ONLY ? { fault: `mutant:${MUTATIONS.findIndex((mutation) => mutation.name === CONTROL_FAULT)}`, head: 'head-warm', heading: '\nThe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 
