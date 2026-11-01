@@ -219,10 +219,10 @@ const FAULTS = [
   ['patched refuses in a quick run', [[MUTANT_SOURCE, 'const patched = (file, text, from, to) => {\n', dollars('const patched = (file, text, from, to) => {\n  refusePlanting(`#{file}: #{from}`)\n')]], 'library'],
   ['plantedPatch does not plant', [[MUTANT_SOURCE, 'return patched(file, text, from, to)\n}\n\n// The sources with a group', 'return text\n}\n\n// The sources with a group']], 'library'],
   ['plantedCopy does not refuse a planting', [[MUTANT_SOURCE, dollars('refusePlanting(`#{file}: #{from}`)\n\n  const result'), 'const result']], 'library'],
-  ['check-all sets no variable', [['check-all.js', "...(quick ? { CHECK_NO_MUTATIONS: '1' } : {})", '...{}']], 'all'],
-  ['check-all sets the variable in a full run too', [['check-all.js', "...(quick ? { CHECK_NO_MUTATIONS: '1' } : {})", "CHECK_NO_MUTATIONS: '1'"]], 'all'],
-  ['check-all never passes the flag', [['check-all.js', "quick && source.includes('--no-mutations') ? ['--no-mutations'] : []", '[]']], 'all'],
-  ['check-all passes the flag to every script', [['check-all.js', "quick && source.includes('--no-mutations') ? ['--no-mutations'] : []", "quick ? ['--no-mutations'] : []"]], 'all'],
+  ['check-all sets no variable', [['check-all.js', "...(heads ? { CHECK_NO_MUTATIONS: '1' } : {})", '...{}']], 'all'],
+  ['check-all sets the variable in a full run too', [['check-all.js', "...(heads ? { CHECK_NO_MUTATIONS: '1' } : {})", "CHECK_NO_MUTATIONS: '1'"]], 'all'],
+  ['check-all never passes the flag', [['check-all.js', "heads && source.includes('--no-mutations') ? ['--no-mutations'] : []", '[]']], 'all'],
+  ['check-all passes the flag to every script', [['check-all.js', "heads && source.includes('--no-mutations') ? ['--no-mutations'] : []", "heads ? ['--no-mutations'] : []"]], 'all'],
 ]
 
 // The checks of a guard made of `faults` (none: the real one) as [[name, true or the reason it failed]]; `kinds` are the groups to run.

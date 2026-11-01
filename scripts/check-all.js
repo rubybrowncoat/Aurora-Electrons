@@ -56,9 +56,11 @@ const main = async () => {
 
   const run = async (name, cap) => {
     const source = fs.readFileSync(path.join(__dirname, name), 'utf8')
-    const args = [...(ARGS[name] || []), ...(quick && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
+    // The pre-commit sweep runs heads only; so does the full gate for a script that drives Chromium, because a browser fault costs 10 to 50 s and the gate's displayed-binding credit is the grouped e2e pass (owner, 2026-11-01, D1 option B: the full gate keeps a grouped pass rather than one fault per binding).
+    const heads = quick || drivesBrowser(name)
+    const args = [...(ARGS[name] || []), ...(heads && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
     const begun = Date.now()
-    const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(quick ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
+    const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(heads ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
     const lines = `${stdout}\n${stderr}`.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
     const summary = lines.filter((line) => /\bchecks?\b.*\b(passed|ok|failed)\b|\bpassed\b/i.test(line)).pop() || lines.pop() || ''
     const result = { name, seconds: (Date.now() - begun) / 1000, code, summary }
