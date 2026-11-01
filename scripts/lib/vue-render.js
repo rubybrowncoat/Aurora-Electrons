@@ -28,12 +28,12 @@ const compiledTemplate = (componentText) => {
   return result
 }
 
-// The render function of that code.
+// The render function of that code, with the static render functions Vue hoists out of the template. A template whose whole body is static compiles to nothing but hoisted trees, so a render without them draws an empty page.
 const renderOf = (componentText) => {
   const { code } = compiledTemplate(componentText)
 
   if (!renderers.has(code)) {
-    renderers.set(code, nodeVm.runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {}))
+    renderers.set(code, nodeVm.runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\n;({ render, staticRenderFns })`, {}))
   }
 
   return renderers.get(code)
@@ -42,7 +42,7 @@ const renderOf = (componentText) => {
 // What the template renders for that instance: the elements in the order they are made, every interpolated text, and the tree they form. `overrides` answers a name before the instance does, for a state the instance cannot be set to.
 const renderTree = (componentText, instance, overrides = {}) => {
   const { errors } = compiledTemplate(componentText)
-  const render = renderOf(componentText)
+  const { render, staticRenderFns } = renderOf(componentText)
   const tags = []
   const texts = []
   const make = (tag, data, children) => {
@@ -52,10 +52,15 @@ const renderTree = (componentText, instance, overrides = {}) => {
 
     return { tag, data: (hasData ? data : null) || {}, children: (hasData ? children : data) || [] }
   }
-  const helpers = { _self: { _c: make }, _l: (list, each) => (list || []).map(each), _v: (text) => text, _s: (value) => { texts.push(String(value)); return String(value) }, _e: () => null, _u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn])), _m: () => null }
-  const tree = render.call(new Proxy(instance, { get: (target, key) => (key in overrides ? overrides[key] : key in helpers ? helpers[key] : target[key]) }))
+  let scope = null
+  // `_m` draws a hoisted static tree. Each call makes its own records, so a caller that mutates one never changes what the next render sees.
+  const helpers = { _self: { _c: make }, _l: (list, each) => (list || []).map(each), _v: (text) => text, _s: (value) => { texts.push(String(value)); return String(value) }, _e: () => null, _u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn])), _m: (index) => (staticRenderFns && staticRenderFns[index] ? staticRenderFns[index].call(scope) : null) }
 
-  return { tags, texts, tree, errors }
+  scope = new Proxy(instance, { get: (target, key) => (key in overrides ? overrides[key] : key in helpers ? helpers[key] : target[key]) })
+
+  const tree = render.call(scope)
+
+  return { tags, texts, tree, errors: [...errors] }
 }
 
 // Every element record in document order, the branches of a v-if chain and the children of a slot included.

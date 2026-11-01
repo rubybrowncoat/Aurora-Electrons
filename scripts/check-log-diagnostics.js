@@ -2773,10 +2773,10 @@ const CONTROL_FAULT = 'a type draws its count negative'
 const GROUPS_ONLY = process.argv.includes('--groups')
 const variantsOf = ({ mutations, browser }) => [
   { key: 'logic', name: 'the head: checklist calculation and watcher truth tables (in process)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkLogicHead },
-  ...(mutations && !GROUPS_ONLY ? [...LOGIC_MOVED.keys()].map((index) => ({ key: `logic-fault:${index}`, name: `in-process checklist fault: ${PAGE_FAULTS[index].name}`, pool: 'suite', deadline: DEADLINES.memory, run: () => checkLogicFault(index) })) : []),
+  ...(mutations ? [...LOGIC_MOVED.keys()].map((index) => ({ key: `logic-fault:${index}`, name: `in-process checklist fault: ${PAGE_FAULTS[index].name}`, pool: 'suite', deadline: DEADLINES.memory, run: () => checkLogicFault(index) })) : []),
   { key: 'units', name: 'the head: the checklist and the window states (in memory)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkUnitsHead },
-  ...(mutations && !GROUPS_ONLY ? UNIT_FAULTS.map((fault, index) => ({ key: `unit-fault:${index}`, name: `unit fault: ${fault.name}`, heading: '\nplanted faults in the utilities', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitFault(fault) })) : []),
-  ...(mutations && !GROUPS_ONLY ? UNIT_REWRITES.map((rewrite, index) => ({ key: `unit-rewrite:${index}`, name: `unit rewrite: ${rewrite.name}`, heading: '\nrewrites of the utilities that say the same thing', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitRewrite(rewrite) })) : []),
+  ...(mutations ? UNIT_FAULTS.map((fault, index) => ({ key: `unit-fault:${index}`, name: `unit fault: ${fault.name}`, heading: '\nplanted faults in the utilities', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitFault(fault) })) : []),
+  ...(mutations ? UNIT_REWRITES.map((rewrite, index) => ({ key: `unit-rewrite:${index}`, name: `unit rewrite: ${rewrite.name}`, heading: '\nrewrites of the utilities that say the same thing', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitRewrite(rewrite) })) : []),
   ...(browser ? [
     { key: 'guard:held-generation', name: 'the head: held log observation refuses a renewed save generation', head: true, pool: 'suite', deadline: DEADLINES.page, browser: true, run: checkHeldGeneration },
     { key: 'page', name: 'the head: the Game Log page in a browser', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkPageHead },

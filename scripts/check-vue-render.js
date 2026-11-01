@@ -24,6 +24,8 @@ const CHOSEN = '<template><div><span v-if="on">A</span><b v-else>B</b></div></te
 const EACH = '<template><ul><li v-for="row in rows" :key="row">{{ row }}</li></ul></template>'
 const TABLE = '<template><div class="panel"><v-data-table :items="rows"><template #item.name="{ item }"><span>{{ item.name }}</span></template></v-data-table></div></template>'
 const BROKEN = '<template><div>{{ broken( }}</div></template>'
+const STATIC = '<template><div><span>fixed</span><b>label</b></div></template>'
+const STATIC_BESIDE = '<template><div><section><span>a</span></section><b>{{ label }}</b></div></template>'
 
 // The records a slot drew, whether it returns one or a list of them.
 const drawnOf = (drawn) => (Array.isArray(drawn) ? drawn : [drawn]).filter((entry) => entry && typeof entry === 'object')
@@ -126,6 +128,15 @@ const CHECKS = [
     },
   },
   {
+    id: 'static',
+    name: 'a template Vue hoists whole is drawn, and a hoisted subtree beside a changing sibling keeps both',
+    run: () => {
+      assert.deepEqual(tagsIn(renderTree(STATIC, {}).tree), ['div', 'span', 'b'], 'the elements of a wholly static template')
+      assert.deepEqual(tagsIn(renderTree(STATIC_BESIDE, { label: 'x' }).tree), ['div', 'section', 'span', 'b'], 'a static subtree beside a changing sibling')
+      assert.equal(renderTree(STATIC, {}).tags.length, 3, 'the elements a static template makes')
+    },
+  },
+  {
     id: 'errors',
     name: 'a broken template gives its compile errors from the render too, never a throw',
     run: () => {
@@ -156,7 +167,8 @@ const FAULTS = [
   { key: 'no-loop', name: 'a list is rendered as itself instead of one element for each entry', file: 'vue-render.js', edits: [['_l: (list, each) => (list || []).map(each)', '_l: (list) => list || []']], fails: ['vfor'] },
   { key: 'no-slots', name: 'a scoped slot is dropped from its table record', file: 'vue-render.js', edits: [['_u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn]))', '_u: () => ({})']], fails: ['slot'] },
   { key: 'attrs-empty', name: 'an element reports no attribute whatever is bound on it', file: 'vue-render.js', edits: [['const attrsOf = (node) => (node && node.data && node.data.attrs) || {}', 'const attrsOf = () => ({})']], fails: ['attrs'] },
-  { key: 'drop-errors', name: 'the render hides the compile errors of a broken template', file: 'vue-render.js', edits: [['return { tags, texts, tree, errors }', 'return { tags, texts, tree, errors: [] }']], fails: ['errors'] },
+  { key: 'drop-errors', name: 'the render hides the compile errors of a broken template', file: 'vue-render.js', edits: [['return { tags, texts, tree, errors: [...errors] }', 'return { tags, texts, tree, errors: [] }']], fails: ['errors'] },
+  { key: 'no-static', name: 'a hoisted static tree is not drawn', file: 'vue-render.js', edits: [['_m: (index) => (staticRenderFns && staticRenderFns[index] ? staticRenderFns[index].call(scope) : null)', '_m: () => null']], fails: ['static'] },
   { key: 'ignore-overrides', name: 'an override is answered by the instance instead', file: 'vue-render.js', edits: [['(key in overrides ? overrides[key] : key in helpers ? helpers[key] : target[key])', '(key in helpers ? helpers[key] : target[key])']], fails: ['overrides'] },
 ]
 

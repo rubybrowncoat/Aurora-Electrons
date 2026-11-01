@@ -2823,8 +2823,8 @@ const variantsOf = (mutating) => {
 
   return [
     { key: 'pure', name: 'the head: the ledger over constructed ships and sites', head: true, heading: 'The fuel ledger (utilities/fuel-ledger.js)', deadline: DEADLINES.pure, run: headOf(PURE_CHECKS, 'the module') },
-    ...(plants ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
-    ...(plants ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
+    ...(mutating ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
+    ...(mutating ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
     { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: headOf(REAL_CHECKS, 'the saves') },
     { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', needs: VARIANTS, deadline: DEADLINES.pageHead, run: pageHeadOf(null, 'the page') },
     ...(plants ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
