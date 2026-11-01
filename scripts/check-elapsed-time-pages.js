@@ -1161,6 +1161,8 @@ const stacksOf = (variants, original) => variants.reduce((stacks, variant) => {
   return stacks
 }, [])
 
+// The gate's grouped pass: the declared groups run and nothing else plants, so one page open credits every member of a group (owner, 2026-11-01, D1 option B).
+const GROUPS_ONLY = process.argv.includes('--groups')
 const LEG_PANEL = 'data-leg-detail elevation="1">'
 const EXPANDED = '            <template #expanded-item="{ headers, item }">\n              <td :colspan="headers.length" class="py-3">\n                <div v-if="item.cycleRows.length"'
 
@@ -1495,13 +1497,13 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) 
         }
         console.log('GROUP_TIMING ' + JSON.stringify({ group: 'route-bindings', members: batch.map((member) => member.key), mode: solo || batch.length === 1 ? 'solo' : 'grouped', seconds }))
       }
-      for (const fault of FAULTS.filter((variant, index) => !ROUTE_GROUP.some((member) => Number(member.key) === index) && wanted(variant) && mine(variant))) {
+      for (const fault of FAULTS.filter((variant, index) => !ROUTE_GROUP.some((member) => Number(member.key) === index) && !GROUPS_ONLY && wanted(variant) && mine(variant))) {
         report(`fault caught: ${fault.name}`, faultVerdict(await viewFault(fault, view), x, fault), `fails ${fault.fails.join(', ')}`)
       }
 
       console.log('\nrewrites that say the same thing')
 
-      const rewrites = BENIGN.filter((one) => wanted(one) && mine(one))
+      const rewrites = GROUPS_ONLY ? [] : BENIGN.filter((one) => wanted(one) && mine(one))
       // Every retained rewrite runs once in its compatible stack; an explicitly selected singleton still runs.
       const served = stacksOf(rewrites, original)
 
@@ -1524,7 +1526,7 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) 
 // The worlds are processes (a process starts one page server): the main one, with the fleets at their maximum speed and no dust, runs here, and each of WORLDS, a copy of the save with rows of its own, runs as a child of this one and counts in its total. Each child is bounded by WORLD_LIMIT; one that runs past it is ended and fails the run.
 const main = async () => {
   const probing = process.argv.includes('--probe')
-  const mutating = mayMutate() && !probing
+  const mutating = (mayMutate() || process.argv.includes('--groups')) && !probing
   const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).toLowerCase()
   const faultArgument = process.argv.find((argument) => argument.startsWith('--faults='))
   const selected = faultArgument ? faultArgument.slice('--faults='.length).split(',') : null
