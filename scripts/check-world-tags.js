@@ -260,7 +260,7 @@ const fakeSave = (save, { failing = [] } = {}) => {
         const ids = wanted ? wanted[1].split(',').map((part) => Number(part.trim())) : null
         const only = sql.includes(':SystemID') ? options.replacements.SystemID : null
 
-        return [save.bodies.filter((row) => (ids ? ids.includes(row.id) : row.systemId === only)).filter((row) => found(save.systems, row.systemId)).map((row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, Component: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered }))]
+        return [save.bodies.filter((row) => (ids ? ids.includes(row.id) : row.systemId === only)).filter((row) => found(save.systems, row.systemId)).map((row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, ComponentNumber: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered }))]
       }
 
       throw new Error(`the fake save does not answer ${sql}`)
@@ -278,7 +278,7 @@ const assertBodyReadOnly = async (tags, row, { GameID = 1, RaceID = 7 } = {}) =>
     await run('create table FCT_SystemBody (SystemBodyID integer, SystemID integer, GameID integer, BodyClass integer, BodyTypeID integer, PlanetNumber integer, OrbitNumber integer, StarID integer)')
     await run('create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, GameID integer, Name text, DiscoveredTime integer)')
     await run('create table FCT_SystemBodySurveys (SystemBodyID integer, RaceID integer, GameID integer)')
-    await run('create table FCT_Star (StarID integer, Component integer)')
+    await run('create table FCT_Star (StarID integer, ComponentNumber integer)')
     await run('create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, GameID integer, Name text)')
     await run('insert into FCT_SystemBody values (?, ?, ?, ?, ?, ?, ?, ?)', [row.id, row.systemId, GameID, row.bodyClass, row.bodyType, row.planet, row.orbit, 1])
     await run('insert into FCT_RaceSysSurvey values (?, ?, ?, ?, ?)', [row.systemId, RaceID, GameID, 'System', 1])

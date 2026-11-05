@@ -6,9 +6,9 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report supported is asserted on the 2.7 base save instead, whose column names the pages are still written for (but for the gas tables, which the copy is given from the shipped 3.1 save, `gasStatements`), until the item that rewrites the reads of the renamed column lands (`RENAMED_READS`: FCT_Star.Component by AE-308-02, with the inputs and reports that still name it, so a half-migrated set of reads fails rather than passing as the item's whole set): the saves of the line read 10 supported, 4 degraded and 12 unsupported reports, and the columns those reports lack are exactly the listed one, none of them a column of DIM_Gases or FCT_AtmosphericGas;
+  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report is supported, and the columns the reports lack are exactly those `RENAMED_READS` lists, the columns Aurora 3.1 renamed or removed that a read of a page still names with the inputs and reports that still name each, so a half-migrated set of reads fails rather than passing as the item's whole set (it is empty since AE-308-02 and AE-308-03 deleted their entries), none of them a column of DIM_Gases or FCT_AtmosphericGas. The altered copies and the report-level checks are made from the 2.7 base save instead, given the 3.1 names the pages read (`baseStatements`);
   - the saves from before the line (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): refused as a save from before Aurora 3.0, naming the seven columns Aurora 3.0 added that the file lacks, with every report still evaluated so that the layout alone holds each page back, and no formula version (the direct loader states none for them either);
-  - copies of the 2.7 base save (AuroraDB_270_base.db) in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
+  - copies of the 2.7 base save (AuroraDB_270_base.db, once made a copy with the star component column renamed to ComponentNumber and the gas tables of the shipped 3.1 save) in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
   - the alien-class reads, on the interim fixture that holds 32 alien classes (the shipped saves and the export hold none, so the preflight says nothing of their queries): the Intelligence page's three reads, the recovery ledger's statements (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History), Route Finder's small places and the known wrecks check of Warnings run through the page loader and loadUtilities and return rows; a read the 3.1 line blocks by a column another item owns (`RENAMED_READS`) is recorded with that item, not fixed;
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
@@ -65,13 +65,15 @@ const LINE_COLUMNS = [
 // Three of the seven, FCT_Game's LostColonies among them and two outside it: a copy without these is a damaged 3.1 save, not one from before the line, and it states no formula version.
 const DAMAGED_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Ship.ShipSeniorCO', 'FCT_Population.AlienArtifacts']
 
-// The columns Aurora 3.1 renamed or removed that a read of a page still names, with the item that rewrites the reads, the number of inputs that name the column and the reports those inputs belong to, as this commit leaves them: a save of the line lacks each of them and no other column a report reads, so the reports that are not supported on it rest on these. An item that lands deletes its entries, and the check of a save of the line fails on an entry no report names any more as on a column that is not listed. The count and the reports pin the state the migration starts from: an item that renames some of its reads changes them, and the check then fails until the item restates what it still has to do or deletes the entry, so a half-migrated read cannot pass as the whole of what the item claims (`renamedReaders`). One removed column is named by no read the preflight sees: DIM_AssignmentTypeFilter.Fighter by nothing.
-const RENAMED_READS = {
-  'FCT_Star.Component': { owner: 'AE-308-02', reads: 66, reports: ['/colony-outlook', '/habitability', '/hauling', '/information', '/lagrange', '/log', '/logistics', '/map', '/mineral-outlook', '/minerals', '/notebook', '/production', '/routes', '/shipyards', '/survey-progress', '/warnings'] },
-}
+// The columns Aurora 3.1 renamed or removed that a read of a page still names, with the item that rewrites the reads, the number of inputs that name the column and the reports those inputs belong to, as this commit leaves them: a save of the line lacks each of them and no other column a report reads, so the reports that are not supported on it rest on these. An item that lands deletes its entries, and the check of a save of the line fails on an entry no report names any more as on a column that is not listed. The count and the reports pin the state the migration starts from: an item that renames some of its reads changes them, and the check then fails until the item restates what it still has to do or deletes the entry, so a half-migrated read cannot pass as the whole of what the item claims (`renamedReaders`). None is left: AE-308-02 (the star's component number, held by `starColumnChecks`) and AE-308-03 (the gas columns, held by the gas checks of `registryChecks`) rewrote theirs. One removed column is named by no read the preflight sees: DIM_AssignmentTypeFilter.Fighter by nothing.
+const RENAMED_READS = {}
 
-// The statements that give a copy of the 2.7 base save the gas tables of a save of the line, DIM_Gases and FCT_AtmosphericGas with their 3.1 columns (the share of a gas, and the danger pair of each of the four breathers), whose file is `gases`. Every copy the base checks use is made from the base save with these applied, so the reports it holds supported stay supported by the pages' columns, whatever else the 2.7 file lacks.
-const gasStatements = (gases) => [
+// The star's component number: `after` is its name in the 3.1 line (AE-308-02), `before` the name the 2.7 base save the altered copies are made from still has.
+const STAR_NUMBER = { table: 'FCT_Star', before: 'Component', after: 'ComponentNumber' }
+
+// The statements that make the 2.7 base save a save the pages' reads run on, given `gases`, a copy of a save of the line. Every copy the base checks use is made from the base save with these applied, so the reports it holds supported stay supported by the pages' columns, whatever else the 2.7 file lacks: the star's component number under its 3.1 name, as the line has it (AE-308-02), and the gas tables of the line, DIM_Gases and FCT_AtmosphericGas with their 3.1 columns, the share of a gas and the danger pair of each of the four breathers (AE-308-03).
+const baseStatements = (gases) => [
+  `alter table ${STAR_NUMBER.table} rename column ${STAR_NUMBER.before} to ${STAR_NUMBER.after}`,
   `attach database '${gases.replaceAll("'", "''")}' as line`,
   'drop table DIM_Gases',
   'create table DIM_Gases as select * from line.DIM_Gases',
@@ -625,7 +627,7 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
     return
   }
 
-  // The pages still read some column names that Aurora 3.1 renamed or removed (`RENAMED_READS`), so a save of the line leaves the reports that rest on them unsupported until the items that rewrite the reads land: this checks that those columns are the only ones a report lacks, and the line, the formula, the lookups and the shell of a real save of the line. The changed-column checks below run on the 2.7 base save, whose column names the pages are still written for.
+  // `RENAMED_READS` lists the column names that Aurora 3.1 renamed or removed that a page still reads (none is left), so a save of the line leaves the reports that rest on them unsupported until the item that rewrites the reads lands: this checks that those columns are the only ones a report lacks, and the line, the formula, the lookups and the shell of a real save of the line. The changed-column checks below run on the 2.7 base save given the 3.1 names the pages read (`baseStatements`).
   check(`${save.label}: every report is evaluated`, allReported(capabilities, result), Object.keys(result.reports).length)
   check(`${save.label}: the shell is supported`, result.shell.status === 'supported', JSON.stringify(result.shell))
   check(`${save.label}: every lookup row reads as expected`, failedGates(result).length === 0, failedGates(result).join(', '))
@@ -1748,6 +1750,28 @@ const lineChecks = async (capabilities, source, fieldWords) => {
   }
 }
 
+// The star's component number is `ComponentNumber` in the 3.1 line and a save of it has no column under the old name (AE-308-02): no input of the registry names the old column, the reserve panel's own list of reads (`RESERVE_PANEL_READS`, which the scan of the panel's component cannot see and so is written by hand) names the new one on both reports that carry it, and a copy of the code in which that list still names the old one has an input that names it, as the check must notice.
+const starColumnChecks = async (capabilities) => {
+  const [oldField, newField] = [STAR_NUMBER.before, STAR_NUMBER.after].map((column) => `${STAR_NUMBER.table}.${column}`)
+  const oldReaders = (module) => renamedReaders(module, oldField).map((reader) => `${reader.route} ${reader.key}`)
+  const reserves = renamedReaders(capabilities, newField).filter((reader) => reader.key === 'ResourceReserves').map((reader) => reader.route).sort()
+
+  check(`registry: no input names the old ${STAR_NUMBER.before} column of ${STAR_NUMBER.table}, which Aurora 3.1 renamed to ${STAR_NUMBER.after} and no save of the line has`, oldReaders(capabilities).length === 0, oldReaders(capabilities).join(', '))
+  check(`registry: the resource reserves input of /hauling and /logistics reads ${newField}, in the list the reserve panel is written out in by hand`, reserves.join() === '/hauling,/logistics', reserves.join())
+
+  if (mutating()) {
+    const directory = mutatedCopy('utilities/capabilities.js', `'${STAR_NUMBER.table}(${STAR_NUMBER.after} StarID)'`, `'${STAR_NUMBER.table}(${STAR_NUMBER.before} StarID)'`)
+
+    try {
+      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+      check(`registry: a copy of the code whose reserve panel reads still name the star's ${STAR_NUMBER.before} column has the two resource reserves inputs name it, as the check above must notice`, oldReaders(mutant).sort().join() === '/hauling ResourceReserves,/logistics ResourceReserves', oldReaders(mutant).join())
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
 const main = async () => {
   const write = process.argv.includes('--write')
   const unknown = process.argv.slice(2).filter((argument) => argument !== '--write' && argument !== '--no-mutations')
@@ -1784,6 +1808,7 @@ const main = async () => {
   registryChecks(capabilities, scan, navigation)
   scannerChecks(scan)
   await markerChecks(capabilities)
+  await starColumnChecks(capabilities)
 
   const realSaves = mutating() ? REAL : REAL.filter(({ label }) => label === QUICK)
 
@@ -1806,7 +1831,7 @@ const main = async () => {
     console.log('SKIP  line: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
   }
 
-  // The base save the altered copies and the report-level checks are made from: a 2.7 save, whose column names the pages are still written for but for the gas tables (`gasStatements`), so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. It moves to a save of the line once the item that rewrites the pages' reads of the renamed star column lands (`RENAMED_READS`: FCT_Star.Component to ComponentNumber, AE-308-02), and `realSaveChecks` then asserts every report supported on the 3.0 and 3.1 saves again.
+  // The base save the altered copies and the report-level checks are made from: the 2.7 base save given the 3.1 names the pages read (`baseStatements`: the star's component number, and the gas tables of the shipped 3.1 save), so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. The saves of the line support every report as well, `RENAMED_READS` being empty, and `realSaveChecks` asserts it.
   const baseFile = path.resolve(repo, 'AuroraDB_270_base.db')
   // A save of the line: the checks of the line itself and the store's accepted-copy test.
   const lineSource = path.resolve(repo, 'saves/AuroraDB_310_shipped.db')
@@ -1819,7 +1844,7 @@ const main = async () => {
 
   if (fs.existsSync(baseFile) && fs.existsSync(lineSource)) {
     const gases = await alteredCopy(lineSource, 'gases', [])
-    const source = await alteredCopy(baseFile, 'base', gasStatements(gases))
+    const source = await alteredCopy(baseFile, 'base', baseStatements(gases))
 
     removeOwnedCopy(gases)
 

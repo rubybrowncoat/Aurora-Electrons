@@ -138,7 +138,7 @@ const RESERVE_PANEL_READS = [
   'FCT_Ship(GameID ShipClassID ShipID)',
   'FCT_ShipClass(ClassName GameID MinimumFuel MinimumSupplies RaceID ShipClassID)',
   'FCT_Species(ProductionRateModifier ResearchRateModifier SpeciesID)',
-  'FCT_Star(Component StarID)',
+  'FCT_Star(ComponentNumber StarID)',
   'FCT_SystemBody(BodyClass OrbitNumber PlanetNumber RadiationLevel StarID SystemBodyID Xcor Ycor)',
   'FCT_SystemBodyName(Name RaceID SystemBodyID)',
 ].join(' ')

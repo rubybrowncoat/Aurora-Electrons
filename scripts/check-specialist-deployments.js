@@ -232,7 +232,7 @@ const MEMORY = {
   FCT_SystemBodySurveys: [101, 102, 103, 104, 105, 106, 108, 109, 111, 112, 113, 115, 116, 120, 123].map((SystemBodyID) => ({ SystemBodyID, RaceID: RACE, GameID: GAME })),
   FCT_RaceSysSurvey: [{ SystemID: 50, RaceID: RACE, GameID: GAME, Name: 'Sol' }],
   FCT_SystemBodyName: [],
-  FCT_Star: [{ StarID: 1, Component: 0 }],
+  FCT_Star: [{ StarID: 1, ComponentNumber: 0 }],
   FCT_Population: [
     colony(1, 101, 0, { GroundGeoSurvey: 100 }), colony(2, 102, 0.9999), colony(3, 103, 1), colony(4, 104, 1.0001), colony(5, 105, null), colony(6, 111, 1000), colony(11, 111, 5), colony(7, 120, 10), colony(8, 109, 10),
     colony(12, 114, 3), colony(13, 115, 2, { SystemID: 51 }), colony(14, 116, 0), colony(15, 112, 4), colony(16, 117, 1), colony(17, 107, 2), colony(18, 122, 6), colony(19, 123, 3),

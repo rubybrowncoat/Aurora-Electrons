@@ -218,7 +218,7 @@ const fixtureSql = () => {
     'create table FCT_RaceSysSurvey (GameID integer, SystemID integer, RaceID integer, Name text);',
     'create table FCT_SystemBody (SystemBodyID integer, StarID integer, BodyClass integer, PlanetNumber integer, OrbitNumber integer, Xcor real, Ycor real);',
     'create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);',
-    'create table FCT_Star (StarID integer, Component integer);',
+    'create table FCT_Star (StarID integer, ComponentNumber integer);',
     'create table FCT_JumpPoint (WarpPointID integer, GameID integer, SystemID integer, Xcor real, Ycor real);',
     'create table FCT_FleetStandingOrder (FleetID integer);',
     'create table FCT_FleetConditionalOrder (FleetID integer, GameID integer);',
@@ -230,7 +230,7 @@ const fixtureSql = () => {
     'create table FCT_DamagedComponent (ShipID integer, GameID integer, ComponentID integer, Number real);',
     'create table FCT_NavalAdminCommand (NavalAdminCommandID integer, AdminCommandTypeID integer);',
     'create table DIM_NavalAdminCommandType (CommandTypeID integer, Description text);',
-    insert('FCT_Star', { StarID: 1, Component: 1 }),
+    insert('FCT_Star', { StarID: 1, ComponentNumber: 1 }),
     insert('FCT_JumpPoint', { WarpPointID: JUMP_POINT[0], GameID: 1, SystemID: JUMP_POINT[1], Xcor: JUMP_POINT[2], Ycor: JUMP_POINT[3] }),
   ]
 

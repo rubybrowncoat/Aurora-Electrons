@@ -1027,7 +1027,7 @@ const optional = (ctx) => {
 }
 
 // What the Outlook's rows need beyond the worked colony: the body and the system the page names a colony by.
-const pageColony = () => ({ SystemName: 'Sol', Component: 1, SystemBodyID: 1, PlanetNumber: 3, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, Radius: 6000, HydroExt: 0, TidalLock: 0, RadiationLevel: 0, Gravity: 1, Efficiency: 1, Capital: 0, SpeciesID: 1, SpeciesName: 'Human', PopulationGrowthModifier: 1, PopulationDensityModifier: 1, Infrastructure: 0, LGInfrastructure: 0 })
+const pageColony = () => ({ SystemName: 'Sol', ComponentNumber: 1, SystemBodyID: 1, PlanetNumber: 3, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, Radius: 6000, HydroExt: 0, TidalLock: 0, RadiationLevel: 0, Gravity: 1, Efficiency: 1, Capital: 0, SpeciesID: 1, SpeciesName: 'Human', PopulationGrowthModifier: 1, PopulationDensityModifier: 1, Infrastructure: 0, LGInfrastructure: 0 })
 
 // ---------- the in-memory population table ----------
 

@@ -330,7 +330,7 @@ const starColor = (star) => {
   const green = toNumber(star.StarType.Green, 0)
   const blue = toNumber(star.StarType.Blue, 0)
 
-  if (!red && !green && !blue) return starColorForComponent(star.Component)
+  if (!red && !green && !blue) return starColorForComponent(star.ComponentNumber)
 
   // return hex int color
   return ((red & 0xff) << 16) | ((green & 0xff) << 8) | (blue & 0xff)
@@ -1208,7 +1208,7 @@ export default {
       // Build index by Component and by StarID
       const byComponent = new Map()
       const byStarID = new Map()
-      for (const s of stars) byComponent.set(toNumber(s.Component, 1), s)
+      for (const s of stars) byComponent.set(toNumber(s.ComponentNumber, 1), s)
 
       // Sort by hierarchy depth so parents get drawn first
       const compToParent = (s) => toNumber(s.OrbitingComponent, 0)
@@ -1225,7 +1225,7 @@ export default {
       // Draw
       const drawnByComponent = new Map()
       for (const [index, star] of ordered.entries()) {
-        const comp = toNumber(star.Component, 1)
+        const comp = toNumber(star.ComponentNumber, 1)
         const parentComp = toNumber(star.OrbitingComponent, 0)
 
         // Choose parent container & local focus point

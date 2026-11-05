@@ -304,7 +304,7 @@ const fakeSave = (save, { failing = [] } = {}) => {
         throw new Error(`no such table: ${table}`)
       }
 
-      const bodyRow = (row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, Xcor: row.x, Ycor: row.y, Component: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered })
+      const bodyRow = (row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, Xcor: row.x, Ycor: row.y, ComponentNumber: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered })
 
       if (sql.startsWith('select FCT_SystemBody.')) {
         const wanted = /FCT_SystemBody\.SystemBodyID in \(([\d, ]+)\)/.exec(sql)
@@ -322,7 +322,7 @@ const fakeSave = (save, { failing = [] } = {}) => {
         return [save.fleets.map((row) => {
           const orbiting = row.orbit > 0 ? found(save.bodies, row.orbit) : null
 
-          return { FleetID: row.id, FleetName: row.name, SystemID: row.systemId, SystemName: named(row.systemId), OrbitBodyID: row.orbit, AssignedPopulationID: row.assigned, Xcor: row.x, Ycor: row.y, CreatedTime: row.created, BodyClass: orbiting ? orbiting.bodyClass : null, PlanetNumber: orbiting ? orbiting.planet : null, OrbitNumber: orbiting ? orbiting.orbit : null, SystemBodyName: orbiting ? orbiting.name : null, Component: orbiting ? 1 : null, Classes: row.classes === null ? null : row.classes.join(','), Ships: row.ships }
+          return { FleetID: row.id, FleetName: row.name, SystemID: row.systemId, SystemName: named(row.systemId), OrbitBodyID: row.orbit, AssignedPopulationID: row.assigned, Xcor: row.x, Ycor: row.y, CreatedTime: row.created, BodyClass: orbiting ? orbiting.bodyClass : null, PlanetNumber: orbiting ? orbiting.planet : null, OrbitNumber: orbiting ? orbiting.orbit : null, SystemBodyName: orbiting ? orbiting.name : null, ComponentNumber: orbiting ? 1 : null, Classes: row.classes === null ? null : row.classes.join(','), Ships: row.ships }
         })]
       }
 

@@ -2066,7 +2066,7 @@ const defineCases = (modules) => {
   })
 
   invariant('warnings', 'an ancient construct with no known colony of 10 million is not evaluated while a population or its state is missing, and one that is known to be dormant or short of people warns', async () => {
-    const construct = (AncientConstructID, Active, PopulationID, Population) => ({ AncientConstructID, Active, ResearchBonus: 1.25, FieldName: 'Sensors', SystemBodyID: AncientConstructID, PlanetNumber: 1, OrbitNumber: 0, BodyClass: 1, SystemBodyName: `Body ${AncientConstructID}`, Component: 1, SystemName: 'Sol', PopulationID, Population })
+    const construct = (AncientConstructID, Active, PopulationID, Population) => ({ AncientConstructID, Active, ResearchBonus: 1.25, FieldName: 'Sensors', SystemBodyID: AncientConstructID, PlanetNumber: 1, OrbitNumber: 0, BodyClass: 1, SystemBodyName: `Body ${AncientConstructID}`, ComponentNumber: 1, SystemName: 'Sol', PopulationID, Population })
     const rows = await readCheck('known-unexploited-constructs', (sql) => (sql.includes('FCT_AncientConstruct') ? [construct(1, 1, 11, null), construct(2, null, 12, 25), construct(3, 0, null, null), construct(4, 1, 13, 25), construct(5, 1, 14, 5)] : []))
     const byId = Object.fromEntries(rows.map((row) => [row.id, row]))
 
@@ -2092,7 +2092,7 @@ const defineCases = (modules) => {
       create table FCT_SystemBody (SystemBodyID integer, PlanetNumber integer, OrbitNumber integer, BodyClass integer, StarID integer);
       create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);
       create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, Name text);
-      create table FCT_Star (StarID integer, Component integer);
+      create table FCT_Star (StarID integer, ComponentNumber integer);
       insert into DIM_PlanetaryInstallation values (1, 1, 0, 0), (2, 2, 0, 0), (3, 0, 0, 0), (4, 0, 1, 0);
       insert into FCT_Population values (1, 1, 1, 'One', 1, 1), (2, 1, 1, 'Two', 1, 1), (3, 1, 1, 'Three', 1, 1), (4, 1, 1, 'Four', 1, 1), (5, 1, 1, 'Five', 1, 1), (6, 1, 1, 'Six', 1, 1), (7, 1, 1, 'Seven', 1, 1);
       ${installation(1, 1, 'null')}
@@ -2140,7 +2140,7 @@ const defineCases = (modules) => {
       create table FCT_SystemBody (SystemBodyID integer, PlanetNumber integer, OrbitNumber integer, BodyClass integer, StarID integer);
       create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);
       create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, Name text);
-      create table FCT_Star (StarID integer, Component integer);
+      create table FCT_Star (StarID integer, ComponentNumber integer);
       insert into FCT_Population values (1, 1, 1, 'Governed', 5, 1, 1), (2, 1, 1, 'Academy', 4, 1, 1), (3, 1, 1, 'Garrison', 3, 1, 1), (4, 1, 1, 'Elsewhere', 2, 1, 1), (5, 1, 1, 'Empty', 0, 1, 1);
       insert into FCT_NavalAdminCommand values (10, 1, 1, 'Commanded', 1), (11, 1, 1, 'Shared', 1), (12, 1, 1, 'Vacant', 1);
       insert into FCT_SectorCommand values (20, 1, 1, 'Commanded', 1), (21, 1, 1, 'Shared', 1), (22, 1, 1, 'Admiralty', 1);

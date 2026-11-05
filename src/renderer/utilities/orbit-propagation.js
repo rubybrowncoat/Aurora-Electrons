@@ -490,7 +490,7 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
     const game = Number(GameID)
     const race = Number(RaceID)
     const missing = (columns, have) => columns.filter((name) => !have.has(name))
-    const lacking = [['FCT_SystemBody', BODY_COLUMNS, bodyColumns], ['FCT_Star', ['StarID', 'Component', 'Xcor', 'Ycor'], starColumns], ['FCT_RaceSysSurvey', ['SystemID', 'GameID', 'RaceID'], surveyColumns]].map(([table, columns, have]) => [table, missing(columns, have)]).filter(([, absent]) => absent.length)
+    const lacking = [['FCT_SystemBody', BODY_COLUMNS, bodyColumns], ['FCT_Star', ['StarID', 'ComponentNumber', 'Xcor', 'Ycor'], starColumns], ['FCT_RaceSysSurvey', ['SystemID', 'GameID', 'RaceID'], surveyColumns]].map(([table, columns, have]) => [table, missing(columns, have)]).filter(([, absent]) => absent.length)
 
     lacking.forEach(([table, absent]) => problems.push(`the save has no ${absent.map((column) => inputWords(table, column)).join(', ')}, so no orbit could be read`))
 
@@ -565,8 +565,8 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
 
     const stars = {}
 
-    ;(await rowsIn(database, 'select FCT_Star.StarID, FCT_Star.Component, FCT_Star.Xcor, FCT_Star.Ycor from FCT_Star where FCT_Star.StarID', integers([...starIds]))).forEach((row) => {
-      stars[row.StarID] = Object.freeze({ id: row.StarID, component: row.Component, xcor: numberOrNull(row.Xcor), ycor: numberOrNull(row.Ycor) })
+    ;(await rowsIn(database, 'select FCT_Star.StarID, FCT_Star.ComponentNumber, FCT_Star.Xcor, FCT_Star.Ycor from FCT_Star where FCT_Star.StarID', integers([...starIds]))).forEach((row) => {
+      stars[row.StarID] = Object.freeze({ id: row.StarID, component: row.ComponentNumber, xcor: numberOrNull(row.Xcor), ycor: numberOrNull(row.Ycor) })
     })
 
     return Object.freeze({ bodies: Object.freeze(bodies), stars: Object.freeze(stars), points: Object.freeze(points), bodyOf: Object.freeze(bodyOf), hidden: Object.freeze(hidden), hiddenPoints: Object.freeze(hiddenPoints), problems: Object.freeze(problems) })

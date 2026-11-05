@@ -117,7 +117,7 @@ export const jumpPointPlaces = (jumpPoints, systemName) => {
   })
 }
 
-// The game numbers a system's Lagrange points LP1, LP2, … by star and distance, and names one for the planet it sits by. `points`: the routes page's Lagrange rows with `Distance`, `Component` and the body's naming fields; `bodyName(point)` names that body.
+// The game numbers a system's Lagrange points LP1, LP2, … by star and distance, and names one for the planet it sits by. `points`: the routes page's Lagrange rows with `Distance`, `ComponentNumber` and the body's naming fields; `bodyName(point)` names that body.
 export const lagrangePlaces = (points, systemName, bodyName) => {
   const numbers = {}
   const bySystem = {}
@@ -125,7 +125,7 @@ export const lagrangePlaces = (points, systemName, bodyName) => {
   points.forEach((point) => {
     ;(bySystem[point.SystemID] = bySystem[point.SystemID] || []).push(point)
   })
-  Object.values(bySystem).forEach((list) => list.slice().sort((a, b) => (a.Component || 0) - (b.Component || 0) || a.Distance - b.Distance || a.LagrangePointID - b.LagrangePointID).forEach((point, index) => {
+  Object.values(bySystem).forEach((list) => list.slice().sort((a, b) => (a.ComponentNumber || 0) - (b.ComponentNumber || 0) || a.Distance - b.Distance || a.LagrangePointID - b.LagrangePointID).forEach((point, index) => {
     numbers[point.LagrangePointID] = index + 1
   }))
 

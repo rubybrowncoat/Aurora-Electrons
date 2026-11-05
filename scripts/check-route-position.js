@@ -1069,7 +1069,7 @@ const ownerDatabase = (switches, without = null, pointOwners = POINT_OWNERS) => 
     create table FCT_Fleet (FleetID, GameID, RaceID, LastMoveTime, OrbitBodyID, Xcor, Ycor, AnchorFleetID);
     create table FCT_MoveOrders (FleetID, GameID);
     create table FCT_SystemBody (${columns.join(', ')});
-    create table FCT_Star (StarID, GameID, Component, Xcor, Ycor);
+    create table FCT_Star (StarID, GameID, ComponentNumber, Xcor, Ycor);
     create table FCT_LagrangePoint (LagrangePointID, GameID, SystemID, PlanetID, Distance, Bearing, Xcor, Ycor);
     create table FCT_Population (PopulationID, GameID, SystemBodyID);
     create table FCT_RaceSysSurvey (GameID, RaceID, SystemID);

@@ -186,7 +186,7 @@ export const bodyReference = (body) => ({
   SystemBodyName: body.SystemBodyName,
   SystemName: body.SystemName,
   BodyClass: body.BodyClass,
-  Component: body.Component,
+  ComponentNumber: body.ComponentNumber,
   PlanetNumber: body.PlanetNumber,
   OrbitNumber: body.OrbitNumber,
 })

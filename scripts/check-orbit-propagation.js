@@ -158,7 +158,7 @@ const RACE = 2
 
 const SCHEMA = `
   create table FCT_SystemBody (SystemBodyID integer, GameID integer, SystemID integer, StarID integer, BodyClass integer, TrojanAsteroid integer, OrbitalDistance real, Bearing real, Year real, Eccentricity real, EccentricityDirection real, ParentBodyID integer, ParentBodyType integer, FixedBody integer, Xcor real, Ycor real);
-  create table FCT_Star (StarID integer, GameID integer, Component integer, Xcor real, Ycor real);
+  create table FCT_Star (StarID integer, GameID integer, ComponentNumber integer, Xcor real, Ycor real);
   create table FCT_LagrangePoint (LagrangePointID integer, GameID integer, SystemID integer, PlanetID integer, Distance real, Bearing real, Xcor real, Ycor real);
   create table FCT_Population (PopulationID integer, GameID integer, SystemBodyID integer);
   create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer);

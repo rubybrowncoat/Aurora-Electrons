@@ -17,7 +17,7 @@ const completeSum = (column) => `case when count(*) = count(${column}) then coal
 // Every colonisable-looking body of a known system, with the atmosphere, the deposits of a surveyed body and the colonies on it. Gas giants and jump points never appear; asteroids and comets do. Each body also gets `CmcStarInReach` (colonization.js `cmcStarInReach` for its star), and each own colony `BlocksCmc`: whether the game would keep a civilian mining complex off its body (people, automated mines, complexes or ex-complexes, or no orbital miners of the race assigned to it there).
 export const loadBodies = async (database, { GameID, RaceID }) => {
   const [bodies, gases, deposits, own, alien, stars, lagrangePoints] = await Promise.all([
-    rows(database, `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.StarID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.AtmosPress, FCT_SystemBody.TidalLock, FCT_SystemBody.DustLevel, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.DistanceToParent, FCT_SystemBody.Eccentricity, FCT_SystemBody.Year, FCT_SystemBody.FixedBody, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.Component, FCT_Star.Luminosity as StarLuminosity, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_SystemBodyName.Name as SystemBodyName, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.Eccentricity as ParentEccentricity, VIR_Parent.Year as ParentYear, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as BodySurveyed, case when FCT_BannedBodies.SystemBodyID is null then 0 else 1 end as Banned
+    rows(database, `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.StarID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.AtmosPress, FCT_SystemBody.TidalLock, FCT_SystemBody.DustLevel, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.DistanceToParent, FCT_SystemBody.Eccentricity, FCT_SystemBody.Year, FCT_SystemBody.FixedBody, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.ComponentNumber, FCT_Star.Luminosity as StarLuminosity, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_SystemBodyName.Name as SystemBodyName, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.Eccentricity as ParentEccentricity, VIR_Parent.Year as ParentYear, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as BodySurveyed, case when FCT_BannedBodies.SystemBodyID is null then 0 else 1 end as Banned
 from FCT_SystemBody
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_SystemBody.GameID
 inner join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
@@ -41,7 +41,7 @@ where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
 from FCT_AlienPopulation
 inner join FCT_Population on FCT_Population.PopulationID = FCT_AlienPopulation.PopulationID
 where FCT_AlienPopulation.GameID = ${GameID} and FCT_AlienPopulation.ViewingRaceID = ${RaceID}`),
-    rows(database, `select FCT_Star.StarID, FCT_Star.SystemID, FCT_Star.Component, FCT_Star.OrbitingComponent, FCT_Star.OrbitalDistance * (1 + FCT_Star.Eccentricity) as Apoapsis
+    rows(database, `select FCT_Star.StarID, FCT_Star.SystemID, FCT_Star.ComponentNumber, FCT_Star.OrbitingComponent, FCT_Star.OrbitalDistance * (1 + FCT_Star.Eccentricity) as Apoapsis
 from FCT_Star
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Star.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_Star.GameID
 where FCT_Star.GameID = ${GameID}`),
@@ -65,7 +65,7 @@ where FCT_LagrangePoint.GameID = ${GameID}`),
     body.BaseTemp = climateBaseTemp(body)
     body.OriginalAlbedo = body.Albedo
     body.OriginalSurfaceTemp = body.SurfaceTemp
-    body.SystemBodyOrder = `${body.Component}-${body.PlanetNumber}-${body.OrbitNumber}`
+    body.SystemBodyOrder = `${body.ComponentNumber}-${body.PlanetNumber}-${body.OrbitNumber}`
     body.Atmosphere = []
     body.Minerals = []
     body.OwnPopulations = []

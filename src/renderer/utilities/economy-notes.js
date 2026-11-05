@@ -54,7 +54,7 @@ const present = (value) => (value === null || value === undefined ? '' : String(
 
 const BODY_CLASSES = '1, 2, 3, 5'
 
-const bodySql = (filter) => `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.Component, FCT_SystemBodyName.Name as SystemBodyName, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.DiscoveredTime from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.GameID = :GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = :RaceID and FCT_SystemBodyName.GameID = :GameID where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (${BODY_CLASSES}) and ${filter} order by FCT_SystemBody.SystemBodyID`
+const bodySql = (filter) => `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.ComponentNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.DiscoveredTime from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.GameID = :GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = :RaceID and FCT_SystemBodyName.GameID = :GameID where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (${BODY_CLASSES}) and ${filter} order by FCT_SystemBody.SystemBodyID`
 
 const bodiesOfSystemSql = bodySql('FCT_SystemBody.SystemID = :SystemID')
 
@@ -73,7 +73,7 @@ export const NOTE_TARGETS = Object.freeze({
     identity: 'created',
     created: 5,
     placed: true,
-    row: (source) => ({ type: 'body', id: source.SystemBodyID, name: systemBodyName({ SystemBodyName: source.SystemBodyName, BodyClass: source.BodyClass, PlanetNumber: source.PlanetNumber, OrbitNumber: source.OrbitNumber, Component: source.Component, SystemBodyID: source.SystemBodyID }, { Name: source.SystemName }), systemId: source.SystemID, systemName: present(source.SystemName), planetNumber: source.PlanetNumber, orbitNumber: source.OrbitNumber, bodyClass: source.BodyClass, bodyTypeId: source.BodyTypeID, discovered: source.DiscoveredTime }),
+    row: (source) => ({ type: 'body', id: source.SystemBodyID, name: systemBodyName({ SystemBodyName: source.SystemBodyName, BodyClass: source.BodyClass, PlanetNumber: source.PlanetNumber, OrbitNumber: source.OrbitNumber, ComponentNumber: source.ComponentNumber, SystemBodyID: source.SystemBodyID }, { Name: source.SystemName }), systemId: source.SystemID, systemName: present(source.SystemName), planetNumber: source.PlanetNumber, orbitNumber: source.OrbitNumber, bodyClass: source.BodyClass, bodyTypeId: source.BodyTypeID, discovered: source.DiscoveredTime }),
     fingerprint: (row) => ['body', present(row.systemId), present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),
   }),
   colony: Object.freeze({

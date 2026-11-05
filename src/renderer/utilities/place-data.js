@@ -43,7 +43,7 @@ where FCT_SurveyLocation.GameID = ${GameID}`),
   return counts
 }
 
-const bodyQuery = (context, only) => `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.Component, FCT_SystemBodyName.Name as SystemBodyName, FCT_RaceSysSurvey.Name as SystemName
+const bodyQuery = (context, only) => `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.ComponentNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_SystemBody
 ${known('FCT_SystemBody', context)}
 left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID

@@ -653,7 +653,7 @@ const MEMORY_SCHEMA = {
   FCT_MineralDeposit: ['GameID', 'SystemBodyID', 'MaterialID', 'Amount', 'Accessibility', 'HalfOriginalAmount', 'OriginalAcc'],
   FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'GameID', 'Name'],
   FCT_SystemBodyName: ['SystemBodyID', 'RaceID', 'Name'],
-  FCT_Star: ['StarID', 'Component'],
+  FCT_Star: ['StarID', 'ComponentNumber'],
   FCT_SystemBodySurveys: ['GameID', 'RaceID', 'SystemBodyID'],
   FCT_Population: ['PopulationID', 'GameID', 'RaceID', 'PopName', 'SystemID', 'SystemBodyID', 'Population', 'Capital', 'MassDriverDest', 'PurchaseCivilianMinerals', ...MINERAL_NAMES.flatMap((name) => [name, `Reserve${name}`])],
   FCT_PopulationInstallations: ['PopID', 'GameID', 'PlanetaryInstallationID', 'Amount'],
@@ -671,7 +671,7 @@ const MEMORY_ROWS = {
   FCT_MineralDeposit: [stored(1, 1, 80000, 0.7), stored(2, 1, 5000, 1, { HalfOriginalAmount: null }), stored(3, 1, 90000, 0.9), stored(4, 1, 90000, 0.9), stored(1, 1, 90000, 0.9, { GameID: 9 })],
   FCT_RaceSysSurvey: [{ SystemID: 1, RaceID: 2, GameID: 1, Name: 'Sol' }, { SystemID: 2, RaceID: 3, GameID: 1, Name: 'Elsewhere' }],
   FCT_SystemBodyName: [{ SystemBodyID: 1, RaceID: 2, Name: 'Deep' }, { SystemBodyID: 1, RaceID: 3, Name: 'Other' }],
-  FCT_Star: [{ StarID: 1, Component: 1 }],
+  FCT_Star: [{ StarID: 1, ComponentNumber: 1 }],
   FCT_SystemBodySurveys: [{ GameID: 1, RaceID: 2, SystemBodyID: 1 }, { GameID: 1, RaceID: 2, SystemBodyID: 2 }, { GameID: 1, RaceID: 2, SystemBodyID: 4 }, { GameID: 1, RaceID: 3, SystemBodyID: 3 }],
   FCT_Population: [],
   FCT_PopulationInstallations: [],
@@ -707,7 +707,7 @@ const page = (ctx) => {
   const statements = []
   const add = (name, test) => statements.push([name, test])
   const mount = (data = {}) => instantiate(pageOptions, { $store: STORE, data })
-  const row = (id, name, material, amount, accessibility, over = {}) => ({ MaterialID: material, Amount: amount, Accessibility: accessibility, HalfOriginalAmount: amount, OriginalAcc: accessibility, SystemID: 1, SystemBodyID: id, PlanetNumber: 1, OrbitNumber: 1, BodyClass: 3, BodyTypeID: 1, Radius: 100, Xcor: null, Ycor: null, GroundMineralSurvey: 0, OrbitalDistance: 2, Eccentricity: 0, RadiationLevel: 0, ParentOrbitalDistance: null, SystemBodyName: name, Component: 1, SystemName: 'Sol', ...over })
+  const row = (id, name, material, amount, accessibility, over = {}) => ({ MaterialID: material, Amount: amount, Accessibility: accessibility, HalfOriginalAmount: amount, OriginalAcc: accessibility, SystemID: 1, SystemBodyID: id, PlanetNumber: 1, OrbitNumber: 1, BodyClass: 3, BodyTypeID: 1, Radius: 100, Xcor: null, Ycor: null, GroundMineralSurvey: 0, OrbitalDistance: 2, Eccentricity: 0, RadiationLevel: 0, ParentOrbitalDistance: null, SystemBodyName: name, ComponentNumber: 1, SystemName: 'Sol', ...over })
   const deposits = [row(1, 'Deep', 1, 80000, 0.7), row(2, 'Marginal', 1, 10500, 1), row(2, 'Marginal', 2, 90000, 0.9), row(2, 'Marginal', 3, 90000, 0.9), row(2, 'Marginal', 4, 90000, 0.9), row(3, 'Far', 1, 90000, 0.9, { OrbitalDistance: 200 })]
   const race = { ...RACE, MaximumOrbitalMiningDiameter: 200, AllowCMC: true }
   const panels = panelsOf(pageText)

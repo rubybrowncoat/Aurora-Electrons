@@ -172,7 +172,7 @@ const world = (m) => {
   // The tonnes of `name` that `msp` MSP take.
   const tonnes = (name, msp) => msp * PER[name]
   // The Logistics page's row of a maintenance colony: 10 facilities at 50 a year, 4 MSP each, so 2000 MSP a year at a modifier of 1.
-  const row = (id, over = {}) => ({ PopulationID: id, PopName: `C${id}`, SystemName: 'Sol', Component: 1, SystemBodyID: id, PlanetNumber: id, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, MaintenanceFacilities: 10, MSPProduction: 50, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, ...over })
+  const row = (id, over = {}) => ({ PopulationID: id, PopName: `C${id}`, SystemName: 'Sol', ComponentNumber: 1, SystemBodyID: id, PlanetNumber: id, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, MaintenanceFacilities: 10, MSPProduction: 50, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, ...over })
   // The loader's row of the same colony: stock and reserve of every mineral, the mass driver and the place.
   const source = (id, stock = {}, reserve = {}, over = {}) => ({ PopulationID: id, PopName: `C${id}`, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, Xcor: 10 * id, Ycor: 10, ShuttleCapacity: null, ServiceNames: null, ...Object.fromEntries(ALL.flatMap((name) => [[name, stock[name] ?? (MIN.includes(name) ? 1e6 : 0)], [`Reserve${name}`, reserve[name] ?? 0]])), ...over })
   const pair = (id, stock = {}, over = {}, reserve = {}, extra = {}) => ({ colony: row(id, { ...stock, ...over }), source: source(id, stock, reserve, extra) })

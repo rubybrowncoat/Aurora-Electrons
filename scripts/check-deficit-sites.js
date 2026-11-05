@@ -137,7 +137,7 @@ const world = (m) => {
   const JUMPS = [jp(11, 1, 21, KM, 0), jp(21, 2, 11, 0, 0)]
   const SOURCES = { jumpPoints: JUMPS, lagrangePoints: [], classes: [], types: [TYPE], colonies: [HOME], projects: [], race: { MineProduction: 10 }, problems: [] }
   const days = (count) => ({ SystemID: SYSTEM, Xcor: count * KM, Ycor: 0 })
-  const deposit = (id, over = {}) => ({ SystemBodyID: id, MaterialID: 1, Amount: 100000, Accessibility: 1, HalfOriginalAmount: 50000, OriginalAcc: 1, SystemID: SYSTEM, Xcor: 0, Ycor: 0, RadiationLevel: 0, Surveyed: 1, AlienColonies: 0, OwnColonies: 1, SystemName: 'Sol', SystemBodyName: null, Component: null, ...over })
+  const deposit = (id, over = {}) => ({ SystemBodyID: id, MaterialID: 1, Amount: 100000, Accessibility: 1, HalfOriginalAmount: 50000, OriginalAcc: 1, SystemID: SYSTEM, Xcor: 0, Ycor: 0, RadiationLevel: 0, Surveyed: 1, AlienColonies: 0, OwnColonies: 1, SystemName: 'Sol', SystemBodyName: null, ComponentNumber: null, ...over })
   // The new site P, one day from Home: build 100 d, carry 1 d, first load 182.5 d, one day each way.
   const sitePlaced = (id, count, over = {}) => deposit(id, { ...days(count), ...over })
   const colony = (id, name, over = {}) => ({ PopulationID: id, PopName: name, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, ...Object.fromEntries(MINS.map(({ name }) => [name, 0])), ...over })
@@ -835,7 +835,7 @@ const memoryDeposits = async ({ without = [], dropRadiation = false } = {}) => {
     FCT_SystemBodySurveys: 'create table FCT_SystemBodySurveys (GameID int, SystemBodyID int, RaceID int)',
     FCT_SystemBody: `create table FCT_SystemBody (GameID int, SystemBodyID int, SystemID int, StarID int, ${dropRadiation ? '' : 'RadiationLevel real, '}Xcor real, Ycor real, BodyClass int, PlanetNumber int, OrbitNumber int)`,
     FCT_RaceSysSurvey: 'create table FCT_RaceSysSurvey (GameID int, SystemID int, RaceID int, Name text)',
-    FCT_Star: 'create table FCT_Star (StarID int, Component int)',
+    FCT_Star: 'create table FCT_Star (StarID int, ComponentNumber int)',
     FCT_SystemBodyName: 'create table FCT_SystemBodyName (SystemBodyID int, RaceID int, Name text)',
     FCT_Population: 'create table FCT_Population (PopulationID int, GameID int, RaceID int, SystemBodyID int)',
     FCT_AlienPopulation: 'create table FCT_AlienPopulation (GameID int, PopulationID int, ViewingRaceID int)',

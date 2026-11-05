@@ -220,7 +220,7 @@ export const cmcBodyInReach = (body) => {
 
 // Whether the game lets a body of this star host a civilian mining complex. The primary star always does. A companion does when it, or for a companion of a companion the star it circles, keeps under 80 AU from what it orbits, or else when the primary has a Lagrange point on a planet within 80 AU and so does the companion (or the star it circles). `stars` are the system's stars, `lagrangePoints` its Lagrange points with their star's OrbitingComponent and their planet's apoapsis.
 export const cmcStarInReach = (star, stars, lagrangePoints) => {
-  if (star.Component === 1) {
+  if (star.ComponentNumber === 1) {
     return true
   }
 
@@ -232,7 +232,7 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
     return star.Apoapsis < CMC_REACH_AU || linked([star.StarID])
   }
 
-  const circled = stars.find((other) => other.Component === star.OrbitingComponent)
+  const circled = stars.find((other) => other.ComponentNumber === star.OrbitingComponent)
 
   return !!circled && (circled.Apoapsis < CMC_REACH_AU || linked([star.StarID, circled.StarID]))
 }

@@ -16,7 +16,7 @@ inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Sys
 inner join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${RaceID}`
 
-const BODY_COLUMNS = 'FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.Component, FCT_SystemBodyName.Name as SystemBodyName'
+const BODY_COLUMNS = 'FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.ComponentNumber, FCT_SystemBodyName.Name as SystemBodyName'
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 const FEATURE_VERSIONS = ['2.7.x']

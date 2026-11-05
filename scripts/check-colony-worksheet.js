@@ -137,7 +137,7 @@ const rowsOfFixture = () => {
   tables.push(['FCT_Game', { GameID: GAME, TerraformingSpeed: 100 }])
   tables.push(['FCT_Race', { GameID: GAME, RaceID: RACE, ColonizationSkill: 1, TerraformingRate: 0.1 }])
   tables.push(['FCT_RaceSysSurvey', { SystemID: 1, RaceID: RACE, GameID: GAME, Name: 'Test', ControlRaceID: 0, MilitaryRestrictedSystem: 0 }])
-  tables.push(['FCT_Star', { StarID: 1, SystemID: 1, GameID: GAME, Component: 1, Luminosity: 1, OrbitingComponent: 0, OrbitalDistance: 0, Eccentricity: 0 }])
+  tables.push(['FCT_Star', { StarID: 1, SystemID: 1, GameID: GAME, ComponentNumber: 1, Luminosity: 1, OrbitingComponent: 0, OrbitalDistance: 0, Eccentricity: 0 }])
   GASES.forEach((gas) => tables.push(['DIM_Gases', gas]))
   SPECIES.forEach((species, index) => {
     tables.push(['FCT_Species', species])
@@ -327,7 +327,7 @@ const fixtureOf = (ctx) => {
   return ctx.fixture
 }
 
-const referenceOf = (row) => ({ SystemBodyID: row.body.SystemBodyID, SystemBodyName: row.body.SystemBodyName, SystemName: row.body.SystemName, BodyClass: row.body.BodyClass, Component: row.body.Component, PlanetNumber: row.body.PlanetNumber })
+const referenceOf = (row) => ({ SystemBodyID: row.body.SystemBodyID, SystemBodyName: row.body.SystemBodyName, SystemName: row.body.SystemName, BodyClass: row.body.BodyClass, ComponentNumber: row.body.ComponentNumber, PlanetNumber: row.body.PlanetNumber })
 
 const rowById = (rows, id) => rows.find((row) => row.body.SystemBodyID === id)
 
@@ -430,6 +430,25 @@ const statements = (ctx) => {
     assert.deepEqual(rows.map((row) => row.body.SystemBodyID).sort(), [101, 102, 103, 104, 105, 106])
     assert.equal(bodies.find((body) => body.SystemBodyID === 102).Minerals.length, 0)
     assert.equal(bodies.find((body) => body.SystemBodyID === 101).Minerals.length, DEPOSITS[101].length)
+
+    return true
+  }))
+
+  add('cmc-reach: the loader marks a body of the primary star (component 1) as in the star\'s reach and a body of a companion that circles it from beyond 80 AU, with no Lagrange point, as out of it', settle(async () => {
+    const { db, database } = await buildDatabase(ctx.m)
+
+    try {
+      await exec(db, 'insert into FCT_Star (StarID, SystemID, GameID, ComponentNumber, Luminosity, OrbitingComponent, OrbitalDistance, Eccentricity) values (2, 1, ?, 2, 1, 1, 100, 0)', [GAME])
+      await exec(db, 'update FCT_SystemBody set StarID = 2 where SystemBodyID = 106')
+
+      const bodies = await ctx.m['colonization-data'].loadBodies(database, SCOPE)
+
+      assert.deepEqual(bodies.filter((body) => body.StarID === 1).map((body) => body.SystemBodyID).sort(), [101, 102, 103, 104, 105])
+      assert.deepEqual(bodies.filter((body) => body.CmcStarInReach).map((body) => body.SystemBodyID).sort(), [101, 102, 103, 104, 105])
+      assert.equal(bodies.find((body) => body.SystemBodyID === 106).CmcStarInReach, false)
+    } finally {
+      await new Promise((resolve) => db.close(resolve))
+    }
 
     return true
   }))
@@ -1273,6 +1292,8 @@ const MUTATIONS = [
   { name: 'the worksheet given the filtered rows', file: P, find: ':rows="rows" :species="speciesRows"', replace: ':rows="tableItems" :species="speciesRows"', fails: ['page'] },
   { name: 'the worksheet mounted without a selection', file: P, find: 'speciesRows.length && selectedBodies.length" :selection', replace: 'speciesRows.length" :selection', fails: ['page'] },
   { name: 'the worksheet not registered', file: P, find: 'components: { BodyDetail, ColonyWorksheet, LoadState,', replace: 'components: { BodyDetail, LoadState,', fails: ['page'] },
+  { name: 'the primary star tested by the star\'s old component name', file: C, find: 'if (star.ComponentNumber === 1) {', replace: 'if (star.Component === 1) {', fails: ['cmc-reach'] },
+  { name: 'a companion beyond the reach counted as in reach whatever it orbits from', file: C, find: 'return star.Apoapsis < CMC_REACH_AU || linked([star.StarID])', replace: 'return true', fails: ['cmc-reach'] },
 ]
 
 const MUTANTS = MUTATIONS.map((mutation, index) => ({ id: `mutant:${index}`, ...mutation }))
