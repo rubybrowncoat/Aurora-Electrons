@@ -44,11 +44,13 @@ const OPEN_EXISTING = 0x2
 const READS_FILE = path.join(repo, 'src', 'renderer', 'utilities', 'capability-reads.js')
 const PLANNED_ROUTES = new Set(['/settings', '/about'])
 
-// The saves the preflight is run on, each with the line it is expected to be of: the shipped 3.0.0 and 3.1.0 databases and the migrated 3.1 fixture are the 3.1 line, the two 2.7 saves are refused as saves from before Aurora 3.0.
+// The saves the preflight is run on, each with the line it is expected to be of: the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the migrated 3.1 fixture and the played 3.2 save are the 3.1 line (3.2 changed no table or column), the two 2.7 saves are refused as saves from before Aurora 3.0.
 const REAL = [
   { label: 'shipped 3.0 save', file: 'saves/AuroraDB_300_shipped.db', expect: 'accepted' },
   { label: 'shipped 3.1 save', file: 'saves/AuroraDB_310_shipped.db', expect: 'accepted' },
   { label: 'migrated 3.1 save', file: 'saves/AuroraDB-310-spookyerol-migrated.db', expect: 'accepted' },
+  { label: 'shipped 3.2 save', file: 'saves/AuroraDB_320_shipped.db', expect: 'accepted' },
+  { label: 'played 3.2 save', file: 'saves/AuroraDB-320-fetterkrolle-1.db', expect: 'accepted' },
   { label: 'modded 2.7 save', file: 'AuroraDB.db', expect: 'refused' },
   { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db', expect: 'refused' },
 ]
