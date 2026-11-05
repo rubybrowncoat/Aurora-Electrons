@@ -508,21 +508,12 @@ export const resetDatabase = (storagePath) => {
 
     Name: Sequelize.STRING,
     CargoPoints: Sequelize.INTEGER,
-    CivMove: Sequelize.BOOLEAN,
     DisplayOrder: Sequelize.FLOAT,
   }, {
     sequelize,
     modelName: 'PlanetaryInstallation',
     tableName: 'DIM_PlanetaryInstallation',
     timestamps: false,
-
-    scopes: {
-      civilianEconomy: {
-        where: {
-          CivMove: true,
-        },
-      },
-    },
   })
 
   class System extends Model {}
