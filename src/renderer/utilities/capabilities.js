@@ -30,7 +30,7 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'assumed',
   structure: FORMULA_COLUMNS,
-  note: 'A save carries no version label. The seven columns Aurora 3.0 added over 2.7.1 are in every save of the line, whose 3.0 and 3.1 shapes are identical in schema, so a save with all seven is taken as played under the rules the app states, and a save missing one of them has no formula version. That is a fact about the schema, not a verified version.',
+  note: 'A save carries no version label. The seven columns the 3.0 schema added over the earlier line are in every save of the line, whose 3.0 and 3.1 shapes are identical in schema, so a save with all seven is taken as played under the rules the app states, and a save missing one of them has no formula version. That is a fact about the schema, not a verified version.',
 })
 
 registerRule({
