@@ -16,6 +16,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -755,8 +756,7 @@ const infoLine = (label, model) => {
 }
 
 const OWNER_SAVES = [
-  ['AuroraDB.db', 140, 784, true],
-  ['saves/AuroraDB_271_skoormit_saved.db', 138, 785, true],
+  [FIXTURE.file, FIXTURE.gameId, FIXTURE.raceId, true],
   ...['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230'].map((time) => [`artifacts/falryx-sequential-and-rollback/AuroraDB-${time}.db`, 141, 791, false]),
   ...['5.03.1940', '20.07.1956', '8.05.1961', '24.12.1962', '21.06.1973'].map((date) => [`artifacts/boscodiogigia-sequential-saves/AuroraDB ${date}.db`, 140, 784, false]),
 ]

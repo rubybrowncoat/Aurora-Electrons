@@ -5,7 +5,7 @@
 
   The utility is run on deposits, colonies, jump points and mines worked by hand, at a carrier speed where one day is 86,400,000 km. What the shortlist explains: the amount, accessibility and distance of a deposit and the four delays of its first delivery (deployment, extraction of a first load, route out and back, depletion) as figures of their own. What changes the rank: a farther site, a slower carrier, a smaller load, a slower build and a ground that gives way to a carrier's limit each move a site past another. What is never listed: a deposit on a body the race has not surveyed (the loader runs on a small in-memory database of its own, with a body only another race surveyed, a body nobody surveyed and a body in a system the race has no survey of), a deposit under a known alien colony, a deposit with nothing left. What is unknown: a site with no explored route, no explored way back, no destination, speed, load, builder, mine type or number of mines has an unknown first delivery, never 0, and is listed after the ranked; a failed read is named and the rest stands. The panel's script runs as a pseudo instance over scripts/lib/page-loader.js with a change of speed, load and drive recalculating the rows, and its template and the page are read as text. The table draws a page of sites at a time and offers no page of every site: hundreds of rows drawn at once make each later frame of the window take seconds (FU-80).
 
-  The saves (saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loaders, compared with raw counts of the survey tables, and the ranking of real deposits: its order, its arrival times, the routes compared with an independent search of the explored jump points, and the sites the race already works.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) gives the real loaders, compared with raw counts of the survey tables, and the ranking of real deposits: its order, its arrival times, the routes compared with an independent search of the explored jump points, and the sites the race already works.
 
   Each mutation of the utility, the panel, the page or the capability table must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -16,6 +16,7 @@ const assert = require('./lib/bounded-assert')
 const { loadPage, loadModules, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -29,11 +30,7 @@ const V = 'component'
 const P = 'page'
 const C = 'capabilities'
 const NAMES = ['deficit-sites', 'mineral-supply', 'mineral-outlook', 'minerals', 'colony-minerals', 'mining-data', 'provenance', 'jump-graph', 'colony-transit', 'production', 'capabilities']
-const SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
   // The page's history helpers need session storage; aurora.js imports dayjs, its UTC plugin and romanum.

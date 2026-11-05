@@ -5,7 +5,7 @@ import { registerRule } from './provenance'
 
 registerRule({
   id: 'miningRedeployment.queue',
-  versions: ['2.7.x'],
+  versions: ['3.1.x'],
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys', 'FCT_Fleet.OrbitBodyID, AssignedPopulationID, Speed', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction', 'FCT_ShipClass.MiningModules', 'FCT_Population.SystemBodyID'],

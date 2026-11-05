@@ -131,10 +131,10 @@ const TOTALS_RULE = 'component.additiveTotals'
 
 registerRule({
   id: ORIGIN_RULES.imported,
-  versions: ['2.7.x'],
+  versions: ['3.1.x'],
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents', 'FCT_RaceTech.TechID = FCT_ShipDesignComponents.SDComponentID'],
-  note: 'A component row read as the save stores it, the race\'s own through its research; the meaning of each column is that of the game\'s schema, so a save whose game rules are not known reads as estimated.',
+  note: 'A component row read as the save stores it, the race\'s own through its research; the meaning of each column is that of the game\'s schema, so a save whose game rules are not known reads as estimated. Held against the migrated Galactic Shogunate save, where every stored figure of the fixed parts and of the race\'s own components was returned as the save stores it.',
 })
 
 registerRule({

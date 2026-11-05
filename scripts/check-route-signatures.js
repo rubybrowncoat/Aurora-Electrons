@@ -29,6 +29,7 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched, patchedGroup, plantedPatch, plantedGroup } = require('./lib/mutant-source')
 const { runSuite, declaredGroup } = require('./lib/suite-runner')
 const { assert, runChecks, caughtBy, judgedGroup, subjectModule, harnessStore, boundary } = require('./lib/fault-credit')
+const { FIXTURE, fixtureRows } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
@@ -1250,7 +1251,7 @@ const BENIGN = [
   { name: 'the sum of the held cargo written the other way round', family: 'condition turned round', file: C, find: '.reduce((total, entry) => total + entry.amount, 0)', to: '.reduce((total, entry) => entry.amount + total, 0)' },
   { name: 'the sources a delivery is covered by written the other way round', family: 'condition turned round', file: S, find: 'const serving = settled.filter((member) => shares.get(member) > 0)', to: 'const serving = settled.filter((member) => 0 < shares.get(member))' },
   { name: 'the scale of the settled test written with its terms swapped', family: 'condition turned round', file: C, find: 'Math.max(1, Math.abs(entry.amount))', to: 'Math.max(Math.abs(entry.amount), 1)' },
-  { name: 'the test for a cycle that has not settled written with its terms swapped', family: 'condition turned round', file: C, find: 'cargo.settled === false', to: 'false === cargo.settled' },
+  { name: 'the test for a cycle that has not settled written with its terms swapped', family: 'condition turned round', file: C, find: '|| cargo.settled === false) {', to: '|| false === cargo.settled) {' },
   { name: 'the shortfall of a demand written with its conditions swapped', family: 'condition turned round', file: S, find: 'short === 0 || (!unknown.length && !untold.length && !open.length) ? short : null', to: '(!open.length && !untold.length && !unknown.length) || short === 0 ? short : null' },
 ]
 
@@ -1305,11 +1306,36 @@ const detail = (results) => results.map((result) => `${result.id}: ${result.kind
 
 // ---- The page, in a browser over a constructed copy of a save ----------------------------------------------------------
 
-const SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire', GameID: 140, RaceID: 784 }
+const SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
 const TIMEOUT = 120000
 
-// The world: the fleets of the page are these and no other. Each is a fleet of the save with ships, whose queue is made here.
-const WORLD = { A: 460251, B: 460255, C: 460047, D: 460188, E: 460033, F: 460114, G: 460159, H: 460167, I: 460187, J: 460576, K: 460220 }
+// The world: the fleets of the page are these and no other. Each is a fleet of the save with ships and a cargo hold, chosen here from the fixture: A, D and K are the freight fleets whose queues the others are given (each opens with a load at a colony and holds an unload at a colony; D runs other places than A, and K places neither of them runs where the save has such a fleet), J the next freight fleet that runs places of its own and keeps its queue, and B, C, E, F, I, G and H the freight fleets with orders after them.
+const worldOf = () => {
+  const rows = fixtureRows('select o.FleetID as fleet, o.MoveOrder as number, o.MoveActionID as action, o.PopulationID as population from FCT_MoveOrders o join FCT_Fleet f on f.FleetID = o.FleetID where f.GameID = ? and f.RaceID = ? and exists (select 1 from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = f.FleetID and c.CargoCapacity > 0) order by o.FleetID, o.MoveOrder', FIXTURE.gameId, FIXTURE.raceId)
+  const queues = new Map()
+
+  rows.forEach((row) => queues.set(row.fleet, [...(queues.get(row.fleet) || []), row]))
+
+  const fleets = [...queues.keys()]
+  const places = (id) => [...new Set(queues.get(id).filter((row) => (row.action === 223 || row.action === 63) && row.population > 0).map((row) => row.population))]
+  const sources = fleets.filter((id) => queues.get(id).length >= 4 && queues.get(id)[0].action === 223 && queues.get(id)[0].population > 0 && queues.get(id).some((row) => row.action === 63 && row.population > 0)).sort((a, b) => queues.get(b).length - queues.get(a).length || a - b)
+  const shares = (a, b) => places(a).some((place) => places(b).includes(place))
+  const A = sources[0]
+  const D = sources.find((id) => id !== A && !shares(id, A))
+  const K = sources.find((id) => id !== A && id !== D && !shares(id, A) && !shares(id, D)) || sources.find((id) => id !== A && id !== D && places(id).join() !== places(A).join() && places(id).join() !== places(D).join())
+  const others = fleets.filter((id) => ![A, D, K].includes(id))
+  const J = others.find((id) => queues.get(id).length >= 2 && [A, D, K].every((source) => places(source).join() !== places(id).join()))
+  const rest = others.filter((id) => id !== J)
+
+  if (!A || !D || !K || !J || rest.length < 7) {
+    throw new Error('the save has too few freight fleets with orders (four that run places of their own and seven more) to make the world of the routes from')
+  }
+
+  const [B, C, E, F, I, G, H] = rest
+
+  return { A, B, C, D, E, F, G, H, I, J, K }
+}
+const WORLD = worldOf()
 
 const all = (db, sql, ...params) => db.query(sql).all(...params)
 
@@ -1366,6 +1392,9 @@ const constructedWorld = () => {
   db.run(`update FCT_Fleet set CycleMoves = 0 where FleetID in (${WORLD.F}, ${WORLD.I})`)
   db.run(`insert into FCT_FleetConditionalOrder (FleetID, GameID, ConditionalOrderID, ConditionID, Priority, CreateFWP) values (${WORLD.E}, ${SAVE.GameID}, 33, 9, 1, 0)`)
   db.run(`update FCT_MoveOrders set OrderDelayRemaining = 400 where FleetID = ${WORLD.C} and MoveOrder = 1`)
+
+  // J keeps its own queue but has not reached the stock of its first order, so its group is served and shows no flag: the group that the switch of the flagged routes must drop.
+  db.run(`update FCT_MoveOrders set Arrived = 0 where FleetID = ${WORLD.J}`)
 
   // Two templates of the cycle of D, one of them saved at another rotation and the other with a delay on one order.
   db.run('delete from FCT_MoveOrderTemplate')
@@ -2609,8 +2638,19 @@ const runBenignTogether = async () => {
   check('benign rewrites together: no check fails', failed.length === 0, detail(failed))
 }
 
+// The checks that need the freight figures the Hauling table draws for a fleet. The figures rest on the loading strength rule (utilities/transport.js), and while that rule does not hold for the version of the save a fleet has no figure to compare: those checks, and the planted faults that only they judge, are printed as needs tier b (owner AE-302-08) and run again once the rule holds.
+const FIGURE_CHECKS = new Set(['screen-filter', 'screen-capacity', 'screen-state', 'desire-created', 'desire-coverage', 'desire-delivered', 'desire-delivered-unit', 'desire-gap', 'desire-gap-unit', 'desire-refreshed'])
+const FIGURES_NOTE = 'needs tier b: the fleets have no freight figure in the table until the loading strength rule holds for the version of the save (owner AE-302-08)'
+
+const figuresHold = async () => {
+  const { provenance } = await loadUtilities(['provenance', 'transport'], { stubs: STUBS })
+
+  return provenance.ruleSupports('transport.handlingStrength', '3.1.x') === true
+}
+
 // The page server, the browser and the world the page variants of a worker share, started by `prepare`.
-const PAGE = { world: null, labels: null, sources: null, server: null, chrome: null }
+const PAGE = { world: null, labels: null, sources: null, server: null, chrome: null, figures: false }
+const neededOf = (fails) => fails.filter((id) => PAGE.figures || !FIGURE_CHECKS.has(id))
 
 const startPage = async () => {
   const { startPageServer } = require('./lib/page-server')
@@ -2618,6 +2658,7 @@ const startPage = async () => {
   PAGE.world = constructedWorld()
   PAGE.world.capableNames = [PAGE.world.expected[WORLD.A].name, PAGE.world.expected[WORLD.D].name]
   PAGE.labels = await wordsOf()
+  PAGE.figures = await figuresHold()
   PAGE.sources = sourcesOf()
   PAGE.server = await startPageServer({ save: PAGE.world.file })
   PAGE.chrome = await require('playwright').chromium.launch()
@@ -2678,12 +2719,17 @@ const pageSeen = async (reads, given, what) => {
   }
 }
 
-const pageChecksOf = (reads) => (reads === 'desires' ? desireChecks : reads === 'refresh' ? refreshChecks : browserChecks)
+const pageChecksOf = (reads) => (reads === 'desires' ? desireChecks : reads === 'refresh' ? refreshChecks : browserChecks).filter((item) => PAGE.figures || !FIGURE_CHECKS.has(item.id))
 
 const judgePage = (reads, seen) => runChecks(pageChecksOf(reads), { seen: seen.value, world: PAGE.world, labels: PAGE.labels })
 
 const runPage = async (reads) => {
   const seen = await pageSeen(reads, PAGE.sources, 'the sources as they are')
+  const waiting = (reads === 'desires' ? desireChecks : reads === 'refresh' ? refreshChecks : browserChecks).filter((item) => !PAGE.figures && FIGURE_CHECKS.has(item.id)).map((item) => item.id)
+
+  if (waiting.length) {
+    console.log(`SKIP  ${waiting.join(', ')}: ${FIGURES_NOTE}`)
+  }
 
   for (const result of await judgePage(reads, seen)) {
     check(`${result.id}: ${result.name}`, result.ok, `${result.kind}: ${result.detail}`)
@@ -2696,19 +2742,35 @@ const pageLabel = (key) => path.basename(FILES[key])
 
 const runPageFault = async (index) => {
   const mutation = BROWSER_MUTATIONS[index]
+  const fails = neededOf(mutation.fails)
+
+  if (!fails.length) {
+    console.log(`SKIP  planted fault of the page: ${mutation.name}: only checks that need the freight figures judge it: ${FIGURES_NOTE}`)
+
+    return
+  }
+
   const reads = readsOfFault(mutation)
   const failed = failedOf(await judgePage(reads, await pageSeen(reads, planted(PAGE.sources, mutation), `the fault "${mutation.name}"`)))
-  const credited = failed.filter((result) => mutation.fails.includes(result.id) && result.kind === 'assertion')
+  const credited = failed.filter((result) => fails.includes(result.id) && result.kind === 'assertion')
 
-  check(`mutation caught: ${mutation.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, mutation.fails, { name: mutation.name }), failed.map((result) => `${result.id}: ${result.kind}: ${String(result.detail).split('\n')[0]}`).join('; '))
+  check(`mutation caught: ${mutation.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, fails, { name: mutation.name }), failed.map((result) => `${result.id}: ${result.kind}: ${String(result.detail).split('\n')[0]}`).join('; '))
 }
 
-// The faults of a group planted together in the sources, the page opened once over them, and each member credited by its own checks alone (`judgedGroup`): a check no member names that fails stops the run as a defect of the harness in the group. `--solo` hands one member.
-const runPageGroup = async (group, members) => {
+// The faults of a group planted together in the sources, the page opened once over them, and each member credited by its own checks alone (`judgedGroup`): a check no member names that fails stops the run as a defect of the harness in the group. `--solo` hands one member. A member that only checks needing the freight figures judge is left out of the group and printed as needs tier b.
+const runPageGroup = async (group, handed) => {
+  const members = handed.filter((member) => neededOf(member.fails).length)
+
+  handed.filter((member) => !members.includes(member)).forEach((member) => console.log(`SKIP  planted fault of the page: ${member.name}: only checks that need the freight figures judge it: ${FIGURES_NOTE}`))
+
+  if (!members.length) {
+    return
+  }
+
   const reads = readsOfFault(members[0])
   const results = await judgePage(reads, await pageSeen(reads, plantedGroup(PAGE.sources, members, pageLabel), members.length === 1 ? `the fault "${members[0].name}"` : `the faults of the group ${group}`))
 
-  for (const { member, caught, failed } of judgedGroup(results, members, { what: `the faults of the group ${group}`, alone: members.length === 1 })) {
+  for (const { member, caught, failed } of judgedGroup(results, members.map((entry) => ({ ...entry, fails: neededOf(entry.fails) })), { what: `the faults of the group ${group}`, alone: members.length === 1 })) {
     const credited = failed.filter((result) => result.kind === 'assertion')
 
     check(`mutation caught: ${member.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caught, `expected a value of ${member.fails.join(', ')}; ${failed.length ? detail(failed) : 'every check it names held'}`)

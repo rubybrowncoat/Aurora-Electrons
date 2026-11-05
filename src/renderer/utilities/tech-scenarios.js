@@ -17,12 +17,12 @@ export const HYPOTHETICAL_PREFIX = 'Hypothetical tech: '
 // The only way a choice enters a record: a level of the race's next research.
 export const NEXT_TECH = 'next-tech'
 
-const SCENARIO_VERSIONS = ['2.7.x']
+const SCENARIO_VERSIONS = ['3.1.x']
 
 registerRule({
   id: 'tech.scenarioChoice',
   versions: SCENARIO_VERSIONS,
-  note: 'The figure of a tech level the player picked from the race\'s next research. A planner\'s own what-if, not a game rule: the race has not researched the level.',
+  note: 'The figure of a tech level the player picked from the race\'s next research. A planner\'s own what-if, not a game rule: the race has not researched the level. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   verification: STATUS.ASSUMED,
   structure: ['FCT_TechSystem', 'FCT_RaceTech.TechID', 'FCT_EligibleProjects.TechSystemID', 'FCT_ResearchProject.TechID', 'FCT_ResearchQueue.TechSystemID', 'FCT_PausedResearch'],
   assumptions: ['The race researches the level before the design is built'],

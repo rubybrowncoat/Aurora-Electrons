@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-empire-logistics.js [--no-mutations]
 
-  The expected figures of `s4` are typed here from the owner's two captures of the tab (the specimen S4, saves/AuroraDB-310-spookyerol-migrated.db at 17 June 2199, game 141, race 784), every row with its colours; `oracle` works the same figures out again from the stored rows by SQL and arithmetic written apart from the loaders, after the game's own code (`Race.method_92`, `Population.RecalculateMaintainedShipTonnage`, `RecalculateAnnualProductionCapacities`, `method_210`, `Ship.CountsAgainstPopulationMaintenance`):
+  The expected figures of `s4` are typed here from the owner's two captures of the tab (the specimen S4, the interim fixture of scripts/lib/fixtures.js named `INTERIM`, at 17 June 2199, game 141, race 784), every row with its colours; `oracle` works the same figures out again from the stored rows by SQL and arithmetic written apart from the loaders, after the game's own code (`Race.method_92`, `Population.RecalculateMaintainedShipTonnage`, `RecalculateAnnualProductionCapacities`, `method_210`, `Ship.CountsAgainstPopulationMaintenance`):
   - `s4`: the page's own read and rows, drawn by the component, equal the capture for every colony: name, the eight figures as written (the whole figure, the fuel in millions to one place), the colour of each, the three marks and the order of the rows;
   - `oracle`: the rows equal the oracle's for the fixture as saved and for in-memory copies in which a fleet of maintenance modules is assigned to no colony, to another colony, moved by less than a unit, moved to another system, given a civilian function or has its modules damaged, a class is made commercial, a ship's mothership has no commercial hangar, a ship is in a shipyard task of its colony, a ship sits a hair off the body and a class lacks its hull spaces;
   - `formula`: the worked cases on given rows (capacity with every modifier, the module's addition with the racial capacity and the economic modifier alone, the whole facilities of production and of the marks, the tonnage and the supplies a year);
@@ -32,11 +32,13 @@ const { compiledTemplate, renderTree, treeOf } = require('./lib/vue-render')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { INTERIM } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
-const GAME = 141
-const RACE = 784
+// The data of this check are the specimen S4 of the interim fixture, not the default: the owner's captures of the tab and the cases planted on the colonies of that save (Earth, Aurelia, Venus) are bound to it, so it names INTERIM and keeps reading that save when `FIXTURE` moves to a later one.
+const SAVE = INTERIM.file
+const GAME = INTERIM.gameId
+const RACE = INTERIM.raceId
 const NEAR = 1e-9
 // DIM_ComponentType: Maintenance Module.
 const MODULE_TYPE = 48

@@ -9,7 +9,7 @@
   - The pure builders on constructed rows worked out by hand: the naval tree (11 commands, 8 fleets and 8 ships of the race, and the rows that must not enter it; with the shipping lines listed, 9 fleets and 10 ships), the posts and their holders, the ground formations with their commanders, the CSV and Markdown of both (the Markdown's title and file name by the empire, its list nested as a CommonMark reader and a reader that needs four spaces a level read it, and its Mermaid diagram of the organisation read back as Mermaid reads it), and the roster filters on a roster of people whose post, rank and age are stored, unknown or on the edge of a bound.
   - The SELECT statements and the loaders on an in-memory SQLite database that holds rows of another race and another game, and a save without the columns the posts need (never a save of the user).
   - The Commanders page itself, its compiled template rendered by Vue: the controls are found by driving them and seeing the roster change, the downloads by clicking the buttons and reading what they save. The shipping-line switch is driven the same way against the page's own read of the naval tree on an in-memory database, re-run as the app re-runs a read whose inputs changed, and across a reload of the saved view.
-  - In full mode every AuroraDB*.db that can be found, in quick mode saves/AuroraDB_271_skoormit_saved.db (the stock save also used by the elapsed-time page checks), one check per game and race: the models (with the shipping lines left out and listed), the posts and the roster filters compared with SQL written separately here. A save without the tables or columns is reported UNSUPPORTED and a save with nothing to compare EMPTY: neither counts as agreement.
+  - In full mode every AuroraDB*.db that can be found, in quick mode the migrated Galactic Shogunate save (scripts/lib/fixtures.js, also used by the elapsed-time page checks), one check per game and race: the models (with the shipping lines left out and listed), the posts and the roster filters compared with SQL written separately here. A save without the tables or columns is reported UNSUPPORTED and a save with nothing to compare EMPTY: neither counts as agreement.
   - Planted faults in the utilities and the page, each of which must make every check it names fail.
 
   The checks read behaviour: the rows a control leaves in the roster, the cells a parsed CSV holds, the text a Markdown reader would show. None reads the source or the template text, the wording of a sentence or the position of an element.
@@ -26,6 +26,7 @@ const Vue = require('vue')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage } = require('./lib/page-loader')
+const { FIXTURE } = require('./lib/fixtures')
 const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const rawAssert = require('./lib/bounded-assert')
@@ -2259,7 +2260,7 @@ const savePairs = async (database, tables) => {
 
 const saveFiles = () => breadthFiles()
 
-// Keep the full matrix's indices: a focused save:N always means the same file, including with --no-mutations. The quick head uses the stock save exercised by the elapsed-time page suite; malformed structures, cross-race rows and missing columns remain covered by the constructed rows and loaders. An explicit save selection can still audit any member of the full matrix.
+// Keep the full matrix's indices: a focused save:N always means the same file, including with --no-mutations. The quick head uses the fixture save exercised by the elapsed-time page suite; malformed structures, cross-race rows and missing columns remain covered by the constructed rows and loaders. An explicit save selection can still audit any member of the full matrix.
 const selectedSaves = (options) => {
   const files = saveFiles().map((file, index) => ({ file, index }))
 
@@ -2267,7 +2268,7 @@ const selectedSaves = (options) => {
     return files
   }
 
-  const representative = path.join(root, 'saves', 'AuroraDB_271_skoormit_saved.db')
+  const representative = path.join(root, FIXTURE.file)
   const chosen = files.filter(({ file }) => file === representative)
 
   if (chosen.length !== 1) {

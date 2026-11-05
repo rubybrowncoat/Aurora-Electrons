@@ -4,8 +4,8 @@
   Run: bun scripts/check-warning-intruders.js [--no-mutations] [--no-browser] [--only=<text>,<text>]
 
   - Fixtures: an in-memory save whose race holds contacts now (one with a lost track beside a current one, and ones with a track whose time is not stored), contacts last detected long ago (ships, a salvo, a colony, the old track of a ship that moved on), contacts lost one sub-pulse before the game time and one a year before it, a colony held now with ground units of both kinds and a lost shipyard beside a ship of another empire that has the colony's id, empires of unknown, allied and friendly standing, systems with contacts of two empires, and a game whose time is not stored. Each check reads the rows the warning returns back through the module's word tables and compares them, system by system, with what is written here: the name, the counts, the inputs missing, each empire named under the system by its id (its name, its contacts by type, whether it is marked hostile) and the place the row's link opens; and the order of the systems with their ids.
-  - Saves, read only: AuroraDB.db (game 140, race 784), saves/AuroraDB.db (game 138, race 785, which holds systems whose contacts are all lost) and saves/AuroraDB_271_skoormit_saved.db (game 138, race 785): the rows of the warning against SQL written here from the game's rules, and the flyout line against the systems the warning lists.
-  - The page in a browser: the real renderer serves saves/AuroraDB.db (scripts/lib/page-server.js), the race is picked and the Warnings page opened on the check; once the page's own read of the check has settled on the copy of the save it shows, the page's section is hovered in the rail and, once the flyout's line under the page has settled, the screen is read the way every page check reads it (scripts/lib/browser-observe.js: `installScreen`, `hooked`, `readFigure`, `rolesRead`, `pairedBy`, `labelKey`). The hooks only find the elements: each row a player can see is paired with the SQL by the id of its system, never by its place; its name, its contacts and the line naming each empire are read by their roles from the text drawn and compared by the ids of the empires; the group a row is shown in is the reason the words of the line over it give, read back through the page's table of them (SEPARATOR_WORDS of utilities/warnings/common.js) with the number on that line; figures are read whole and signed in the grouping of the app's setting; the place the row's link opens is read from the link on screen; and the count of the flyout's line is compared with the warnings shown.
+  - Saves, read only: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784): the rows of the warning against SQL written here from the game's rules, and the flyout line against the systems the warning lists.
+  - The page in a browser: the real renderer serves the fixture save (scripts/lib/page-server.js), the race is picked and the Warnings page opened on the check; once the page's own read of the check has settled on the copy of the save it shows, the page's section is hovered in the rail and, once the flyout's line under the page has settled, the screen is read the way every page check reads it (scripts/lib/browser-observe.js: `installScreen`, `hooked`, `readFigure`, `rolesRead`, `pairedBy`, `labelKey`). The hooks only find the elements: each row a player can see is paired with the SQL by the id of its system, never by its place; its name, its contacts and the line naming each empire are read by their roles from the text drawn and compared by the ids of the empires; the group a row is shown in is the reason the words of the line over it give, read back through the page's table of them (SEPARATOR_WORDS of utilities/warnings/common.js) with the number on that line; figures are read whole and signed in the grouping of the app's setting; the place the row's link opens is read from the link on screen; and the count of the flyout's line is compared with the warnings shown.
   - Planted faults in copies of the rule, the shared condition, the flyout line, the words of the page and the page, one for each way the code can be wrong, each of which must make a check named for it fail by an assertion of its own on a value, never by a call of the code under test that threw (scripts/lib/fault-credit.js `caughtBy`, which stops the run when only a throw would credit a fault; a fault served to the browser is judged on what the page then shows, and a page that does not get through stops the run, as nothing may be credited with it), and benign rewrites, one of each family (an explicit prop and event instead of v-model, a longhand v-on, a qualifier moved from the front to the back, a synonym in generated prose, the empires of a system named in another order, a parenthesised condition, a cell's binding written another way that draws the same text, full opacity on the check), that must make none fail, alone and all together.
   - Controls of the harness: an assertion of a check is told from an error of the code under test.
 
@@ -21,6 +21,7 @@ const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, GROUPINGS, readFigure, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 const { assert, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 const pageLoading = require('./page-loading')
+const { FIXTURE: FIXTURE_SAVE, fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -313,9 +314,7 @@ const openFixture = () => new Promise((resolve, reject) => {
 // ---------- the saves ----------
 
 const SAVES = [
-  { id: 'save-modded', file: 'AuroraDB.db', GameID: 140, RaceID: 784 },
-  { id: 'save-egg', file: 'saves/AuroraDB.db', GameID: 138, RaceID: 785, lost: true },
-  { id: 'save-stock', file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785 },
+  { id: 'save-fixture', file: fixtureSave().file, GameID: fixtureSave().game, RaceID: fixtureSave().race, lost: true },
 ]
 
 const openSave = (file) => new Promise((resolve, reject) => {
@@ -372,7 +371,7 @@ const oracleOf = async (database, GameID, RaceID) => {
 
 // ---------- the page in a browser ----------
 
-const BROWSER = { save: SAVES[1], game: 'EggSample', race: 'EggSample', route: '/warnings?check=intruders', path: '/warnings', check: 'intruders', read: 'readIntruders' }
+const BROWSER = { save: SAVES[0], game: FIXTURE_SAVE.gameName, race: FIXTURE_SAVE.raceName, route: '/warnings?check=intruders', path: '/warnings', check: 'intruders', read: 'readIntruders' }
 const BROWSER_TIMEOUT = 120000
 
 // What the page on screen shows of the check, and the line the open section flyout shows under the page; runs in the page, through the shared readers (`window.__screen` of scripts/lib/browser-observe.js `installScreen`). Hooks only find the elements: the lines of the check's table in the order drawn, each a line over the rows listed apart (`data-separator`) or a row (`data-row`, its id), a row's cells by their roles (`data-cell`, and `data-caption` for the line naming its empires, as the role `caption`) and the flyout's item marked as the page on screen. What each says and whether it is on screen are read from the screen: the text drawn, never a container's `textContent`, and never the value of a hook. A row's links are each link among its actions with the place it opens and whether it is on screen. The grouping is that of the app's "Thousands Separator" setting.
@@ -637,8 +636,8 @@ add('page-peek', 'the line the section flyout shows under the Warnings page, its
 // [name, file key, from, to, the ids of the checks one of which must fail by a value (a fault), browser (served to the browser and the page read again)], one for each way the code can be wrong. Anchors are code, keys and attributes.
 /* eslint-disable no-template-curly-in-string */
 const MUTANTS = [
-  ['every stored contact is held, a lost one included', 'contacts', '\'FCT_Contacts.LastUpdate = FCT_Game.GameTime\'', '\'FCT_Contacts.LastUpdate <= FCT_Game.GameTime\'', ['long-ago', 'boundary', 'population', 'unknown-standing', 'save-egg', 'page-rows'], true],
-  ['the rule reads every stored contact', 'space', ' and (${HELD_CONTACT}) is not 0`', '`', ['long-ago', 'boundary', 'population', 'save-egg', 'page-rows'], true],
+  ['every stored contact is held, a lost one included', 'contacts', '\'FCT_Contacts.LastUpdate = FCT_Game.GameTime\'', '\'FCT_Contacts.LastUpdate <= FCT_Game.GameTime\'', ['long-ago', 'boundary', 'population', 'unknown-standing', 'save-fixture', 'page-rows'], true],
+  ['the rule reads every stored contact', 'space', ' and (${HELD_CONTACT}) is not 0`', '`', ['long-ago', 'boundary', 'population', 'save-fixture', 'page-rows'], true],
   ['a contact with no stored time reads as held', 'space', 'contact.Held === 1 ? [] :', 'contact.Held !== 0 ? [] :', ['unknown-time']],
   ['a game time that is not stored leaves every contact out', 'space', ' and (${HELD_CONTACT}) is not 0`', ' and (${HELD_CONTACT}) = 1`', ['unknown-time']],
   ['a ship and a colony that share an id are one contact', 'space', 'const key = `${track.SystemID}:${type}:${track.ContactID}`', 'const key = `${track.SystemID}:${track.ContactID}`', ['population']],
@@ -650,12 +649,12 @@ const MUTANTS = [
   ['a neutral contact is told as a hostile one', 'space', 'contactCount(ctx, neutrals.length, `neutral ${type}`)', 'contactCount(ctx, neutrals.length, `hostile ${type}`)', ['population']],
   ['the rule\'s structure leaves out the time of a contact and the game time', 'space', '\'FCT_Contacts.ContactType, ContactID, ContactRaceID, SystemID, LastUpdate\', \'FCT_Game.GameTime\', ', '\'FCT_Contacts.ContactType, ContactID, ContactRaceID, SystemID\', ', ['structure']],
   ['the rule speaks to the player', 'space', 'rule: \'Another empire\\\'s ships, salvos', 'rule: \'Your rivals\\\' ships, salvos', ['voice']],
-  ['the flyout line counts every stored contact', 'peeks', ' and ${HELD_CONTACT}) as IntruderSystems', ') as IntruderSystems', ['peek-fixture', 'save-egg', 'page-peek'], true],
+  ['the flyout line counts every stored contact', 'peeks', ' and ${HELD_CONTACT}) as IntruderSystems', ') as IntruderSystems', ['peek-fixture', 'save-fixture', 'page-peek'], true],
   ['the flyout line counts a system whose contacts are of unknown standing', 'peeks', 'FCT_AlienRace.ContactStatus not in (2, 3) and ${HELD_CONTACT}', 'coalesce(FCT_AlienRace.ContactStatus, 0) not in (2, 3) and ${HELD_CONTACT}', ['peek-fixture']],
-  ['an empire named by a name it does not have', 'space', '${Alien.AlienRaceName || RACE_WORDS.unnamed}', '${\'Wrong empire\'}', ['current', 'population', 'unknown-standing', 'unknown-time', 'races', 'save-egg', 'page-rows'], true],
+  ['an empire named by a name it does not have', 'space', '${Alien.AlienRaceName || RACE_WORDS.unnamed}', '${\'Wrong empire\'}', ['current', 'population', 'unknown-standing', 'unknown-time', 'races', 'save-fixture', 'page-rows'], true],
   ['two empires of a system given each other\'s contacts', 'space', 'const intruderRaces = (ctx, races) => Object.values(races).map(({ Alien, Types }) => {', 'const intruderRaces = (ctx, races) => Object.values(races).map(({ Alien }, index, all) => { const { Types } = all[all.length - 1 - index]', ['population', 'races']],
   ['a neutral empire marked hostile', 'space', 'Alien.ContactStatus === HOSTILE ? ` — ${RACE_WORDS.hostile}`', '[0, 1].includes(Alien.ContactStatus) ? ` — ${RACE_WORDS.hostile}`', ['population', 'races']],
-  ['the link of a row opens the map on the id of an empire', 'space', 'link: linkTo.map(system.SystemID),', 'link: linkTo.map(Object.keys(system.Races)[0]),', ['current', 'population', 'races', 'save-egg', 'page-rows'], true],
+  ['the link of a row opens the map on the id of an empire', 'space', 'link: linkTo.map(system.SystemID),', 'link: linkTo.map(Object.keys(system.Races)[0]),', ['current', 'population', 'races', 'save-fixture', 'page-rows'], true],
   ['a row of the check is hidden', 'page', ':data-row="row.id">', ':data-row="row.id" v-show="false">', ['page-rows', 'page-peek'], true],
   ['the check is drawn with no opacity', 'page', ':data-check="section.check.key">', ':data-check="section.check.key" style="opacity: 0">', ['page-rows'], true],
   ['the contacts cell shows the name of the row', 'page', ':data-cell="column.key">{{ cellText(row, column) }}</span><provenance-mark', ':data-cell="column.key">{{ cellText(row, section.check.columns[0]) }}</span><provenance-mark', ['page-rows'], true],

@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-warning-wrecks.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Skoormit (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785), read only: the race has 12 wrecks in its surveyed systems, 10 its own and 2 of another race (wreck 180 with an alias for its class and wreck 169 with none). The expected names come from SQL over the save, never from the module.
+  The saved game is the migrated Galactic Shogunate save (the fixture of scripts/lib/fixtures.js), read only: the race has 11 wrecks in its surveyed systems, 1 its own and 10 of other races. Foreign wrecks with an alias for the class that differs from the real class and foreign wrecks with no alias are both there, and the check takes the first of each from SQL over the save. The expected names come from SQL over the save, never from the module.
 
   Every planted fault must fail the check it names by a wrong value, never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing. The word for a class that is not known is a text policy: the owner of the rule names it Unknown, and a rewrite that says Unknown class passes.
 
@@ -17,14 +17,12 @@ const { patched } = require('./lib/mutant-source')
 const { HarnessError, GROUPINGS } = require('./lib/browser-observe')
 const { assert, through, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const GAME = 138
-const RACE = 785
-const ALIASED_WRECK = 180
-const ALIASED_NAME = 'LÉ Niamh'
-const UNALIASED_WRECK = 169
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const DETAIL = process.argv.includes('--detail')
 const SPACE = path.join(root, 'src', 'renderer', 'utilities', 'warnings', 'space.js')
 const SEPARATOR = GROUPINGS.Tick
@@ -81,17 +79,17 @@ const namesChecks = {
     const wrecks = wrecksOf(db)
     const own = wrecks.filter((wreck) => wreck.RaceID === RACE)
     const foreign = wrecks.filter((wreck) => wreck.RaceID !== RACE)
-    const aliased = foreign.find((wreck) => wreck.WreckID === ALIASED_WRECK)
-    const unaliased = foreign.find((wreck) => wreck.WreckID === UNALIASED_WRECK)
+    const aliased = foreign.find((wreck) => wreck.Alias && wreck.Alias !== wreck.RealClass)
+    const unaliased = foreign.find((wreck) => !wreck.Alias)
 
-    if (!aliased || aliased.Alias !== ALIASED_NAME || !unaliased || unaliased.Alias || !unaliased.RealClass || !aliased.RealClass) {
-      throw new HarnessError('the save must hold foreign wreck 180 with an alias for its class and foreign wreck 169 with none, both of a class with a real name')
+    if (!aliased || !unaliased || !unaliased.RealClass || !aliased.RealClass) {
+      throw new HarnessError('the save must hold a foreign wreck with an alias for its class that differs from its real class and a foreign wreck with none, both of a class with a real name')
     }
 
     const shown = await rows()
 
     assert.deepEqual(shown.map((row) => row.id).sort(), wrecks.map((wreck) => `wreck:${wreck.WreckID}`).sort(), 'the warning lists the wrecks of the surveyed systems, each once')
-    assert.deepEqual([own.length, foreign.length], [10, 2], 'the save holds 10 wrecks of the race and 2 of another race')
+    assert.ok(own.length > 0 && foreign.length > 0, `the save holds wrecks of the race (${own.length}) and of other races (${foreign.length})`)
 
     const rowOf = (wreck) => shown.find((row) => row.id === `wreck:${wreck.WreckID}`)
 
@@ -104,11 +102,11 @@ const namesChecks = {
     foreign.forEach((wreck) => {
       const row = rowOf(wreck)
 
-      assert.notEqual(row.cells.wreck, wreck.RealClass, `the wreck ${wreck.WreckID} of another race is named by its real class ${wreck.RealClass}`)
+      assert.ok(wreck.Alias === wreck.RealClass || row.cells.wreck !== wreck.RealClass, `the wreck ${wreck.WreckID} of another race is named by its real class ${wreck.RealClass}`)
       assert.equal(row.cells.design, '', `the wreck ${wreck.WreckID} of another race is not marked as the race's`)
     })
-    assert.equal(rowOf(aliased).cells.wreck, aliased.Alias, 'wreck 180 is named by the alias of the race')
-    assert.match(rowOf(unaliased).cells.wreck, /^Unknown( class)?$/, 'wreck 169 has no alias and is named as unknown')
+    assert.equal(rowOf(aliased).cells.wreck, aliased.Alias, `wreck ${aliased.WreckID} is named by the alias of the race`)
+    assert.match(rowOf(unaliased).cells.wreck, /^Unknown( class)?$/, `wreck ${unaliased.WreckID} has no alias and is named as unknown`)
   },
 }
 

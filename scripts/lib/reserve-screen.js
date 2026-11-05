@@ -6,12 +6,13 @@
 // `seen` is the record of scripts/lib/browser-observe.js `observe`: its `value` is { logistics, hauling, actions, cells } for the parts asked for, `cells` keyed by the fixture's name, and the page errors, the console errors (those Vue catches included) and the failed requests are in it. No error is named in advance, so a page that raises one has an observation that says so.
 const pageLoading = require('../page-loading')
 const { observe, installScreen, settled } = require('./browser-observe')
+const { FIXTURE } = require('./fixtures')
 
 // Every step of an observation (opening the app, picking the game and the race, the wait for the save of the race, each settling, each click and wait for a page) is bounded by TIMEOUT, below the deadline the runner gives a variant that reads the screen (DEADLINES in scripts/check-resource-ledger.js), so a step that does not end fails by its own timeout and is named by the step it was at. The page server is warmed before the first observation (`warm` of scripts/lib/page-server.js), so no step meets a cold start.
 const TIMEOUT = 120000
 // How long a panel that stays loading is waited for.
 const LOADING_LIMIT = 45000
-const NAMES = { game: 'Aurelian Empire', race: 'Aurelian Empire' }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 // A control is pressed when it is on screen and enabled once the panel's own work is done (no write of the panel in progress); one that is not is not pressed, at once, and that is what is observed. Only the wait for that work and the click itself are bounded, by TIMEOUT, and either running out is a failure of the observation, never a control that was not pressed.
 const idle = (page) => page.waitForFunction(() => !document.querySelector('[data-reserve-panel]') || !window.__reservePanel().busy, null, { timeout: TIMEOUT })
 
@@ -105,7 +106,8 @@ const boot = async (page, url, step) => {
 const logisticsPart = async ({ page, settle, go, step }) => {
   await go('/logistics')
 
-  const views = await page.evaluate(() => [...document.querySelectorAll('.v-btn-toggle .v-btn')].map((button) => button.getAttribute('value')))
+  // The first toggle of the page is its views; a later one (the horizon of the harvesters' fuel) is drawn in the fuel view when the race has harvesters, as the fixture's does, and is no view.
+  const views = await page.evaluate(() => [...document.querySelector('.v-btn-toggle').querySelectorAll('.v-btn')].map((button) => button.getAttribute('value')))
   const byView = {}
 
   for (const view of [...views].reverse()) {

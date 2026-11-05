@@ -30,6 +30,7 @@ const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { observe, validate, HarnessError, installScreen, settled } = require('./lib/browser-observe')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -1101,7 +1102,7 @@ const templateFaults = async (stock) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
+  const options = { stock: fixtureTriple(), mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {

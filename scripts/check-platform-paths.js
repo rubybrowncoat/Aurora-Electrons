@@ -7,7 +7,7 @@
 
   The panel's script is run as a pseudo instance over scripts/lib/page-loader.js and its template and the Shipyards page's mount are read as text.
 
-  The loader is also run on an in-memory save built in this script, whether or not the saves are there. The saves (saves/AuroraDB.db and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only) give the real classes, yards, colonies and stored Space station projects: the loader is compared with raw counts, the class cost with the sum of its components', and the stored projects' build points and minerals with the recipe (a stored project made before its class was changed differs; those are reported, not failed). A save that is not there is skipped.
+  The loader is also run on an in-memory save built in this script, whether or not the saves are there. The save (the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141, race 784, read-only) gives the real classes, yards, colonies and stored Space station projects (it holds none): the loader is compared with raw counts, the class cost with the sum of its components', and the stored projects' build points and minerals with the recipe (a stored project made before its class was changed differs; those are reported, not failed). A save that is not there is skipped.
 
   Each mutation of the utility, the panel or the page must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -18,16 +18,15 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilityFile = path.join(root, 'src', 'renderer', 'utilities', 'platform-paths.js')
 const componentFile = path.join(root, 'src', 'renderer', 'components', 'shipyards', 'PlatformPaths.vue')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'shipyards.vue')
 const NAMES = ['platform-paths', 'refits', 'component-calc', 'workforce-demand', 'production', 'provenance', 'minerals']
-const SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785, stored: 3 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785, stored: 1 },
-]
+// `stored` is the least number of the save's stored Space station projects whose build points and minerals repeat the recipe: the fixture holds none, so none can match.
+const SAVES = [{ ...fixtureSave(), stored: 0 }]
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -609,6 +608,8 @@ const saveStatements = async (ctx, save) => {
   const colonies = Object.fromEntries(Object.entries(read.colonies).map(([id, colony]) => [id, { ...colony, modifiers, capacity }]))
   const statements = []
   const add = (name, test, detail = '') => statements.push([name, test, detail])
+  // What the save cannot show, printed as needs tier b where the checks are listed and not counted.
+  const waiting = []
   const ids = (list) => list.map((row) => Number(row.PopID)).sort((a, b) => a - b)
 
   const mismatches = classes.filter((shipClass) => {
@@ -654,7 +655,11 @@ const saveStatements = async (ctx, save) => {
   })
   add(`save-researched: ${label}: every component of the race's classes is read once as researched, not researched or not known, as the raw rows count`, () => same([Object.keys(read.researched).length, Object.values(read.researched).every((value) => value === 1 || value === 0 || value === null)], [componentCount, true]))
   add(`save-recipe: ${label}: the class's stored cost is the sum of its components' costs times their counts, in every class`, () => (mismatches.length ? `${mismatches.length} of ${classes.length} differ, such as ${short(mismatches.slice(0, 2).map((shipClass) => shipClass.name))}` : true), `${classes.length} classes`)
-  add(`save-stored: ${label}: the stored Space station projects of unchanged classes repeat the recipe's build points and minerals exactly`, () => (matched.length >= save.stored ? true : `${matched.length} of ${stored.length} projects match, ${save.stored} expected`), `${matched.length} of ${stored.length} match; the rest were made before their class was changed`)
+  if (stored.length === 0) {
+    waiting.push(`save-stored: ${label}: needs tier b: the save holds no stored Space station project to compare with the recipe`)
+  } else {
+    add(`save-stored: ${label}: the stored Space station projects of unchanged classes repeat the recipe's build points and minerals exactly`, () => (matched.length >= save.stored ? true : `${matched.length} of ${stored.length} projects match, ${save.stored} expected`), `${matched.length} of ${stored.length} match; the rest were made before their class was changed`)
+  }
   add(`save-paths: ${label}: a mining platform class has a yard row for every yard and an industry row for every colony with a spaceport, factories or a yard, each with a real number or no time`, () => {
     if (!target) {
       return true
@@ -694,7 +699,7 @@ const saveStatements = async (ctx, save) => {
     return bad.length ? short(bad.map((line) => line.colony)) : true
   })
 
-  return { skipped: false, statements, database, close: () => database.close() }
+  return { skipped: false, statements, waiting, database, close: () => database.close() }
 }
 
 // ---------- the loader, on an in-memory save that is always there ----------
@@ -1182,6 +1187,7 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
   const statements = [...pure(ctx), ...loader(ctx), ...panel(ctx), ...page(ctx)]
   const opened = []
   const skipped = []
+  const waiting = []
 
   if (withSaves) {
     for (const save of SAVES) {
@@ -1192,6 +1198,7 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
         skipped.push(save.file)
       } else {
         statements.push(...read.statements)
+        waiting.push(...(read.waiting || []))
 
         if (read.close) {
           opened.push(read)
@@ -1200,17 +1207,21 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
     }
   }
 
-  return { statements, opened, skipped }
+  return { statements, opened, skipped, waiting }
 }
 
 const checkHead = async () => {
   const ctx = await contextOf(sourcesOf(null))
-  const { statements, opened, skipped } = await statementsOf(ctx, true)
+  const { statements, opened, skipped, waiting } = await statementsOf(ctx, true)
 
   console.log('\nMining platform production paths, on classes, yards and colonies worked by hand, the panel, the page and the saves')
 
   for (const file of skipped) {
     console.log(`SKIP  ${file} is not there`)
+  }
+
+  for (const note of waiting) {
+    console.log(`SKIP  ${note}`)
   }
 
   for (const [name, result, detail] of await runStatements(statements)) {

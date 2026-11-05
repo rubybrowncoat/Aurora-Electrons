@@ -26,6 +26,7 @@ const { patched, plantedPatch, plantedGroup } = require('./lib/mutant-source')
 const pageLoading = require('./page-loading')
 const { runSuite, declaredGroup, RunnerError } = require('./lib/suite-runner')
 const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixtureRows } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -640,18 +641,18 @@ const UNIT_REWRITES = [
 
 // ---------- the save and the page ----------
 
-const SAVE = 'AuroraDB.db'
-const GAME = 140
-const GAME_NAME = 'Aurelian Empire'
-const PLAYER = 784
-const QUIET = 795
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const GAME_NAME = FIXTURE.gameName
+const PLAYER = FIXTURE.raceId
+// The race the page switches to for a log with no event: a race of the game, not the player's, with no row in the log.
+const QUIET = fixtureRows('select RaceID as id from FCT_Race r where r.GameID = ? and r.RaceID <> ? and not exists (select 1 from FCT_GameLog l where l.GameID = r.GameID and l.RaceID = r.RaceID) order by r.RaceID limit 1', GAME, PLAYER)[0].id
 const BROKEN = 786
-const REAL_TIP = 359010
-const REAL_TIP_TIME = 9485081425
-const REAL_LEN = 432000
+// The newest increment of the game's record, the game time it starts at and its length: the log of the copy served ends there.
+const [{ tip: REAL_TIP, time: REAL_TIP_TIME, length: REAL_LEN }] = fixtureRows('select IncrementID as tip, GameTime as time, Length as length from FCT_Increments where GameID = ? order by IncrementID desc limit 1', GAME)
 const PT = (id) => REAL_TIP_TIME - (REAL_TIP - id) * REAL_LEN
 const END = PT(REAL_TIP + 1)
-const HEAD = 359007
+const HEAD = REAL_TIP - 3
 const TIMEOUT = 120000
 const BANNED = /\b(safe|safely|no combat|no fighting|nothing happened|nothing has happened|all clear|no boarding|no fire|did not happen|never happened)\b/i
 const VOICE = /\b(I|me|my|mine|you|your|yours|we|our|ours)\b/i
@@ -693,7 +694,8 @@ const makeSave = async () => {
   const raw = await openRaw(file, sqlite3.OPEN_READWRITE)
 
   try {
-    await run(raw, `delete from FCT_GameLog where GameID = ${GAME} and IncrementID < ${HEAD}`)
+    await run(raw, `delete from FCT_GameLog where GameID = ${GAME} and (IncrementID < ${HEAD} or EventType in (${SQL_WATCHED}))`)
+    await run(raw, `delete from FCT_HideEvents where GameID = ${GAME} and RaceID = ${PLAYER} and EventID in (${SQL_WATCHED})`)
 
     for (const row of SAVE_ROWS) {
       for (let copy = 0; copy < row.copies; copy++) {

@@ -28,7 +28,7 @@ export const PLAN_KINDS = Object.freeze({ withdraw: 'Withdrawal', refill: 'Refil
 
 const FUEL = FUEL_RESOURCE
 
-const RESERVE_VERSIONS = ['2.7.x']
+const RESERVE_VERSIONS = ['3.1.x']
 
 registerRule({
   id: 'reserveLedger.player',
@@ -36,7 +36,7 @@ registerRule({
   units: 'litres, supplies or tonnes',
   verification: 'confirmed',
   structure: ['the scenario records of kind resource.reserve'],
-  note: 'The amount of a resource the player keeps back at a colony, read from the player\'s own record. It is not stored in the save and the game does not know it: a withdrawal planned here leaves it in the stock, and nothing stops a ship or a mass driver from taking it in the game. Zero is a reserve of nothing; a resource with no reserve set shows none, which the ledger treats as 0.',
+  note: 'The amount of a resource the player keeps back at a colony, read from the player\'s own record. It is not stored in the save and the game does not know it: a withdrawal planned here leaves it in the stock, and nothing stops a ship or a mass driver from taking it in the game. Zero is a reserve of nothing; a resource with no reserve set shows none, which the ledger treats as 0. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -45,7 +45,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_Population.Reserve<mineral>'],
-  note: 'The reserve of a mineral the game stores for a colony: the stock the colony keeps back from its mass driver export, and the floor the Hauling plan leaves. A colony has no stored minimum of fuel or maintenance supplies, so none is shown for them, and fuel warning level and maintenance supply warning level are warning levels, not reserves.',
+  note: 'The reserve of a mineral the game stores for a colony: the stock the colony keeps back from its mass driver export, and the floor the Hauling plan leaves. A colony has no stored minimum of fuel or maintenance supplies, so none is shown for them, and fuel warning level and maintenance supply warning level are warning levels, not reserves. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -54,7 +54,7 @@ registerRule({
   units: 'litres or supplies',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MinimumFuel, MinimumSupplies of the classes that have ships'],
-  note: 'The most fuel or supplies a ship of any class in service keeps back when it gives them to another ship: a stored figure of each ship class, read as it is. It applies to the ships of the class and not to a colony\'s stock, and no mineral has one.',
+  note: 'The most fuel or supplies a ship of any class in service keeps back when it gives them to another ship: a stored figure of each ship class, read as it is. It applies to the ships of the class and not to a colony\'s stock, and no mineral has one. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key)

@@ -19,11 +19,12 @@
   - component: the panel's template, the three minimums and the notes of the template that the data decides, a class minimum that some classes do not record shown as at least the figure, production and an export of an input on one stock from either panel and from the Hauling page's rows, which carry no supply column (the panel reads the colonies' supplies and production rates itself for minerals, waits on both and names a failure of either), a production not known listed as not known and never as covered, its form and its writes, and its states while a read is out or failed;
   - page: the Logistics and Hauling pages rendered with state they are given: the panel's mount is there in its own view only, with the props the page hands it evaluated, and the view the Logistics page keeps; page-label reads a resource name from the real mounted panel's visible text nodes against the independently named resource in the fixture's save;
   - voice: nothing the panel and its utilities say to the player is in the first or second person;
-  - browser: what the panel draws, read from the real app in Chromium (scripts/lib/reserve-screen.js): the mounts of both pages, the buttons pressed, and fixtures of the panel mounted in the page whose cells (stock, the three minimums, the lowest balance, the status chips, the run, the timeline, the shortfalls, the summary) are read as the text drawn and whether each is on screen, and compared with the numbers the ledger holds: each quantity from the element that draws it, by its role, read as a signed number in the grouping of the page's setting and at the precision the page shows. The state of a minimum cell and the message of a write are read from what they draw too, a word read back through the panel's own words for it (`minimumWords`, `saveWords`), beside the hook that names them. No virtual node is read and no text is taken from a container for its figures. The screen is read by the shared readers of scripts/lib/browser-observe.js (`visible`, `visibleText`, `hooked`, `readFigure`, `rounded`, `rolesRead`, `pairedBy`, `labelKey`), which scripts/check-browser-observe.js checks, the 90 texts of the page's formatter among them.
+  - browser: what the panel draws, read from the real app in Chromium (scripts/lib/reserve-screen.js) over a copy of the fixture save whose first industrial project of the race is raised to a thousand units, so that the Hauling plan holds hauls (the fixture's own queue is short of nothing): the mounts of both pages, the buttons pressed, and fixtures of the panel mounted in the page whose cells (stock, the three minimums, the lowest balance, the status chips, the run, the timeline, the shortfalls, the summary) are read as the text drawn and whether each is on screen, and compared with the numbers the ledger holds: each quantity from the element that draws it, by its role, read as a signed number in the grouping of the page's setting and at the precision the page shows. The state of a minimum cell and the message of a write are read from what they draw too, a word read back through the panel's own words for it (`minimumWords`, `saveWords`), beside the hook that names them. No virtual node is read and no text is taken from a container for its figures. The screen is read by the shared readers of scripts/lib/browser-observe.js (`visible`, `visibleText`, `hooked`, `readFigure`, `rounded`, `rolesRead`, `pairedBy`, `labelKey`), which scripts/check-browser-observe.js checks, the 90 texts of the page's formatter among them.
 
   Each planted fault must fail, by an assertion on a value and not by a call that threw, a check that it names: a fault whose named checks fail only by a call that threw is a defect of the harness (scripts/lib/fault-credit.js `caughtBy`), which fails that variant by name and ends the run with status 2. A planted fault that is caught by what the browser reads may name the parts of the screen it is read in (`parts`), the parts its checks read; every equivalent rewrite reads the whole screen. The head and the variants run through scripts/lib/suite-runner.js, one after another in a worker that starts one page server and one browser for them all and warms it first, with a deadline for each variant, a record that --resume continues, and the control that runs a planted fault and then the head on the same server (`control:warm-reset`); --detail lists the failed checks of a variant, and --variants=mutant:N runs one (mutant:N,mutant:M runs several, one after another in one worker, as the full run does). Exit code 1 when a check fails, 2 on a defect of the harness.
 */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const acorn = require('acorn')
 const sqlite3 = require('sqlite3')
@@ -34,6 +35,7 @@ const { loadPage, loadModule, instantiate } = require('./lib/page-loader')
 const { patched, plantedGroup } = require('./lib/mutant-source')
 const { runSuite, runnerArgs, declaredGroup } = require('./lib/suite-runner')
 const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
@@ -2867,15 +2869,33 @@ const validateBrowserGroups = (groups = BROWSER_GROUPS) => {
 const wanted = (keys, group) => !keys || group.keys.some((key) => keys.includes(key))
 
 // The renderer served to a browser and the browser, started and warmed once for the worker (`openScreen`, run by the runner before the worker's first variant) and stopped after its last; the failure of a start that did not get through; and the parts of the screen that `observeScreen` of scripts/lib/reserve-screen.js reads.
-const SCREEN = { server: null, chrome: null, failure: null }
+const SCREEN = { server: null, chrome: null, failure: null, copy: null }
 const SCREEN_PARTS = ['logistics', 'hauling', 'flips', 'actions', 'cells']
 // The pages the screen goes to: their modules are compiled while the server warms.
 const SCREEN_ROUTES = ['/logistics', '/hauling']
 
+// The save the screen is read over: a copy of the fixture in the temp folder whose first industrial project of the race is raised to a thousand units, so that its colony's queue needs more of its minerals than the colony holds and the Hauling plan covers the shortage with hauls from colonies that hold more than they keep. The fixture's own queue is short of nothing, so its plan holds no haul and the plan panel's days of its hauls would not be read.
+const screenSave = () => new Promise((resolve, reject) => {
+  const copy = path.join(os.tmpdir(), `ae-resource-ledger-${process.pid}.db`)
+
+  fs.copyFileSync(path.join(root, FIXTURE.file), copy)
+
+  const raw = new sqlite3.Database(copy, (openError) => {
+    if (openError) {
+      reject(openError)
+
+      return
+    }
+
+    raw.run(`update FCT_IndustrialProjects set Amount = 1000 where ProjectID = (select min(ProjectID) from FCT_IndustrialProjects where GameID = ${FIXTURE.gameId} and RaceID = ${FIXTURE.raceId})`, (error) => raw.close(() => (error ? reject(error) : resolve(copy))))
+  })
+})
+
 // Starts the page server and Chromium and opens the app once in them (scripts/lib/page-server.js `warm`). A start that does not get through is kept as `failure`, and every observation of the worker is then one that did not happen.
 const openScreen = async () => {
   try {
-    SCREEN.server = await require('./lib/page-server').startPageServer({ save: 'AuroraDB.db' })
+    SCREEN.copy = await screenSave()
+    SCREEN.server = await require('./lib/page-server').startPageServer({ save: SCREEN.copy })
     SCREEN.chrome = await require('playwright').chromium.launch()
 
     const warmed = await SCREEN.server.warm(SCREEN.chrome, { routes: SCREEN_ROUTES })
@@ -2887,10 +2907,11 @@ const openScreen = async () => {
 }
 
 const closeScreen = async () => {
-  const { server, chrome } = SCREEN
+  const { server, chrome, copy } = SCREEN
 
   SCREEN.server = null
   SCREEN.chrome = null
+  SCREEN.copy = null
 
   if (chrome) {
     await chrome.close()
@@ -2898,6 +2919,10 @@ const closeScreen = async () => {
 
   if (server) {
     await server.stop()
+  }
+
+  if (copy) {
+    fs.rmSync(copy, { force: true })
   }
 }
 
@@ -3147,6 +3172,7 @@ const run = async () => {
   const totals = await runSuite({
     script: __filename,
     workers: WORKERS,
+    inputs: [FIXTURE.file],
     variants: variantsOf(options),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

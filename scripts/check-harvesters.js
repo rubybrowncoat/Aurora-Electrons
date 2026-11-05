@@ -1,7 +1,7 @@
 /*
   Checks the Sorium harvester rule against a save: for every harvester ship of one race it recomputes the annual potential and the fuel one harvesting step can add from the save's own rows, compares the stored inputs it can (the racial rate, the class module and tank totals, the deposit accessibility, the tank level) and compares the Fuel & Maintenance page's own figures (utilities/logistics.js harvesterReport, harvesterBasis, harvesterObtainable and harvesterAdminBonus, fed by the page's own query) with the rule.
 
-  node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <earlier.db>] [--list]
+  node scripts/check-harvesters.js [<save.db> --race <RaceID>] [--years <n>] [--since <earlier.db>] [--list]
 
   Two kinds of result stay apart. Rule verification: the rule below is the game's 2.7.1 per-step harvesting rule, read from its source (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an earlier save of the same 2.7 campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
 
@@ -14,6 +14,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { fuelServiceTruth } = require('./lib/fuel-service-oracle')
+const { FIXTURE, fixturePath } = require('./lib/fixtures')
 
 // Game constants of the rule: component type ids (harvester, fuel storage), the Sorium material id, the commander's Mining bonus id, the ship command type, body types that can be harvested, the race type of the Ancients, litres per tonne of Sorium and seconds per year, and the racial rate a race has before it researches a better one.
 const HARVESTER_TYPE = 32
@@ -59,8 +60,14 @@ const parseArguments = (argv) => {
     }
   }
 
+  // No save named: the fixture of scripts/lib/fixtures.js and its player race (a named save needs its race named as well).
+  if (!options.save) {
+    options.save = fixturePath()
+    options.race = Number.isInteger(options.race) ? options.race : FIXTURE.raceId
+  }
+
   if (!options.save || !Number.isInteger(options.race) || !(options.years > 0)) {
-    fail('Usage: node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <earlier.db>] [--list]')
+    fail('Usage: node scripts/check-harvesters.js [<save.db> --race <RaceID>] [--years <n>] [--since <earlier.db>] [--list]')
   }
 
   return options

@@ -3,7 +3,7 @@
 
   node scripts/check-campaigns.js [--no-mutations]
 
-  Everything runs on in-memory installations (a history store, a registry, a migration record and a settings store, each a plain JSON value) and on small synthetic saves that answer the recorder's reads: a game, the lowest-numbered systems, and an increment ledger that is one chain a later save extends, an older save is a prefix of, and a replayed save forks from. No Electron and no network are needed; the two real saves (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db) are opened read-only for the last group when they are present, and are skipped with a note when they are not.
+  Everything runs on in-memory installations (a history store, a registry, a migration record and a settings store, each a plain JSON value) and on small synthetic saves that answer the recorder's reads: a game, the lowest-numbered systems, and an increment ledger that is one chain a later save extends, an older save is a prefix of, and a replayed save forks from. No Electron and no network are needed; the two real saves (the fixture of scripts/lib/fixtures.js and the recorded Aurelian campaign saves/AuroraDB_270_unknown.db) are opened read-only for the last group when they are present, and are skipped with a note when they are not.
 
   Groups:
   - matrix: the fixture cases of the identity evidence (AE-033-01): independent campaigns that share a GameID and a name stay apart with their histories, warning state and map groups; a rename, a move, a copy and a rewind keep one campaign; a save replayed from an earlier point is a branch seeded up to the fork; a short or thin record is never merged on a guess, and the player's answer (keep apart, attach to the same branch, attach as a new branch) is kept;
@@ -24,6 +24,7 @@ const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { routes: routeTable } = require('./lib/store-routes')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { FIXTURE, fixturePath } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -2051,9 +2052,10 @@ const defineSuite = (m) => {
 
 // ---- Real saves -------------------------------------------------------------------------------------------------------
 
+// The migrated 3.1 fixture, and a recorded 2.7 campaign (the Aurelian Empire, game 140) whose systems tell the two campaigns apart: the recorder reads no column the line renamed, so the recorded save is read as it is.
 const REAL = [
-  { label: 'modded 2.7 save', file: path.join(repo, 'AuroraDB.db'), GameID: 140, RaceID: 784 },
-  { label: 'stock 2.7.1 save', file: path.join(repo, 'saves', 'AuroraDB_271_skoormit_saved.db'), GameID: 138, RaceID: 785 },
+  { label: 'fixture', file: fixturePath(), GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId },
+  { label: 'recorded Aurelian campaign', file: path.join(repo, 'saves', 'AuroraDB_270_unknown.db'), GameID: 140, RaceID: 784 },
 ]
 
 const openReadOnly = (file) => new Promise((resolve, reject) => {
@@ -2131,7 +2133,7 @@ const realChecks = async (m) => {
   }
 
   if (real.length === 2) {
-    await run('the modded and the stock save are different campaigns by their systems', async () => {
+    await run('the fixture and the recorded Aurelian campaign are different campaigns by their systems', async () => {
       const [one, two] = await Promise.all(real.map(async (save) => {
         const database = realDatabase(save.handle)
         const [games] = await database.query(campaign.GAMES_SQL)

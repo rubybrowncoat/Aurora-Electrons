@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-research-reads.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds saved research or a queue (the owner's decision Q7 of AE-31: none will be supplied; the migrated fixture saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784, holds no research project, queue or saved row), so each case plants its rows into in-memory copies of the fixture, as scripts/check-treasury-categories.js does. A planted tech the race designed is the copy of a design the fixture holds for the race, under a new id with a cost and no RaceTech row, as `Game.cs:31830-31849` stores one (the game and the race on the row):
+  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds saved research or a queue (the owner's decision Q7 of AE-31: none will be supplied; the migrated fixture of scripts/lib/fixtures.js, game 141, race 784, holds no research project, queue or saved row), so each case plants its rows into in-memory copies of the fixture, as scripts/check-treasury-categories.js does. A planted tech the race designed is the copy of a design the fixture holds for the race, under a new id with a cost and no RaceTech row, as `Game.cs:31830-31849` stores one (the game and the race on the row):
   - `Population.ProcessPlayerResearchProjects` (Population.cs:781-955): a project makes `perLab * labs * factor * step` RP in an increment of `step` years, the factor the scientist's Research bonus (four times it less 3 on a tech of his own field) and the race's field bonus; a project that has not enough is left with the difference; one that has enough lands, and the part of the increment it does not need (`(made - left) / made`) goes to the techs queued behind it, each at its own field's factor, owing its development cost less the points saved on it (`PausedResearchProject`, `method_108`, Population.cs:5107-5142), each landing in that increment while the carry lasts and the first it cannot finish starting with what it still owes after the carry;
   - `Population.method_112` (Population.cs:5241-5294) lists a tech of the game that is the baseline's, the race's own or one the race is eligible for (`Game.LoadTechSystems` loads the techs of the baseline and of the game, Game.cs:22107-22112), unless it is researched, running or queued; a tech with a saved row is listed though it is found only in ruins or has a prerequisite not researched (the game colours it as not researchable); the game's NoShieldTechnology filter and its research prototypes are not modelled and not asserted;
   - `Game.CalculateDevelopmentCost` (Game.cs:30919-30933) floors the cost it stores at the build cost, so the stored `FCT_TechSystem.DevelopCost` is the cost and is never recomputed.
@@ -35,11 +35,12 @@ const { renderTree, treeOf, attrsOf } = require('./lib/vue-render')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
-const GAME = 141
-const RACE = 784
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const NEAR = 1e-9
 
 const renderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)

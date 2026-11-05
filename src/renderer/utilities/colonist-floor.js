@@ -9,6 +9,9 @@ import { combine, isAvailable, ofRule, registerRule, unavailable } from './prove
 
 const VERSIONS = ['2.7.x']
 
+// The two rules the fixture's colonies exercise: the loader that reads them (check-colonist-floor, group save-loader, against raw counts of the population table). The other rules of the module have worked colonies only, so they keep the line they were verified on.
+const FIXTURE_VERSIONS = ['3.1.x']
+
 // Workers in millions: a balance this close to zero counts as staffed when the removable population is searched for.
 const EPSILON = 1e-9
 // Bisection rounds that narrow a monotone stretch of the worker curve to its boundary.
@@ -63,19 +66,19 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.source',
-  versions: VERSIONS,
+  versions: FIXTURE_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_Population.ColonistDestination', 'FCT_Population.PoliticalStatus', 'FCT_Population.MilitaryRestrictedColony'],
-  note: 'Whether the colony is one civilian shipping lines may take colonists from: it must be marked a source of colonists, be an imperial population and not be restricted to military use. The stored marker is read as 0 a destination, 1 a source and 2 stable, which follows the order of the game\'s own list and the capital of nearly every save examined being marked a source; no save states the meaning, so the reading is not confirmed. A fleet of the race can load the residents of any colony the order reaches, whatever the marker says.',
+  note: 'Whether the colony is one civilian shipping lines may take colonists from: it must be marked a source of colonists, be an imperial population and not be restricted to military use. The stored marker is read as 0 a destination, 1 a source and 2 stable, which follows the order of the game\'s own list and the capital of nearly every save examined being marked a source; no save states the meaning, so the reading is not confirmed. A fleet of the race can load the residents of any colony the order reaches, whatever the marker says. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
   id: 'colonistFloor.pool',
-  versions: VERSIONS,
+  versions: FIXTURE_VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_Population.AvailableColonists', 'FCT_Population.ColonizationPressure', 'FCT_Population.Population'],
-  note: 'The emigrants the colony holds ready for shipping lines, in millions of people as stored. The pool refills each refresh by the pressure as a percentage of the population per year, and cannot rise above that share of the population; the share the batch leaves behind is shown as the ceiling the pool could refill to. The pressure is recomputed from conditions at a refresh, so neither the pool nor the ceiling is a forecast.',
+  note: 'The emigrants the colony holds ready for shipping lines, in millions of people as stored. The pool refills each refresh by the pressure as a percentage of the population per year, and cannot rise above that share of the population; the share the batch leaves behind is shown as the ceiling the pool could refill to. The pressure is recomputed from conditions at a refresh, so neither the pool nor the ceiling is a forecast. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the pool is read as stored, in millions of people'],
 })
 

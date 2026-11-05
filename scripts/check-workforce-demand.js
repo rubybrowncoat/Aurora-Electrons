@@ -3,7 +3,7 @@
 
   node scripts/check-workforce-demand.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
+  With no options it runs on the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only.
 
   Worked cases on synthetic rows (labelled so) run the real functions: a factory or a yard upgrade that finishes raises the demand from the month its date falls in (a date on a month's last day counts in that month, the day after in the next), a paused, queued or stalled job adds nothing that is certain and a stalled one at most what its stock builds, a job with no date adds nothing to the lower demand and everything to the higher, a conversion adds the difference of the two installations (and lowers the demand where the new one needs fewer), a retool adds nothing, a shipyard activity the model does not know and a colony of a spied empire are unavailable and name what is missing, population orbiting aboard Arks never reaches the workers, and a colony with nothing queued gives the Outlook's own figure.
 
@@ -11,7 +11,7 @@
 
   The yards aboard a ship run on the saves that hold them, whatever saves are named (SHIP_YARD_SAVES, read-only; a copy is a temporary table over the save's own; a save that is not there reads UNSUPPORTED): the page's colonies read gives each colony the workers of the yards no ship holds, value for value against a sum worked out here from the save's yard and ship rows, and the colonies named for a yard aboard a ship read the figure worked out by hand; with the queue counted, an activity given to a yard aboard a ship in a copy is not read, and the workers the colony's activities change leave it out. A rewrite of both filters that says the same thing must leave those checks green.
 
-  The species growth modifier is applied to positive growth only (3.1: Population.RecalculateAnnualSurfaceGrowthAndOvercrowding, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since 2.7.1, line 229). A worked case runs a colony of 100 M people at a species modifier of 1.5, and one whose governor bonus takes its growth below zero, through the growth rate, the Outlook's growth figure and its projection, and reads the rate alone of a colony with no people and an unreadable modifier and of one with no people at a radiation level. The saves whose own colonies are run beside it are read by hand (population, species, body and installation rows), not through the Outlook's colonies read, which is of the 2.7 schema: the interim 3.1 fixture (a 2.7 game migrated to the 3.1 schema, game 141, race 784) and the stock 2.7.1 save, each UNSUPPORTED when it is not there. A save whose colonies all read a species modifier of 1 cannot tell either growth mutant apart: its save case is no credit for the mutant, and where no save can tell it apart the worked case carries the kill. Every colony's rate is compared with the rule worked out here, the species modifier on growth that is positive and left off growth that is not, with the zero case (no people) and the negative one (a governor bonus below zero) taken from the same colonies.
+  The species growth modifier is applied to positive growth only (3.1: Population.RecalculateAnnualSurfaceGrowthAndOvercrowding, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since 2.7.1, line 229). A worked case runs a colony of 100 M people at a species modifier of 1.5, and one whose governor bonus takes its growth below zero, through the growth rate, the Outlook's growth figure and its projection, and reads the rate alone of a colony with no people and an unreadable modifier and of one with no people at a radiation level. The save whose own colonies are run beside it is read by hand (population, species, body and installation rows), not through the Outlook's colonies read, which is of the 2.7 schema: the interim 3.1 fixture of scripts/lib/fixtures.js (a 2.7 game migrated to the 3.1 schema, game 141, race 784), UNSUPPORTED when it is not there. A save whose colonies all read a species modifier of 1 cannot tell either growth mutant apart: its save case is no credit for the mutant, and where no save can tell it apart the worked case carries the kill. Every colony's rate is compared with the rule worked out here, the species modifier on growth that is positive and left off growth that is not, with the zero case (no people) and the negative one (a governor bonus below zero) taken from the same colonies.
 
   The mutants load a temp copy of the utilities folder with one thing changed; each must fail the check named with it. The faults of the yards aboard a ship are planted in the page and must fail their checks by a value on every save that holds the case, never by a throw of the page.
 */
@@ -24,17 +24,15 @@ const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { assert, boundary, caughtAll, judged, runChecks } = require('./lib/fault-credit')
+const { fixtureSave, convertedSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const DEFAULT_SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
-// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In saves/AuroraDB.db (game 138, race 785) BEG-A2M9 XENO (49494, 92 M people) holds the repair yard Fix50 001 aboard a ship (50,000 t, 1.25 M workers were it counted) beside 0.00025 M of yards of its own; `activity` is that ship's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In saves/AuroraDB_270_unknown.db (game 140, race 784) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`). In the owner's AuroraDB-271-spookyerol-repair-yards.db at the root (game 141, race 784; local only, so it reads unsupported where it is not there) the homeworld Aurelia (48979, 497 M people) holds two repair yards aboard ships, SB15M Shipbreaker 001 (1,500,000 t, 37.5 M were it counted) and SNS Hephaestus (31,000 t, 0.775 M), beside 74.25 M of yards of its own; `activity` is the shipbreaker's yard.
+const FIXTURE_SAVE = fixtureSave()
+const DEFAULT_SAVES = [FIXTURE_SAVE]
+// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In the migrated 3.1 fixture (game 141, race 784) the homeworld Aurelia (48979) holds two repair yards aboard ships, a shipbreaker's (1,500,000 t, 37.5 M were it counted) and a smaller one's (31,000 t, 0.775 M), beside 90.375 M of yards of its own (eight yards, from 0.125 M to 17.25 M each); `activity` is the shipbreaker's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In the recorded 2.x save saves/AuroraDB_270_unknown.db (game 140, race 784, read through its converted copy: `recorded`) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`).
 const SHIP_YARD_SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785, named: { 49494: 0.00025 }, activity: 6760 },
-  { file: 'saves/AuroraDB_270_unknown.db', game: 140, race: 784, named: { 49025: 0, 49026: 0 }, peopled: [49025, 49026] },
-  { file: 'AuroraDB-271-spookyerol-repair-yards.db', game: 141, race: 784, named: { 48979: 74.25 }, activity: 25 },
+  { file: FIXTURE_SAVE.file, game: FIXTURE_SAVE.game, race: FIXTURE_SAVE.race, named: { 48979: 90.375 }, activity: 25 },
+  { file: 'saves/AuroraDB_270_unknown.db', game: 140, race: 784, named: { 49025: 0, 49026: 0 }, peopled: [49025, 49026], recorded: true },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {
@@ -89,8 +87,8 @@ const parseArguments = (argv) => {
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does, and counts the queries that name each table it is asked about. `run(sql)` runs a statement on a temporary table that shadows one of the save's own, so the save itself is never written.
-const openSave = (file) => new Promise((resolve, reject) => {
-  const resolved = path.resolve(root, file)
+const openSave = (file, recorded = false) => new Promise((resolve, reject) => {
+  const resolved = recorded && fs.existsSync(path.resolve(root, file)) ? convertedSave(file) : path.resolve(root, file)
 
   if (!fs.existsSync(resolved)) {
     resolve(null)
@@ -693,11 +691,8 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
 
 // ---------- the species growth modifier ----------
 
-// The saves whose own colonies are run through the growth rule: the interim 3.1 fixture (a 2.7 game migrated to the 3.1 schema, race 784 of game 141) and the stock 2.7.1 save. Their tables are read by hand rather than through the Outlook's colonies read, which is of the 2.7 schema; a save that is not there reads UNSUPPORTED.
-const GROWTH_SAVES = [
-  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+// The save whose own colonies are run through the growth rule: the interim 3.1 fixture (a 2.7 game migrated to the 3.1 schema, race 784 of game 141). Its tables are read by hand rather than through the Outlook's colonies read, which is of the 2.7 schema; a save that is not there reads UNSUPPORTED.
+const GROWTH_SAVES = [fixtureSave()]
 
 // The faults planted in the growth rule, each with the worked case and the save case that must fail with it.
 const GROWTH_MUTANTS = [
@@ -874,7 +869,7 @@ const shipYardCases = async (pageOptions, store) => {
   const opened = []
 
   for (const save of SHIP_YARD_SAVES) {
-    const database = await openSave(save.file)
+    const database = await openSave(save.file, save.recorded)
 
     if (database) {
       opened.push({ database, save })
@@ -969,13 +964,13 @@ const main = async () => {
   const saves = parseArguments(process.argv.slice(2))
   const explicitSaves = process.argv.includes('--save')
   const quickDefault = !explicitSaves && !mutating()
-  const stockRepresentative = DEFAULT_SAVES.find(({ file }) => file === 'saves/AuroraDB_271_skoormit_saved.db')
+  const representative = DEFAULT_SAVES[0]
 
-  if (quickDefault && !fs.existsSync(path.resolve(root, stockRepresentative.file))) {
-    throw new Error(`quick mode requires its stock representative save: ${stockRepresentative.file}`)
+  if (quickDefault && !fs.existsSync(path.resolve(root, representative.file))) {
+    throw new Error(`quick mode requires its representative save: ${representative.file}`)
   }
 
-  const ordinarySaves = quickDefault ? [stockRepresentative] : saves
+  const ordinarySaves = quickDefault ? [representative] : saves
   const apps = await loadUtilities(UTILITIES, { stubs: STUBS })
   const pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB } })
   const productionOptions = await loadPage('pages/production', { stubs: STUBS })

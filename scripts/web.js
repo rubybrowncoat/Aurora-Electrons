@@ -1,5 +1,5 @@
 /*
-  Web mode: serves the renderer as a plain browser app for testing without Electron. Electron/Node-only modules are swapped for the shims in ./web/shims, and database calls go to ./web/database-middleware.js, which runs the real Sequelize models against ./AuroraDB.db (override with AURORA_DB). The middleware executes raw SQL, so the server listens on 127.0.0.1 only and the middleware answers only the page (see web/database-middleware.js). Run through run-vite.js (`bun run web`).
+  Web mode: serves the renderer as a plain browser app for testing without Electron. Electron/Node-only modules are swapped for the shims in ./web/shims, and database calls go to ./web/database-middleware.js, which runs the real Sequelize models against the fixture of scripts/lib/fixtures.js (override with AURORA_DB). The middleware executes raw SQL, so the server listens on 127.0.0.1 only and the middleware answers only the page (see web/database-middleware.js). Run through run-vite.js (`bun run web`).
 */
 const path = require('path')
 

@@ -5,7 +5,7 @@
 
   The synthetic checks need no save: they build a small database in memory with two games, several races, a shipping line, a ship that cannot move, a warship, classes with no recorded cargo or colonist capacity, and colonies and outposts of the race and of other races and games, among them two records on one body, outposts with no people, a body of a class and a body of a type the planner leaves out, and a colony in a system the race has not surveyed. They prove: the Transport line counts only the selected race's own ships that can move and carry cargo or colonists, in the selected game, with the capacity summed (hand-written lines for each race); a race with no such ship reads "No transport ships"; a capacity that is not recorded makes the line unknown (null), never 0; the Colonization line counts, as the planner's Colonies view does, the bodies of surveyed systems that hold a colony or outpost of the race (one body once however many records it has, an outpost with no people as one), and the surveyed systems that hold one, never a body of another race or game, one in a system the race has not surveyed, or one of a class or type the planner leaves out; a race that knows no system reads "No known systems"; a read that gives no row, or a figure that is null, leaves the line null; the lines read FCT_SystemBody only by primary key from the race's own population records (never a scan of it) and every statement they send is scoped by GameID and RaceID; a line shown again reuses the cached read (the underlying database sees no statement), the Galaxy Map line and the Colonization line share one read of the known systems, and a write to a table they read drops the kept read; and the store keeps a line until the database, game, race, history revision or separator changes, loads nothing a second time and leaves a failing peek's line null. A value is compared with its expectation part by part (an array item by item, an object key by key, whatever order its keys were added in), so the store's lines are compared route by route and the order the lines finish loading in cannot change a result; two controls force each order on a game change (the database sends one line's statements only once the store has set the other line) and must pass. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing; a mutation that names a check counts only when that check fails by a wrong value, never by a throw. Exit code 1 when a check fails.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them, that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
+  With a save (by default the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141 race 784; a save named by --stock or --modded is run as given, and one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them (a save that holds one game only prints a skip), that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
 
   The store holds off while the save is refused as a save of another Aurora line (store/capabilities.js `refused`): a refused copy loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused (one synthetic check, and a mutation that leaves the hold out).
 
@@ -22,6 +22,7 @@ const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { watchLoad, loadShare, describeLoad, processorTimes } = require('./lib/machine-load')
 const { routes: routeTable } = require('./lib/store-routes')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -646,7 +647,7 @@ const failedChecks = async (modules, fails, name) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], budget: 20, laps: 7, mutations: mutating(), only: [] }
+  const options = { modded: fixtureTriple(), stock: null, budget: 20, laps: 7, mutations: mutating(), only: [] }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -927,10 +928,15 @@ const run = async () => {
 
     const load = watchLoad()
 
-    await measureSave('modded', options.modded, options, modules, load)
-    await measureSave('stock', options.stock, options, modules, load)
-    await compareSave('modded', options.modded, modules, planner)
-    await compareSave('stock', options.stock, modules, planner)
+    const named = [['modded', options.modded], ['stock', options.stock]].filter(([, triple]) => triple)
+
+    for (const [label, triple] of named) {
+      await measureSave(label, triple, options, modules, load)
+    }
+
+    for (const [label, triple] of named) {
+      await compareSave(label, triple, modules, planner)
+    }
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

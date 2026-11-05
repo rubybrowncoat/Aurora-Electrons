@@ -6,11 +6,13 @@ import { MINERALS, massDriverRateResult } from './minerals'
 import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
-const SUPPLY_VERSIONS = ['2.7.x']
+const SUPPLY_VERSIONS = ['3.1.x']
+// The rules that read the packet the complexes' output goes into, and the route that says it goes (a known mismatch, owner AE-309-13): the 3.1.0 and 3.0.0 game fills a colony's stockpile up to its reserve from the purchased civilian output first and ships only the rest (Population.ProcessMiningProduction; the 2.7.1 GClass146.method_10 does not), which these rules and the route's note do not model (scripts/check-mineral-supply.js, group save-reserve), so they stay on the earlier line.
+const PACKET_VERSIONS = ['2.7.x']
 
 registerRule({
   id: 'mineralSupply.route',
-  versions: SUPPLY_VERSIONS,
+  versions: PACKET_VERSIONS,
   units: 'route',
   verification: 'estimated',
   structure: ['FCT_Population.MassDriverDest, PurchaseCivilianMinerals', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
@@ -19,7 +21,7 @@ registerRule({
 
 registerRule({
   id: 'mineralSupply.packetOutput',
-  versions: SUPPLY_VERSIONS,
+  versions: PACKET_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_Population.PurchaseCivilianMinerals, MassDriverDest', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_MineralDeposit.Accessibility'],
@@ -28,7 +30,7 @@ registerRule({
 
 registerRule({
   id: 'mineralSupply.localStock',
-  versions: SUPPLY_VERSIONS,
+  versions: PACKET_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['the site\'s mining rates', 'FCT_Population.PurchaseCivilianMinerals, MassDriverDest'],
@@ -37,7 +39,7 @@ registerRule({
 
 registerRule({
   id: 'mineralSupply.supply',
-  versions: SUPPLY_VERSIONS,
+  versions: PACKET_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['the site\'s route', 'FCT_RaceMineralData.Amount, MineralDataType 12'],
@@ -50,7 +52,7 @@ registerRule({
   units: 't/yr',
   verification: 'confirmed',
   structure: ['FCT_RaceMineralData.Amount, MineralDataType 8, 12, PopulationID, MineralID'],
-  note: 'The tonnes the game\'s ledger records a colony sending by mass driver or loading into freighters over its window, annualised: stored values, summed. The ledger records a packet when drivers send stock, not when civilian output goes straight into a packet, and a tonne loaded into a freighter is not a tonne delivered.',
+  note: 'The tonnes the game\'s ledger records a colony sending by mass driver or loading into freighters over its window, annualised: stored values, summed. The ledger records a packet when drivers send stock, not when civilian output goes straight into a packet, and a tonne loaded into a freighter is not a tonne delivered. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, and against a copy of it with mass driver sends planted in the ledger from the game\'s source.',
 })
 
 registerRule({
@@ -59,7 +61,7 @@ registerRule({
   units: 't/yr',
   verification: 'confirmed',
   structure: ['FCT_RaceMineralData.Amount, MineralDataType 7, 13, PopulationID, MineralID'],
-  note: 'The tonnes the game\'s ledger records a colony receiving from mass-driver packets or unloading from freighters over its window, annualised: stored values, summed. A receipt moves minerals between the race\'s own colonies; it is not income to the race.',
+  note: 'The tonnes the game\'s ledger records a colony receiving from mass-driver packets or unloading from freighters over its window, annualised: stored values, summed. A receipt moves minerals between the race\'s own colonies; it is not income to the race. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, and against a copy of it with mass driver receipts planted in the ledger from the game\'s source.',
 })
 
 registerRule({
@@ -68,7 +70,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_Population.<mineral>', 'FCT_MassDriverPackets.<mineral>, DestID'],
-  note: 'What a colony holds once the packets bound for it have landed: its stock plus what is in flight to it, arithmetic on stored values. A packet in flight is in no colony\'s stock, so it is not available to industry until it arrives; each packet counts for exactly one destination.',
+  note: 'What a colony holds once the packets bound for it have landed: its stock plus what is in flight to it, arithmetic on stored values. A packet in flight is in no colony\'s stock, so it is not available to industry until it arrives; each packet counts for exactly one destination. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, and against a copy of it with packets in flight planted from the game\'s source.',
 })
 
 registerRule({
@@ -77,7 +79,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_ShipCargo.Amount, CargoTypeID 3, CargoID'],
-  note: 'The tonnes of a mineral in the holds of the race\'s ships: stored values, summed. A freighter\'s destination is not recorded, so the cargo supplies no colony until the ledger shows it unloaded; it is still the race\'s own mineral, counted in what the race holds so a haul between colonies changes no total.',
+  note: 'The tonnes of a mineral in the holds of the race\'s ships: stored values, summed. A freighter\'s destination is not recorded, so the cargo supplies no colony until the ledger shows it unloaded; it is still the race\'s own mineral, counted in what the race holds so a haul between colonies changes no total. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -86,7 +88,7 @@ registerRule({
   units: 't/yr',
   verification: 'assumed',
   structure: ['a delivery entered on the page'],
-  note: 'A hypothetical delivery from a site to a colony, entered on the page. No route, order or packet of the save backs it, and nothing is counted from it until it is entered.',
+  note: 'A hypothetical delivery from a site to a colony, entered on the page. No route, order or packet of the save backs it, and nothing is counted from it until it is entered. Checked against the migrated Galactic Shogunate save, with a delivery entered for each of its sites.',
   assumptions: ['the delivery is a hypothetical input, not a route or a packet the save holds'],
 })
 
@@ -179,7 +181,7 @@ const loadedOf = (flows, populationId, materialId) => observed('mineralSupply.sh
 const receivedOf = (flows, populationId, materialId) => observed('mineralSupply.received', flows, populationId, materialId, [LEDGER_TYPES.received])
 const unloadedOf = (flows, populationId, materialId) => observed('mineralSupply.received', flows, populationId, materialId, [LEDGER_TYPES.unloaded])
 
-// How a site's packet route reads, as a result of 'mineralSupply.route' whose value is `{ state, civilian, stock, target, destinationId }`. A stored destination keeps the route while its colony exists, whoever owns it, wherever it is and whether or not it has a driver: only the picker offers fewer, so only the source's drivers decide whether stock ships. `civilian`: the race buys the complexes' output for a destination (the mining rows' `MassDriverExport`); `stock`: 'ships' when the site's drivers send stock above the reserve, 'none' when they cannot, 'unknown' when what decides it is not recorded; `target`: `targetOf`'s verdict on the destination, for display. `state` is 'packets' (civilian output goes by packet), 'driver' (stock goes by the drivers), or 'none' (nothing leaves by packet, whatever the destination field says). A site whose route cannot be told is unavailable. `colony` is the site's row of `loadSiteRoutes`, undefined when it has none.
+// How a site's packet route reads, as a result of 'mineralSupply.route' whose value is `{ state, civilian, stock, target, destinationId }`. A stored destination keeps the route while its colony exists, whoever owns it, wherever it is and whether or not it has a driver: only the picker offers fewer, so only the source's drivers decide whether stock ships. `civilian`: the race buys the complexes' output for a destination (the mining rows' `MassDriverExport`); `stock`: 'ships' when the site's drivers send stock above the reserve, 'none' when they cannot, 'unknown' when what decides it is not recorded; `target`: `targetOf`'s verdict on the destination, for display. `state` is 'packets' (civilian output goes by packet: the potential route, as the 2.7.1 game ships it all; the 3.1.0 game keeps it in the stockpile while that is below its reserve, Population.ProcessMiningProduction, owner AE-309-13), 'driver' (stock goes by the drivers), or 'none' (nothing leaves by packet, whatever the destination field says). A site whose route cannot be told is unavailable. `colony` is the site's row of `loadSiteRoutes`, undefined when it has none.
 export const routeResult = ({ colony, civilian, RaceID }) => {
   const target = colony ? targetOf(colony, RaceID) : null
   const reach = colony ? reachOf(colony) : null

@@ -11,14 +11,15 @@ import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, UNLOADS } from './transport'
 
 const ROUTE_VERSIONS = ['2.7.x']
+const GROUP_VERSIONS = ['3.1.x']
 
 registerRule({
   id: 'hauling.routeGroup',
-  versions: ROUTE_VERSIONS,
+  versions: GROUP_VERSIONS,
   units: 'fleets',
   verification: 'estimated',
   structure: ['FCT_MoveOrders', 'DIM_MoveAction.DestinationItemType, SpecifyQuanitity, MinQuantity, TransitOrder', 'FCT_FleetConditionalOrder', 'FCT_OrderTemplate', 'FCT_MoveOrderTemplate'],
-  note: 'Fleets are grouped by the stored orders alone: the least rotation of each order\'s path and service (reduced to its period), with the conditional set. No table links a fleet to a template, so a template name is a match of content and may be a copy of a template since removed; a fleet name is free text.',
+  note: 'Fleets are grouped by the stored orders alone: the least rotation of each order\'s path and service (reduced to its period), with the conditional set. No table links a fleet to a template, so a template name is a match of content and may be a copy of a template since removed; a fleet name is free text. Checked on copies of the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, in which fleets are given the freight queues of others at another rotation, with a delay, repeated, cut short and emptied.',
   assumptions: ['routes are told apart by the stored orders, not by what the fleets were meant to do'],
 })
 

@@ -21,15 +21,16 @@ const { plantedPatch } = require('./lib/mutant-source')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating: canMutate } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const POOLS_FILE = 'src/renderer/utilities/maintenance-pools.js'
 const LOGISTICS_FILE = 'src/renderer/utilities/logistics.js'
 const PAGE_FILE = 'src/renderer/pages/logistics.vue'
 const POOL_FILE = 'src/renderer/components/logistics/MaintenancePool.vue'
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const IDS = { GameID: 138, RaceID: 785 }
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+const SAVE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 const DETAIL = process.argv.includes('--detail')
 // The page draws figures in groups of three with the apostrophe under the setting the checks start with.
@@ -403,10 +404,20 @@ const plan = async (raw) => {
     await run(raw, `update FCT_Fleet set Xcor = Xcor + 1000000, Ycor = Ycor + 1000000 where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and SystemID = ${at.sys} and abs(Xcor - ${at.x}) < 2 and abs(Ycor - ${at.y}) < 2`)
   }
 
-  const classId = async (name) => (await first(`select ShipClassID as id from FCT_ShipClass where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and ClassName = '${name}'`)).id
-  const bonk = await classId('Bonk')
-  const well = await classId('Well')
-  const shed = await classId('Shed01-0.5k')
+  // The classes cloned are chosen by what the planted ships need of them: any class of the race for the ordinary ships, a supply ship with a cargo shuttle bay, and a class with maintenance modules.
+  const ownClasses = `from FCT_ShipClass where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID}`
+  const classWhere = async (condition) => {
+    const found = await first(`select ShipClassID as id ${ownClasses} and ${condition} order by ShipClassID limit 1`)
+
+    if (!found) {
+      throw new HarnessError(`the save has no class of the race with ${condition}`)
+    }
+
+    return found.id
+  }
+  const bonk = await classWhere('1 = 1')
+  const well = await classWhere('SupplyShip = 1 and exists (select 1 from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = FCT_ShipClass.ShipClassID and d.ComponentTypeID = 14)')
+  const shed = await classWhere('MaintModules > 0')
   const { top } = await first('select max(ShipClassID) as top from FCT_ShipClass')
   const classes = { W: top + 1, K: top + 2, C: top + 3, S1: top + 4, S2: top + 5, M: top + 6, P: top + 7 }
   const ordinary = ['Size = 2', 'Cost = 4000', 'SupplyShip = 0', 'MinimumSupplies = 0', 'MaintModules = 0', 'MaintPriority = 5']

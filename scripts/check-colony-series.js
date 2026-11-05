@@ -6,7 +6,7 @@
   Groups, each check numbered and keyed (a mutation names the keys it must break):
   - rows: the record of a colony (the states, the rounding, a stored zero against a missing value), what is chosen and when it applies, the limit of 50, the size estimate;
   - merge: the series of a branch (the same save again, a colony added, a revision, a failed read over an observation, an older save, the cap, a branch seeded from its parent);
-  - single: the recorder over the modded save AuroraDB.db (game 140, race 784), read only: no statement and no write without a choice, one statement with one, the figures against SQL written here, a repeat write nothing, a failed read, a pass superseded at every guard, the retention cap;
+  - single: the recorder over the fixture save (scripts/lib/fixtures.js), read only: no statement and no write without a choice, one statement with one, the figures against SQL written here, a repeat write nothing, a failed read, a pass superseded at every guard, the retention cap;
   - falryx: the recorder over the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and three forks), read only: the opt-in observation, a restart, a skipped save, a fork seeded and never merged, a colony that is another object across a fork, a reconnect.
   A save that is not there skips its group and says so; nothing is read from it but SELECTs (the files are opened read only).
 
@@ -21,10 +21,11 @@ const { patched } = require('./lib/mutant-source')
 const { loadPage, replacing, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
-const MODDED = { file: path.join(root, 'AuroraDB.db'), GameID: 140, RaceID: 784 }
+const MODDED = { file: path.join(root, FIXTURE.file), GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
 const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const FALRYX_GAME = 141
 const FALRYX_RACE = 791
@@ -173,7 +174,7 @@ const statementsOfColonies = (log) => log.filter((sql) => /PopulationID in \(/.t
 
 // ---------- the scenarios, each run once for a set of modules ----------
 
-// The modded save, one pass at a time on copies of one installation.
+// The fixture save, one pass at a time on copies of one installation.
 const single = async (m) => {
   const { file, GameID, RaceID } = MODDED
   const t = await gameTimeOf(file, GameID)

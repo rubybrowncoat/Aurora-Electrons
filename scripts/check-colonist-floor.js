@@ -5,7 +5,7 @@
 
   The utility is run on colonies worked by hand, whose workers follow the Outlook's own worker split (a colony of 62.5 M people at colony cost 0 has 28.125 M workers: services take half of the people and agriculture 5%). What a batch leaves: the remaining population and its workers, the workers short (never negative, never a figure when the batch is blank, not a number or larger than the colony). What limits a removal: the staffing floor, found by removing people gradually, and a floor the player enters; the smaller binds, and either can bind first. The current view needs no queue: it is the same with the committed workforce absent, unavailable or present, and the committed view changes only its own figures. The emigrant pool limits only shipping-line pickups from a source colony; a pickup yet to happen is never a figure. A blank floor or batch is not known, a stored field that is null is unknown, and an invalid entry is refused. The loader runs on a small in-memory database, with a column or a table the save lacks. The panel is mounted on the same rows and its template compiled and rendered: each figure cell and each table of the detail row carries a mark bound to its own result, and the fields it keeps are those the persisted view is given. The page's tracked reads are found by running them, not by reading its text.
 
-  The saves (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loader, compared with raw counts and values of the population table.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) gives the real loader, compared with raw counts and values of the population table.
 
   The colonist sources read feeds only the panel, so a failed read holds nothing back: the page, loaded with its real load-state mixin, stays ready, and the panel (its template compiled and rendered) shows the failure or the progress in place of its figures, and its figures once the read is in.
 
@@ -19,6 +19,7 @@ const { loadPage, loadModules, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { renderTree: rendered, treeOf } = require('./lib/vue-render')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -30,10 +31,7 @@ const U = 'utility'
 const V = 'component'
 const P = 'page'
 const NAMES = ['colonist-floor', 'colonies', 'workforce-demand', 'provenance']
-const SAVES = [
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
   // The page's history helpers need session storage; aurora.js imports dayjs, its UTC plugin and romanum.

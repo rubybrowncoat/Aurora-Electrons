@@ -3,7 +3,7 @@
 
   node scripts/check-legacy-consumption.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options a full run checks the repository's modded save (AuroraDB.db, game 140, race 784), the stock save (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a later copy (saves/AuroraDB.db, game 138, race 785). --no-mutations checks only stock, which covers the same supported ledger and shipyard assertion groups as the later copy with fewer unsupported cases (2 versus 4 in the baseline). The passive campaign remains a separate full set of snapshots in either mode. Explicit --save arguments are always used as given. A save is never written: the fallback is run on a copy of the stock save in the temp folder whose mineral ledger is emptied, deleted afterwards.
+  With no options a run checks the fixture save (scripts/lib/fixtures.js: its game and race). The passive campaign remains a separate full set of snapshots. Explicit --save arguments are always used as given. A save is never written: the fallback is run on a copy of the save in the temp folder whose mineral ledger is emptied, deleted afterwards.
 
   What is compared. The ledger logs, once per production tick and colony, the tonnes each purpose used: fuel refining (MineralDataType 14, Sorium), maintenance supplies (16, Duranium, Uridium and Gallicite), shipbuilding (5) and shipyard activities (9). For the last production tick (the years between the last two ticks of the ledger's construction rows) the check sets what the model gives a colony, worked out from the save's installations, tasks and race rates alone, against what the ledger logged for it: the fuel and maintenance rules as the page applies them, and the shipbuilding and activity rules at one tick (a task's build points rounded to 4 decimals each tick, as the game does; the utility's year is a forecast and is compared with the tick within the rounding bound). A task with no build points done may have been added after the tick and is left out of the comparison, said so. The ledger's continual-upgrade rows are compared as estimates (the saved capacity is the one after the tick's growth).
 
@@ -27,14 +27,11 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild } = require('./lib/check-pool')
+const { fixtureSave, convertedSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
-const DEFAULT_SAVES = [
-  { key: 'modded', file: 'AuroraDB.db', game: 140, race: 784 },
-  { key: 'stock', file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { key: 'later', file: 'saves/AuroraDB.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [{ key: 'fixture', ...fixtureSave() }]
 const SECONDS_PER_YEAR = 365 * 86400
 const FUEL_LEDGER_TYPE = 14
 const MAINTENANCE_LEDGER_TYPE = 16
@@ -138,13 +135,11 @@ const parseArguments = (argv) => {
     return saves
   }
 
-  const selected = mutating() ? DEFAULT_SAVES : [DEFAULT_SAVES[1]]
-
-  if (!mutating() && !fs.existsSync(path.resolve(root, selected[0].file))) {
-    throw new Error(`quick representative save is missing: ${selected[0].file}`)
+  if (!mutating() && !fs.existsSync(path.resolve(root, DEFAULT_SAVES[0].file))) {
+    throw new Error(`quick representative save is missing: ${DEFAULT_SAVES[0].file}`)
   }
 
-  return selected
+  return DEFAULT_SAVES
 }
 
 // The rows of the saves' queries are kept for the length of one run, in a folder the first process makes (LEGACY_CACHE, which the processes it starts inherit) and removes at its end: a mutation re-reads the same save with the same statements, and a save does not change under a run. An entry is named by the save (path, size and time of last change) and the exact statement, so a statement a mutation changes never meets another's rows; a process without the folder queries the save every time.
@@ -180,9 +175,9 @@ const identityOf = (file) => {
   return `${path.resolve(file)}|${size}|${mtimeMs}`
 }
 
-// A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does. `queries` keeps every statement run.
+// A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does. `queries` keeps every statement run. A snapshot of the passive campaign is a recorded 2.x save: it is read through its converted copy (scripts/lib/fixtures.js `convertedSave`, the star's component number under its 3.1 name and nothing else).
 const openSave = (file) => new Promise((resolve, reject) => {
-  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => {
+  const raw = new sqlite3.Database(file.startsWith(PASSIVE) ? convertedSave(file) : file, sqlite3.OPEN_READONLY, (error) => {
     if (error) {
       reject(error)
       return
@@ -269,6 +264,34 @@ const ledgerlessCopy = async (file, directory) => {
   })
 
   return target
+}
+
+// A copy of a save in the temp folder whose first new-build shipyard task is a refit of another class (the saves tried hold none): { file, task, from, to } with the class the task named and the class of another size it now becomes, or null when the save holds no such task or class.
+const refitCopy = async (file, directory, { game, race }) => {
+  const target = path.join(directory, 'refit.db')
+
+  fs.copyFileSync(file, target)
+
+  const raw = await new Promise((resolve, reject) => {
+    const opened = new sqlite3.Database(target, (error) => (error ? reject(error) : resolve(opened)))
+  })
+  const one = (sql) => new Promise((resolve, reject) => raw.get(sql, (error, row) => (error ? reject(error) : resolve(row || null))))
+  const run = (sql) => new Promise((resolve, reject) => raw.run(sql, (error) => (error ? reject(error) : resolve())))
+
+  try {
+    const from = await one(`select FCT_ShipyardTask.TaskID as task, FCT_ShipClass.ShipClassID as id, FCT_ShipClass.Size as size, FCT_ShipClass.Commercial as commercial from FCT_ShipyardTask inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${game} and FCT_ShipyardTask.RaceID = ${race} and FCT_ShipyardTask.TaskTypeID = 0 order by FCT_ShipyardTask.TaskID limit 1`)
+    const to = from && (await one(`select ShipClassID as id, Size as size, Commercial as commercial from FCT_ShipClass where GameID = ${game} and Size <> ${from.size} order by (Commercial <> ${from.commercial || 0}) desc, ShipClassID limit 1`))
+
+    if (!from || !to) {
+      return null
+    }
+
+    await run(`update FCT_ShipyardTask set TaskTypeID = 2, RefitID = ${to.id} where TaskID = ${from.task}`)
+
+    return { file: target, task: from.task, from, to }
+  } finally {
+    await new Promise((resolve) => raw.close(resolve))
+  }
 }
 
 // The emptied copy of a save: made once for the run in its cache folder when there is one (the first process to need it makes it, the others open that), else made in `directory`.
@@ -363,8 +386,8 @@ const suite = (tree, saves, unsupported) => {
 
   const environments = Object.fromEntries(saves.map((save) => [save.key, present(save) ? environment(save) : null]))
 
-  // The emptied copy of the first save that has shipbuilding in its ledger (the stock save), as a page that has no ledger.
-  const fallbackSource = saves.find((save) => save.key === 'stock' && present(save)) || saves.find((save) => present(save) && save.key !== 'modded')
+  // The emptied copy of the first save that is there, as a page that has no ledger.
+  const fallbackSource = saves.find((save) => present(save))
   const fallback = memo(async () => {
     const directory = createOwnedTemp('ae-legacy-copy-')
 
@@ -421,6 +444,25 @@ const suite = (tree, saves, unsupported) => {
 
       return true
     })
+
+    if (save.key === 'fixture') {
+      add(`loader-refit:${save.key}`, `${label}: a refit task builds the class it becomes: on a copy whose first shipyard task is a refit, the task's class size and commercial flag are those of the class it becomes and not of the one it names`, async () => {
+        const directory = createOwnedTemp('ae-legacy-copy-')
+
+        cleanup.push(() => removeOwnedTemp(directory))
+
+        const planted = await refitCopy(present(save), directory, save)
+
+        if (!planted) {
+          return skip(`${label}: the save holds no new-build shipyard task, so no refit can be planted on it`)
+        }
+
+        const env = await environment(save, planted.file, { ledger: false })()
+        const row = env.inputs.tasks.find((task) => task.TaskID === planted.task)
+
+        return row && row.ClassSize === planted.to.size && Number(row.ClassCommercial || 0) === Number(planted.to.commercial || 0) && row.ClassSize !== planted.from.size ? true : `task ${planted.task}: the read gives size ${row && row.ClassSize} and commercial ${row && row.ClassCommercial}, the class it becomes has ${planted.to.size} and ${planted.to.commercial}, the one it names ${planted.from.size}`
+      })
+    }
 
     add(`msp-ledger:${save.key}`, `${label}: a colony's Duranium, Uridium and Gallicite for maintenance supplies over the last tick are the ledger's (a colony whose stock cannot cover a year makes the rate at the tick, the year's use is held to the stock)`, async () => {
       const env = await environments[save.key]()
@@ -1685,25 +1727,25 @@ const RESULT_PREFIX = 'LEGACY-RESULT '
 // The mutations: [label, file, from, to, fails]. `fails` are the ids of the checks the mutation must break; only those are run, in a process of their own on a copy of the sources.
 const MUTATIONS = [
   ['facilities are no longer cut to whole numbers', path.join('utilities', 'legacy-consumption.js'), '{ count: Math.trunc(value), fractional: Math.trunc(value) !== value }', '{ count: value, fractional: false }', ['synthetic-whole-facilities']],
-  ['a scrap task takes its (negative) minerals', path.join('utilities', 'legacy-consumption.js'), 'task.TaskTypeID === TASK_TYPE_SCRAP) {\n    return idle', 'task.TaskTypeID === -1) {\n    return idle', ['synthetic-scrap-paused', 'ship-ledger:later']],
-  ['a paused task is built', path.join('utilities', 'legacy-consumption.js'), '} else if (task.Paused) {', '} else if (false) {', ['synthetic-scrap-paused', 'ship-ledger:later']],
+  ['a scrap task takes its (negative) minerals', path.join('utilities', 'legacy-consumption.js'), 'task.TaskTypeID === TASK_TYPE_SCRAP) {\n    return idle', 'task.TaskTypeID === -1) {\n    return idle', ['synthetic-scrap-paused']],
+  ['a paused task is built', path.join('utilities', 'legacy-consumption.js'), '} else if (task.Paused) {', '} else if (false) {', ['synthetic-scrap-paused']],
   ['a task builds past its remaining build points', path.join('utilities', 'legacy-consumption.js'), 'Math.min(values[\'the task\\\'s build rate\'], Math.max(0, task.TotalBP - task.CompletedBP))', 'values[\'the task\\\'s build rate\']', ['synthetic-task-cap']],
-  ['a commercial class counts its full size', path.join('utilities', 'legacy-consumption.js'), 'task.ClassCommercial ? 0.25 : 1', '1', ['synthetic-tasks', 'ship-ledger:later']],
-  ['a refit builds the class it leaves, not the one it becomes', path.join('utilities', 'legacy-consumption.js'), 'FCT_ShipyardTask.TaskTypeID in (2, 4)', 'FCT_ShipyardTask.TaskTypeID in (-1)', ['ship-ledger:later']],
+  ['a commercial class counts its full size', path.join('utilities', 'legacy-consumption.js'), 'task.ClassCommercial ? 0.25 : 1', '1', ['synthetic-tasks']],
+  ['a refit builds the class it leaves, not the one it becomes', path.join('utilities', 'legacy-consumption.js'), 'FCT_ShipyardTask.TaskTypeID in (2, 4)', 'FCT_ShipyardTask.TaskTypeID in (-1)', ['loader-refit:fixture']],
   ['a retool ignores its slipways', path.join('utilities', 'legacy-consumption.js'), '(retool ? yard.Slipways : 1)', '1', ['synthetic-activities']],
   ['a colony with no maintenance switch makes nothing', path.join('utilities', 'legacy-consumption.js'), 'result = unavailable({ rule: MAINTENANCE, missing: [\'whether maintenance production is on\'], units: \'MSP/yr\' })', 'result = zero(MAINTENANCE, \'maintenance production is off\', \'MSP/yr\')', ['synthetic-unknown-status']],
   ['a refinery with its production off still refines', path.join('utilities', 'logistics.js'), '} else if (!colony.FuelProdStatus || colony.Refineries === 0) {', '} else if (colony.Refineries === 0) {', ['synthetic-fuel']],
   ['a use that lacks an input is counted as 0', path.join('utilities', 'mineral-outlook.js'), 'uses.filter((use) => use.enabled && use.result)', 'uses.filter((use) => use.enabled && use.result && use.result.value !== null)', ['synthetic-flow-switches', 'fallback-unknown']],
   ['a switched-off use still counts without a ledger', path.join('utilities', 'mineral-outlook.js'), 'uses.filter((use) => use.enabled && use.result)', 'uses.filter((use) => use.result)', ['synthetic-flow-switches', 'fallback-switches']],
-  ['a switched-off use leaves the ledger\'s use alone', path.join('utilities', 'mineral-outlook.js'), 'spendGroups.filter((key) => !left.includes(key))', 'spendGroups', ['synthetic-flow-switches', 'ledger-no-model:stock']],
-  ['the page models the uses of a save that has a ledger', path.join('pages', 'mineral-outlook.vue'), 'if (this.hasLedger) {\n        return null\n      }\n\n      const { queueDemand, industrialProjects }', 'if (false) {\n        return null\n      }\n\n      const { queueDemand, industrialProjects }', ['ledger-no-model:stock']],
+  ['a switched-off use leaves the ledger\'s use alone', path.join('utilities', 'mineral-outlook.js'), 'spendGroups.filter((key) => !left.includes(key))', 'spendGroups', ['synthetic-flow-switches', 'ledger-no-model:fixture']],
+  ['the page models the uses of a save that has a ledger', path.join('pages', 'mineral-outlook.vue'), 'if (this.hasLedger) {\n        return null\n      }\n\n      const { queueDemand, industrialProjects }', 'if (false) {\n        return null\n      }\n\n      const { queueDemand, industrialProjects }', ['ledger-no-model:fixture']],
   ['a modelled use is called observed', path.join('utilities', 'mineral-outlook.js'), 'known ? (hasLedger ? \'observed\' : \'modelled\') : \'missing\'', 'known ? \'observed\' : \'missing\'', ['synthetic-category-rows', 'fallback-modelled']],
   ['an NPR\'s colony away from its capital uses its own (empty) Sorium', path.join('utilities', 'legacy-consumption.js'), 'if (!colony.NPR || colony.Capital) {', 'if (true) {', ['synthetic-pool']],
   ['a shared stock is called as good as a measured one', path.join('utilities', 'legacy-consumption.js'), 'return pool.shared ? estimated(cut, SHARED_STOCK) : cut', 'return cut', ['synthetic-pool']],
   ['an NPR colony with no capital row uses its own stock', path.join('utilities', 'legacy-consumption.js'), 'shared: true } : null', 'shared: true } : { colony, shared: false }', ['synthetic-pool']],
   ['the NPR ordnance exception is not noted', path.join('utilities', 'legacy-consumption.js'), 'capacityKind(project.ProductionType) === \'ordnance\'', 'capacityKind(project.ProductionType) === \'none\'', ['synthetic-industry-basis']],
-  ['the production modifier is ignored', path.join('utilities', 'legacy-consumption.js'), 'row && isNumber(row.OverallProductionModifier) ? row.OverallProductionModifier : null', 'row && isNumber(row.OverallProductionModifier) ? 1 : null', ['fuel-ledger:stock', 'passive-npr-sample', 'passive-npr-mixed']],
-  ['a maintenance mineral takes ten times its tonnage', path.join('utilities', 'logistics.js'), '{ name: \'Uridium\', perMsp: 0.05 }', '{ name: \'Uridium\', perMsp: 0.5 }', ['msp-ledger:stock', 'passive-npr-sample', 'passive-npr-mixed']],
+  ['the production modifier is ignored', path.join('utilities', 'legacy-consumption.js'), 'row && isNumber(row.OverallProductionModifier) ? row.OverallProductionModifier : null', 'row && isNumber(row.OverallProductionModifier) ? 1 : null', ['fuel-ledger:fixture', 'passive-npr-sample', 'passive-npr-mixed']],
+  ['a maintenance mineral takes ten times its tonnage', path.join('utilities', 'logistics.js'), '{ name: \'Uridium\', perMsp: 0.05 }', '{ name: \'Uridium\', perMsp: 0.5 }', ['msp-ledger:fixture', 'passive-npr-sample', 'passive-npr-mixed']],
   ['maintenance is not held to the minerals at the colony', path.join('utilities', 'legacy-consumption.js'), 'const allowed = settled', 'const allowed = made.value', ['synthetic-msp-stock', 'passive-player']],
   ['a mine on a deposit that holds the mineral is taken as an unlimited supply', path.join('utilities', 'legacy-consumption.js'), 'return { low, exact: low >= wanted || !mined,', 'return { low: mined ? Infinity : low, exact: true,', ['synthetic-msp-stock', 'synthetic-query-unread']],
   ['an uncertain mineral blocks a figure another mineral settles', path.join('utilities', 'legacy-consumption.js'), 'if (settled > lowest) {', 'if (supplies.some((supply) => !supply.exact && supply.low < made.value)) {', ['synthetic-msp-stock']],

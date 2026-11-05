@@ -7,8 +7,8 @@
 
   Groups, each check numbered and keyed (a mutation names the keys it must break):
   - unit: when a snooze ends and when it holds (a game date at and after its expiry and the guards before it, a declared change, an episode that is seen to end and a return that is a new one), what a failed read, a row that could not be evaluated, an id listed twice, a signature or an identity that cannot be read, an unknown clock, changed options and a save earlier than the snooze leave alone, a snooze of the whole check, what a record is made of and refused for, the stored form and the ended records kept apart, a restart, the isolation of races and campaigns, the seeding of a branch at a fork whatever the parent did since, the dates of the game, the bands and the signatures, the 24 checks that declare a material change, the signature of a damaged ship made of ids, the condition told in words, a Settings reset keeping the snoozes, the wording;
-  - page: the real options of pages/warnings.vue run in Vue 2.7 without a template, over the real checks on AuroraDB.db and a store that is a plain object (a permanent mute outranks a snooze, the clock of the save, the guards of an evaluation, the store that cannot be read or written, a retry, the words of a snooze);
-  - reads: the real checks on the saves AuroraDB.db (game 140, race 784), saves/AuroraDB_271_skoormit_saved.db (game 138, race 785) and the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791): the signatures of every row, every row snoozed and held, the identity stamps against SQL written here, a failed read, a save earlier than the snooze;
+  - page: the real options of pages/warnings.vue run in Vue 2.7 without a template, over the real checks on the migrated Galactic Shogunate save (scripts/lib/fixtures.js) and a store that is a plain object (a permanent mute outranks a snooze, the clock of the save, the guards of an evaluation, the store that cannot be read or written, a retry, the words of a snooze);
+  - reads: the real checks on the migrated Galactic Shogunate save (game 141, race 784) and the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, recorded 2.x saves read through the copies with the star's component number renamed that `convertedSave` of scripts/lib/fixtures.js makes): the signatures of every row, every row snoozed and held, the identity stamps against SQL written here, a failed read, a save earlier than the snooze;
   - forks: the same eight saves through the real recorder into in-memory stores, so the registry gives the branches (a rollback and three forks); the snoozes of one branch seeded to the next and judged on the real rows of the child, against the identity of each object read independently.
   A save that is not there skips its group and says so (a skip is never agreement); only SELECTs are issued to a save, which is opened read only.
 
@@ -27,6 +27,7 @@ const { patched } = require('./lib/mutant-source')
 const { loadPage } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { fixtureSave, convertedSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -35,12 +36,11 @@ const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const FALRYX_TIMES = ['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230']
 
 const SAVES = {
-  modded: { file: path.join(root, 'AuroraDB.db'), game: 140, race: 784 },
-  stock: { file: path.join(root, 'saves', 'AuroraDB_271_skoormit_saved.db'), game: 138, race: 785 },
+  fixture: { ...fixtureSave(), file: path.join(root, fixtureSave().file) },
   ...Object.fromEntries(FALRYX_TIMES.map((time) => [`f${time}`, { file: path.join(FALRYX, `AuroraDB-${time}.db`), game: 141, race: 791 }])),
 }
 const SAVE_KEYS = Object.keys(SAVES).filter((key) => fs.existsSync(SAVES[key].file))
-const FAST_SAVES = ['modded', 'f2904201340'].filter((key) => SAVE_KEYS.includes(key))
+const FAST_SAVES = ['fixture', 'f2904201340'].filter((key) => SAVE_KEYS.includes(key))
 // The checks that compare particular saves with each other (the rewinds and the forks of the Falryx game), which the fast saves do not hold.
 const ACROSS_SAVES = ['rewind-real', 'fork-real']
 const DEFAULT_OPTIONS = { idleFleetsAtColonies: false, maintenanceThreshold: 100, maintenanceExclusions: [] }
@@ -297,7 +297,7 @@ const handles = new Map()
 const handleOf = (file) => {
   if (!handles.has(file)) {
     handles.set(file, new Promise((resolve, reject) => {
-      const handle = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
+      const handle = new sqlite3.Database(file.startsWith(FALRYX) ? convertedSave(file) : file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
     }))
   }
 
@@ -1320,7 +1320,7 @@ const subjectVm = (vm) => new Proxy(vm, {
 
 const PAGE_STORE_SHAPE = { config: ['object'], database: ['object'], GameID: ['number'], RaceID: ['number'], GameTime: ['number', 'null', 'undefined', 'string'], StartYear: ['number'], racePrefix: ['string'], campaignId: ['string'], 'history/campaign': ['object'] }
 
-const mountPage = async (m, { save = 'modded', world: overrides = {}, config = memoryConfig() } = {}) => {
+const mountPage = async (m, { save = 'fixture', world: overrides = {}, config = memoryConfig() } = {}) => {
   const spec = SAVES[save]
   const real = databaseOf(spec.file)
   const control = { broken: false, gates: [], held: 0, inflight: 0, hold: null }
@@ -1609,7 +1609,7 @@ check('page-store', 'on the page a store of snoozes that cannot be read is shown
   const unreadable = { version: 99, seeded: {}, records: [{ keep: 'me' }] }
   const config = memoryConfig()
 
-  config.set(`${m.campaign.raceKeyPrefix('c1', SAVES.modded.race)}.warningsSnoozed`, unreadable)
+  config.set(`${m.campaign.raceKeyPrefix('c1', SAVES.fixture.race)}.warningsSnoozed`, unreadable)
 
   await withPage(m, { config }, async (page) => {
     await loaded(page)
@@ -1850,7 +1850,7 @@ check('sig-names', 'no signature is made of the name of the row it describes', '
 
 check('stamps-real', 'on the saves the identity stamp of every ship, colony, commander and wreck a check lists is read, and two objects have one stamp exactly when SQL written here reads one tuple for them', 'reads', async ({ m, ctx }) => {
   let objects = 0
-  const keys = ctx.keys.filter((key) => ctx.fast.includes(key) || key.startsWith('f29') || key === 'stock')
+  const keys = ctx.keys.filter((key) => ctx.fast.includes(key) || key.startsWith('f29'))
 
   await ctx.saves(keys)
 
@@ -1930,7 +1930,7 @@ check('real-hide', 'on every save every row of every check that can be snoozed i
     }
 
     console.log(`         ${key}: ${savedHeld} rows held`)
-    assert.ok(savedHeld > 0 || key === 'stock', `${key}: no row to hold`)
+    assert.ok(savedHeld > 0, `${key}: no row to hold`)
   }
 
   assert.ok(held > ctx.minHeld, `${held} rows held`)
@@ -2362,7 +2362,7 @@ const contextOf = (m, { shared = null, keys = SAVE_KEYS } = {}) => {
 }
 
 const runEntry = async (m, context, entry) => {
-  if ((entry.needs === 'reads' && !context.keys.length) || (entry.needs === 'page' && !SAVE_KEYS.includes('modded'))) {
+  if ((entry.needs === 'reads' && !context.keys.length) || (entry.needs === 'page' && !SAVE_KEYS.includes('fixture'))) {
     return 'skip'
   }
 

@@ -5,7 +5,7 @@
 
   The synthetic checks need no save. They prove: steps of 0.1 and 0.05 and singleton domains give exactly the decimals of the grid, each once, with the preview's count equal to the iterator's; a bound between two steps is left out or tried once under the stated endpoint policy; negative or zero steps, NaN, infinity, text, reversed bounds, fractional counts, figures finer than the resolution and bounds outside the researched limits are refused with a message on the field that is wrong and no values; switching the display between HS and tons leaves the canonical domain as it was; and the engine grid equals the grid the search stepped before the domains existed (a copy of the old functions below is the reference), on a matrix of techs and on random limits, and equals a brute-force enumeration of the integer grid. Then every mutation of the modules (a tolerance removed, a check dropped, an endpoint left out, a unit factor changed) must fail at least one check.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock save in saves/, game 138 race 785; one that is not there is reported as not run) it also builds the engine grid from the race's researched techs as the page does, compares it with the old grid, and runs the page's default search twice, once on the domain grid and once on the old grid, to prove the two searches give the same result; the digests of the default searches of the repository's saves were taken from the search before the domains existed. --no-mutations checks only modded, whose search domain contains 168,284 candidates versus 64,779 in stock. Explicit --stock/--modded arguments are always used as given. Exit code 1 when a check fails.
+  With a save (by default the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141 race 784; a save named by --stock or --modded is run instead, and one that is not there is reported as not run) it also builds the engine grid from the race's researched techs as the page does, compares it with the old grid, and runs the page's default search twice, once on the domain grid and once on the old grid, to prove the two searches give the same result; the digest of the default search on the fixture was recorded at AE-301-07 (a save with no digest recorded prints a skip). Exit code 1 when a check fails.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -14,6 +14,7 @@ const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -637,16 +638,15 @@ const MUTATIONS = [
 // The page's default search: a 5,000 ton hull, 2,500 km/s, 5 bn km at half power, either kind, 1 to 100 engines, half the ship.
 const DEFAULT_INPUT = { hullHS: 100, speed: 2500, fraction: 0.5, goal: { mode: 'range', value: 5e9 }, kind: 'either', minCount: 1, maxCount: 100, share: 0.5 }
 
-// The digest of the default search on the repository's saves, taken from the search before the domains existed.
+// The digest of the default search on the fixture, recorded at AE-301-07 from the search as it stands. A save with no digest recorded prints a skip.
 const ANCHORS = {
-  'AuroraDB.db:140:784': { evaluated: 168284, matched: 141201, digest: 'db517f092dd4a48c' },
-  'AuroraDB_271_skoormit_saved.db:138:785': { evaluated: 64779, matched: 49905, digest: '20a9ab5a6d9e3308' },
+  [`${path.basename(FIXTURE.file)}:${FIXTURE.gameId}:${FIXTURE.raceId}`]: { evaluated: 181995, matched: 151846, digest: 'c99ce21b99e53ccc' },
 }
 
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { part: null }
   const specified = []
 
   for (let index = 0; index < argv.length; index++) {
@@ -665,10 +665,14 @@ const parseArguments = (argv) => {
     }
   }
 
-  options.saveLabels = options.part !== null ? ['modded', 'stock'] : mutating() ? ['modded', 'stock'] : specified.length ? [...new Set(specified)] : ['modded']
+  options.saveLabels = specified.length ? [...new Set(specified)] : ['fixture']
 
-  if (options.part === null && !mutating() && !specified.length && !fs.existsSync(path.resolve(root, options.modded[0]))) {
-    throw new Error(`quick representative save is missing: ${options.modded[0]}`)
+  if (!specified.length) {
+    options.fixture = fixtureTriple()
+  }
+
+  if (options.part === null && !mutating() && !fs.existsSync(path.resolve(root, options[options.saveLabels[0]][0]))) {
+    throw new Error(`quick representative save is missing: ${options[options.saveLabels[0]][0]}`)
   }
 
   return options
@@ -810,7 +814,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   check(`${label}: the default search on the domain grid gives the result of the search on the old grid (${current.counts.evaluated} candidates, ${current.counts.feasible} matched, ${current.sets.length} kept)`, digest(current) === digest(old) && current.counts.evaluated === old.counts.evaluated ? true : `${digest(current)} vs ${digest(old)}`, digest(current))
 
   if (anchor) {
-    check(`${label}: the default search still gives the result taken before the domains existed`, current.counts.evaluated === anchor.evaluated && current.counts.feasible === anchor.matched && digest(current) === anchor.digest ? true : `${current.counts.evaluated}/${current.counts.feasible}/${digest(current)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+    check(`${label}: the default search still gives the result recorded for this save`, current.counts.evaluated === anchor.evaluated && current.counts.feasible === anchor.matched && digest(current) === anchor.digest ? true : `${current.counts.evaluated}/${current.counts.feasible}/${digest(current)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
   } else {
     console.log('SKIP  no digest of the unchanged search is recorded for this save')
   }
@@ -818,7 +822,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   database.close()
 }
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
 
 // One part, in this process: `synthetic`, a mutation by its index (`mutation:3`) or a save by its label.
 const runPart = async (part, options) => {
@@ -840,7 +844,7 @@ const runPart = async (part, options) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))

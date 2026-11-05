@@ -30,6 +30,7 @@ const path = require('path')
 const { createRequire } = require('module')
 const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
+const { convertedSave } = require('./lib/fixtures')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
@@ -1100,9 +1101,9 @@ const suite = (m) => {
 
   const sqlite3 = () => localRequire('sqlite3')
 
-  // A save opened read only, with a `database` of the shape the page's reads use, and the SQL it was sent.
+  // A recorded 2.x save opened read only through the copy that holds the star's component number under its 3.1 name (scripts/lib/fixtures.js `convertedSave`, the one statement), with a `database` of the shape the page's reads use, and the SQL it was sent.
   const openSave = (file) => {
-    const db = new (sqlite3().Database)(file, sqlite3().OPEN_READONLY)
+    const db = new (sqlite3().Database)(convertedSave(file), sqlite3().OPEN_READONLY)
     const sent = []
     const run = (sql, params = {}) => new Promise((resolve, reject) => db.all(sql, Object.fromEntries(Object.entries(params).map(([key, value]) => [`:${key}`, value])), (error, rows) => (error ? reject(error) : resolve(rows))))
 

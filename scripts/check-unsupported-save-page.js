@@ -22,12 +22,14 @@ const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
+// The refusal test: a recorded save from before the line, which the page must refuse, and the fixture, which it must accept.
 const SAVE_271 = 'saves/AuroraDB_271_skoormit_saved.db'
-const SAVE_310 = 'saves/AuroraDB-310-spookyerol-migrated.db'
+const SAVE_310 = FIXTURE.file
 // The game and race each copy lists: the 2.7 save's own, and the 3.1 fixture's, whose race is the one the picker settles.
-const NAMES = { refused: { game: 'EggSample', race: 'Khanate of Inarcs' }, accepted: { game: 'Galactic Shogunate', race: 'Galactic Shogunate' }, damaged: { game: 'Galactic Shogunate', race: 'Galactic Shogunate' } }
+const NAMES = { refused: { game: 'EggSample', race: 'Khanate of Inarcs' }, accepted: { game: FIXTURE.gameName, race: 'Galactic Shogunate' }, damaged: { game: FIXTURE.gameName, race: 'Galactic Shogunate' } }
 const TIMEOUT = 120000
 const RELEASE = '2.7.11'
 const COMPONENT = 'src/renderer/components/page/UnsupportedSave.vue'

@@ -1,7 +1,7 @@
 /*
   Smoke test for the Electron app (`bun run electron:smoke`, through run-vite.js). Builds the app with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it runs alongside `bun run dev`, `bun run web` or a packaged build without touching theirs, and loads the renderer over app:// as the package does. Then launches Electron through Playwright on a copy of the save and a fresh user-data folder, so your save, settings and history are never touched. Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher reloading the database. Database calls run in the renderer, so they're counted by wrapping the Sequelize instance.
 
-  Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES (comma-separated routes, default the list in smoke-pages.js). SMOKE_MAP_EXPORT=1 checks complete PNG export, high-DPI borders and layout restoration on /map.
+  Env: AURORA_DB (the save to copy, default the fixture of scripts/lib/fixtures.js), AURORA_GAME and AURORA_RACE (the names the Empires page lists, default those of the fixture), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES (comma-separated routes, default the list in smoke-pages.js). SMOKE_MAP_EXPORT=1 checks complete PNG export, high-DPI borders and layout restoration on /map.
  */
 const os = require('os')
 const fs = require('fs')
@@ -9,11 +9,12 @@ const path = require('path')
 const { execFileSync } = require('child_process')
 
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 
-const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
-const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
+const GAME = process.env.AURORA_GAME || FIXTURE.gameName
+const RACE = process.env.AURORA_RACE || FIXTURE.raceName
 const OUT = process.env.SMOKE_OUT || path.join(os.tmpdir(), 'aurora-electron-smoke')
 const PAGES = process.env.SMOKE_PAGES ? process.env.SMOKE_PAGES.split(',') : require('./smoke-pages')
 
@@ -94,7 +95,7 @@ const run = async () => {
   const { _electron } = require('playwright')
   const electronPath = require('electron')
   const { build } = await import('electron-vite')
-  const SAVE = path.resolve(process.env.AURORA_DB || path.join(PROJECT_ROOT, 'AuroraDB.db'))
+  const SAVE = path.resolve(process.env.AURORA_DB || path.join(PROJECT_ROOT, FIXTURE.file))
 
   // Under the project, so the preload's requires (sequelize) find node_modules. The run folder (the save copy and user data) is kept until the next run for inspection.
   const builds = path.join(PROJECT_ROOT, 'out', 'smoke')

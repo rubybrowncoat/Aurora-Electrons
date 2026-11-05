@@ -12,6 +12,8 @@ const MONTHS_PER_YEAR = 12
 // Workers in millions: a balance this close to zero is balanced, not short.
 export const WORKER_TOLERANCE = 0.005
 const COLONY_VERSIONS = ['2.7.x']
+// The growth rule alone: check-workforce-demand runs every colony of the fixture through it against the rate the 3.1 source gives.
+const GROWTH_VERSIONS = ['3.1.x']
 const TOTALS = 'colonies.totals'
 
 registerRule({
@@ -34,11 +36,11 @@ registerRule({
 
 registerRule({
   id: 'colonies.growthRate',
-  versions: COLONY_VERSIONS,
+  versions: GROWTH_VERSIONS,
   units: 'per year',
   verification: 'estimated',
   structure: ['FCT_Species.PopulationGrowthModifier', 'FCT_Commander, FCT_CommanderBonuses (Population Growth bonus 8)', 'FCT_SystemBody.RadiationLevel', 'FCT_Population.Population'],
-  note: 'Annual growth as a fraction: 20% over the cube root of the population in millions (at most 10%), times the governor modifier, the species modifier on growth that is positive and the crowding factor, less 1% per 400 points of radiation. The constants have no source in the save and the rate is not compared with a stored change of population.',
+  note: 'Annual growth as a fraction: 20% over the cube root of the population in millions (at most 10%), times the governor modifier, the species modifier on growth that is positive and the crowding factor, less 1% per 400 points of radiation. The constants have no source in the save and the rate is not compared with a stored change of population. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, where every colony\'s rate is compared with the rate the game\'s own rule gives.',
 })
 
 registerRule({

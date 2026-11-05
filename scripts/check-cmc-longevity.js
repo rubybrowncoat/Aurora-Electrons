@@ -21,6 +21,7 @@ const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
+const { fixtureSave } = require('./lib/fixtures')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
@@ -43,7 +44,7 @@ const D = 'colonization-data'
 const NAMES = ['cmc-candidates', 'minerals', 'cmc-policy', 'provenance']
 const PLANNER_NAMES = ['colonization', 'colonization-data', 'provenance']
 const SAVES = [
-  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 784 },
+  fixtureSave(),
   { file: 'saves/AuroraDB_310_shipped.db', game: 160, race: 903 },
 ]
 

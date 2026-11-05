@@ -4,13 +4,13 @@
   Run: CHECK_JOBS=1 bun scripts/check-recovery-ledger.js [--no-mutations] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   The expected values are written here, in SQL over the saves and in a constructed save, never read from the module under test:
-  - saves: Skoormit (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785: 10 own and 2 foreign wrecks in known systems, no pod), Falryx (artifacts/falryx-sequential-and-rollback, game 141: the own pods, own wrecks and foreign wrecks of race 791 and the foreign pod race 785 sees in another save) and the modded save (AuroraDB.db, game 140, race 784: 16 foreign wrecks, 11 of a class the race names). The objects read are the ones the SQL gives, with the labels the game words them with, `Unknown` for a class the race has no alias for, and no field the viewing race may not see in a row, a statement, a record or an observation;
+  - saves: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784: 1 own and 10 foreign wrecks in known systems, 6 of a class the race names, no pod) and Falryx (artifacts/falryx-sequential-and-rollback, game 141: the own pods, own wrecks and foreign wrecks of race 791 and the foreign pod race 785 sees in another save). The objects read are the ones the SQL gives, with the labels the game words them with, `Unknown` for a class the race has no alias for, and no field the viewing race may not see in a row, a statement, a record or an observation;
   - a constructed save holds the cases the saves do not: twins that only the observer's projection can tell apart, an object in a system the race does not know, a pod with no creation time, an alias the race has and one it has not, and a hidden field that changes while nothing the race may see does;
   - the kind by state matrix: each of the four kinds of object (own pod, foreign pod, own wreck, foreign wreck) against held, gone, returned, id reused, unverified, unread and kept at a later time, each cell with the state, the list and the words it must have; a vanished object reads `No longer observed` with its status kept, never as an outcome, and the same id with the same details seen again is held again.
   Statuses are kept in an in-memory scenario repository: they are the race's and the branch's own (another race, branch or campaign does not see them), pending is no record, a duplicate id is refused and a stale revision is refused.
   Every planted fault must fail the checks it names by a wrong value, never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
-  The browser part runs the real app over a copy of the Skoormit save, opens the ledger from the Galaxy Map and reads what it draws: the rows, the figures, the statuses kept and read back after the app is opened again, a later copy of the save with objects removed (listed as no longer observed, the status as it was kept), the words, and the page's errors.
+  The browser part runs the real app over a copy of the Galactic Shogunate save, opens the ledger from the Galaxy Map and reads what it draws: the rows, the figures, the statuses kept and read back after the app is opened again, a later copy of the save with objects removed (listed as no longer observed, the status as it was kept), the words, and the page's errors.
 
   Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. The suite runs through scripts/lib/suite-runner.js.
 */
@@ -24,15 +24,15 @@ const { observe, failedObservation, report, HarnessError, installScreen, readFig
 const { assert, subjectModule, runChecks, judged, caughtBy, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
 const UTILITIES = inRenderer('utilities')
 
-const SKOORMIT = { file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785, game: 'EggSample', race: 'EggSample' }
+const SHOGUNATE = { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, game: FIXTURE.gameName, race: FIXTURE.raceName }
 const FALRYX_NOW = { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2904201340.db', GameID: 141, RaceID: 791 }
 const FALRYX_POD = { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2810693885.db', GameID: 141 }
-const MODDED = { file: 'AuroraDB.db', GameID: 140, RaceID: 784 }
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -604,12 +604,13 @@ const savesChecks = {
   id: 'saves',
   name: 'the objects of the real saves are the ones SQL gives, own and foreign apart, with the labels the game words them with and no field the race may not see',
   run: async ({ mod }) => {
-    const skoormit = saveOf(SKOORMIT)
-    const found = await loadObjects(mod, skoormit, SKOORMIT)
+    const shogunate = saveOf(SHOGUNATE)
+    const found = await loadObjects(mod, shogunate, SHOGUNATE)
+    const { GameID: game, RaceID: race } = SHOGUNATE
 
-    assert.equal(found.objects.ownWreck.size, countOf(skoormit, `select count(*) as n from FCT_Wrecks where GameID = 138 and RaceID = 785 and ${known(138, 785)}`), 'Skoormit: the own wrecks')
-    assert.equal(found.objects.wreck.size, countOf(skoormit, `select count(*) as n from FCT_Wrecks where GameID = 138 and RaceID != 785 and ${known(138, 785)}`), 'Skoormit: the foreign wrecks')
-    assert.deepEqual([found.objects.ownWreck.size, found.objects.wreck.size, found.objects.ownLifepod.size, found.objects.lifepod.size], [10, 2, 0, 0], 'Skoormit as race 785: 10 own wrecks, 2 foreign, no pod')
+    assert.equal(found.objects.ownWreck.size, countOf(shogunate, `select count(*) as n from FCT_Wrecks where GameID = ${game} and RaceID = ${race} and ${known(game, race)}`), 'Shogunate: the own wrecks')
+    assert.equal(found.objects.wreck.size, countOf(shogunate, `select count(*) as n from FCT_Wrecks where GameID = ${game} and RaceID != ${race} and ${known(game, race)}`), 'Shogunate: the foreign wrecks')
+    assert.deepEqual([found.objects.ownWreck.size, found.objects.wreck.size, found.objects.ownLifepod.size, found.objects.lifepod.size], [1, 10, 0, 0], 'the Shogunate as race 784: 1 own wreck, 10 foreign, no pod')
 
     // Falryx at the later time, as race 791
     const falryx = saveOf(FALRYX_NOW)
@@ -657,28 +658,25 @@ const savesChecks = {
     assert.deepEqual([...seen.objects.lifepod.values()].map((row) => mod.ledger.labelOf(row)), pod.map((row) => `${row.hull ? `${row.hull} ` : ''}${row.cls || 'Unknown'} life pods #${row.id}`), 'a foreign pod by the class the race knows and its id')
     assert.equal(seen.objects.lifepod.size, 1)
 
-    // the modded save: foreign wrecks only
-    const modded = saveOf(MODDED)
-    const aurelian = await loadObjects(mod, modded, MODDED)
-    const aliased = countOf(modded, 'select count(*) as n from FCT_Wrecks w where w.GameID = 140 and w.RaceID != 784 and w.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = 140 and RaceID = 784) and w.ClassID in (select ActualClassID from FCT_AlienClass where GameID = 140 and ViewRaceID = 784)')
+    // the classes the race names among the foreign wrecks of the Shogunate save
+    const aliased = countOf(shogunate, `select count(*) as n from FCT_Wrecks w where w.GameID = ${game} and w.RaceID != ${race} and w.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${game} and RaceID = ${race}) and w.ClassID in (select ActualClassID from FCT_AlienClass where GameID = ${game} and ViewRaceID = ${race})`)
 
-    assert.deepEqual([aurelian.objects.wreck.size, aurelian.objects.ownWreck.size, aurelian.objects.lifepod.size + aurelian.objects.ownLifepod.size], [16, 0, 0])
-    assert.equal([...aurelian.objects.wreck.values()].filter((row) => row.className).length, aliased, 'the wrecks of a class the race names')
-    assert.equal(aliased, 11)
+    assert.equal([...found.objects.wreck.values()].filter((row) => row.className).length, aliased, 'the wrecks of a class the race names')
+    assert.equal(aliased, 6)
 
     // no foreign row of any save holds a field the race may not see
-    for (const bundle of [found, now, seen, aurelian]) {
+    for (const bundle of [found, now, seen]) {
       for (const row of [...bundle.objects.lifepod.values(), ...bundle.objects.wreck.values()]) {
         assert.deepEqual(Object.keys(row).filter((key) => !FOREIGN_KEYS.includes(key)), [], `a foreign ${row.place} ${row.id} holds only what the race may see`)
       }
     }
 
     // the split of the wrecks of a system on the map is the one SQL gives
-    const features = await mod.features.loadMapFeatures(adapter(skoormit), SKOORMIT)
-    const split = skoormit.query('select SystemID as id, count(*) as total, sum(RaceID = 785) as own from FCT_Wrecks where GameID = 138 and SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = 138 and RaceID = 785) group by SystemID').all()
+    const features = await mod.features.loadMapFeatures(adapter(shogunate), SHOGUNATE)
+    const split = shogunate.query(`select SystemID as id, count(*) as total, sum(RaceID = ${race}) as own from FCT_Wrecks where GameID = ${game} and SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${game} and RaceID = ${race}) group by SystemID`).all()
 
     assert.deepEqual(split.map((row) => [features[String(row.id)].wrecks, features[String(row.id)].ownWrecks]), split.map((row) => [row.total, row.own]), 'the wrecks of each system, and the own ones among them')
-    assert.deepEqual([split.reduce((sum, row) => sum + row.own, 0), split.reduce((sum, row) => sum + row.total - row.own, 0)], [10, 2], 'Skoormit: 10 own wrecks and 2 foreign')
+    assert.deepEqual([split.reduce((sum, row) => sum + row.own, 0), split.reduce((sum, row) => sum + row.total - row.own, 0)], [1, 10], 'the Shogunate: 1 own wreck and 10 foreign')
     assert.equal(Object.values(features).filter((system) => system.wrecks === 0 && system.ownWrecks !== 0).length, 0, 'a system with no wreck has no own one')
   },
 }
@@ -798,7 +796,7 @@ const checkRewrite = async (rewrite) => {
   check(`variant passes: ${rewrite.name}`, wrong.length === 0, wrong.join('; '))
 }
 
-// ---------- the browser: the real app over a copy of the Skoormit save ----------
+// ---------- the browser: the real app over a copy of the Galactic Shogunate save ----------
 
 const TIMEOUT = 120000
 const BROWSER = { server: null, chrome: null, failure: null, later: null }
@@ -882,10 +880,10 @@ const observeCase = (browser, server, plan) => observe(browser, async ({ page, s
     const picker = page.locator('.empire-list').first()
 
     step('picking the game')
-    await picker.locator('.empire-list__game').filter({ hasText: `${SKOORMIT.game} ·` }).first().click({ timeout: TIMEOUT })
+    await picker.locator('.empire-list__game').filter({ hasText: `${SHOGUNATE.game} ·` }).first().click({ timeout: TIMEOUT })
 
     if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
-      await picker.getByText(SKOORMIT.race, { exact: true }).last().click({ timeout: TIMEOUT })
+      await picker.getByText(SHOGUNATE.race, { exact: true }).last().click({ timeout: TIMEOUT })
     }
 
     await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix) && Boolean(window.$app.$store.getters['history/campaign']), null, { timeout: TIMEOUT })
@@ -950,14 +948,14 @@ const observeCase = (browser, server, plan) => observe(browser, async ({ page, s
 const laterCopy = async (key) => {
   const file = path.join(os.tmpdir(), `ae-recovery-${process.pid}.db`)
 
-  fs.copyFileSync(path.join(root, SKOORMIT.file), file)
+  fs.copyFileSync(path.join(root, SHOGUNATE.file), file)
   BROWSER.later = file
 
   const db = new Database(file)
 
-  db.run(`delete from FCT_Wrecks where GameID = ${SKOORMIT.GameID} and WreckID = ${Number(key.split(':')[1])}`)
-  db.run(`update FCT_Game set GameTime = GameTime + ${STEP} where GameID = ${SKOORMIT.GameID}`)
-  db.run(`insert into FCT_Increments (IncrementID, GameID, GameTime, Length) select max(IncrementID) + 1, ${SKOORMIT.GameID}, ${gameTimeOf() + STEP}, ${STEP} from FCT_Increments`)
+  db.run(`delete from FCT_Wrecks where GameID = ${SHOGUNATE.GameID} and WreckID = ${Number(key.split(':')[1])}`)
+  db.run(`update FCT_Game set GameTime = GameTime + ${STEP} where GameID = ${SHOGUNATE.GameID}`)
+  db.run(`insert into FCT_Increments (IncrementID, GameID, GameTime, Length) select max(IncrementID) + 1, ${SHOGUNATE.GameID}, ${gameTimeOf() + STEP}, ${STEP} from FCT_Increments`)
   db.close()
 
   return file
@@ -985,17 +983,17 @@ const observeSource = async (replacements = [], until = null) => {
 
 // The wrecks of the save as SQL gives them, each by its own statements and not the ledger's: id, whether own, tons, the system the race knows it by, the class (the owner's for an own wreck, the viewing race's own for another's), its hull, and the tag of the race when the class is known.
 const wreckOracle = () => {
-  const { GameID, RaceID } = SKOORMIT
+  const { GameID, RaceID } = SHOGUNATE
   const classOf = (column) => `(select ${column} from FCT_AlienClass where GameID = w.GameID and ViewRaceID = ${RaceID} and ActualClassID = w.ClassID)`
   const ownClass = (column) => `(select ${column} from FCT_ShipClass where GameID = w.GameID and ShipClassID = w.ClassID)`
 
-  return saveOf(SKOORMIT).query(`select w.WreckID as id, w.RaceID = ${RaceID} as own, w.Size * 50 as tons, (select Name from FCT_RaceSysSurvey where GameID = w.GameID and RaceID = ${RaceID} and SystemID = w.SystemID) as system, case when w.RaceID = ${RaceID} then ${ownClass('ClassName')} else ${classOf('ClassName')} end as cls, case when w.RaceID = ${RaceID} then (select HullAbbr from FCT_HullDescription where HullDescriptionID = ${ownClass('HullDescriptionID')}) else (select HullAbbr from FCT_HullDescription where HullDescriptionID = ${classOf('HullID')}) end as hull, case when w.RaceID != ${RaceID} and ${classOf('AlienClassID')} is not null then (select trim(Abbrev) from FCT_AlienRace where GameID = w.GameID and ViewRaceID = ${RaceID} and AlienRaceID = w.RaceID) end as tag from FCT_Wrecks w where w.GameID = ${GameID} and w.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${GameID} and RaceID = ${RaceID}) order by w.WreckID`).all()
+  return saveOf(SHOGUNATE).query(`select w.WreckID as id, w.RaceID = ${RaceID} as own, w.Size * 50 as tons, (select Name from FCT_RaceSysSurvey where GameID = w.GameID and RaceID = ${RaceID} and SystemID = w.SystemID) as system, case when w.RaceID = ${RaceID} then ${ownClass('ClassName')} else ${classOf('ClassName')} end as cls, case when w.RaceID = ${RaceID} then (select HullAbbr from FCT_HullDescription where HullDescriptionID = ${ownClass('HullDescriptionID')}) else (select HullAbbr from FCT_HullDescription where HullDescriptionID = ${classOf('HullID')}) end as hull, case when w.RaceID != ${RaceID} and ${classOf('AlienClassID')} is not null then (select trim(Abbrev) from FCT_AlienRace where GameID = w.GameID and ViewRaceID = ${RaceID} and AlienRaceID = w.RaceID) end as tag from FCT_Wrecks w where w.GameID = ${GameID} and w.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${GameID} and RaceID = ${RaceID}) order by w.WreckID`).all()
 }
 
 // A game time as the date the ledger writes, from the start year of the save and the calendar's own arithmetic (a year starts on the 1st of January).
-const dateOf = (seconds) => new Date(Date.UTC(saveOf(SKOORMIT).query(`select StartYear from FCT_Game where GameID = ${SKOORMIT.GameID}`).get().StartYear, 0, 1) + seconds * 1000).toISOString().slice(0, 10)
+const dateOf = (seconds) => new Date(Date.UTC(saveOf(SHOGUNATE).query(`select StartYear from FCT_Game where GameID = ${SHOGUNATE.GameID}`).get().StartYear, 0, 1) + seconds * 1000).toISOString().slice(0, 10)
 
-const gameTimeOf = () => saveOf(SKOORMIT).query(`select GameTime from FCT_Game where GameID = ${SKOORMIT.GameID}`).get().GameTime
+const gameTimeOf = () => saveOf(SHOGUNATE).query(`select GameTime from FCT_Game where GameID = ${SHOGUNATE.GameID}`).get().GameTime
 
 // The label of a wreck as the screen shows it, read apart: the class the label names, the tag of the race, the id and the tons.
 const wreckShown = (label, grouping) => {
@@ -1040,9 +1038,9 @@ const BROWSER_CHECKS = [
         assert.equal(labelKey(row.status, words.STATUS_TEXT), 'pending', `${row.label}: the status the row shows is pending (${row.status})`)
         assert.equal(row.observed, null, `${row.label}: no observation is shown while the switch is off`)
       })
-      assert.equal(seen.rows.filter((row) => row.own).length, 10, 'Skoormit: 10 own wrecks')
-      assert.equal(seen.rows.filter((row) => !row.own).length, 2, 'Skoormit: 2 foreign wrecks')
-      assert.equal(seen.count, '12 in the save, 0 with a status')
+      assert.equal(seen.rows.filter((row) => row.own).length, 1, 'the Shogunate: 1 own wreck')
+      assert.equal(seen.rows.filter((row) => !row.own).length, 10, 'the Shogunate: 10 foreign wrecks')
+      assert.equal(seen.count, '11 in the save, 0 with a status')
       assert.deepEqual(seen.entries, [], 'no status, so no list of vanished objects')
     },
   },
@@ -1053,7 +1051,7 @@ const BROWSER_CHECKS = [
       const seen = observation.value.observing
       const date = dateOf(gameTimeOf())
 
-      assert.equal(seen.rows.length, 12)
+      assert.equal(seen.rows.length, 11)
       seen.rows.forEach((row) => {
         assert.ok(row.observed, `${row.label}: an observation is shown`)
         assert.ok(row.observed.headline.includes(date), `${row.label}: since when, ${row.observed.headline}`)
@@ -1069,9 +1067,9 @@ const BROWSER_CHECKS = [
       const seen = observation.value
       const words = mod.ledger
 
-      assert.equal(seen.kept.rows.length, 12)
+      assert.equal(seen.kept.rows.length, 11)
       seen.kept.rows.forEach((row) => assert.equal(labelKey(row.status, words.STATUS_TEXT), row.key === seen.picked ? 'personal' : 'pending', `${row.label}: the status the row shows (${row.status})`))
-      assert.equal(seen.kept.count, '12 in the save, 1 with a status')
+      assert.equal(seen.kept.count, '11 in the save, 1 with a status')
     },
   },
   {
@@ -1103,9 +1101,9 @@ const BROWSER_CHECKS = [
       assert.ok(entry.detail.startsWith(words.STATE_TEXT.gone), 'what the entry says of it')
       assert.ok(entry.detail.includes(dateOf(gameTimeOf())) && !entry.detail.includes(dateOf(gameTimeOf() + STEP)), `the date it had been observed up to is the capture it was kept at: ${entry.detail}`)
       assert.equal(entry.holder, null, 'no other object holds the id')
-      assert.equal(seen.gone.rows.length, 11, 'the other eleven are still listed')
+      assert.equal(seen.gone.rows.length, 10, 'the other ten are still listed')
       assert.equal(seen.gone.rows.some((row) => row.key === seen.picked), false, 'the vanished object has no row of its own')
-      assert.equal(seen.gone.count, '11 in the save, 1 with a status', 'the status kept for the vanished object is still counted as kept')
+      assert.equal(seen.gone.count, '10 in the save, 1 with a status', 'the status kept for the vanished object is still counted as kept')
     },
   },
   {
@@ -1227,7 +1225,7 @@ const checkBrowserVariant = async (variant, fault) => {
 
 const openBrowser = async () => {
   try {
-    BROWSER.server = await startPageServer({ save: SKOORMIT.file })
+    BROWSER.server = await startPageServer({ save: SHOGUNATE.file })
     BROWSER.chrome = await require('playwright').chromium.launch()
 
     const warmed = await BROWSER.server.warm(BROWSER.chrome, { routes: ['/map'] })
@@ -1265,7 +1263,7 @@ const BROWSER_DEADLINE = 500
 
 const variantsOf = (mutating) => [
   { key: 'head', name: 'the head: the ledger over the saves and a constructed save', head: true, heading: 'The recovery ledger (utilities/recovery-ledger.js, observations.js, map-features.js)', deadline: DEADLINE, run: checkHead },
-  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of the Skoormit save, in Chromium)', pool: 'browser', deadline: BROWSER_DEADLINE, run: checkBrowserHead },
+  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of the Galactic Shogunate save, in Chromium)', pool: 'browser', deadline: BROWSER_DEADLINE, run: checkBrowserHead },
   ...(mutating ? FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults', deadline: DEADLINE, run: () => checkFault(fault) })) : []),
   ...(mutating ? BROWSER_FAULTS.map((fault, index) => ({ key: `browser-fault:${index}`, name: `browser fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'browser', deadline: BROWSER_DEADLINE, run: () => checkBrowserVariant(fault, true) })) : []),
   ...(mutating ? BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites that say the same thing', deadline: DEADLINE, run: () => checkRewrite(rewrite) })) : []),
@@ -1276,7 +1274,7 @@ const main = async () => {
   const mutating = !runnerArgs().rest.includes('--no-mutations')
   const totals = await runSuite({
     script: __filename,
-    inputs: [SKOORMIT.file, FALRYX_NOW.file, FALRYX_POD.file, MODDED.file],
+    inputs: [SHOGUNATE.file, FALRYX_NOW.file, FALRYX_POD.file],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

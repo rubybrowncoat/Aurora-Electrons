@@ -25,6 +25,7 @@ const path = require('path')
 const Module = require('module')
 const { chromium } = require('playwright')
 const assert = require('./lib/bounded-assert')
+const { FIXTURE } = require('./lib/fixtures')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel, jobs, runChild, startChild, lastJson } = require('./lib/check-pool')
@@ -687,10 +688,15 @@ const opened = async (page) => {
   await page.waitForFunction(() => window.$app.$store.getters.RaceID || document.querySelector('.empire-list__game'), null, { timeout: 60000 })
 
   if (!(await page.evaluate(() => window.$app.$store.getters.RaceID))) {
-    const game = page.locator('.empire-list__game:has-text("Aurelian Empire")').first()
+    const game = page.locator(`.empire-list__game:has-text("${FIXTURE.gameName}")`).first()
 
     await game.waitFor({ timeout: 120000 })
     await game.click()
+
+    if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
+      await page.locator('.empire-list').first().getByText(FIXTURE.raceName, { exact: true }).last().click({ timeout: 60000 })
+    }
+
     await page.waitForFunction(() => window.$app.$store.getters.RaceID, null, { timeout: 60000 })
     await settle(page, 400, 1500)
   }

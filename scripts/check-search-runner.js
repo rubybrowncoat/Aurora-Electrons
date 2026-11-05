@@ -5,7 +5,7 @@
 
   The synthetic checks need no save. They prove, on small domains that an unpruned enumeration can walk (an independent reference below: every engine of the sweep at every count, no bound, no early exit): the search's feasible candidates, by their deterministic names, are exactly the enumeration's, with its lightest, fastest and cheapest set, its ranked list, and frontiers that no feasible candidate beats or escapes, for custom count limits, the endpoint policy at the limits, each kind of engine, one of the race's own engines, range and endurance targets, no target, a speed no engine reaches and a share nothing fits in; the counts add up (`evaluated + pruned = total`, nothing left unexplored when the domain is exhausted); a search of more than the 50 sets it lists is complete for its domain, and says how many it left out of the list; a candidate budget stops after exactly that many candidates with the run truncated, one the domain just fits is complete, and a time budget (a clock the check supplies, never the wall clock) does the same; a run cancelled or invalidated at any step holds exactly the best of the candidates before the step, labelled incomplete, under the input it was given; a run that was superseded, whose save changed or that was never the current one is not published; and every step of the search is bounded by the work of its slice (the candidates, the tank packages and the engine designs it covers) whether it rejects at once or packs, so the caller regains control within the declared responsiveness budget (milliseconds are never asserted: scripts/bench-tank-packing.js measures them).
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it repeats the exhaustive comparison with the race's tanks, engines and tech, runs the page's default search as a run, and compares its digest with the one taken before runs existed. Each mutation of the utilities must fail at least one synthetic check. Exit code 1 when a check fails. With --no-mutations no mutation is planted and only the stock save is run, the cheaper of the two.
+  With a save (by default the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141 race 784; a save named by --stock or --modded is run instead, and one that is not there is reported as not run) it repeats the exhaustive comparison with the race's tanks, engines and tech, runs the page's default search as a run, and compares its digest with the one recorded on the fixture at AE-301-07 (a save with no digest recorded prints a skip). Each mutation of the utilities must fail at least one synthetic check. Exit code 1 when a check fails. With --no-mutations no mutation is planted, the cheaper of the two.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -14,6 +14,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1120,10 +1121,9 @@ const snapshotDisagrees = (m, input) => {
 // The page's default search: a 5,000 ton hull, 2,500 km/s, 5 bn km at half power, either kind, 1 to 100 engines, half the ship.
 const DEFAULT_INPUT = { hullHS: 100, speed: 2500, fraction: 0.5, goal: { mode: 'range', value: 5e9 }, kind: 'either', minCount: 1, maxCount: 100, share: 0.5 }
 
-// The digest of the default search on the repository's saves, taken from the search before it kept counts or ran as a run: the sets, the best sets, the frontiers and the packages, then the evaluated and matched figures that `counts.evaluated` and `counts.feasible` now hold.
+// The digest of the default search on the fixture, recorded at AE-301-07 from the search as it stands: the sets, the best sets, the frontiers and the packages, then the evaluated and matched figures that `counts.evaluated` and `counts.feasible` hold. A save with no digest recorded prints a skip.
 const ANCHORS = {
-  'AuroraDB.db:140:784': { evaluated: 168284, matched: 141201, digest: 'db517f092dd4a48c', total: 2708300 },
-  'AuroraDB_271_skoormit_saved.db:138:785': { evaluated: 64779, matched: 49905, digest: '20a9ab5a6d9e3308', total: 619100 },
+  [`${path.basename(FIXTURE.file)}:${FIXTURE.gameId}:${FIXTURE.raceId}`]: { evaluated: 181995, matched: 151846, digest: 'c99ce21b99e53ccc', total: 3014900 },
 }
 
 const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts }) => crypto.createHash('sha256').update(JSON.stringify({ sets, lightest, fastest, cheapest, pareto, packages, evaluated: counts.evaluated, matched: counts.feasible })).digest('hex').slice(0, 16)
@@ -1131,11 +1131,14 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { part: null }
+  const specified = []
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
-      options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      const label = argv[index].slice(2)
+      options[label] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      specified.push(label)
       index += 3
     } else if (argv[index] === '--no-mutations') {
       continue
@@ -1145,6 +1148,12 @@ const parseArguments = (argv) => {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
     }
+  }
+
+  options.saveLabels = specified.length ? [...new Set(specified)] : ['fixture']
+
+  if (!specified.length) {
+    options.fixture = fixtureTriple()
   }
 
   return options
@@ -1307,7 +1316,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   if (anchor) {
     const result = outcome.result
 
-    check(`${label}: the default search through the run still gives the result taken before runs existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && result.counts.total === anchor.total && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+    check(`${label}: the default search through the run still gives the result recorded for this save`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && result.counts.total === anchor.total && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
   } else {
     console.log('SKIP  no digest of the unchanged search is recorded for this save')
   }
@@ -1328,7 +1337,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   database.close()
 }
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
 
 // One part, in this process: `synthetic`, a mutation by its id (`utility:3`, `page:1`), `page` or a save by its label.
 const runPart = async (part, options) => {
@@ -1353,7 +1362,7 @@ const runPart = async (part, options) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
@@ -1363,9 +1372,9 @@ const run = async () => {
     endSection(checks, failures)
   }
 
-  // In the order they print; the longest start first. A quick run plants nothing and runs the stock save alone, which has 64,779 candidates of the default search to the modded save's 168,284.
+  // In the order they print; the longest start first. The saves are the fixture, or the ones the command line names.
   const planting = mutating()
-  const labels = planting ? SAVE_LABELS : ['stock']
+  const labels = options.saveLabels
 
   const parts = [
     { part: 'synthetic', weight: 20 },

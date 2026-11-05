@@ -27,11 +27,11 @@ const UNKNOWN_INPUT = 'an input the check reads'
 // The words of the line the Warnings page draws over the rows of a check it lists apart, after the number of them, by why they are apart.
 export const SEPARATOR_WORDS = Object.freeze({ snoozed: 'snoozed: out of the tiles until the snooze ends', unevaluated: 'not evaluated: a stored value the condition needs is missing' })
 
-// Registers the rule behind each check of a module (`evidence` on the check: { verification, structure, note, assumptions? }) and gives the check its `provenance` id; its `read` gets `ctx.unknown(missing)`, an unavailable result of that rule naming `missing` (a list of the inputs a figure or a verdict lacks).
+// Registers the rule behind each check of a module (`evidence` on the check: { verification, structure, note, assumptions?, versions? }, the versions defaulting to those of the line the Warnings page was written for) and gives the check its `provenance` id; its `read` gets `ctx.unknown(missing)`, an unavailable result of that rule naming `missing` (a list of the inputs a figure or a verdict lacks).
 export const checksOf = (checks) => checks.map(({ evidence, read, ...check }) => {
   const provenance = `warnings.${ruleName(check.key)}`
 
-  registerRule({ id: provenance, versions: WARNING_VERSIONS, units: 'rows', verification: evidence.verification, structure: evidence.structure, note: evidence.note, assumptions: evidence.assumptions })
+  registerRule({ id: provenance, versions: evidence.versions || WARNING_VERSIONS, units: 'rows', verification: evidence.verification, structure: evidence.structure, note: evidence.note, assumptions: evidence.assumptions })
 
   return { ...check, provenance, read: (ctx) => read({ ...ctx, unknown: (missing = []) => unavailable({ rule: provenance, missing: missing.length ? missing : [UNKNOWN_INPUT], units: 'rows' }) }) }
 })

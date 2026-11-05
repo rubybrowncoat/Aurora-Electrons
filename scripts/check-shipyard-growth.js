@@ -5,7 +5,7 @@
 
   The utility is run on yards worked by hand: upgrade prices follow the capacity, slipways and the race's lowest held operations factor, with the commercial/repair discount; continual upgrades are priced on tons added and timed by the Recap's construction-period rule. The script/computed contracts run through page-loader on four independent yards. The actual app also runs in Chromium through page-server and browser-observe: visible titles, prose, view controls, task columns, capacity sort order and player-usable Production/Warnings/Tech Tree links are read with the shared opacity-aware readers. A disposable copy of the real save supplies three yards with low, high and unknown capacities; the owner's saves are never changed. The real persisted-view mixin and an in-memory settings store prove storage keys, scope and validation. Source/template syntax is not mutation credit; only a named check's own marked comparison of an observed value is.
 
-  The loaders run on an in-memory save built in this script, and on the saves (saves/AuroraDB.db and saves/AuroraDB_271_skoormit_saved.db, read-only), whether or not the saves are there: a save that is not there is skipped. On the saves the stored build points of every yard activity of types 1 to 6 (the slipway and the five capacity steps) are compared with the rules' price: 64 of 64 are equal once the race's operations factor applies, 63 of them at a factor of 1; the stored build points of a continual activity are 0, so the continual price has no stored comparison; and no save holds an activity of the 500 or 2,000 ton steps, so those two rest on the pattern of the others.
+  The loaders run on an in-memory save built in this script, and on the fixture save (scripts/lib/fixtures.js, read-only), whether or not the save is there: a save that is not there is skipped. On a save that holds activities, the stored build points of every yard activity of types 1 to 6 (the slipway and the five capacity steps) are compared with the rules' price; the stored build points of a continual activity are 0, so the continual price has no stored comparison. The fixture holds no activity of types 1 to 6, so the stored comparisons and the totals pinned from two 2.7 saves (64 of 64 equal once the race's operations factor applies, 63 of them at a factor of 1) are printed as needs tier b. No save holds an activity of the 500 or 2,000 ton steps, so those two rest on the pattern of the others.
   A mapped mutation is rejected if a required save fixture is absent; it never drops that mapping. Page faults share one warm browser/server within their child section, and restore every source override before the next variant. Unreachable one-panel summary attributes and malformed-template compiler failures have been replaced with visible prose/title faults; their original classes are explicitly retired in the batch-two catalog ledger, not claimed retained.
 
   Each mutation of the utility, the loader, the page or the other sources must fail the checks it names. Exit code 1 when a check fails.
@@ -21,6 +21,7 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { observe, validate, HarnessError, installScreen, settled } = require('./lib/browser-observe')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
@@ -36,9 +37,13 @@ const FILES = {
 }
 const { G, R, D, P, PR, W, L, PV } = Object.fromEntries(Object.keys(FILES).map((key) => [key, key]))
 const NAMES = ['shipyard-growth', 'refits', 'production', 'provenance', 'deep-links']
-const SAVES = ['saves/AuroraDB.db', 'saves/AuroraDB_271_skoormit_saved.db']
-// The yards of each save that belong to a ship (FCT_Shipyard.ParentShipID above 0), read by hand from the saves: three yards of race 785 in AuroraDB.db (6711 'Fix 001', 6760, 6772), none in the other.
-const SHIP_BASED_YARDS = { 'AuroraDB.db': [6711, 6760, 6772], 'AuroraDB_271_skoormit_saved.db': [] }
+const SAVES = [FIXTURE.file]
+// The checks of the saves that a save with no case for them leaves out, by the reason (the fixture holds no stored activity of types 1 to 6 and no task at a commercial yard): needs tier b. The head prints them and a mutation is not required to fail them.
+const NO_CASE = new Map()
+const NO_ACTIVITY = 'the fixture holds no stored shipyard activity of types 1 to 6, so the counts and prices pinned from two 2.7 saves have no case in it'
+const NO_COMMERCIAL = 'the fixture holds no task at a commercial yard, so the quarter weight of a commercial yard\'s build rate has no case in it'
+// The yards of each save that belong to a ship (FCT_Shipyard.ParentShipID above 0), read by hand from the saves: two yards of race 784 in the fixture (24, 25).
+const SHIP_BASED_YARDS = { [path.basename(FIXTURE.file)]: [24, 25] }
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -157,9 +162,9 @@ const browserSession = async () => {
   pageSession = held
 
   try {
-    const source = path.join(root, SAVES[1])
+    const source = path.join(root, SAVES[0])
 
-    if (!fs.existsSync(source)) throw new HarnessError(`Required rendered-page fixture is absent: ${SAVES[1]}`)
+    if (!fs.existsSync(source)) throw new HarnessError(`Required rendered-page fixture is absent: ${SAVES[0]}`)
     fs.copyFileSync(source, file)
 
     const raw = await new Promise((resolve, reject) => {
@@ -168,7 +173,7 @@ const browserSession = async () => {
     const database = { query: rawQuery(raw) }
 
     try {
-      const yards = await rowsOf(database, 'select ShipyardID from FCT_Shipyard where GameID = 138 and RaceID = 785 order by ShipyardID limit 3')
+      const yards = await rowsOf(database, `select ShipyardID from FCT_Shipyard where GameID = ${FIXTURE.gameId} and RaceID = ${FIXTURE.raceId} order by ShipyardID limit 3`)
 
       if (yards.length !== 3) throw new HarnessError('The rendered inventory fixture needs three own yards')
 
@@ -176,11 +181,23 @@ const browserSession = async () => {
         await execOf(raw, `update FCT_Shipyard set ShipyardName = 'Growth probe ${['low', 'high', 'unknown'][index]}', Capacity = ${[1000, 2000, 'null'][index]} where ShipyardID = ${yard.ShipyardID}`)
       }
 
-      const [task] = await rowsOf(database, 'select t.UnitName, t.ShipyardID, t.PopulationID, y.ShipyardName from FCT_ShipyardTask t join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.GameID = 138 and t.RaceID = 785 and t.TaskTypeID = 0 and t.Paused = 0 and (select sum(s.Slipways) from FCT_Shipyard s where s.PopulationID = t.PopulationID) > (select count(*) from FCT_ShipyardTask s where s.PopulationID = t.PopulationID) order by t.TaskID limit 1')
-      const [tech] = await rowsOf(database, 'select t.TechSystemID from FCT_TechSystem t join FCT_RaceTech r on r.TechID = t.TechSystemID where r.GameID = 138 and r.RaceID = 785 and t.TechTypeID = 30 order by t.TechSystemID limit 1')
-      const [obsolete] = await rowsOf(database, 'select count(*) as n from FCT_Shipyard y join FCT_ShipClass c on c.ShipClassID = y.BuildClassID where y.GameID = 138 and y.RaceID = 785 and c.Obsolete = 1')
+      const [task] = await rowsOf(database, `select t.UnitName, t.ShipyardID, t.PopulationID, y.ShipyardName from FCT_ShipyardTask t join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.GameID = ${FIXTURE.gameId} and t.RaceID = ${FIXTURE.raceId} and t.TaskTypeID = 0 and t.Paused = 0 and (select sum(s.Slipways) from FCT_Shipyard s where s.PopulationID = t.PopulationID) > (select count(*) from FCT_ShipyardTask s where s.PopulationID = t.PopulationID) order by t.TaskID limit 1`)
+      const [tech] = await rowsOf(database, `select t.TechSystemID from FCT_TechSystem t join FCT_RaceTech r on r.TechID = t.TechSystemID where r.GameID = ${FIXTURE.gameId} and r.RaceID = ${FIXTURE.raceId} and t.TechTypeID = 30 order by t.TechSystemID limit 1`)
+      const obsoleteYards = () => rowsOf(database, `select count(*) as n from FCT_Shipyard y join FCT_ShipClass c on c.ShipClassID = y.BuildClassID where y.GameID = ${FIXTURE.gameId} and y.RaceID = ${FIXTURE.raceId} and c.Obsolete = 1`)
+
+      if (!(await obsoleteYards())[0].n) {
+        // The fixture holds no obsolete class on a yard: the class of the first tooled yard is marked obsolete on the disposable copy, as a player would on the Ship Classes page.
+        await execOf(raw, `update FCT_ShipClass set Obsolete = 1 where ShipClassID = (select BuildClassID from FCT_Shipyard where GameID = ${FIXTURE.gameId} and RaceID = ${FIXTURE.raceId} and BuildClassID > 0 order by ShipyardID limit 1)`)
+      }
+
+      const [obsolete] = await obsoleteYards()
 
       if (!task || !tech || !obsolete.n) throw new HarnessError('The named-link fixture needs a construction task, idle capacity, an obsolete yard and researched build-rate tech')
+
+      // Yard names repeat across colonies, so the search for the yard of the task would open the first of several: the yard gets a name of its own on the disposable copy.
+      task.ShipyardName = 'Growth task probe'
+      await execOf(raw, `update FCT_Shipyard set ShipyardName = 'Growth task probe' where ShipyardID = ${task.ShipyardID}`)
+
       held.truth = { task, tech }
     } finally {
       await new Promise((resolve, reject) => raw.close((error) => error ? reject(error) : resolve()))
@@ -266,12 +283,12 @@ const observeScreen = async (ctx, kind) => {
     await page.goto(held.server.url, { timeout: PAGE_TIMEOUT })
     await installScreen(page)
     await page.waitForFunction(() => Boolean(window.$app && window.$app.$store && window.$app.$store.getters.database) && window.$app.$store.state.empires.games.length > 0, null, { timeout: PAGE_TIMEOUT })
-    await page.evaluate(() => {
+    await page.evaluate(({ gameId, raceId }) => {
       const store = window.$app.$store
-      const game = store.state.empires.games.find((entry) => entry.GameID === 138)
+      const game = store.state.empires.games.find((entry) => entry.GameID === gameId)
 
-      return store.dispatch('changeGame', { game, race: game.Races.find((entry) => entry.RaceID === 785) })
-    })
+      return store.dispatch('changeGame', { game, race: game.Races.find((entry) => entry.RaceID === raceId) })
+    }, { gameId: FIXTURE.gameId, raceId: FIXTURE.raceId })
     await page.waitForFunction(() => Boolean(window.$app.$store.getters.racePrefix), null, { timeout: PAGE_TIMEOUT })
 
     const settlePage = () => settled(page, {
@@ -1110,16 +1127,21 @@ const saveStatements = async (ctx, file) => {
   const races = await rowsOf(database, 'select distinct GameID, RaceID from FCT_Shipyard')
   const equal = (row, figure) => near(row.RequiredBP, figure)
 
-  add(`save-stored: ${label}: every stored activity of types 1 to 6 has the build points the rules give once the race's operations factor applies`, () => {
-    const bad = activities.filter((row) => !equal(row, row.expected))
+  if (activities.length === 0) {
+    NO_CASE.set('save-stored', NO_ACTIVITY)
+  } else {
+    add(`save-stored: ${label}: every stored activity of types 1 to 6 has the build points the rules give once the race's operations factor applies`, () => {
+      const bad = activities.filter((row) => !equal(row, row.expected))
 
-    return same(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.expected]), [])
-  })
-  add(`save-stored: ${label}: the activities that differ at a factor of 1 are those of a race that holds a better level, and only then`, () => {
-    const bad = activities.filter((row) => !equal(row, row.atOne) && !(row.held < 1 && equal(row, row.expected)))
+      return same(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.expected]), [])
+    })
+    add(`save-stored: ${label}: the activities that differ at a factor of 1 are those of a race that holds a better level, and only then`, () => {
+      const bad = activities.filter((row) => !equal(row, row.atOne) && !(row.held < 1 && equal(row, row.expected)))
 
-    return same(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.atOne]), [])
-  })
+      return same(bad.map((row) => [row.ShipyardID, row.TaskType, row.RequiredBP, row.atOne]), [])
+    })
+  }
+
   add(`save-operations: ${label}: the race's stored operations column is the lowest multiplier among the levels it holds`, async () => {
     const bad = []
 
@@ -1186,7 +1208,7 @@ const saveStatements = async (ctx, file) => {
 
     return same(found.sort((a, b) => a - b), SHIP_BASED_YARDS[label])
   })
-  add(`save-tasks: ${label}: the time left of every stored task is the Production Recap's, the build points left over the colony's rate for the class (the shared rate and finish)`, async () => {
+  const compareTasks = async (wanted, least) => {
     const { g, production: pr, provenance: p } = m
     const bad = []
     let compared = 0
@@ -1196,7 +1218,7 @@ const saveStatements = async (ctx, file) => {
       const recap = await rowsOf(database, 'select FCT_ShipyardTask.TaskID as ID, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = :GameID and FCT_ShipyardTask.RaceID = :RaceID', { GameID, RaceID })
       const byId = Object.fromEntries(recap.map((row) => [row.ID, row]))
 
-      yards.forEach((yard) => yard.taskRows.forEach((row) => {
+      yards.forEach((yard) => yard.taskRows.filter((row) => wanted(byId[row.id])).forEach((row) => {
         const expected = byId[row.id]
         const rate = pr.shipRate(MODIFIERS, expected)
         const finish = pr.finishDays({ rule: 'production.shipFinish', rate, remaining: expected.RemainingProduction, remainingName: 'the task\'s remaining build points', paused: pr.flagOf(expected.Paused) })
@@ -1210,18 +1232,33 @@ const saveStatements = async (ctx, file) => {
       }))
     }
 
-    return same([bad, compared >= 0], [[], true])
-  })
+    return same([bad, compared >= least], [[], true])
+  }
+
+  add(`save-tasks: ${label}: the time left of every stored task is the Production Recap's, the build points left over the colony's rate for the class (the shared rate and finish)`, () => compareTasks(() => true, 0))
+
+  if ((await rowsOf(database, 'select count(*) as n from FCT_ShipyardTask inner join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID where FCT_Shipyard.SYType <> 1'))[0].n === 0) {
+    NO_CASE.set('save-commercial', NO_COMMERCIAL)
+  } else {
+    add(`save-commercial: ${label}: the time left of every stored task at a commercial yard is the Production Recap's, at a quarter of the class rate`, () => compareTasks((row) => row.CommercialModifier === 0.25, 1))
+  }
 
   return { skipped: false, statements, activities, close: () => database.close() }
 }
 
-// The counts over both saves: 64 activities of types 1 to 6 (types 1, 3, 5, 6 in the saves; 2 and 4 in none), all 64 equal once the operations factor applies, 63 at a factor of 1.
+// The counts over the two 2.7 saves this check was written on: 64 activities of types 1 to 6 (types 1, 3, 5, 6 in the saves; 2 and 4 in none), all 64 equal once the operations factor applies, 63 at a factor of 1. The fixture holds none, so the counts have no case in it: needs tier b.
 const totalStatements = (reads) => {
   const all = reads.flatMap((read) => read.activities || [])
   const byType = (type) => all.filter((row) => row.TaskType === type).length
   const statements = []
   const add = (name, test) => statements.push([name, test])
+
+  if (all.length === 0) {
+    NO_CASE.set('save-stored', NO_ACTIVITY)
+    NO_CASE.set('save-types', NO_ACTIVITY)
+
+    return statements
+  }
 
   add('save-stored: both saves: 64 stored activities of types 1 to 6, and all 64 equal the rules\' price once the operations factor applies, 63 of them at a factor of 1 and the one other (yard 6746, 192 stored against 240) at the race\'s 0.8', () => {
     const exact = all.filter((row) => near(row.RequiredBP, row.expected)).length
@@ -1258,7 +1295,7 @@ const MUTATIONS = [
   { name: 'a target at or below the capacity priced', file: G, find: 'isAvailable(price) && !(target > yard.capacity)', replace: 'false', fails: ['continual'] },
   { name: 'the most construction periods cut to 100', file: G, find: 'export const MAX_CONTINUAL_PERIODS = 100000', replace: 'export const MAX_CONTINUAL_PERIODS = 100', fails: ['continual', 'growth'] },
   { name: 'a fixed upgrade timed on no build points', file: G, find: 'remaining: price.value, target: null', replace: 'remaining: 0, target: null', fails: ['time', 'growth'] },
-  { name: 'a task at a commercial yard weighted as a naval one', file: G, find: 'yard.type === SHIPYARD_TYPE.NAVAL ? 1 : isNumber(yard.type) ? 0.25 : null', replace: 'isNumber(yard.type) ? 1 : null', fails: ['time', 'save-tasks'] },
+  { name: 'a task at a commercial yard weighted as a naval one', file: G, find: 'yard.type === SHIPYARD_TYPE.NAVAL ? 1 : isNumber(yard.type) ? 0.25 : null', replace: 'isNumber(yard.type) ? 1 : null', fails: ['time', 'save-commercial'] },
   { name: 'an activity timed on all its build points, not what is left', file: G, find: 'isNumber(yard.requiredBP) && isNumber(yard.completedBP) ? yard.requiredBP - yard.completedBP : null', replace: 'isNumber(yard.requiredBP) ? yard.requiredBP : null', fails: ['time', 'page-rows'] },
   { name: 'the levels read for every race', file: G, find: 'where FCT_RaceTech.GameID = :GameID and FCT_RaceTech.RaceID = :RaceID and', replace: 'where FCT_RaceTech.GameID = :GameID and', fails: ['loader'] },
   { name: 'the Shipyard Operations tech type read as another', file: G, find: 'export const OPERATIONS_TECH_TYPE = 158', replace: 'export const OPERATIONS_TECH_TYPE = 30', fails: ['loader', 'techtree', 'save-operations', 'save-stored'] },
@@ -1413,6 +1450,10 @@ const checkHead = async () => {
     console.log(`SKIP  ${file} is not there`)
   }
 
+  for (const reason of new Set(NO_CASE.values())) {
+    console.log(`SKIP  ${[...NO_CASE].filter(([, text]) => text === reason).map(([key]) => key).sort().join(', ')}: needs tier b: ${reason}`)
+  }
+
   for (const [name, result] of await runStatements(statements)) {
     check(name, result)
   }
@@ -1443,9 +1484,10 @@ const checkMutant = async (mutant) => {
   }
 
   const { statements, opened, skipped } = await statementsOf(ctx, mutant.fails.some((key) => key.startsWith('save-')), mutant.fails)
-  const absent = mutant.fails.filter((key) => !statements.some(([name]) => keyOf(name) === key))
-  const results = await runStatements(statements, mutant.fails)
-  const missed = mutant.fails.filter((key) => !results.some(([name, result, valueFailure]) => keyOf(name) === key && result !== true && valueFailure))
+  const required = mutant.fails.filter((key) => !NO_CASE.has(key))
+  const absent = required.filter((key) => !statements.some(([name]) => keyOf(name) === key))
+  const results = await runStatements(statements, required)
+  const missed = required.filter((key) => !results.some(([name, result, valueFailure]) => keyOf(name) === key && result !== true && valueFailure))
 
   opened.forEach((read) => read.close())
   check(`mutation caught: ${mutant.name}`, skipped.length ? `required fixture absent: ${skipped.join(', ')}` : absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)

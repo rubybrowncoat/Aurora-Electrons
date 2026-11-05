@@ -24,12 +24,13 @@ const assert = require('./lib/bounded-assert')
 const { runChild, lastJson } = require('./lib/check-pool')
 const { patched } = require('./lib/mutant-source')
 const { safeRoot } = require('./lib/safe-root')
+const { FIXTURE } = require('./lib/fixtures')
 
 const ROOT = path.resolve(__dirname, '..')
-// A save of the 2.7 line (its FCT_Game carries both 2.7 columns) whose file name is that of an earlier version.
+// A save of the 2.7 line (its FCT_Game carries both 2.7 columns) whose file name is that of an earlier version: the server serves a copy whatever the name or the release of the file, so this is a recorded 2.x save kept for that, not a default.
 const SAVE = 'saves/AuroraDB_26OafsalotError.db'
-// Another save, for `useSave`; the module a variant replaces, by its path and its route.
-const OTHER_SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
+// Another save, for `useSave`: the fixture; the module a variant replaces, by its path and its route.
+const OTHER_SAVE = FIXTURE.file
 const MODULE = { file: 'src/renderer/utilities/specialist-deployments.js', route: '/utilities/specialist-deployments.js' }
 const MARKER = 'plantedByTheCheck'
 const RESULT = 'RESULT '

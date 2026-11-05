@@ -22,6 +22,7 @@ const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const pagePath = path.join(root, 'src', 'renderer', 'pages', 'sensors.vue')
@@ -653,7 +654,7 @@ const runMutations = async (stock) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
+  const options = { stock: fixtureTriple(), mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {

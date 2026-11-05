@@ -772,50 +772,10 @@ check('registration', 'the adapters are registered at the one gate with the stat
 })
 
 // ---- The saves, when they are there ---------------------------------------------------------------------------------------
-// Two saves of one game 31 years apart: the earlier one's independent asteroids moved to the later one's last body update must land on the later save's positions. The later save's bodies were last moved 11,700 s after the instant its own clock says (a residue measured on these saves), which the instant here takes in.
-const EARLIER = path.join(root, 'saves', 'AuroraDB_271_skoormit_saved.db')
-const LATER = path.join(root, 'saves', 'AuroraDB.db')
-const LATER_RESIDUE_SECONDS = 11700
+// Not run: the independent asteroids of one save, moved to the last body update of a later save of the same game, must land on the later save's positions, which needs two saves of one 3.1 game a year or more apart (the saves A and B of AE-310-03) and the 3.1 orbital step that AE-302-04 measures. The check is written against those saves by AE-301-08.
+const NOT_RUN = new Map()
 
-const readOnly = (file) => {
-  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY)
-
-  return { raw, query: (sql) => new Promise((resolve, reject) => raw.all(sql, (error, rows) => (error ? reject(error) : resolve([rows])))) }
-}
-
-check('saves', 'the independent asteroids of one save, moved to the last body update of a later save of the same game, are where that save has them, to a kilometre (skipped when the saves are not in saves/)', async (w) => {
-  if (!fs.existsSync(EARLIER) || !fs.existsSync(LATER)) {
-    return
-  }
-
-  const m = (await w.modules())['orbit-propagation']
-  const before = readOnly(EARLIER)
-  const after = readOnly(LATER)
-  const ids = { GameID: 138, RaceID: 781 }
-
-  try {
-    const [[clock]] = await before.query(`select GameTime, LastGrowthTime, OrbitalMotion, OrbitalMotionAst from FCT_Game where GameID = ${ids.GameID}`)
-    const [[next]] = await after.query(`select LastGrowthTime from FCT_Game where GameID = ${ids.GameID}`)
-
-    if (!clock || !next) {
-      return
-    }
-
-    const [asteroids] = await before.query(`select SystemBodyID, SystemID, Xcor, Ycor from FCT_SystemBody where GameID = ${ids.GameID} and BodyClass = 3 and coalesce(TrojanAsteroid, 0) = 0 and coalesce(Eccentricity, 0) = 0 and coalesce(FixedBody, 0) = 0 and SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${ids.GameID} and RaceID = ${ids.RaceID})`)
-    const [later] = await after.query(`select SystemBodyID, Xcor, Ycor from FCT_SystemBody where GameID = ${ids.GameID}`)
-    const laterOf = Object.fromEntries(later.map((row) => [row.SystemBodyID, row]))
-    const endpoints = asteroids.map((row) => ({ family: 'body', key: `body:${row.SystemBodyID}`, id: row.SystemBodyID, SystemID: row.SystemID, Xcor: row.Xcor, Ycor: row.Ycor }))
-    const orbits = await m.loadOrbitFacts(before, ids, endpoints)
-    const facts = { clock: { gameTime: clock.GameTime, lastGrowthTime: clock.LastGrowthTime, orbitalMotion: clock.OrbitalMotion, orbitalMotionAst: clock.OrbitalMotionAst }, orbits }
-    const worst = endpoints.map((endpoint) => ({ endpoint, found: m.orbitAdapter(endpoint, { facts, at: next.LastGrowthTime + LATER_RESIDUE_SECONDS }) })).filter(({ endpoint, found }) => !found.reasons && laterOf[endpoint.id]).map(({ endpoint, found }) => Math.hypot(found.position.Xcor - laterOf[endpoint.id].Xcor, found.position.Ycor - laterOf[endpoint.id].Ycor))
-
-    assert.ok(worst.length > 100, `${worst.length} asteroids were moved`)
-    assert.ok(Math.max(...worst) <= 1, `the worst is ${Math.max(...worst)} km off`)
-  } finally {
-    before.raw.close()
-    after.raw.close()
-  }
-})
+check('saves', 'the independent asteroids of one save, moved to the last body update of a later save of the same game, are where that save has them, to a kilometre (needs tier b: two saves of one 3.1 game a year apart)', async () => ({ skipped: 'needs tier b: two saves of one 3.1 game a year or more apart (the saves A and B of AE-310-03) and the 3.1 orbital step of AE-302-04' }))
 
 check('review-round-1', 'the asteroid switch holds an eccentric asteroid too, an unread eccentricity is no orbit, an arrival is certified to a second or declined, and a short-period moon is as fast as it is', async (w) => {
   const m = (await w.modules())['orbit-propagation']
@@ -1198,7 +1158,11 @@ const run = async (checks, world) => {
 
   for (const { name, run: body } of checks) {
     try {
-      await body(world)
+      const outcome = await body(world)
+
+      if (outcome && outcome.skipped) {
+        NOT_RUN.set(name, outcome.skipped)
+      }
     } catch (error) {
       failures.push({ name, error })
     }
@@ -1212,9 +1176,10 @@ const describeFailure = ({ name, error }) => `${name}: ${(error && error.message
 const main = async () => {
   const mutate = mutating()
   const failures = await run(CHECKS, worldOf())
-  let passed = CHECKS.length - failures.length
-  let total = CHECKS.length
+  let passed = CHECKS.length - failures.length - NOT_RUN.size
+  let total = CHECKS.length - NOT_RUN.size
 
+  NOT_RUN.forEach((reason, name) => console.log(`SKIP  ${name}: ${reason} (not run)`))
   failures.forEach((failure) => console.log(`FAIL ${describeFailure(failure)}`))
 
   if (mutate) {

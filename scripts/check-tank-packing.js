@@ -3,13 +3,14 @@
 
   Run from the repo root with Node 22.12 or newer: `node scripts/check-tank-packing.js [--quick] [--stock FILE GAME RACE] [--modded FILE GAME RACE]`. It only reads the saves (sqlite3 OPEN_READONLY); a save that is not there is skipped and the synthetic catalogues always run. Exit code 2 when a check fails.
 
-  It proves, against the enumeration (the oracle below, written apart from the solver, on whole numbers: HS times 1,000, BP times 100): the lightest package (HS, then BP, then tanks) and the cheapest (BP, then HS, then tanks) are the enumeration's best on the stock tanks, the modded save's tanks and synthetic catalogues of one and of two densities, with and without a divisibility chain; the recorded counterexample (10 L/10 HS against two 6 L/3 HS tanks for 10 L) picks the two 6 L tanks; the nondominated set of HS, BP and litres held over the request equals the enumeration's; requests past the oracle's reach agree with the closed form of the stock catalogue (a mixed-radix count), with a table of another size, and with the package's own litres; every package holds its request within the named tolerance from the catalogue's own rows; an empty catalogue is infeasible for a positive request, a zero request is the empty package, and a package a bound cut short is feasible, not claimed optimal and not reported infeasible; and the propulsion search reports the status of each set's tanks, drops a candidate no tank can hold fuel for, and keeps its steps short.
+  It proves, against the enumeration (the oracle below, written apart from the solver, on whole numbers: HS times 1,000, BP times 100): the lightest package (HS, then BP, then tanks) and the cheapest (BP, then HS, then tanks) are the enumeration's best on the stock tanks, the fixture's tanks and synthetic catalogues of one and of two densities, with and without a divisibility chain; the recorded counterexample (10 L/10 HS against two 6 L/3 HS tanks for 10 L) picks the two 6 L tanks; the nondominated set of HS, BP and litres held over the request equals the enumeration's; requests past the oracle's reach agree with the closed form of the stock catalogue (a mixed-radix count), with a table of another size, and with the package's own litres; every package holds its request within the named tolerance from the catalogue's own rows; an empty catalogue is infeasible for a positive request, a zero request is the empty package, and a package a bound cut short is feasible, not claimed optimal and not reported infeasible; and the propulsion search reports the status of each set's tanks, drops a candidate no tank can hold fuel for, and keeps its steps short.
 */
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { endSection, printSection, runSections } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const HS_SCALE = 1000
@@ -20,7 +21,7 @@ let failures = 0
 let checks = 0
 
 const options = (() => {
-  const parsed = { quick: false, stock: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 }, modded: { file: 'AuroraDB.db', game: 140, race: 784 } }
+  const parsed = { quick: false, stock: null, modded: fixtureSave() }
   const argv = process.argv.slice(2)
 
   for (let index = 0; index < argv.length; index++) {
@@ -735,7 +736,7 @@ const saveChecks = async (data, utilities, label, { file, game, race }) => {
 const loadSaves = async (data) => {
   const saves = []
 
-  for (const [label, { file, game, race }] of [['stock', options.stock], ['modded', options.modded]]) {
+  for (const [label, { file, game, race }] of [['stock', options.stock], ['modded', options.modded]].filter(([, named]) => named)) {
     const database = await openSave(file)
 
     if (database) {
@@ -748,9 +749,9 @@ const loadSaves = async (data) => {
 }
 
 // The parts that run in processes of their own (head, stock, modded, search, cancel), in the order the output reads, with the time each takes as its weight. The two searches of the sparse catalogue take most of the time and are independent: the cancel part is the search that follows an abandoned one, compared in the parent with the search of a fresh array.
-const PARTS = [{ part: 'head', weight: 5 }, { part: 'stock', weight: 15 }, { part: 'modded', weight: 50 }, { part: 'search', weight: 100 }, { part: 'cancel', weight: 100 }]
+const PARTS = [{ part: 'head', weight: 5 }, ...[['stock', 15], ['modded', 50]].filter(([label]) => options[label]).map(([part, weight]) => ({ part, weight })), { part: 'search', weight: 100 }, { part: 'cancel', weight: 100 }]
 
-const forwarded = () => [...(options.quick ? ['--quick'] : []), ...['stock', 'modded'].flatMap((label) => [`--${label}`, options[label].file, options[label].game, options[label].race])].map(String)
+const forwarded = () => [...(options.quick ? ['--quick'] : []), ...['stock', 'modded'].filter((label) => options[label]).flatMap((label) => [`--${label}`, options[label].file, options[label].game, options[label].race])].map(String)
 
 const run = async () => {
   const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'tank-packing', 'provenance'])

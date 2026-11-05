@@ -21,6 +21,7 @@ const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -860,7 +861,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
+  const options = { modded: fixtureTriple(), stock: null, mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -905,6 +906,9 @@ const openSave = (file) => new Promise((resolve, reject) => {
     })
   })
 })
+
+// The first id of the techs the owner's mod adds to the baseline (game 0): the shipped saves of the game hold none from this id on, and the fixture holds 262 of 74 types.
+const MOD_ID = 500000
 
 const rowsOf = async (database, sql, replacements = {}) => (await database.query(sql, { replacements }))[0]
 
@@ -951,20 +955,23 @@ const saveChecks = async (m, database, { GameID, RaceID }, label) => {
     add(`${rt.techFamily(typeId).name} defaults to the lowest figure, the level of the highest development cost (${entry.pick.info} of ${entry.levels.length})`, entry.pick.info === Math.min(...infos) && entry.pick.cost === Math.max(...entry.levels.map((item) => item.cost)) ? true : short(entry.levels.map((item) => [item.cost, item.info])))
   }
 
-  add('the pick is the best figure the registry names, on every line that has a direction', (() => {
-    const wrong = lines.filter((entry) => entry.pick && rt.techFamily(entry.typeId).better !== 'none' && entry.pick.info !== (rt.techFamily(entry.typeId).better === 'higher' ? Math.max : Math.min)(...entry.levels.map((item) => item.info))).map((entry) => entry.typeId)
+  // The owner's mod adds baseline levels from MOD_ID on, whose figures need not follow the development cost (on the fixture a minimum cloak size of 0.1 costs less than one of 8), and the game's pick is the highest cost whatever the figure, which the groups above check: a line that holds a level of the mod is left out here and named in the detail.
+  const modded = lines.filter((entry) => entry.levels.some((item) => item.id >= MOD_ID)).map((entry) => entry.typeId)
+
+  add('the pick is the best figure the registry names, on every line that has a direction and no level of the mod', (() => {
+    const wrong = lines.filter((entry) => !modded.includes(entry.typeId) && entry.pick && rt.techFamily(entry.typeId).better !== 'none' && entry.pick.info !== (rt.techFamily(entry.typeId).better === 'higher' ? Math.max : Math.min)(...entry.levels.map((item) => item.info))).map((entry) => entry.typeId)
 
     return wrong.length ? `lines ${wrong.join()} default to another figure than the registry's best` : true
-  })())
+  })(), `${modded.length} lines hold a level of the mod`)
 
   // The registry against the save.
   const names = new Map((await rowsOf(database, 'select TechTypeID, Description from DIM_TechType')).map((row) => [row.TechTypeID, row.Description]))
 
   add('the registry\'s names are DIM_TechType\'s descriptions', typeIds.every((typeId) => names.get(typeId) === rt.techFamily(typeId).name) || typeIds.filter((typeId) => names.get(typeId) !== rt.techFamily(typeId).name).map((typeId) => `${typeId}: ${names.get(typeId)}`).join('; '), `${typeIds.length} types`)
 
-  const baseline = await rowsOf(database, `select TechTypeID, DevelopCost, AdditionalInfo from FCT_TechSystem where GameID = 0 and AdditionalInfo is not null and TechTypeID in (${typeIds.join(', ')}) order by TechTypeID, DevelopCost, TechSystemID`)
+  const baseline = await rowsOf(database, `select TechTypeID, DevelopCost, AdditionalInfo from FCT_TechSystem where GameID = 0 and AdditionalInfo is not null and TechSystemID < ${MOD_ID} and TechTypeID in (${typeIds.join(', ')}) order by TechTypeID, DevelopCost, TechSystemID`)
 
-  add('the baseline rows of a type run the way the registry says as their development cost rises', (() => {
+  add('the baseline rows of the game of a type run the way the registry says as their development cost rises', (() => {
     const wrong = typeIds.filter((typeId) => {
       const rows = baseline.filter((row) => row.TechTypeID === typeId)
       const { better } = rt.techFamily(typeId)
@@ -1137,7 +1144,7 @@ const run = async () => {
     }
   }
 
-  for (const [label, [file, GameID, RaceID]] of [['modded', options.modded], ['stock', options.stock]]) {
+  for (const [label, [file, GameID, RaceID]] of [['modded', options.modded], ['stock', options.stock]].filter(([, named]) => named)) {
     console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
 
     const database = await openSave(file)

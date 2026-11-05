@@ -6,7 +6,7 @@
   The rule is the game's (`Ship.method_47`: the rank a ship's captain must hold is the rank its class requires, one higher for a ship whose `ShipSeniorCO` is 1 and none at all when the class already requires the highest rank of its type; `Commander.PopulateAssignmentsListView` and `Race.AutoAssignCommanders` ask it for the captain and ask the class for every other post, which keep the class rank less the post's modifier). The class's own Senior CO option is already in the stored `FCT_ShipClass.RankRequired` (`ShipClass.method_87` adds it when the class is saved), so a flagged ship in such a class takes one rank more than the class stores and the class column is not read again. Every expected figure is written here from that rule and from the saved officers, never read from the module:
   - `rank`: the captain's rank level for an unflagged ship, a flagged one, a flag that is not 1, a class row that carries its own Senior CO column (no effect), a flag or class rank that is not stored (no rank, named), a flagged ship whose class holds the highest naval rank (no rank above it, named) or whose race's number of naval ranks is not stored, a flag the save does not hold at all (no rank, the flag unknown and the setting named), and the specialist post of a terraformer, miner, harvester and survey captain, while the science officer's post stays class-relative and is not moved by, or held back by, the flag;
   - `suggestions`: the candidates the specialist ship suggestions list for a ship with a captain and for a vacant one, at the captain's rank, the other ranks counted beside them, a flagged ship at the highest rank left unrated, and a ship whose save does not hold the flag left unrated rather than given the class rank;
-  - `fixture`: on the interim 3.1 fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784) the rank level of each of the 1,100 serving captains equals the module's for its ship (1,074 unflagged, 26 flagged ships, all of classes with the Senior CO option, so a class-level option still has one more on top), and the executive, engineering, science, tactical and air group officers hold the class rank less their modifier whether the ship is flagged or not;
+  - `fixture`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the rank level of each of the 1,100 serving captains equals the module's for its ship (1,074 unflagged, 26 flagged ships, all of classes with the Senior CO option, so a class-level option still has one more on top), and the executive, engineering, science, tactical and air group officers hold the class rank less their modifier whether the ship is flagged or not;
   - `page`: the page's own ships read and roster read, taken from its source and run on the fixture and on planted copies (the harvester class flagged, the survey class flagged, a class at the highest and next-to-highest rank flagged, the flag not stored, the column dropped) deliver the flag, the rank count, the post's level and the mark of the roster for each officer on a flagged ship, equal to the figures worked out here, and a copy without the column leaves every captain's post unavailable and named while the science officer's post and the roster stay, the executive officers keeping their ranks;
   - `export`: the command structure model marks the 26 flagged ships, the CSV holds a `Senior CO` column (yes, no, empty where it is not stored or not a ship) and the Markdown names them, on the fixture and on a copy with a flag of 2 and one not stored, and a copy without the column still gives the same tree and both exports, with every ship's flag unknown, and the panel says the mark is not shown and the captain's rank unknown;
   - `capability`: no declared column of FCT_Ship.ShipSeniorCO is left in the registry (the page reads it), the Commanders report holds the `seniorCO` group beside the ranks and ages, and a save that lacks the column degrades the report by that group alone and leaves the ranks, the ages and the roster;
@@ -27,11 +27,12 @@ const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 const { renderTree, treeOf } = require('./lib/vue-render')
 const { strictRecords } = require('./lib/csv-records')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
-const GAME = 141
-const RACE = 784
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const IDS = { GameID: GAME, RaceID: RACE }
 // The 13 naval ranks of the race (RankType 0), the lowest at level 1.
 const NAVAL_RANKS = 13

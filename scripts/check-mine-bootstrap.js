@@ -8,7 +8,7 @@
 
   The reads run on a small in-memory database of their own: which installation types the race can build, the colonies' places, stock and cargo handling, the projects, the freighters and troop ships, and the formations with their commanders; the reads that meet a column the save lacks or a null value say unknown, never 0. The page is run as a pseudo instance on rows given as data, with its real load state, and its template is read as text: a pick of a colony starts the panel's reads once, which leave the page shown and out of its loading state while the panel shows their progress or failure, and a source that failed to read inside the sources is offered for a retry that reads them again and recovers its rows, where a column the save lacks is not.
 
-  The saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only; a save that is not there is skipped and counts as neither a pass nor a failure) give the real reads, which are compared with raw counts, the engineers' rating at each colony compared with the figure the Production page's modifiers hold, the routes of real colonies, and copies of the saves in memory (temporary tables over the read-only save) with a colony short of workers, a null rating, a null commander bonus, a dropped column and an unconfirmed commander bonus lookup.
+  The fixture save (scripts/lib/fixtures.js, read-only; a save that is not there is skipped and counts as neither a pass nor a failure) gives the real reads, which are compared with raw counts, the engineers' rating at each colony compared with the figure the Production page's modifiers hold, the routes of real colonies, and copies of the save in memory (temporary tables over the read-only save) with a colony short of workers, a null rating, a null commander bonus, a dropped column and an unconfirmed commander bonus lookup. The engineers' route is unavailable for a save whose version no rule maps yet, so the checks that plant a fault into that route are printed as needs tier b and run once a rule maps the version.
 
   Each mutation of a utility, the page or the haul module must fail the checks it names. A mutation's run calls only the functions that make the checks it names and loads the page only for the page's checks or the saves'; the head fails when a check a run names reads the page that run leaves out. Exit code 1 when a check fails.
 */
@@ -22,6 +22,7 @@ const { patched } = require('./lib/mutant-source')
 const { runChild } = require('./lib/check-pool')
 const { HarnessError } = require('./lib/browser-observe')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const U = 'src/renderer/utilities/mine-bootstrap.js'
@@ -31,10 +32,7 @@ const P = 'src/renderer/pages/colony-outlook.vue'
 const C = 'src/renderer/utilities/capabilities.js'
 const FILES = { [U]: 'mine-bootstrap', [D]: 'mine-bootstrap-data', [H]: 'haul-plan' }
 const NAMES = ['mine-bootstrap', 'mine-bootstrap-data', 'colonies', 'production', 'haul-plan', 'provenance', 'minerals']
-const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const SAVES = [fixtureSave()]
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
@@ -1831,18 +1829,18 @@ const pageStatements = (ctx) => {
 
     return true
   })
-  add('page: a freighter class with a fuel input the save leaves null leaves only the import unavailable, naming it', () => {
-    const routes = routesOf(mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }) }))
+  add('page: a freighter class with a fuel input the save leaves null leaves the import unavailable, naming it, and the local route as it was', () => {
+    const routes = routesOf(mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.1.x' }))
 
     assert.equal(routes.import.status, 'unavailable')
     assert.ok(routes.import.missing.includes('the engine power of Hauler'))
     assert.equal(routes.local.status, 'limited')
-    assert.equal(routes.ground.status, 'limited')
+    assert.equal(routes.ground.status, 'unavailable', 'the ground assistance rule lists the 2.7 line only, so the engineers\' route is unavailable at the 3.1 version and the fuel gap of the import does not touch it')
 
     return true
   })
   add('page: an import that stops before the haul is timed marks its hauling and total time rows with a result naming what is missing', () => {
-    const vm = mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }) })
+    const vm = mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.1.x' })
     const rows = Object.fromEntries(vm.routeFigures(routesOf(vm).import).map((figure) => [figure.label, figure]))
 
     ;['Hauling time', 'Hauling and build time'].forEach((label) => {
@@ -1964,6 +1962,7 @@ const saveStatements = async (ctx, save) => {
   const mb = m['mine-bootstrap']
   const label = (text) => `${text} (${save.file})`
   const statements = []
+  const tierB = []
   const add = (name, test) => statements.push([label(name), test])
   const store = (blocked = new Set()) => ({ $store: { getters: { 'capabilities/blockedBonuses': blocked }, state: { RaceNPR: false }, dispatch: async () => {} } })
   const pageOf = async (db = database, blocked = new Set()) => {
@@ -1985,7 +1984,7 @@ const saveStatements = async (ctx, save) => {
   }
   const routesOf = (vm) => Object.fromEntries(vm.bootstrapRoutes.map((route) => [route.id, route]))
   // A colony the routes can be compared on: a place, an idle construction rate and engineers at other colonies.
-  const pick = async (vm) => {
+  const pick = async (vm, needGround = true) => {
     await withTarget(vm, vm.rows[0].PopulationID)
 
     let fallback = null
@@ -1995,7 +1994,7 @@ const saveStatements = async (ctx, save) => {
 
       const routes = routesOf(vm)
 
-      if (routes.local.figures.full && routes.ground.figures.candidates && routes.ground.figures.candidates.length > 0) {
+      if (routes.local.figures.full && (!needGround || (routes.ground.figures.candidates && routes.ground.figures.candidates.length > 0))) {
         if (routes.local.figures.rate.value > 0) {
           return row
         }
@@ -2006,6 +2005,14 @@ const saveStatements = async (ctx, save) => {
 
     return fallback
   }
+
+  // The engineers' route is available only for a version a rule maps. While no rule supports the version of the save the route is unavailable, so the checks that plant a fault into it have no case in the save: needs tier b, printed by the head.
+  const first = await pageOf()
+
+  await withTarget(first, first.rows[0].PopulationID)
+
+  const groundMapped = m.provenance.ruleSupports('mineBootstrap.groundAssistance', first.bootstrapVersion) === true
+  const addGround = (name, test) => (groundMapped ? add(name, test) : tierB.push(label(name)))
 
   add('save-sources: the reads are checked against raw counts: types, colonies, formations, commanders and the units x rating total', async () => {
     const sources = await data.loadBootstrapSources(database, scope)
@@ -2086,7 +2093,7 @@ const saveStatements = async (ctx, save) => {
   })
   add('save-faults: a copy of the save in memory with a colony short of workers: the route is limited, the lost capacity is named, and the full capacity is unchanged by the lower efficiency', async () => {
     const reference = await pageOf()
-    const row = await pick(reference)
+    const row = await pick(reference, false)
 
     assert.ok(row, 'no colony to cut')
 
@@ -2114,7 +2121,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a null construction rating at a candidate makes the engineers\' route unavailable, naming the formation', async () => {
+  addGround('save-faults: a null construction rating at a candidate makes the engineers\' route unavailable, naming the formation', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2137,7 +2144,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a null commander bonus value makes the engineers\' route unavailable', async () => {
+  addGround('save-faults: a null commander bonus value makes the engineers\' route unavailable', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2159,7 +2166,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a dropped rating column makes the engineers\' route unavailable and names the column; the other routes stay', async () => {
+  addGround('save-faults: a dropped rating column makes the engineers\' route unavailable and names the column; the other routes stay', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2179,7 +2186,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a save that is not of the 2.7 shape (a dropped game column) makes the engineers\' route unavailable for its version', async () => {
+  addGround('save-faults: a save that is not of the 2.7 shape (a dropped game column) makes the engineers\' route unavailable for its version', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2197,7 +2204,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: with the commander bonus lookup not confirmed the engineers\' route is unavailable, not computed at a bonus of 1', async () => {
+  addGround('save-faults: with the commander bonus lookup not confirmed the engineers\' route is unavailable, not computed at a bonus of 1', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2210,7 +2217,7 @@ const saveStatements = async (ctx, save) => {
     return true
   })
 
-  return { skipped: false, statements, database }
+  return { skipped: false, statements, database, tierB }
 }
 
 // ---------- the mutations: each must fail the checks it names ----------
@@ -2520,6 +2527,7 @@ const statementsOf = async (ctx, withSaves, keys = null, names = BUILDER_NAMES) 
   const misplaced = [...new Set(built.flatMap(([name, list]) => list.map(([title]) => keyOf(title)).filter((key) => builderOf(key) !== name).map((key) => `${key} made by ${name}`)))]
   const opened = []
   const skipped = []
+  const tierB = []
 
   if (withSaves) {
     ctx.reader = 'make saves'
@@ -2531,22 +2539,27 @@ const statementsOf = async (ctx, withSaves, keys = null, names = BUILDER_NAMES) 
         skipped.push(save.file)
       } else {
         statements.push(...result.statements)
+        tierB.push(...result.tierB)
         opened.push(result.database)
       }
     }
   }
 
-  return { statements: statements.filter(([name]) => !keys || keys.includes(keyOf(name))), opened, skipped, misplaced }
+  return { statements: statements.filter(([name]) => !keys || keys.includes(keyOf(name))), opened, skipped, misplaced, tierB }
 }
 
 const checkHead = async (withSaves) => {
   const { ctx, reads } = traced(await contextOf(sourcesOf(null)))
-  const { statements, opened, skipped, misplaced } = await statementsOf(ctx, withSaves)
+  const { statements, opened, skipped, misplaced, tierB } = await statementsOf(ctx, withSaves)
 
   console.log('\nThe routes to mining capacity at a colony, on colonies, freighters and formations worked by hand, on a database of its own, on the page and on the saves')
 
   for (const file of skipped) {
     console.log(`SKIP  ${file} is not there`)
+  }
+
+  for (const name of tierB) {
+    console.log(`SKIP  ${name}: no case in the save: the engineers' route is unavailable for the version of this save until the ground assistance rule lists it, and no landed item moved that rule (AE-302-09 landed without it), so a fault planted in it has no case`)
   }
 
   check('mutations: the checks of each key are all made by the function a mutation\'s run calls for that key, so the run judges every check of the keys it names', misplaced.length ? misplaced.join('; ') : true)

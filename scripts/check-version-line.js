@@ -8,7 +8,7 @@
   - version-line: from 2.7.10 on, the major.minor of the package version is the stated line's. A version before 2.7.10 is numbered the old way (0.x) and states no line, so it passes with a note; the check applies from the bump commit that makes the version 2.7.10 or later.
   Planted faults are states of the two files, never a change of this script's own logic, each naming both values so that a move of the real line changes none of them: a package version one minor or one major ahead of the line, the stated line moved to 3.0.x or 2.8.x with the package left at 2.7.10, a package version of two parts or with a leading zero, a stated line that names a patch. Each must fail the check named for it by a wrong value. The rewrites that must pass: the next count of the line (2.7.11), the 3.0 line once both move (3.0.0 against 3.0.x), and the old numbering (0.11.0).
 
-  The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of AuroraDB.db and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to another line (3.0.x, or 4.1.x when the real line is 3.0.x), so a line that does not come from the constant fails by a value:
+  The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of the fixture save (scripts/lib/fixtures.js) and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to another line (3.0.x, or 4.1.x when the real line is 3.0.x), so a line that does not come from the constant fails by a value:
   - about-line: the line on screen reads "For Aurora <stated line> saves", the sentence the release notes and the refusal notice repeat, with the line the served constant holds;
   - about-beside: the line is on screen, on the row of the version chip and right of it;
   - about-version: the version chip reads v<package version>, the text the launch check of a release waits for;
@@ -27,12 +27,13 @@ const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const PACKAGE_FILE = 'package.json'
 const CAPABILITIES_FILE = 'src/renderer/utilities/capabilities.js'
 const ABOUT_FILE = 'src/renderer/pages/about.vue'
-const SAVE = 'AuroraDB.db'
+const SAVE = FIXTURE.file
 const TIMEOUT = 90000
 // The line the served constant is moved to, so that a page which does not read it shows the line it was built with: the first of these the real line is not.
 const MOVED = ['3.0.x', '4.1.x']

@@ -904,11 +904,18 @@ const coverageChecks = (m) => [
       return skipped('no save is there')
     }
 
-    const fixture = await m.dd.loadSensorFixture(save.database, save.ids.GameID, save.ids.RaceID)
-    const controls = fixture.components.filter((component) => component.row.ComponentTypeID === m.dd.SENSOR_COMPONENT_TYPES.missileFireControl && component.row.MaxSensorRange > 0)
+    const controlsOf = (fixture) => fixture.components.filter((component) => component.row.ComponentTypeID === m.dd.SENSOR_COMPONENT_TYPES.missileFireControl && component.row.MaxSensorRange > 0)
+    let controls = controlsOf(await m.dd.loadSensorFixture(save.database, save.ids.GameID, save.ids.RaceID))
+
+    // The fixture's player race holds no missile fire control; the race that holds the most stands in for it, found by SQL.
+    if (!controls.length) {
+      const [holders] = await save.database.query(`select FCT_RaceTech.RaceID as race from FCT_RaceTech inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :game and FCT_ShipDesignComponents.ComponentTypeID = ${m.dd.SENSOR_COMPONENT_TYPES.missileFireControl} and FCT_ShipDesignComponents.MaxSensorRange > 0 group by FCT_RaceTech.RaceID order by count(*) desc, FCT_RaceTech.RaceID`, { replacements: { game: save.ids.GameID } })
+
+      controls = holders.length ? controlsOf(await m.dd.loadSensorFixture(save.database, save.ids.GameID, holders[0].race)) : []
+    }
 
     if (!controls.length) {
-      return skipped('the race has no missile fire control')
+      return skipped('no race of the save holds a missile fire control')
     }
 
     const problems = []
@@ -931,6 +938,7 @@ const coverageChecks = (m) => [
 // ---------- the nominations ----------
 
 const FIXTURES = require('./lib/missile-fixtures.json').fixtures
+const { fixtureTriple } = require('./lib/fixtures')
 
 const STOCK = { label: 'stock-271-g138', race: 785 }
 const ORDINARY = 154630
@@ -1575,7 +1583,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true, mutant: null, probe: null }
+  const options = { modded: fixtureTriple(), stock: null, mutations: true, mutant: null, probe: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1626,20 +1634,22 @@ const openSave = (file) => new Promise((resolve, reject) => {
 })
 
 const openSaves = async (options) => {
-  const [moddedFile, moddedGame, moddedRace] = options.modded
-  const [stockFile, stockGame, stockRace] = options.stock
-  const modded = await openSave(moddedFile)
-  const stock = await openSave(stockFile)
+  const named = {}
 
-  if (modded) {
-    SAVES.modded = { database: modded, ids: { GameID: moddedGame, RaceID: moddedRace } }
+  for (const label of ['modded', 'stock']) {
+    if (options[label]) {
+      const [file, GameID, RaceID] = options[label]
+      const database = await openSave(file)
+
+      named[label] = { file, database }
+
+      if (database) {
+        SAVES[label] = { database, ids: { GameID, RaceID } }
+      }
+    }
   }
 
-  if (stock) {
-    SAVES.stock = { database: stock, ids: { GameID: stockGame, RaceID: stockRace } }
-  }
-
-  return { moddedFile, stockFile, modded, stock }
+  return named
 }
 
 const closeSaves = () => Object.values(SAVES).forEach((save) => save.database.close())
@@ -1721,7 +1731,7 @@ const inChild = async (argv) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 // Every planted fault in a process of its own, as many at a time as the pool allows, results printed in the order of the list.
 const runMutants = async (options) => {
@@ -1785,9 +1795,9 @@ const run = async () => {
   }
 
   const real = await loadAll()
-  const { moddedFile, stockFile, modded, stock } = await openSaves(options)
+  const named = await openSaves(options)
 
-  console.log(`Saves read by the coverage checks: modded ${modded ? moddedFile : `${moddedFile} (not there)`}, stock ${stock ? stockFile : `${stockFile} (not there)`}`)
+  console.log(`Saves read by the coverage checks: ${['modded', 'stock'].map((label) => (named[label] ? `${label} ${named[label].database ? named[label].file : `${named[label].file} (not there)`}` : `${label} (none named)`)).join(', ')}`)
   console.log('The missile optimiser: domain, goals, cheapest per warhead, unreachable hit chances, results kept, incomplete runs, unknown figures, launcher coverage and nominations')
 
   for (const [name, test, detail] of GROUPS(real)) {

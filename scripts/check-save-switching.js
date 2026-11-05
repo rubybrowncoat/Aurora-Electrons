@@ -1,13 +1,13 @@
 /*
   Checks that the app moves between saves as one step: the real store, the real database module over real SQLite saves, the real recorder plugin, the real watcher and the real save service of the main process, with only the Electron pieces stood in for (the IPC calls are answered by the real service over a window registry, the file dialog and the file-watching library are fakes, or the real chokidar for the watcher checks).
 
-  Each case builds a fresh app over two saves that share a game and race number (GameID 141, race 784) but are different campaigns: a copy of saves/AuroraDB-310-spookyerol-migrated.db, a save of the 3.1 line, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
+  Each case builds a fresh app over two saves that share a game and race number (the game and the race of scripts/lib/fixtures.js, 141 and 784) but are different campaigns: a copy of the fixture, a save of the 3.1 line, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
 
   A copy that is refused as a save of another Aurora line (the schema answered with the seven columns Aurora 3.0 added left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
 
   The 57 head cases run in six parts. With 77 mutation descriptors, a full run has 83 isolated variants and 134 checks; --no-mutations has six variants and 57 checks. Existing mutation indexes stay in place when a descriptor is appended.
 
-  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and at most four parts or mutations run side by side, each in a process of its own with its own fixtures. CHECK_JOBS budgets scripts, not this suite's isolated variants. Run: bun scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs saves/AuroraDB-310-spookyerol-migrated.db.
+  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and at most four parts or mutations run side by side, each in a process of its own with its own fixtures. CHECK_JOBS budgets scripts, not this suite's isolated variants. Run: bun scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs the fixture of scripts/lib/fixtures.js.
 */
 const fs = require('fs')
 const os = require('os')
@@ -19,16 +19,17 @@ const { plantedPatch } = require('./lib/mutant-source')
 
 const { loadUtilities } = require('./lib/utilities')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { FIXTURE, fixturePath } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
 const requireHere = createRequire(`${repo}/`)
 
-const GAME = 141
-const RACE = 784
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const FLAG = 'probe-flag.png'
-// The 3.1 fixture: a save of the line, so the app reads it (a save from before 3.0 is refused, and the recorder holds it).
-const SAVE = path.join(repo, 'saves', 'AuroraDB-310-spookyerol-migrated.db')
+// The fixture of scripts/lib/fixtures.js: a save of the line, so the app reads it (a save from before 3.0 is refused, and the recorder holds it).
+const SAVE = fixturePath()
 
 // The packages the sources import. The real sequelize and sqlite3 open the real files; the others are as small as the cases allow. electron-store keeps its stores in `globalThis.__stores`, except while a case sets `globalThis.__SettingsClient`: every store opened then is that class's, the window's own store client (src/preload/store-client.js) built by the case.
 const STUBS = {
@@ -2523,7 +2524,7 @@ const main = async () => {
   }
 
   if (!fs.existsSync(SAVE)) {
-    console.log(`saves/AuroraDB-310-spookyerol-migrated.db is not here (${SAVE}); the check needs it.`)
+    console.log(`${FIXTURE.file} is not here (${SAVE}); the check needs it.`)
     process.exit(1)
   }
 

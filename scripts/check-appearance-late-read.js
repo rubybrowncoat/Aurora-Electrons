@@ -3,7 +3,7 @@
 
   bun scripts/check-appearance-late-read.js [--no-mutations] [--only=<text>,<text>]
 
-  The real renderer is served over a copy of AuroraDB.db (scripts/lib/page-server.js) and driven in Chromium, each variant in a context of its own (scripts/lib/browser-observe.js `observe`), so nothing it does to the settings outlasts it. The reading of a chosen file is held back (a file named slow-* is read once the check releases it), and the check waits on the end of each read it started, never on a quiet period. It proves: a read that ends after Settings was left starts no preview on the page that is open and leaves no draft behind; a read that a newer one superseded neither replaces the newer draft nor shows a failure beside it; the inks on the toolbar and snackbar fills, which an imported file can set, are reported as findings, and Apply waits for the confirmation; and a file whose snackbar ink is transparent, whose findings are known without measuring (that ink over a fill is the fill itself, 1:1, and the snackbar's message is the one use drawn in it, on each named fill of COLOUR_FILLS), is reported with exactly those findings and that many named by the summary and the confirmation.
+  The real renderer is served over a copy of the fixture save (scripts/lib/fixtures.js, through scripts/lib/page-server.js) and driven in Chromium, each variant in a context of its own (scripts/lib/browser-observe.js `observe`), so nothing it does to the settings outlasts it. The reading of a chosen file is held back (a file named slow-* is read once the check releases it), and the check waits on the end of each read it started, never on a quiet period. It proves: a read that ends after Settings was left starts no preview on the page that is open and leaves no draft behind; a read that a newer one superseded neither replaces the newer draft nor shows a failure beside it; the inks on the toolbar and snackbar fills, which an imported file can set, are reported as findings, and Apply waits for the confirmation; and a file whose snackbar ink is transparent, whose findings are known without measuring (that ink over a fill is the fill itself, 1:1, and the snackbar's message is the one use drawn in it, on each named fill of COLOUR_FILLS), is reported with exactly those findings and that many named by the summary and the confirmation.
 
   The screen is read the way every page check reads it (scripts/lib/browser-observe.js `installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements. A draft is the name its card draws, compared with the name the file gives; the preview is the colour the app is painted in; a failure is the alert on screen and whether the screen names the file; each finding is its whole label, read back to the use and the fill it stands for through the contrast module's own tables (NAMED_USES and FILL_LABELS of utilities/appearance-contrast.js); and Apply is what a click on it does, beside the confirmation it asks for, read whole through ACKNOWLEDGEMENT_WORDS with the number of findings it names, which must be the number the summary of the setting names.
 
@@ -17,6 +17,7 @@ const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rolesRead, labelKey } = require('./lib/browser-observe')
 const { assert, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -25,7 +26,7 @@ const FILES = {
   file: path.join(root, 'src', 'renderer', 'components', 'settings', 'AppearanceFile.vue'),
   report: path.join(root, 'src', 'renderer', 'utilities', 'appearance-file.js'),
 }
-const SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire' }
+const SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 90000
 const KEY = 'aurora-electrons:config'
 // The id the app gives the draft a file is previewed as: the identity of its card.

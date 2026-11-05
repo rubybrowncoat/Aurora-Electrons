@@ -9,7 +9,7 @@ import { depositForecastResult, miningSum, surfaceRateResult } from './mineral-o
 import { depositForecast, depositStateAt } from './minerals'
 import { combine, failureWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.1.x']
 const DAYS_PER_YEAR = 365
 
 // Hold tonnes of cargo one tonne of mineral takes. A class's cargo capacity is hold tonnes; mines are carried at their own cargo points each, minerals at this many hold tonnes to the tonne.
@@ -21,7 +21,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_MineralDeposit.Amount, Accessibility', 'FCT_SystemBodySurveys.SystemBodyID, RaceID'],
-  note: 'What the save stores of a deposit on a body the race has surveyed: its amount and its accessibility today. The race sees a deposit only through a survey of the body, so a body it has not surveyed is not read at all, whoever else has surveyed it.',
+  note: 'What the save stores of a deposit on a body the race has surveyed: its amount and its accessibility today. The race sees a deposit only through a survey of the body, so a body it has not surveyed is not read at all, whoever else has surveyed it. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -30,7 +30,7 @@ registerRule({
   units: 't/yr',
   verification: 'assumed',
   structure: ['DIM_PlanetaryInstallation.MiningProductionValue, Workers', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.RadiationLevel'],
-  note: 'What the mines entered on the page would dig a year from the deposit, worked as a colony\'s mining rows are: mines times the mining value of one, cut to a whole number, times the race\'s mine production, the deposit\'s accessibility and the body\'s radiation modifier. Hypothetical: no colony works the deposit yet, so the colony efficiency, stability, political status and the governor and sector bonuses are all taken as neutral.',
+  note: 'What the mines entered on the page would dig a year from the deposit, worked as a colony\'s mining rows are: mines times the mining value of one, cut to a whole number, times the race\'s mine production, the deposit\'s accessibility and the body\'s radiation modifier. Hypothetical: no colony works the deposit yet, so the colony efficiency, stability, political status and the governor and sector bonuses are all taken as neutral. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the colony is fully staffed and neutral on efficiency, stability and political status', 'no governor or sector bonus applies', 'the mines work the deposit from the day they stand'],
 })
 
@@ -40,7 +40,7 @@ registerRule({
   units: 't',
   verification: 'assumed',
   structure: ['FCT_ShipClass.CargoCapacity'],
-  note: 'The tonnes of mineral one trip of the representative carrier takes: the cargo hold entered, or the cargo capacity of the ship class picked, over the two hold tonnes each tonne of mineral takes. The hold itself, not this figure, carries the mines to a new site. It is the player\'s choice, not a fleet\'s load. With no hold entered there is no first load and no delivery time.',
+  note: 'The tonnes of mineral one trip of the representative carrier takes: the cargo hold entered, or the cargo capacity of the ship class picked, over the two hold tonnes each tonne of mineral takes. The hold itself, not this figure, carries the mines to a new site. It is the player\'s choice, not a fleet\'s load. With no hold entered there is no first load and no delivery time. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['one carrier, full on every trip', 'the whole hold is free for the mineral'],
 })
 
@@ -50,7 +50,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['mineBootstrap.localBuild', 'deficitSites.route', 'DIM_PlanetaryInstallation.Cost, CargoPoints'],
-  note: 'The days until mines stand at a site that has none: the build at the builder colony over its idle construction capacity, plus the carry of the mines to the site by the representative carrier over the jump points the race has explored. A site already worked by mines has no deployment (0, a fact of the save). The carry is one-way, and a second or later load adds a flight back along the route the carrier can fly.',
+  note: 'The days until mines stand at a site that has none: the build at the builder colony over its idle construction capacity, plus the carry of the mines to the site by the representative carrier over the jump points the race has explored. A site already worked by mines has no deployment (0, a fact of the save). The carry is one-way, and a second or later load adds a flight back along the route the carrier can fly. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['a ship is free at the builder when the mines are finished, apart from the carrier that delivers the mineral', 'a colony stands on the body, or its founding is not counted'],
 })
 
@@ -60,7 +60,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['deficitSites.extraction', 'deficitSites.load', 'FCT_MineralDeposit.Amount, Accessibility, HalfOriginalAmount, OriginalAcc'],
-  note: 'The days the site takes to dig one load of the representative carrier, from the day the mines work it: the cumulative output of the deposit at the extraction, whose accessibility falls once it is mined past half (the Mineral Outlook forecast\'s decline), not the extraction held flat. A deposit that holds less than one load, or whose amount is not read, gives no first load. The minerals already in the site colony\'s stockpile are not counted. A site that delivers by mass driver now has none.',
+  note: 'The days the site takes to dig one load of the representative carrier, from the day the mines work it: the cumulative output of the deposit at the extraction, whose accessibility falls once it is mined past half (the Mineral Outlook forecast\'s decline), not the extraction held flat. A deposit that holds less than one load, or whose amount is not read, gives no first load. The minerals already in the site colony\'s stockpile are not counted. A site that delivers by mass driver now has none. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the stock the site colony already holds is not loaded'],
 })
 
@@ -70,7 +70,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['habitability.transitRoute', 'habitability.transitTime'],
-  note: 'The days the representative carrier flies one way over the jump points the race has explored, from the colony to the site (empty) or from the site back (loaded), each by the shortest route in kilometres the Route Finder\'s search gives. The two directions are searched apart: a jump point explored on one side is not necessarily explored on the other. No route, no speed or no destination leaves the figure unknown.',
+  note: 'The days the representative carrier flies one way over the jump points the race has explored, from the colony to the site (empty) or from the site back (loaded), each by the shortest route in kilometres the Route Finder\'s search gives. The two directions are searched apart: a jump point explored on one side is not necessarily explored on the other. No route, no speed or no destination leaves the figure unknown. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['one speed all the way, loaded or empty', 'no loading, unloading, refuelling, jump shock or acceleration', 'military restriction and danger are not applied'],
 })
 
@@ -80,7 +80,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['deficitSites.deployment', 'deficitSites.firstLoad', 'deficitSites.route'],
-  note: 'The days from now until the first load reaches the destination colony: the carrier leaves the colony now, and leaves the site when it is there and the first load is dug, which is after the deployment and the load\'s extraction, then flies back loaded. A site that already delivers to the colony by a mass-driver route the save names is 0.',
+  note: 'The days from now until the first load reaches the destination colony: the carrier leaves the colony now, and leaves the site when it is there and the first load is dug, which is after the deployment and the load\'s extraction, then flies back loaded. A site that already delivers to the colony by a mass-driver route the save names is 0. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the carrier is free and at the destination colony now', 'the load leaves as soon as it is dug'],
 })
 
@@ -90,7 +90,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['deficitSites.route'],
-  note: 'The days one carrier takes for a whole trip: out to the site empty and back loaded. Unknown when either direction is.',
+  note: 'The days one carrier takes for a whole trip: out to the site empty and back loaded. Unknown when either direction is. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -99,7 +99,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['deficitSites.extraction', 'deficitSites.load', 'deficitSites.roundTrip', 'mineralSupply.supply'],
-  note: 'What the site delivers a year once running: the lower of its extraction and what one carrier hauls (the mineral load over the round trip). A site that delivers by a mass-driver route the save names shows what that route supplies today, which the ledger and the mass-driver output give.',
+  note: 'What the site delivers a year once running: the lower of its extraction and what one carrier hauls (the mineral load over the round trip). A site that delivers by a mass-driver route the save names shows what that route supplies today, which the ledger and the mass-driver output give. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['one carrier'],
 })
 
@@ -109,7 +109,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['mineral.depositForecast', 'deficitSites.deployment'],
-  note: 'The days from now until the deposit is empty at the extraction: the deployment, then the forecast of the deposit\'s years to depletion, whose accessibility falls once it is mined past half. A deposit nothing mines (no extraction, or no accessibility) is not emptied and has no such day.',
+  note: 'The days from now until the deposit is empty at the extraction: the deployment, then the forecast of the deposit\'s years to depletion, whose accessibility falls once it is mined past half. A deposit nothing mines (no extraction, or no accessibility) is not emptied and has no such day. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the extraction holds as the accessibility falls, as the Mineral Outlook forecast has it'],
 })
 
@@ -119,7 +119,7 @@ registerRule({
   units: 'rank',
   verification: 'assumed',
   structure: ['deficitSites.firstDelivery', 'deficitSites.delivered', 'deficitSites.deposit'],
-  note: 'The order of the sites that can deliver: the earliest first delivery first, a tie by the larger delivery a year, then the larger deposit. A site whose deposit holds less than one load, or with no known arrival, is not ranked. The order is a choice of this page, not a rule of the game.',
+  note: 'The order of the sites that can deliver: the earliest first delivery first, a tie by the larger delivery a year, then the larger deposit. A site whose deposit holds less than one load, or with no known arrival, is not ranked. The order is a choice of this page, not a rule of the game. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)

@@ -17,6 +17,7 @@ const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { strictRecords } = require('./lib/csv-records')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -991,9 +992,9 @@ const mutatedSources = (file, from, to) => {
 
 const DEFAULT_INPUT = { hullHS: 100, speed: 2500, fraction: 0.5, goal: { mode: 'range', value: 5e9 }, kind: 'either', minCount: 1, maxCount: 100, share: 0.5 }
 
+// The digest of the default search on the fixture, recorded at AE-301-07 from the search as it stands (the search of the 2.7 saves it was first taken from no longer has a save to run on by default); a save with no digest recorded prints a skip.
 const ANCHORS = {
-  'AuroraDB.db:140:784': { evaluated: 168284, matched: 141201, digest: 'db517f092dd4a48c' },
-  'AuroraDB_271_skoormit_saved.db:138:785': { evaluated: 64779, matched: 49905, digest: '20a9ab5a6d9e3308' },
+  [`${path.basename(FIXTURE.file)}:${FIXTURE.gameId}:${FIXTURE.raceId}`]: { evaluated: 181995, matched: 151846, digest: 'c99ce21b99e53ccc' },
 }
 
 const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts }) => crypto.createHash('sha256').update(JSON.stringify({ sets, lightest, fastest, cheapest, pareto, packages, evaluated: counts.evaluated, matched: counts.feasible })).digest('hex').slice(0, 16)
@@ -1001,7 +1002,7 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { part: null }
   const specified = []
 
   for (let index = 0; index < argv.length; index++) {
@@ -1020,10 +1021,14 @@ const parseArguments = (argv) => {
     }
   }
 
-  options.saveLabels = options.part !== null ? ['modded', 'stock'] : mutating() ? ['modded', 'stock'] : specified.length ? [...new Set(specified)] : ['modded']
+  options.saveLabels = specified.length ? [...new Set(specified)] : ['fixture']
 
-  if (options.part === null && !mutating() && !specified.length && !fs.existsSync(path.resolve(root, options.modded[0]))) {
-    throw new Error(`quick representative save is missing: ${options.modded[0]}`)
+  if (!specified.length) {
+    options.fixture = fixtureTriple()
+  }
+
+  if (options.part === null && !mutating() && !fs.existsSync(path.resolve(root, options[options.saveLabels[0]][0]))) {
+    throw new Error(`quick representative save is missing: ${options[options.saveLabels[0]][0]}`)
   }
 
   return options
@@ -1200,7 +1205,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   if (anchor) {
     const result = asked.result
 
-    check(`${label}: the default search with a front gives the result taken before fronts existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+    check(`${label}: the default search with a front gives the result recorded for this save`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
   } else {
     console.log('SKIP  no digest of the unchanged search is recorded for this save')
   }
@@ -1215,7 +1220,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   database.close()
 }
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
 
 // One part, in this process: `head`, a mutant by its id or a save by its label.
 const runPart = async (part, options) => {
@@ -1241,7 +1246,7 @@ const runPart = async (part, options) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))

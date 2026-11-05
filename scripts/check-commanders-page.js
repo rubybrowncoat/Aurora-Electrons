@@ -24,19 +24,41 @@ const { strictRecords } = require('./lib/csv-records')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating: mutationsEnabled, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE, fixtureRows } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const PAGE_FILE = 'src/renderer/pages/commanders.vue'
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const IDS = { GameID: 138, RaceID: 785 }
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+const SAVE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 const YEAR = 31536000
 const ROSTER_ROWS = 25
 const STORED = { commandersAgeMin: 30, commandersAgeMax: 90, commandersRank: 2 }
-// Two serving naval officers of the save whose post, age and rank put both on every roster the checks compare (the roster as it opens, the post chosen, the age bound): every copy of the save served gives the second the name of the first.
-const NAMESAKES = [624163, 624519]
-const NAMESAKE_RENAME = `update FCT_Commander set Name = (select Name from FCT_Commander where CommanderID = ${NAMESAKES[0]}) where CommanderID = ${NAMESAKES[1]}`
+// Two serving naval officers made the namesakes of the control. The fixture holds no two serving officers of one name, so the first two serving naval officers (by CommanderID, the order the roster opens in) that hold another post are planted in the post the checks choose (the post held by the most serving officers, from two to 23, so that two more stay within the roster's 25 rows), made the oldest of the race (so that the age bound leaves both), and the second takes the name of the first. Every copy of the save served is planted so.
+const plantedNamesakes = () => {
+  const serving = fixtureRows('select CommanderID as id, CommandType as post from FCT_Commander where GameID = ? and RaceID = ? and CommanderType = 0 and RetireStatus = 0 and Prisoner = 0 order by CommanderID', IDS.GameID, IDS.RaceID)
+  const counts = new Map()
+
+  serving.forEach((row) => counts.set(row.post, (counts.get(row.post) || 0) + 1))
+
+  const [post] = [...counts.entries()].filter(([, count]) => count >= 2 && count <= ROSTER_ROWS - 2).sort((a, b) => b[1] - a[1])[0] || []
+  const pair = serving.filter((row) => row.post !== post).slice(0, 2).map((row) => row.id)
+
+  if (post === undefined || pair.length !== 2) {
+    throw new Error(`the save has no post held by two to ${ROSTER_ROWS - 2} serving naval officers and two officers of another post to plant`)
+  }
+
+  return { post, ids: pair }
+}
+const NAMESAKE_PLAN = plantedNamesakes()
+const NAMESAKES = NAMESAKE_PLAN.ids
+const PLANTED = [
+  `update FCT_Commander set CommandType = ${NAMESAKE_PLAN.post}, CareerStart = (select min(CareerStart) from FCT_Commander where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and CommanderType = 0) - ${2 * YEAR} where CommanderID in (${NAMESAKES.join(', ')})`,
+  `update FCT_Commander set Name = (select Name from FCT_Commander where CommanderID = ${NAMESAKES[0]}) where CommanderID = ${NAMESAKES[1]}`,
+  // The fixture holds no shipping line (every fleet of the race is a naval one): the first four fleets of the race that hold a ship become shipping lines, so the Shipping lines switch has rows to add and take off.
+  `update FCT_Fleet set ShippingLine = 1 where FleetID in (select f.FleetID from FCT_Fleet f where f.GameID = ${IDS.GameID} and f.RaceID = ${IDS.RaceID} and exists (select 1 from FCT_Ship s where s.FleetID = f.FleetID) order by f.FleetID limit 4)`,
+]
 // The packages the commanders module imports, for reading its table of posts.
 const STUBS = {
   dayjs: `import { createRequire } from 'node:module'\nexport default createRequire(${JSON.stringify(path.join(root, 'package.json'))})('dayjs')`,
@@ -669,7 +691,7 @@ const cleanups = []
 const setUp = async () => {
   const { startPageServer } = require('./lib/page-server')
   const { commanders } = await loadUtilities(['commanders'], { stubs: STUBS })
-  const copy = await saveCopy('ae-commanders-', [NAMESAKE_RENAME])
+  const copy = await saveCopy('ae-commanders-', PLANTED)
 
   cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
 
@@ -719,7 +741,7 @@ const lackingResults = async (variant) => {
   }
 
   if (!ENV.lackingFile) {
-    const lacking = await saveCopy('ae-commanders-lacking-', [NAMESAKE_RENAME, 'drop table FCT_Species', 'drop table FCT_Ranks'])
+    const lacking = await saveCopy('ae-commanders-lacking-', [...PLANTED, 'drop table FCT_Species', 'drop table FCT_Ranks'])
 
     cleanups.push(async () => fs.rmSync(lacking.folder, { recursive: true, force: true }))
     ENV.lackingFile = lacking.file

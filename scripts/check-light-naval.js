@@ -7,7 +7,7 @@
   - `factor`: the officer factor at the limit (20 hull spaces, included), a hair under and over it and at the sizes of the fixture's classes, with a science officer, without a captain, with a captain who has no Survey bonus, with a bonus below 1, a captain whose Survey bonus is 1 (or is not stored) leaving the science officer's bonus alone without a class size, the control component default that stays as it was, and a class size that is not a number (null, missing, text, an object) leaving the factor unknown where the captain's bonus is not 1, never the full bonus of a light naval craft;
   - `rate`: a fleet's points a day for a light naval craft, a larger ship and both together, the assumption a rate that rests on a light naval captain's full bonus carries until a save holds a case (it is not a saved case: the game that played the fixture halved every captain's bonus), and a sensor ship whose class size is not stored giving no rate and naming it, while a ship without a captain, a ship whose captain's Survey bonus is 1 (a science officer aboard included) or a ship without a sensor of the kind needs no size and the fleet still rates;
   - `post`: the post and share the Commanders page suggests for a survey ship without a Science Department (the captain at the full share up to 20 hull spaces, half above), the science officer's post and the miner's and terraformer's captain unmoved by size, and a class whose size is not stored unavailable, never read as small;
-  - `save`: on the interim 3.1 fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784) the two survey ships of the class Intrepid (1,220 hull spaces, no survey order, so no saved progress) rate by the half bonus, and on copies whose class is cut to 20, 20.0001 and 10 hull spaces the loader's rows rate by the full bonus at the limit and below and by the half above it, each against the figure worked out here from the commanders' stored bonuses;
+  - `save`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the two survey ships of the class Intrepid (1,220 hull spaces, no survey order, so no saved progress) rate by the half bonus, and on copies whose class is cut to 20, 20.0001 and 10 hull spaces the loader's rows rate by the full bonus at the limit and below and by the half above it, each against the figure worked out here from the commanders' stored bonuses;
   - `page`: the Commanders page's own ships read, taken from its source and run on the same copies, delivers the class size and gives the post and share the size decides;
   - `landing`: the landing size is 10 hull spaces on the line the rule is registered for, where a craft over it with no bays at a colony with no spaceport is blocked, and the 10 hull space limit of the 3.1 source's shuttle branch (`Ship.GetCargoShuttleTransferMultiplier`) does not keep any craft from loading there (the multiplier is positive, `Ship.method_159` counting one bay for none), the light naval limit of 20 moving nothing;
   - `names`: the production type 2 and the idle capacity column read Light Naval, the Industry check of free light naval capacity says so in its title and rule, the capacity rule names installation 35, the Light Naval Factory, and the terms a missing capacity names are light naval ones;
@@ -27,12 +27,13 @@ const { loadUtilities } = require('./lib/utilities')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
+const SAVE = FIXTURE.file
 const SHIPPED = 'saves/AuroraDB_310_shipped.db'
-const GAME = 141
-const RACE = 784
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 // The class Intrepid: the two survey ships of the fixture, each with a Science Department and a captain, one captain with a Survey bonus of 1.13 and the other with none stored.
 const SURVEY_CLASS = 63083
 const SURVEY_SPEED = 40

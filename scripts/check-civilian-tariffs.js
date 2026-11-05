@@ -7,7 +7,7 @@
 
   The synthetic checks need no save. They prove: the worked 2.7 estimates of every category (colonist, passenger, trade good, cargo point) equal the quantity times the published rate times the distance in billion km, with the expected figures written out by hand; a route in km is converted to billion km before it is priced; the rates are the 2.7 ones and not the 2.6 ones; a player's race is paid the published rate and a computer-run empire half of it (the published modifier of 0.5), and a race kind that is not known gives no figure; an unsupported or unknown game version, a category with no published rate, and a quantity or distance that is not a number of 0 or more give an unavailable result that names what is missing, never 0; an extra per-system tariff field changes nothing; the civilian uses of the wealth log are the expected ones, each on its side; no net cost is given while any civilian use is not placed against a payout, whatever amounts are logged, and a fully placed table gives the logged payout uses less the taxes; the figures read as text; both pages feed the save's formula version and the selected race's kind to the rules, run on a player's race and a computer-run empire (the worked estimate and the Transport note are evaluated from the pages' own source), the Finances estimate names its one-way loaded route basis, and the new panel carries a summary; and the new text speaks in no first or second person. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also reads the wealth use table and the race's wealth log: every civilian use is in the save's table with the table's name and side, every use of the save whose name mentions shipping, passenger, civilian or tariff is a civilian use or an acknowledged exclusion, the civilian rows of the ledger the Finances page builds equal the amounts summed straight from the log, and the net cost is unavailable. Exit code 1 when a check fails.
+  With a save (by default the migrated 3.1 fixture of scripts/lib/fixtures.js; one that is not there is reported as not run) it also reads the wealth use table and the race's wealth log: every civilian use is in the save's table with the table's name and side, every use of the save whose name mentions shipping, passenger, civilian or tariff is a civilian use or an acknowledged exclusion, the civilian rows of the ledger the Finances page builds equal the amounts summed straight from the log, and the net cost is unavailable. Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const os = require('os')
@@ -16,6 +16,7 @@ const vm = require('vm')
 const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -481,11 +482,11 @@ const caughtValues = async (results, fails, name) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785] }
+  const options = { saves: [] }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
-      options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      options.saves.push([argv[index].slice(2), [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]])
       index += 3
     } else if (argv[index].startsWith('--only=')) {
       options.only = argv[index].slice('--only='.length).split('|').filter(Boolean)
@@ -497,7 +498,7 @@ const parseArguments = (argv) => {
     }
   }
 
-  return options
+  return { ...options, saves: options.saves.length ? options.saves : [['fixture', fixtureTriple()]] }
 }
 
 const allRows = (raw, sql, replacements) => new Promise((resolve, reject) => {
@@ -652,8 +653,9 @@ const run = async () => {
     }
   }
 
-  await compareSave('modded', options.modded, mods)
-  await compareSave('stock', options.stock, mods)
+  for (const [label, triple] of options.saves) {
+    await compareSave(label, triple, mods)
+  }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

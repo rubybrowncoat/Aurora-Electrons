@@ -27,13 +27,14 @@ const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
 const { strictRecords } = require('./lib/csv-records')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
+const SAVE = FIXTURE.file
 const SHIPPED = 'saves/AuroraDB_310_shipped.db'
 const EXPORT = '.github/exports/DIM_WealthUse.csv'
-const GAME = 141
-const RACE = 784
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const DAY = 86400
 const NEAR = 1e-9
 // The four uses this item names, with the name, the display order and the Income flag the export gives each.

@@ -7,7 +7,7 @@
 
   The supplied read feeds only its panel, so a failed read holds nothing back: the page, loaded with its real load-state mixin, stays ready, and the panel (its template compiled and rendered) shows the failure or the progress in place of its figures.
 
-  The saves (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) are optional witnesses of the real loader and of the ledger.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) is an optional witness of the real loader and of the ledger.
 
   Each planted fault must fail a check that needs no save and that it names. Each benign edit (wording, whitespace, the order of attributes, another default) must leave every check that needs no save green, alone, stacked and under every planted fault. Exit code 1 when a check fails.
 */
@@ -20,6 +20,7 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { compiledTemplate: compiled, renderTree: rendered, treeOf } = require('./lib/vue-render')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -35,10 +36,7 @@ const V = 'component'
 const P = 'page'
 const M = 'colonyMinerals'
 const NAMES = ['msp-supply', 'logistics', 'provenance', 'mineral-supply', 'minerals', 'mineral-outlook', 'colony-minerals']
-const SAVES = [
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',

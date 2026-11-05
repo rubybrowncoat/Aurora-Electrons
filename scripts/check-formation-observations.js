@@ -6,10 +6,10 @@
   The groups, each check a PASS or FAIL line named by its group:
   - units: the merge of a capture into a record (first import, an unchanged repeat, a changed or moved object, an object that came back, a failed read, an older save, the same time on another ledger, the cap), the cut a fork takes, the span an object reports, the file a version can read, the choice kept in the settings;
   - view: the words a row gets, which never claim an age before the first capture;
-  - modded: the recorder over the modded save AuroraDB.db (game 140, race 784), read only: nothing read and written without a choice, nothing for a race that is not a player race, exactly two statements with one, the record against SQL written here, a later save changed in memory, an older save, a failed read, a clear, a pass superseded at each of its checks, the size against the figure kept;
+  - modded: the recorder over the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784; the group keeps the name `modded` of the slot it stands in), read only: nothing read and written without a choice, nothing for a race that is not a player race, exactly two statements with one, the record against SQL written here, a later save changed in memory, an older save, a failed read, a clear, a pass superseded at each of its checks, the size against the figure kept;
   - falryx: the recorder over the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and three forks): the spans against SQL, a skipped save, a rollback, the seed a fork takes and keeps, a campaign that never observed;
   - passive: the saves of artifacts/passive-campaign-20261013 (game 139): a player race with no formation and an NPR with 114, read only;
-  - browser: the real app in Chromium over copies of the modded save: the switch, the Observed column and what it says after a first import and after a formation moved.
+  - browser: the real app in Chromium over copies of the fixture: the switch, the Observed column and what it says after a first import and after a formation moved.
   Planted faults in copies of the utilities and of the page must each fail the checks they name by a value (scripts/lib/fault-credit.js `caughtBy`); one rewrite of each family must fail none. Everything the recorder reads comes through SELECTs of saves opened read only. Prints `N of N checks passed`; a failed check sets exit code 1, a defect of the harness 2.
 */
 const fs = require('fs')
@@ -22,11 +22,12 @@ const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rounded, settled: pageSettled } = require('./lib/browser-observe')
 const { failure, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pagesDirectory = path.join(root, 'src', 'renderer', 'pages')
-const MODDED = { file: path.join(root, 'AuroraDB.db'), GameID: 140, RaceID: 784, NPR: null }
+const MODDED = { file: path.join(root, FIXTURE.file), GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, NPR: null }
 const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const FALRYX_GAME = 141
 const FALRYX_RACE = 791
@@ -492,7 +493,9 @@ const modded = (m) => once(m, 'modded', async () => {
   const { file, GameID, RaceID } = MODDED
   const t = await gameTimeOf(file, GameID)
   const n = await ledgerOf(file, GameID)
-  const result = { t, n, oracle: await oracleOf(file, GameID, RaceID), npr: await nprOf() }
+  // The empires a run records, one snapshot each: the player races and the NPR races that are no special faction (history.js records every empire it can chart, and Aurora's special factions have none).
+  const empires = Number((await rowsOf(file, `select count(*) as n from FCT_Race where GameID = ${GameID} and (NPR = 0 or SpecialNPRID = 0)`))[0].n)
+  const result = { t, n, empires, oracle: await oracleOf(file, GameID, RaceID), npr: await nprOf() }
 
   // Settled with nothing chosen.
   const plainRun = installation()
@@ -654,7 +657,7 @@ const moddedChecks = (m) => {
     }),
     entry('modded: the empire file of the later pass holds both snapshots', (s) => same(s.laterBranch.races[MODDED.RaceID].snapshots.length, 2)),
     entry('modded: the save read again after a later one changes nothing in the record and adds no write', (s) => same({ same: equal(s.older.file, s.later), writes: s.older.writes, branches: Object.keys(s.older.registry.branches) }, { same: true, writes: 2, branches: ['b1'] })),
-    entry('modded: a failed read is noted and the empire snapshot is still written, with no capture and no object', (s) => same({ run: [s.failed.run.recorded, s.failed.run.failed.length, s.failed.run.superseded], snapshots: s.failed.branch.races[MODDED.RaceID].snapshots.length, captures: kindOf(s.failed.file, MODDED.RaceID).captures, objects: kindOf(s.failed.file, MODDED.RaceID).objects, failures: (kindOf(s.failed.file, MODDED.RaceID).failures || []).map(({ t, reason }) => [t, reason]) }, { run: [1, 0, false], snapshots: 1, captures: [], objects: {}, failures: [[s.t, 'the formation read failed']] })),
+    entry('modded: a failed read is noted and the empire snapshot is still written, with no capture and no object', (s) => same({ run: [s.failed.run.recorded, s.failed.run.failed.length, s.failed.run.superseded], snapshots: s.failed.branch.races[MODDED.RaceID].snapshots.length, captures: kindOf(s.failed.file, MODDED.RaceID).captures, objects: kindOf(s.failed.file, MODDED.RaceID).objects, failures: (kindOf(s.failed.file, MODDED.RaceID).failures || []).map(({ t, reason }) => [t, reason]) }, { run: [s.empires, 0, false], snapshots: 1, captures: [], objects: {}, failures: [[s.t, 'the formation read failed']] })),
     entry('modded: the capture after a failed one is recorded and the failure stays noted', (s) => same({ captures: kindOf(s.filled, MODDED.RaceID).captures.length, count: ids(kindOf(s.filled, MODDED.RaceID)).length, failures: kindOf(s.filled, MODDED.RaceID).failures.length }, { captures: 1, count: s.oracle.size, failures: 1 })),
     entry('modded: a failed read over a recorded capture changes no object and no capture', (s) => same(plain(kindOf(s.erased.after, MODDED.RaceID)), plain(kindOf(s.erased.before, MODDED.RaceID)))),
     entry('modded: the choice withdrawn reads no more and writes no more, and keeps what was recorded', (s) => same({ statements: s.off.statements, writes: s.off.writes, kept: equal(s.off.file, s.later) }, { statements: 0, writes: 0, kept: true })),
@@ -1087,8 +1090,8 @@ const passiveChecks = (m) => {
 
 // ---------- the browser ----------
 
-// The real app in Chromium (scripts/lib/page-server.js over a copy of the modded save, scripts/lib/browser-observe.js): the switch of the Survey Progress page, the Observed column after the first capture, a later save (the save served is changed and the app opened again) in which one formation moved and one changed its elements, and the Retention panel of the History page. What the page draws is read through the hooks the templates carry; what is judged is the text on screen.
-const BROWSER_SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire' }
+// The real app in Chromium (scripts/lib/page-server.js over a copy of the fixture, scripts/lib/browser-observe.js): the switch of the Survey Progress page, the Observed column after the first capture, a later save (the save served is changed and the app opened again) in which one formation moved and one changed its elements, and the Retention panel of the History page. What the page draws is read through the hooks the templates carry; what is judged is the text on screen.
+const BROWSER_SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 const SURVEY_FILE = path.join(pagesDirectory, 'survey-progress.vue')
 const DAY = 432000
@@ -1125,7 +1128,7 @@ const readObserved = () => {
 
 const BROWSER = { server: null, chrome: null, failure: null, copy: null, base: null, facts: null }
 
-// The formations of the race the browser save keeps: remote ones (on a ship) and ones at a colony, each with elements. The page lists every formation again at each step, so the 3,288 formations of the modded save are cut to as many as the checks need: some on screen with the scope on, some only with it off (the size predicted is for every formation, not for those in view), and the three the later save moves and changes.
+// The formations of the race the browser save keeps: remote ones (on a ship) and ones at a colony, each with elements. The page lists every formation again at each step, so the 5,337 formations of the fixture's race are cut to as many as the checks need: some on screen with the scope on, some only with it off (the size predicted is for every formation, not for those in view), and the three the later save moves and changes.
 const KEPT_REMOTE = 40
 const KEPT_AT_COLONIES = 20
 
@@ -1138,7 +1141,7 @@ const sqlOn = (database) => ({
   all: (sql) => new Promise((resolve, reject) => database.all(sql, (error, rows) => (error ? reject(error) : resolve(rows)))),
 })
 
-// A copy of the modded save with the race's formations cut to the ones the browser case needs, and what the case is told of it (`facts`): the game time, the StartYear, a ship that carries no formation, the formations on a ship that hold elements, and the formations the race has. The facts are read from the copy itself by SQL, not by the app. Resolves to the file.
+// A copy of the fixture with the race's formations cut to the ones the browser case needs, and what the case is told of it (`facts`): the game time, the StartYear, a ship that carries no formation, the formations on a ship that hold elements, and the formations the race has. The facts are read from the copy itself by SQL, not by the app. Resolves to the file.
 const trimmedSave = async () => {
   const file = path.join(os.tmpdir(), `ae-observations-base-${process.pid}.db`)
   const own = `GameID = ${MODDED.GameID} and RaceID = ${MODDED.RaceID}`
@@ -1203,7 +1206,7 @@ const SECOND_IN_RECORD = "(() => { const matched = window.$app.$route.matched; c
 
 const STEP_BOUND = 15000
 
-// The longest a pass of the recorder over the 3,288 formations of the modded save is waited for.
+// The longest a pass of the recorder over the 5,337 formations of the fixture's race is waited for.
 const PASS_BOUND = 30000
 
 // The case as a player meets it, each step read where it ends; resolves to the record of `observe`. A wait that does not end is a step that did not reach its change (kept in `steps`), never a throw, so that the checks name what is missing; the picking of the game and the arrival of the route are bounded and fail the observation. Each wait is for the thing it follows: the pass of the recorder the switch asked for (its request counted by the store and ended on this copy of the save), the pass the app started for the opened save, the rows or the record the page then draws, and the page's own reads (`settled` of scripts/lib/browser-observe.js: the page's count of the database calls it has out and none of its asynchronous reads updating); nothing is waited for by time. `plan.until` is the last stage a variant needs ('off', 'first', 'history' or 'detail'; none for the whole case): a fault whose named checks all read an earlier stage stops there, and a stage reads only what the checks it serves read.
@@ -1733,13 +1736,13 @@ const runPart = async (part) => {
   }
 }
 
-// The deadlines, in seconds: a part in memory runs the scenarios over the saves (the modded and the eight of falryx are read through SQL once for the process); a part served to the browser starts the app twice; the setup starts and warms the page server, the one cold start of the run.
+// The deadlines, in seconds: a part in memory runs the scenarios over the saves (the fixture and the eight of falryx are read through SQL once for the process); a part served to the browser starts the app twice; the setup starts and warms the page server, the one cold start of the run.
 const DEADLINES = { part: 240, mutant: 240, browser: 400, setup: 900 }
 const MUTATIONS_HEADING = '\nMutations: each must fail by a value the checks it names, and each benign rewrite none'
 
 const variantsOf = (options) => [
-  { key: 'groups', name: 'the observation record: units, words, the recorder over the saves', head: true, heading: 'The formation observation record: units, words and the recorder over the modded save, the falryx saves and the passive campaign', deadline: DEADLINES.part, run: () => runPart('groups') },
-  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of AuroraDB.db and a later copy of it, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser') },
+  { key: 'groups', name: 'the observation record: units, words, the recorder over the saves', head: true, heading: 'The formation observation record: units, words and the recorder over the fixture, the falryx saves and the passive campaign', deadline: DEADLINES.part, run: () => runPart('groups') },
+  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of the fixture and a later copy of it, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser') },
   ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind.includes('benign') ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id) })) : []),
 ]
 

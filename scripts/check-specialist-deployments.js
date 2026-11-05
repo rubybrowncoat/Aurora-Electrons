@@ -29,6 +29,7 @@ const { runChild } = require('./lib/check-pool')
 const { runSuite, step: sayStep } = require('./lib/suite-runner')
 const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
 const pageLoading = require('./page-loading')
+const { FIXTURE, convertedSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -266,8 +267,8 @@ const runSql = (raw, sql, params = []) => new Promise((resolve, reject) => {
 const wrap = (raw) => ({ query: async (sql) => [await allRows(raw, sql)], close: () => new Promise((resolve) => raw.close(() => resolve())) })
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.
-const openSave = (file) => new Promise((resolve, reject) => {
-  const resolved = path.resolve(root, file)
+const openSave = (file, recorded = false) => new Promise((resolve, reject) => {
+  const resolved = recorded ? convertedSave(file) : path.resolve(root, file)
 
   if (!fs.existsSync(resolved)) {
     resolve(null)
@@ -299,11 +300,49 @@ const memoryDatabase = async (source, tables) => {
   return wrap(raw)
 }
 
-// What the saves are known to hold: the specialist formations by state, the ground survey bodies the race knows, the ruins by state and those it has not surveyed, the colonies of the race.
+// The formation that is put at a colony on a ruin in the third save below, and moved from there to a colony with no ruin and no construct in the copies of the browser's tests: one of ten specialist formations of the migrated save, all aboard ships. The migrated save has no ruin the race has found (its three ruins on colony bodies are all identified). `plantedFixture` makes the save once, in the temp folder, from the fixture with the builders of the first such ruin made unidentified (the race's row in the table of known ruin builders deleted) and that formation taken off its ship and put at the colony on it, so that the race has formations in two states and one of them works a ruin.
+const BROWSER_FORMATION = 2508
+const plantedFixture = () => {
+  const source = path.resolve(root, FIXTURE.file)
+  const { size, mtimeMs } = fs.statSync(source)
+  const key = require('crypto').createHash('sha1').update(`${source}|${size}|${mtimeMs}|${BROWSER_FORMATION}|unidentified-builders`).digest('hex').slice(0, 16)
+  const target = path.join(os.tmpdir(), `ae-specialist-deployments-${key}.db`)
+
+  if (fs.existsSync(target)) {
+    return target
+  }
+
+  const { Database } = require('bun:sqlite')
+  const partial = `${target}.${process.pid}.partial`
+
+  fs.copyFileSync(source, partial)
+
+  const db = new Database(partial)
+  const known = `exists (select 1 from FCT_SystemBodySurveys s where s.SystemBodyID = b.SystemBodyID and s.RaceID = ${FIXTURE.raceId} and s.GameID = ${FIXTURE.gameId}) and exists (select 1 from FCT_RaceSysSurvey r where r.SystemID = b.SystemID and r.RaceID = ${FIXTURE.raceId} and r.GameID = ${FIXTURE.gameId})`
+
+  try {
+    const [site] = db.query(`select p.PopulationID as pop, b.RuinRaceID as builders from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = ${FIXTURE.gameId} and p.RaceID = ${FIXTURE.raceId} and b.RuinID > 0 and b.AbandonedFactories > 0 and ${known} order by p.PopulationID limit 1`).all()
+
+    db.exec(`delete from FCT_KnownRuinRace where RuinRaceID = ${site.builders} and RaceID = ${FIXTURE.raceId} and GameID = ${FIXTURE.gameId}`)
+    db.exec(`update FCT_GroundUnitFormation set ShipID = 0, PopulationID = ${site.pop} where FormationID = ${BROWSER_FORMATION}`)
+  } finally {
+    db.close()
+  }
+
+  if (fs.existsSync(target)) {
+    fs.rmSync(partial, { force: true })
+  } else {
+    fs.renameSync(partial, target)
+  }
+
+  return target
+}
+
+// What the saves are known to hold: the specialist formations by state, the ground survey bodies the race knows, the ruins by state and those it has not surveyed, the colonies of the race. The first is the migrated Galactic Shogunate save, whose specialists are all aboard ships; the second is a recorded 2.x game read through the copy with the star's component number renamed (`convertedSave` of scripts/lib/fixtures.js); the third is the planted save.
 const FIXTURES = [
-  { file: 'AuroraDB.db', GameID: 140, RaceID: 784, colonies: 75, specialists: 9, states: { idle: 0, busy: 0, embarked: 9, unresolved: 0, unknown: 0 }, geoBodies: 12, geoColonies: 1, ruins: { found: 2, hidden: 2 }, constructs: { bodies: 4, inactive: 0 } },
-  { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', GameID: 141, RaceID: 791, colonies: 102, specialists: 27, states: { idle: 27, busy: 0, embarked: 0, unresolved: 0, unknown: 0 }, geoBodies: 16, geoColonies: 2, ruins: { found: 3, hidden: 6 }, constructs: { bodies: 3, inactive: 2 } },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785, colonies: 101, specialists: 3, states: { idle: 2, busy: 1, embarked: 0, unresolved: 0, unknown: 0 }, geoBodies: 0, geoColonies: 0, ruins: { found: 1, hidden: 2 }, constructs: { bodies: 1, inactive: 0 } },
+  { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, colonies: 52, specialists: 10, states: { idle: 0, busy: 0, embarked: 10, unresolved: 0, unknown: 0 }, geoBodies: 0, geoColonies: 0, ruins: { found: 0, hidden: 5 }, constructs: { bodies: 2, inactive: 0 } },
+  { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', recorded: true, GameID: 141, RaceID: 791, colonies: 102, specialists: 27, states: { idle: 27, busy: 0, embarked: 0, unresolved: 0, unknown: 0 }, geoBodies: 16, geoColonies: 2, ruins: { found: 3, hidden: 6 }, constructs: { bodies: 3, inactive: 2 } },
+  { file: plantedFixture(), source: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, colonies: 52, specialists: 10, states: { idle: 0, busy: 1, embarked: 9, unresolved: 0, unknown: 0 }, geoBodies: 0, geoColonies: 0, ruins: { found: 1, hidden: 5 }, constructs: { bodies: 2, inactive: 0 } },
 ]
 
 // The save's facts in SQL written here and apart from the module's: the formations with their ratings and mass, the colonies' bodies, the bodies the race knows with ground survey work, the ruins it has found and those it has not surveyed, the system of each ship, the geosurvey of each colony, and the old per-colony ground survey read of the page.
@@ -325,7 +364,27 @@ const oracle = async (database, GameID, RaceID) => {
   // The commanders are read in one pass each: a subquery per formation scans the commander table once for each of them, and the modded save holds thousands of formations.
   const commands = await q(`with commanding as (select m.CommandID as id, count(*) as commanders from FCT_Commander m where m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID} group by m.CommandID), bonuses as (select m.CommandID as id, cb.BonusValue as bonus, row_number() over (partition by m.CommandID order by m.CommanderID) as place from FCT_Commander m join FCT_CommanderBonuses cb on cb.CommanderID = m.CommanderID and cb.BonusID = 2 where m.CommandType = 5 and m.GameID = ${GameID} and m.RaceID = ${RaceID}) select f.FormationID as id, f.ParentFormationID as parent, f.PopulationID as pop, coalesce(commanding.commanders, 0) as commanders, bonuses.bonus as bonus, (select coalesce(sum(e.Units * k.Size), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as size, (select coalesce(max(k.HQCapacity), 0) from FCT_GroundUnitFormationElement e join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = f.FormationID) as capacity from FCT_GroundUnitFormation f left join commanding on commanding.id = f.FormationID left join bonuses on bonuses.id = f.FormationID and bonuses.place = 1 where f.GameID = ${GameID} and f.RaceID = ${RaceID}`)
   const commandOf = new Map(commands.map((row) => [row.id, { ...row, size: Math.trunc(row.size) }]))
-  const totalSize = (id) => commandOf.get(id).size + commands.filter((row) => row.parent === id && row.id !== id).reduce((all, row) => all + totalSize(row.id), 0)
+  // The children of each command and the whole size under it, each worked once: the commands of the fixture nest deeply, and a scan of every command for the children of each of them does not finish.
+  const childrenOf = new Map()
+
+  commands.forEach((row) => {
+    if (row.id !== row.parent) {
+      if (!childrenOf.has(row.parent)) {
+        childrenOf.set(row.parent, [])
+      }
+
+      childrenOf.get(row.parent).push(row)
+    }
+  })
+
+  const sizes = new Map()
+  const totalSize = (id) => {
+    if (!sizes.has(id)) {
+      sizes.set(id, commandOf.get(id).size + (childrenOf.get(id) || []).reduce((all, row) => all + totalSize(row.id), 0))
+    }
+
+    return sizes.get(id)
+  }
   // The headquarters capacity against the whole size, an integer division as in the game: 0 beyond the capacity, 1 within it.
   const capacityShare = (row) => (totalSize(row.id) > 0 ? Math.min(1, Math.floor(row.capacity / totalSize(row.id))) : 1)
   const ownMultiplier = (row) => (capacityShare(row) < 1 ? 1 + ((row.bonus === null ? 1 : row.bonus) - 1) * capacityShare(row) : row.bonus === null ? 1 : row.bonus)
@@ -980,7 +1039,7 @@ const judge = async (ctx, list = results) => judged(await runChecks(list, ctx))
 
 // The save the browser opens and the game and race to pick on the Empires page: a race with formations in two states and a ruin worked by one of them, which tells every control apart. Each variant of the page gets a new browser context, so nothing it stores reaches another.
 const BROWSER_SAVE = 2
-const BROWSER_NAMES = { game: 'EggSample', race: 'EggSample' }
+const BROWSER_NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const CAPABILITIES_FILE = path.join(utilitiesDirectory, 'capabilities.js')
 const WITHHELD_TIMEOUT = 15000
 // The bounds of the children the controls of the harness start (`checkControls`): a probe of `finish`, which prints and ends before it starts a page server (a second or two), and the run of this script on the records of the page (`--only`, 7 s measured), each over five times its measured time, a minute for the probes and two for the run.
@@ -988,7 +1047,7 @@ const QUICK_LIMIT = 60000
 const NESTED_LIMIT = 120000
 
 // The formation of the browser's save that works the ruin there, and the colony it is put on in every copy below: one that holds no ruin and no ancient construct, so that the formation is idle when everything is read and only an unread ruin or construct read can leave its work in doubt.
-const MOVED_FORMATION = 557
+const MOVED_FORMATION = BROWSER_FORMATION
 const movedStatement = (fixture) => `update FCT_GroundUnitFormation set PopulationID = (select p.PopulationID from FCT_Population p where p.GameID = ${fixture.GameID} and p.RaceID = ${fixture.RaceID} and p.SystemBodyID not in (select SystemBodyID from FCT_SystemBody where GameID = ${fixture.GameID} and AbandonedFactories > 0) and p.SystemBodyID not in (select SystemBodyID from FCT_AncientConstruct where GameID = ${fixture.GameID}) order by p.PopulationID limit 1) where FormationID = ${MOVED_FORMATION}`
 
 // The optional reads of the page, each case with what is taken from a copy of the browser's save so that the read finds nothing, and the text of the capability registry that makes the input required (the planted fault).
@@ -1593,7 +1652,7 @@ const setUp = async () => {
   const databases = []
 
   for (const fixture of FIXTURES) {
-    databases.push(await openSave(fixture.file))
+    databases.push(await openSave(fixture.file, fixture.recorded))
   }
 
   const schemaSource = databases.find(Boolean)
@@ -2086,7 +2145,7 @@ const main = async () => {
   const totals = await runSuite({
     script: __filename,
     workers: 4,
-    inputs: FIXTURES.map((fixture) => fixture.file),
+    inputs: FIXTURES.map((fixture) => fixture.source || fixture.file),
     variants: variantsOf(),
     counts: () => ({ checks, failures }),
     prepare: async () => {

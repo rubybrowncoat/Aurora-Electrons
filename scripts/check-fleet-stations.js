@@ -20,7 +20,7 @@
   - page: the mount, the view, the tracked reads and their labels;
   - optional: the reads behind the panel hold nothing back: the page is ready while they are in flight or failed, and the panel shows the progress or the failure, with a Retry that reads again only the failed ones.
 
-  The saves (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loaders, compared with raw counts, and the orbit rule on every fleet in orbit.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) gives the real loaders, compared with raw counts, and the orbit rule on every fleet in orbit.
 
   Each planted fault must fail a check that needs no save and that it names. Each benign edit (wording, whitespace, the order of attributes or of a list) must leave every check that needs no save green with every other edit applied and under every planted fault, and alone for the first edit of each family in each file and for an edit a later one overwrites. A planted fault's run calls only the functions that make the checks it names and loads only the panel or the page they read; the head fails when a check a run names reads a part that run leaves out. Exit code 1 when a check fails.
 */
@@ -34,6 +34,7 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { compiledTemplate: compiled, renderTree: rendered, treeOf, attrsOf } = require('./lib/vue-render')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -47,10 +48,7 @@ const X = 'mixin'
 const V = 'component'
 const P = 'page'
 const NAMES = ['fleet-stations', 'scenario-records', 'provenance', 'history-milestones', 'economy-notes', 'place-data']
-const SAVES = [
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const SAVES = [fixtureSave()]
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 

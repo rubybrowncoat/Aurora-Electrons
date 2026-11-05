@@ -8,6 +8,9 @@ export const HISTORY_DAYS = 365
 // The cycle length taken when the history holds a single cycle end, so no length can be measured.
 export const DEFAULT_STEP_DAYS = 5
 const VERSIONS = ['2.7.x']
+
+// The rules of the wealth ledger that check-treasury-categories exercises on copies of the fixture with logged amounts planted from the game's own source: the stored amounts added up by cycle and by use, the cycle length, the span of a window, the yearly scaling and the shares of a side.
+const LEDGER_VERSIONS = ['3.1.x']
 const WEALTH_STRUCTURE = ['FCT_WealthData.UseID, TimeUsed, Amount', 'DIM_WealthUse.Description, Income, DisplayOrder', 'FCT_Game.GameTime']
 
 registerRule({
@@ -21,57 +24,57 @@ registerRule({
 
 registerRule({
   id: 'finances.stepLedger',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'wealth per cycle',
   verification: 'confirmed',
   structure: WEALTH_STRUCTURE,
-  note: 'A cycle\'s income, spending and net are the stored amounts of its uses added up, income by the use\'s Income flag. Arithmetic on stored values; it holds only what the game logs as income or spending.',
+  note: 'A cycle\'s income, spending and net are the stored amounts of its uses added up, income by the use\'s Income flag. Arithmetic on stored values; it holds only what the game logs as income or spending. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, with logged amounts of the newer uses written in from the game\'s own rules.',
 })
 
 registerRule({
   id: 'finances.cycleDays',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_WealthData.TimeUsed'],
-  note: 'The cycle length is the shortest gap between the logged cycle ends. In the modded save every one of 73 gaps is 5 days; in the stock sample save the 723 gaps run from 30 minutes to about 2 days, so there the shortest gap is not one cycle length and the longest gap is shown beside it. One logged cycle end has no gap to measure, so a default length is assumed.',
+  note: 'The cycle length is the shortest gap between the logged cycle ends. In the modded save every one of 73 gaps is 5 days; in the stock sample save the 723 gaps run from 30 minutes to about 2 days, so there the shortest gap is not one cycle length and the longest gap is shown beside it. One logged cycle end has no gap to measure, so a default length is assumed. A log shorter than a year is scaled by the time it spans, checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
   id: 'finances.coverage',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_WealthData.TimeUsed', 'FCT_Game.GameTime'],
-  note: 'The time the logged cycles of the window span, from the end before the first one to the last end. The first cycle of a save has no earlier end, so it is taken as long as the one after it, and a window of one cycle without an earlier end takes a default length.',
+  note: 'The time the logged cycles of the window span, from the end before the first one to the last end. The first cycle of a save has no earlier end, so it is taken as long as the one after it, and a window of one cycle without an earlier end takes a default length. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
   id: 'finances.windowChange',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'wealth',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'The net of every logged cycle in the window added up. It is the ledger\'s change, not a stored change of the treasury: the save keeps no earlier treasury to compare it with.',
+  note: 'The net of every logged cycle in the window added up. It is the ledger\'s change, not a stored change of the treasury: the save keeps no earlier treasury to compare it with. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
   id: 'finances.categoryPerYear',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'wealth/yr',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'The window\'s total scaled to 365 days by the time the window spans. Over the 30 days to today the modded save\'s scaled income was within 0.01% of the stored annual wealth figure (26324711 against 26325265); over 365 days it was 0.8% under. In the stock sample save the scaled income was 9% to 12% above the stored figure (256977 to 265046 against 237291), so the two do not agree there; the stored figure\'s own definition is not known here.',
+  note: 'The window\'s total scaled to 365 days by the time the window spans. Over the 30 days to today the modded save\'s scaled income was within 0.01% of the stored annual wealth figure (26324711 against 26325265); over 365 days it was 0.8% under. In the stock sample save the scaled income was 9% to 12% above the stored figure (256977 to 265046 against 237291), so the two do not agree there; the stored figure\'s own definition is not known here. The scaling itself is checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the rate over the window holds for a year'],
 })
 
 registerRule({
   id: 'finances.netPerYear',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'wealth/yr',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'The yearly income less the yearly spending, both scaled from the window. Arithmetic on the two yearly figures; the saves hold no stored net to compare it with.',
+  note: 'The yearly income less the yearly spending, both scaled from the window. Arithmetic on the two yearly figures; the saves hold no stored net to compare it with. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the rate over the window holds for a year'],
 })
 
@@ -87,11 +90,11 @@ registerRule({
 
 registerRule({
   id: 'finances.categoryShare',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 'fraction',
   verification: 'confirmed',
   structure: WEALTH_STRUCTURE,
-  note: 'A use\'s share of its own side: its window total over the total of the income uses, or of the spending uses. Arithmetic on stored amounts; no share when the side has nothing logged.',
+  note: 'A use\'s share of its own side: its window total over the total of the income uses, or of the spending uses. Arithmetic on stored amounts; no share when the side has nothing logged. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({

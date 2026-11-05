@@ -6,7 +6,7 @@ import { countText } from './math'
 import { withinOrbitalReach } from './minerals'
 import { registerRule, ruleSupports } from './provenance'
 
-const SITE_VERSIONS = ['2.7.x']
+const SITE_VERSIONS = ['3.1.x']
 
 registerRule({
   id: 'miningSites.deposit',
@@ -23,7 +23,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_Population.Efficiency, Population', 'FCT_SystemBody.RadiationLevel', 'FCT_Race.MineProduction'],
-  note: 'Mines with workers need a workforce (the colony\'s efficiency above 0), automated mines and civilian complexes do not; no mine produces without a deposit, with radiation of 10000 or more or at a race mine production of 0. Read from the game\'s mining rules, so the workforce and the radiation cut-off are unknown on a save whose game rules are not known (the stored radiation level stays readable); the sample saves have no colony whose mines stand idle for these reasons.',
+  note: 'Mines with workers need a workforce (the colony\'s efficiency above 0), automated mines and civilian complexes do not; no mine produces without a deposit, with radiation of 10000 or more or at a race mine production of 0. Read from the game\'s mining rules, so the workforce and the radiation cut-off are unknown on a save whose game rules are not known (the stored radiation level stays readable). The migrated Galactic Shogunate save has 19 colonies with mines and none stands idle for these reasons, so those cases are worked on rows changed in memory.',
   assumptions: ['A colony\'s stored efficiency of 0 means its manned mines have no workers; a colony without efficiency stored and with no population has none either.'],
 })
 
@@ -33,7 +33,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_Fleet.OrbitBodyID, AssignedPopulationID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew, MiningModules', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
-  note: 'Orbital mining modules add to the output of the race\'s colony on the body the fleet is at, when the fleet is assigned to that colony (an unassigned fleet is assigned to it), the body is no wider than the race\'s orbital mining limit and has a deposit; each undamaged module works at the share of the class crew aboard, so a ship with no crew aboard mines nothing. Read from the game\'s rules; the modded sample save has no orbital miner and the stock sample\'s all work.',
+  note: 'Orbital mining modules add to the output of the race\'s colony on the body the fleet is at, when the fleet is assigned to that colony (an unassigned fleet is assigned to it), the body is no wider than the race\'s orbital mining limit and has a deposit; each undamaged module works at the share of the class crew aboard, so a ship with no crew aboard mines nothing. Read from the game\'s rules; the migrated Galactic Shogunate save has no orbital miner, so those cases are worked on rows changed in memory.',
   assumptions: ['A fleet assigned to a colony that no longer exists is treated as unassigned.', 'Only fleets without move orders are judged; one with orders is moving or about to.'],
 })
 

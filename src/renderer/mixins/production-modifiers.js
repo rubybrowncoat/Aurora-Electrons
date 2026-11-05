@@ -4,11 +4,11 @@ import capabilityGates from './capability-gates'
 
 registerRule({
   id: 'production.populationCapacity',
-  versions: ['2.7.x'],
+  versions: ['3.1.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['FCT_Race.ConstructionProduction, OrdnanceProduction, FighterProduction, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PlanetaryInstallation.ConstructionValue, OrdnanceProductionValue, FighterProductionValue (the Light Naval Factory, installation 35)', 'FCT_PopulationInstallations.Amount', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_GroundUnitClass.ConstructionRating'],
-  note: 'A colony\'s yearly capacity for construction, ordnance or light naval units: the race\'s production rate times the installations\' rating times the colony\'s overall modifier (governor and sector bonus, species rate, economy, efficiency, radiation, stability and political status); construction adds the engineer formations\' share. The light naval rate and rating are stored in the columns FighterProduction and FighterProductionValue, which the schema keeps under their old names; the Light Naval Factory (installation 35) carries the rating. The ordnance figure matched the saved build rate of ordnance projects to within 0.15%; the construction and light naval figures are the same product on other columns and have no saved case. A colony the modifier read does not cover has no figure.',
+  note: 'A colony\'s yearly capacity for construction, ordnance or light naval units: the race\'s production rate times the installations\' rating times the colony\'s overall modifier (governor and sector bonus, species rate, economy, efficiency, radiation, stability and political status); construction adds the engineer formations\' share. The light naval rate and rating are stored in the columns FighterProduction and FighterProductionValue, which the schema keeps under their old names; the Light Naval Factory (installation 35) carries the rating. The ordnance figure matched the saved build rate of ordnance projects to within 0.15%; the construction and light naval figures are the same product on other columns and have no saved case. A colony the modifier read does not cover has no figure. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 // The columns each capacity multiplies together; a null one leaves the capacity unknown.

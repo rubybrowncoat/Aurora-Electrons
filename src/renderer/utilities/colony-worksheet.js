@@ -7,7 +7,7 @@ import { isKnownNumber } from './math'
 import { MINERALS } from './minerals'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.1.x']
 const SURVEY_INPUT = 'a geological survey of the body by the race'
 const COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
@@ -20,7 +20,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys.SystemBodyID, RaceID'],
-  note: 'The tons of one mineral in the body\'s deposit as the save stores them, shown only for a body the race has surveyed geologically (the survey covers the whole body, not one mineral). A body that is not surveyed has no figure, whatever the save holds for it. A surveyed body with no deposit of the mineral holds none. Deposits found by a later ground survey and the depletion of mining are not forecast: the figure is the deposit as of the save.',
+  note: 'The tons of one mineral in the body\'s deposit as the save stores them, shown only for a body the race has surveyed geologically (the survey covers the whole body, not one mineral). A body that is not surveyed has no figure, whatever the save holds for it. A surveyed body with no deposit of the mineral holds none. Deposits found by a later ground survey and the depletion of mining are not forecast: the figure is the deposit as of the save. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['a surveyed body with no deposit row of a mineral holds none of it'],
 })
 
@@ -30,7 +30,7 @@ registerRule({
   units: '0 to 1',
   verification: 'confirmed',
   structure: ['FCT_MineralDeposit.Accessibility', 'FCT_SystemBodySurveys.SystemBodyID, RaceID'],
-  note: 'How easily one mineral\'s deposit is mined, 0 to 1, as the save stores it, shown only for a body the race has surveyed geologically. A mineral with no deposit has no accessibility. The figure is the deposit as of the save; mining and later ground surveys change it.',
+  note: 'How easily one mineral\'s deposit is mined, 0 to 1, as the save stores it, shown only for a body the race has surveyed geologically. A mineral with no deposit has no accessibility. The figure is the deposit as of the save; mining and later ground surveys change it. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 export const amountKey = (mineralId) => `amount${mineralId}`

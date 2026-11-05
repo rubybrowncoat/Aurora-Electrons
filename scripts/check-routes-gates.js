@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-routes-gates.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791). The check copies it into a folder of its own and adds one life pod of the race and two of another race, one of a class the race holds an alias for and one of a class it holds none for (the save holds no pod). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy. A pod of another race must show the race's alias for its class and its id and never its ship name or crew, which the game shows only the owner of the pod (check `pods`).
+  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791, a recorded save of an earlier release that scripts/lib/fixtures.js `convertedSave` gives the star's component number under its present name). The check copies it into a folder of its own and adds one life pod of the race and two of another race, one of a class the race holds an alias for and one of a class it holds none for (the save holds no pod). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy. A pod of another race must show the race's alias for its class and its id and never its ship name or crew, which the game shows only the owner of the pod (check `pods`).
 
   Every planted fault must fail the checks it names by a wrong value or by the read error the page reports (`loadErrors.smallPlaces`), never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -17,6 +17,7 @@ const { runSuite } = require('./lib/suite-runner')
 const { HarnessError } = require('./lib/browser-observe')
 const { assert, boundary, harnessOwn, subjectModule, isSubjectThrow, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
 const { loadModule, loadPage, instantiate } = require('./lib/page-loader')
+const { convertedSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
@@ -54,7 +55,7 @@ const copies = () => {
 
   const intactFile = path.join(FOLDER, 'intact.db')
 
-  fs.copyFileSync(path.join(root, SAVE), intactFile)
+  fs.copyFileSync(convertedSave(SAVE), intactFile)
 
   const edit = new Database(intactFile)
   const [system] = edit.query(`select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 1`).all()

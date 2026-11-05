@@ -7,7 +7,7 @@
 
   The panel is the component the app ships: its script is loaded the way the pages' are (with the real persisted-view mixin), its template is compiled and rendered by Vue without a document, and what is read is the text and the attributes of the nodes. The body detail is rendered the same way, and the cost and the population limit the worksheet shows for a species are read against its two headlines. The Planner's own shownEvaluation is run for the evaluation it shows.
 
-  The save (saves/AuroraDB-310-spookyerol-migrated.db, game 141, read-only, as races 784 and 785, the two that know bodies both surveyed and not) gives the real figures: the worksheet's deposits against the raw rows and its cost and limit against the assessment. A save that is not there is skipped.
+  The save (the fixture of scripts/lib/fixtures.js, game 141, read-only, as races 784 and 785, the two that know bodies both surveyed and not) gives the real figures: the worksheet's deposits against the raw rows and its cost and limit against the assessment. A save that is not there is skipped.
 
   Each planted fault in a source must fail the checks it names, none of them a check of a save. Exit code 1 when a check fails.
 */
@@ -22,6 +22,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -41,9 +42,10 @@ const FILES = {
 }
 
 const NAMES = ['colony-worksheet', 'colonization', 'colonization-data', 'habitability', 'colonies', 'minerals', 'provenance', 'math']
+// The fixture as its player race and as the second race of its game that knows bodies both surveyed and not (race 785, pinned with the figures read from the save: re-pinned with them when the fixture moves).
 const SAVES = [
-  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 784 },
-  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 785 },
+  fixtureSave(),
+  { ...fixtureSave(), race: 785 },
 ]
 
 const STUBS = {

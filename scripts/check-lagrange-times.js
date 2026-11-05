@@ -8,7 +8,7 @@
   - a ship with no crew aboard is not a candidate, whatever its class needs, so a class that needs none but carries none is skipped too: a fleet times at its quickest ready ship whatever zero-crew ships sail with it, and a fleet of zero-crew and damaged ships has no time (no figure, never 0) and names no division by the crew;
   - a current crew that is not in the save is unknown, not crewless, whatever its class needs: a class that needs none with its crew missing gives no time and is disclosed in a mixed fleet as possibly quicker, while its activities that the class never scales keep the share of 1;
   - the duration is 60 / sqrt(mass) months of 30 days times that multiplier, and the game's 32-bit integer time caps it at 2,147,483,647 seconds (24855.13 days): a tiny body or a very short crew gives the cap and never a larger or non-finite figure;
-  - on the interim 3.1 fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784: the values the 2.7 game stored under the 3.1 schema) every body of the page's list is timed from the save's stored mass, crew and captain's Production bonus read by SQL here, a crew of 0 planted in a copy of the save leaves no ship and no time, and a crew of 1 gives the cap on the light bodies and a figure below it on the heavy ones;
+  - on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784: the values the 2.7 game stored under the 3.1 schema) every body of the page's list is timed from the save's stored mass, crew and captain's Production bonus read by SQL here, a crew of 0 planted in a copy of the save leaves no ship and no time, and a crew of 1 gives the cap on the light bodies and a figure below it on the heavy ones;
   - the stabilisation activity of a zero-crew ship is blocked at factor 0, never an unsupported figure, a class that needs none whose current crew is missing is unknown there rather than blocked, and the two timing rules and `crew.stabilisation` stand for 3.1.x.
   The fixture holds no zero-crew stabilisation ship of the race (specimen S18 is tier b of AE-310-03), so the zero-crew cases are written into copies of the save here, and the fixture's own stored values are the 2.7 game's. A save that is not there reads UNSUPPORTED.
 
@@ -25,11 +25,12 @@ const { loadUtilities } = require('./lib/utilities')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
-const GAME = 141
-const RACE = 784
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const COMPONENT = 29
 const PRODUCTION_BONUS = 5
 const BASE_DAYS = 60 * 30

@@ -21,6 +21,7 @@ const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { loadPage, instantiate } = require('./lib/page-loader')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -198,9 +199,8 @@ const openSave = (file) => new Promise((resolve, reject) => {
 
 // What the saves are known to hold: formations, those stationed at no colony of the race, the roles of all and of those, and the systems of the marks (null where no figure is held).
 const FIXTURES = [
-  { file: 'AuroraDB.db', GameID: 140, RaceID: 784, formations: 3288, remote: 1568, systems: 31, colony: 1720, remoteRoles: { formations: 1568, geo: 9, xeno: 9, other: 1559, both: 9, unknown: 0 } },
+  { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, formations: 5337, remote: 268, systems: 21, colony: 5069, remoteRoles: { formations: 268, geo: 10, xeno: 10, other: 258, both: 10, unknown: 0 } },
   { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', GameID: 141, RaceID: 791, formations: 1455, remote: 0, systems: 0, colony: 1455, allRoles: { geo: 25, xeno: 2 } },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785, formations: 206, remote: 11, systems: 9, colony: 195, remoteRoles: { formations: 11, geo: 0, xeno: 0, other: 11, both: 0, unknown: 0 }, allRoles: { geo: 2, xeno: 1 } },
 ]
 
 // The formations of the race that are stationed at no colony of it, those at a colony the save lacks, and the system of each remote one the race has named, in SQL written here and apart from the module's.
@@ -475,7 +475,7 @@ pageAdd('page-map-roles', 'the role filter of the map narrows the marked systems
 
 pageAdd('page-map-read', 'the map reads the ground formations only while the mark is on', async (ctx) => {
   const asked = []
-  const fixture = FIXTURES[2]
+  const fixture = FIXTURES[0]
   const source = await openSave(fixture.file)
 
   assert.ok(source, `the named save ${fixture.file} must be available`)

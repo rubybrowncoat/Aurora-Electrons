@@ -14,7 +14,7 @@
   - `unserved`: a ship with its crew aboard loads at a colony with no spaceport or cargo shuttle station whatever bays it has (`Ship.GetCargoShuttleTransferMultiplier` is positive there, `Ship.method_159` counting one bay for none): a craft of 10 hull spaces or less, a ship over it with no bays or with every bay damaged and a ship with bays, in the stop, the Transport round trip and the Hauling cycle;
   - `versions`: the loading rules hold for the 3.1 line only, the landing rule stays registered for 2.7 alone while the 10 hull space limit of the ship term is the 3.1 line's own, a ship with no bays has a verdict there, and the rule notes cite the members of the source;
   - `footers`: the footers of Hauling and Information say that a ship with no bays loads at the technology alone, not that loading at a colony with no service is not settled;
-  - `fixture`: on the interim 3.1 fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784) the loaders' ship and colony columns, the officers' bonuses and the strength and time of a stop at a colony with a spaceport and one without each equal what is worked out here from the stored rows by SQL and arithmetic written apart from the loaders, for the fleet's ships as saved and for copies in which a freighter class has no bays or a ship has its bay damaged (the fixture has no such ship);
+  - `fixture`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the loaders' ship and colony columns, the officers' bonuses and the strength and time of a stop at a colony with a spaceport and one without each equal what is worked out here from the stored rows by SQL and arithmetic written apart from the loaders, for the fleet's ships as saved and for copies in which a freighter class has no bays or a ship has its bay damaged (the fixture has no such ship);
   - `recorded`: the loading times the migrated save stores for loads in progress (the time still to run, the full time is not stored) are no longer than the full-hold time of the same fleet at the same colony by the rule above.
   What no check here can settle on the migrated fixture: the full loading time the 3.1 game stores for a load that has just started (the save holds the remaining time of loads in progress only), which needs a save played under 3.1 (tier b).
 
@@ -32,11 +32,12 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { renderTree, treeOf } = require('./lib/vue-render')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
-const GAME = 141
-const RACE = 784
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const VERSION = '3.1.x'
 // The Logistics commander bonus (DIM_CommanderBonusType 24) and the cargo shuttle bay component type (DIM_ComponentType 14).
 const LOGISTICS = 24

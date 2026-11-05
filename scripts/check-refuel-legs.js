@@ -5,8 +5,8 @@
 
   Three parts, each with a head, planted faults and rewrites that say the same thing (scripts/lib/suite-runner.js):
   - `pure`: the ledger over constructed ships and sites, every expected figure written here from the rules and worked by hand: the legs, a colony with no stock, the rate and the stock as limits, the 20 HS limit of a low rate, the order tankers and recipients are taken in, the reserves, the hours, a closing visit, the litres a run needs, the gates, an input that is not known, and the netting of several fleets over one stock.
-  - `real`: the same ledger over the saves, read-only (the Falryx copy of the 2930 artifact and the EggSample save), set against SQL written here and the independent fills of scripts/lib/fuel-service-oracle.js.
-  - `page`: /information served by scripts/lib/page-server.js over a copy of the Falryx save in which fleets of cargo ships, a destination spaceport with a stock and a stationary tanker fleet are planted, read back in Chromium: the status, the cycle, the ledger, the tankers, the reserves not read, the draw order and its stability under sorting, the fill target, and the orders of the copy untouched.
+  - `real`: the same ledger over the saves, read-only (the Falryx copy of the 2930 artifact, a recorded 2.x game, and the migrated Galactic Shogunate save of scripts/lib/fixtures.js), set against SQL written here and the independent fills of scripts/lib/fuel-service-oracle.js.
+  - `page`: /information served by scripts/lib/page-server.js over a copy of the fixture save in which fleets of cargo ships, a destination spaceport with a stock and a stationary tanker fleet are planted (the rows they are made from are chosen from the fixture by SQL, `chooseWorld`), read back in Chromium: the status, the cycle, the ledger, the tankers, the reserves not read, the draw order and its stability under sorting, the fill target, and the orders of the copy untouched.
   Every planted fault must fail the checks it names by an assertion, and every rewrite must pass every check.
 
   Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2.
@@ -23,6 +23,7 @@ const { observe, validate, HarnessError, settled, installScreen, readFigure, rou
 const pageLoading = require('./page-loading')
 const { loadUtilities } = require('./lib/utilities')
 const { plantedGroup } = require('./lib/mutant-source')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const MODULE = 'fuel-ledger'
@@ -1228,8 +1229,10 @@ const PURE_BENIGN = [
 
 // ---------- the ledger over the saves, read-only ----------
 
-const SAVES = { falryx: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', egg: 'saves/AuroraDB.db' }
-const REAL = { falryx: { GameID: 141, RaceID: 791, fleet: 461113, tankers: 468378 }, egg: { GameID: 138, RaceID: 785, fleet: 462709 } }
+const SAVES = { falryx: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', fixture: FIXTURE.file }
+const REAL = { falryx: { GameID: 141, RaceID: 791, fleet: 461113, tankers: 468378 }, fixture: { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId } }
+// A ship that can serve as a tanker by the game's gates: its class is marked a tanker, has a refuelling rate and a Transfer - Fuel system (written here, with `c` the class).
+const TANKER_SQL = 'c.FuelTanker = 1 and c.RefuellingRate > 0 and exists (select 1 from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID and d.ComponentTypeID = 61 where cc.ClassID = c.ShipClassID)'
 
 const openRead = (file) => new Promise((resolve, reject) => {
   const raw = new sqlite3.Database(path.join(root, file), sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(raw)))
@@ -1310,7 +1313,7 @@ const realColonyChecks = {
   id: 'real-colonies',
   name: 'both saves: every colony of the race with a point and no stock is blocked at the stock, and no colony has a stock and no point',
   run: async (ctx) => {
-    for (const key of ['falryx', 'egg']) {
+    for (const key of ['falryx', 'fixture']) {
       await withSave(key, async (raw, database) => {
         const ids = REAL[key]
         const sites = await ctx.mod.loadFuelSites(database, ids)
@@ -1334,25 +1337,32 @@ const realColonyChecks = {
 
 const realTankerChecks = {
   id: 'real-tankers',
-  name: 'the EggSample save, race 785: the fleet of 50 tankers against ten planted recipients: the gates pass with no orders and the fill equals the independent one over all 50',
+  name: 'the fixture, race 784: the stationary fleet with the most tankers, alone at its stop, against ten planted recipients: the gates pass with no orders and the fill equals the independent one over all its tankers',
   run: async (ctx) => {
-    await withSave('egg', async (raw, database) => {
-      const ids = REAL.egg
+    await withSave('fixture', async (raw, database) => {
+      const ids = REAL.fixture
+      const [chosen] = await allOf(raw, `select s.FleetID as fleet from FCT_Ship s join FCT_Fleet f on f.FleetID = s.FleetID join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${ids.GameID} and s.RaceID = ${ids.RaceID} and f.OrbitBodyID > 0 and ${TANKER_SQL} and not exists (select 1 from FCT_MoveOrders m where m.FleetID = s.FleetID) group by s.FleetID order by count(*) desc, s.FleetID limit 1`)
       const loaded = await ctx.mod.loadFuelSites(database, ids)
-      const fleet = loaded.fleets.find((row) => row.FleetID === ids.fleet)
-      const donors = await allOf(raw, `select s.ShipID id, s.Fuel fuel, c.MinimumFuel minimum, c.RefuellingRate rate, c.FuelCapacity cap from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = ${ids.fleet}`)
+      const fleet = loaded.fleets.find((row) => row.FleetID === chosen.fleet)
+      const donors = await allOf(raw, `select s.ShipID id, s.Fuel fuel, c.MinimumFuel minimum, c.RefuellingRate rate, c.FuelCapacity cap from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = ${chosen.fleet} and ${TANKER_SQL}`)
       const recipients = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((id) => hauler(id, 0, { FuelCapacity: 500000 + 50000 * id, RefuelPriority: (id % 3) + 1 }))
       const planted = colonyRow(987654321, { SystemID: fleet.SystemID, SystemBodyID: fleet.OrbitBodyID, FuelStockpile: 0, RefuellingPoints: 0 })
-      const sites = { ...loaded, colonies: [...loaded.colonies, planted] }
+      // The fixture keeps other tanker fleets at the same body, each served as a service of its own after the fleets ahead of it: the sites hold the chosen fleet alone, so that its tankers are the whole supply the independent fill is worked over.
+      const sites = { ...loaded, fleets: [fleet], colonies: [...loaded.colonies, planted] }
       const ledger = ledgerOf(ctx, { ships: recipients, stops: [{ name: 'Orbit', PopulationID: planted.PopulationID, SystemID: fleet.SystemID, Xcor: fleet.Xcor, Ycor: fleet.Ycor }, at(null, 'Far')], sites })
       const service = ledger.stops[0].service.services.find((part) => part.kind === 'tankers')
       const truth = fuelFillTruth.tankerFill({ tankers: donors.map((row) => ({ id: row.id, fraction: row.fuel / row.cap, surplus: Math.floor(row.fuel) - row.minimum, rate: row.rate })), recipients: recipients.map((ship) => ({ id: ship.ShipID, priority: ship.RefuelPriority, classPriority: ship.ClassRefuelPriority, capacity: ship.FuelCapacity, size: ship.Size, litres: ship.FuelCapacity })) })
 
-      assert.equal(donors.length, 50, 'the fleet has 50 tankers')
+      assert.ok(donors.length >= 2, `the fleet has ${donors.length} tankers`)
       assert.equal(fleet.FirstOrderStationary, 1, 'the fleet has no orders')
       assert.equal(service.permission, 'allowed', 'the gates pass')
-      recipients.forEach((ship) => near(service.perShip.get(ship.ShipID), truth.received.get(ship.ShipID) || 0, `ship ${ship.ShipID} receives what the independent fill gives`))
-      donors.forEach((row) => near(service.tankers.find((tanker) => tanker.key === `tanker:${row.id}`).drawn, truth.drawn.get(row.id), `tanker ${row.id} gives what the independent fill takes`))
+      recipients.forEach((ship) => near(service.perShip.get(ship.ShipID) || 0, truth.received.get(ship.ShipID) || 0, `ship ${ship.ShipID} receives what the independent fill gives`))
+      donors.forEach((row) => {
+        const given = service.tankers.find((tanker) => tanker.key === `tanker:${row.id}`)
+
+        assert.ok(given, `tanker ${row.id} is one of the service's tankers (${service.tankers.map((tanker) => tanker.key).join(', ')})`)
+        near(given.drawn, truth.drawn.get(row.id), `tanker ${row.id} gives what the independent fill takes`)
+      })
       near(service.residual, [...truth.residual.values()].reduce((sum, litres) => sum + litres, 0), 'the residual of the fleet')
     })
   },
@@ -1362,19 +1372,63 @@ const REAL_CHECKS = [realCargoChecks, realColonyChecks, realTankerChecks]
 
 // ---------- the planted world of the page ----------
 
-const FALRYX = 'saves/AuroraDB_270_Falryx_date_issue.db'
-const IDS = { GameID: 141, RaceID: 785 }
-const NAMES = { game: 'Orphean Concord', race: 'Meacham Clan' }
+const BASE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 
-// The run of the page: from colony 48978 (a system with no stock) to the spaceport planted at colony 48979 in the next system, 400 hours at 1,490 km/s each way. Each cargo ship holds 20,000 L (the class is cut to that), starts with 17,000 L and burns the 25.9 L/h of its engines, so a leg takes about 10,360 L, a ship reaches the destination with more than half a leg in its tank (the litres a ship takes to reach the next stop are then exact) and the round trip does not fit without a fill.
-const WORLD = { origin: 48978, destination: 48979, originBody: 1989396, destinationBody: 1989404, originSystem: 21629, destinationSystem: 21630, jumpOut: 59542, jumpIn: 59547, classId: 62907, tankerClass: 62897, speed: 1490, hours: 400, capacity: 20000, fuel: 17000, spaceport: 33 }
+// What the page's run is built to hold: a leg takes 10,360 L, each cargo ship holds 20,000 L (its class is cut to that) and starts with 17,000 L, so a ship reaches the destination with more than half a leg in its tank (the litres a ship takes to reach the next stop are then exact) and the round trip does not fit without a fill.
+const LEG_LITRES = 10360
+const CARGO_CAPACITY = 20000
+const CARGO_FUEL = 17000
+
+// The rows of the fixture the page is run on, found by SQL written here: two colonies of the race in two systems joined by a jump link the race has explored (the origin, whose stock is cleared, and the destination, which is given a spaceport); the cargo class, of ships with engines and no refuelling that has three fleets of two ships of that class alone, the one whose burn is nearest 25.9 L/h, with those three fleets; and the tanker class, with a Transfer - Fuel system and a refuelling rate, the stationary tanker fleet being cloned from the fleet of its first ship. The leg is 10,360 L at the burn of the cargo class, so its hours are 10,360 over the burn.
+const chooseWorld = () => {
+  const { Database } = require('bun:sqlite')
+  const db = new Database(path.join(root, BASE), { readonly: true })
+  const { GameID: g, RaceID: r } = IDS
+  const rows = (sql) => db.query(sql).all()
+  const own = `x.GameID = ${g} and x.RaceID = ${r}`
+  const explored = (point) => `exists (select 1 from FCT_RaceJumpPointSurvey s where s.GameID = ${g} and s.RaceID = ${r} and s.WarpPointID = ${point}.WarpPointID and s.Explored = 1)`
+
+  try {
+    const [link] = rows(`select * from (select a.WarpPointID as jumpOut, b.WarpPointID as jumpIn, a.SystemID as originSystem, b.SystemID as destinationSystem, (select min(x.PopulationID) from FCT_Population x where ${own} and x.SystemID = a.SystemID and x.Population > 0) as origin, (select min(x.PopulationID) from FCT_Population x where ${own} and x.SystemID = b.SystemID and x.Population > 0) as destination, (select count(*) from FCT_Population x where ${own} and x.SystemID = a.SystemID) + (select count(*) from FCT_Population x where ${own} and x.SystemID = b.SystemID) as colonies from FCT_JumpPoint a join FCT_JumpPoint b on b.WarpPointID = a.WPLink and b.GameID = a.GameID and b.WPLink = a.WarpPointID and b.SystemID <> a.SystemID where a.GameID = ${g} and ${explored('a')} and ${explored('b')}) where origin is not null and destination is not null order by colonies, jumpOut limit 1`)
+
+    if (!link) {
+      throw new HarnessError('the fixture holds no explored jump link between two systems with a colony of the race')
+    }
+
+    const bodyOf = (colony) => rows(`select SystemBodyID as id from FCT_Population where PopulationID = ${colony}`)[0].id
+    const classes = rows(`select s.ShipClassID as classId, c.EnginePower * c.FuelEfficiency as burn, c.MaxSpeed as speed from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${g} and s.RaceID = ${r} and c.EnginePower > 0 and c.FuelEfficiency > 0 and c.MaxSpeed > 0 and coalesce(c.RefuellingRate, 0) = 0 and (c.CargoCapacity > 0 or c.ColonistCapacity > 0) group by s.ShipClassID having count(*) >= 6 order by abs(c.EnginePower * c.FuelEfficiency - 25.9), s.ShipClassID`)
+    const cargo = classes.map((klass) => ({ klass, fleets: rows(`select f.FleetID as id from FCT_Fleet f where f.GameID = ${g} and f.RaceID = ${r} and (select count(*) from FCT_Ship s where s.FleetID = f.FleetID) = 2 and not exists (select 1 from FCT_Ship s where s.FleetID = f.FleetID and s.ShipClassID <> ${klass.classId}) order by f.FleetID limit 3`) })).find(({ fleets }) => fleets.length === 3)
+
+    if (!cargo) {
+      throw new HarnessError('the fixture holds no class of ships with engines that has three fleets of two of its ships alone')
+    }
+
+    const [tanker] = rows(`select s.ShipClassID as classId, c.FuelCapacity as capacity from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${g} and s.RaceID = ${r} and ${TANKER_SQL} group by s.ShipClassID having count(distinct s.ShipID) >= 2 order by count(distinct s.ShipID) desc, s.ShipClassID limit 1`)
+
+    if (!tanker) {
+      throw new HarnessError('the fixture holds no class with a Transfer - Fuel system and a refuelling rate that has two ships')
+    }
+
+    const tankers = rows(`select ShipID as id, FleetID as fleet from FCT_Ship where GameID = ${g} and RaceID = ${r} and ShipClassID = ${tanker.classId} order by ShipID limit 2`)
+    const names = ['Zulu Convoy', 'Yankee Convoy', 'Xray Convoy']
+
+    return {
+      WORLD: { origin: link.origin, destination: link.destination, originBody: bodyOf(link.origin), destinationBody: bodyOf(link.destination), originSystem: link.originSystem, destinationSystem: link.destinationSystem, jumpOut: link.jumpOut, jumpIn: link.jumpIn, classId: cargo.klass.classId, tankerClass: tanker.classId, speed: cargo.klass.speed, hours: LEG_LITRES / cargo.klass.burn, capacity: CARGO_CAPACITY, fuel: CARGO_FUEL, spaceport: 33 },
+      FLEETS: cargo.fleets.map((fleet, index) => ({ id: fleet.id, name: names[index], ships: rows(`select ShipID as id from FCT_Ship where FleetID = ${fleet.id} order by ShipID`).map((ship) => ship.id) })),
+      TANKERS: { fleetName: 'Depot tankers', source: tankers[0].fleet, eligible: tankers[0].id, blocked: tankers[1].id, blockedFuel: Math.floor(tanker.capacity / 4) },
+    }
+  } finally {
+    db.close()
+  }
+}
+
+// The run of the page: from the origin colony (a system with no stock) to the spaceport planted at the destination colony in the next system, one leg each way, the hours of a leg taking the litres above at the burn of the cargo class. The fleets are of two ships each, named so that the order of their names is the reverse of the order of their IDs. The stationary tanker fleet of the `tankers` variant: a ship of the tanker class with 31,080 L above its minimum and a clone of its class with no Transfer - Fuel system.
+const { WORLD, FLEETS, TANKERS } = chooseWorld()
 const LEG_KM = WORLD.hours * 3600 * WORLD.speed
-// The fleets of two ships each, named so that the order of their names is the reverse of the order of their IDs.
-const FLEETS = [{ id: 460019, name: 'Zulu Convoy', ships: [195834, 195836] }, { id: 460021, name: 'Yankee Convoy', ships: [195838, 195840] }, { id: 460023, name: 'Xray Convoy', ships: [195842, 195844] }]
 const NAME_ORDER = ['Xray Convoy', 'Yankee Convoy', 'Zulu Convoy']
-// The stationary tanker fleet of the `tankers` variant: a Lynx with 700,000 L above its minimum and a clone of its class with no Transfer - Fuel system.
-const TANKERS = { fleetName: 'Depot tankers', source: 460006, eligible: 195791, blocked: 196154, blockedFuel: 1000000 }
 // The refuelling rate of the race in the planted copy: low, so that the hours a fill takes show in the days of the round trip.
 const RATE = 500
 
@@ -1409,6 +1463,8 @@ const baseStatements = () => [
   `update FCT_JumpPoint set Xcor = ${LEG_KM}, Ycor = 0 where WarpPointID = ${WORLD.jumpOut}`,
   `update FCT_JumpPoint set Xcor = 0, Ycor = 0 where WarpPointID = ${WORLD.jumpIn}`,
   `update FCT_ShipClass set FuelCapacity = ${WORLD.capacity} where ShipClassID = ${WORLD.classId}`,
+  // The fixture holds 145 fleets of the race and the panel pages its rows: every fleet is marked as a shipping line's, so that the panel lists only the planted fleets (set back to 0 below).
+  `update FCT_Fleet set ShippingLine = 1 where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID}`,
   `delete from FCT_MoveOrders where FleetID in (${FLEETS.map((fleet) => fleet.id).join(', ')})`,
   ...FLEETS.flatMap((fleet) => [
     `update FCT_Fleet set FleetName = '${fleet.name}', ShippingLine = 0, Speed = ${WORLD.speed}, UseMaximumSpeed = 1, SystemID = ${WORLD.originSystem}, Xcor = 0, Ycor = 0 where FleetID = ${fleet.id}`,
@@ -1416,8 +1472,9 @@ const baseStatements = () => [
   ]),
 ]
 
-// The statements of the tanker fleet at the destination's body.
+// The statements of the tanker fleet at the destination's body. The class of the tanker is given a refuelling rate of 450,000 L/h in the copy: the fixture's most numerous tanker class (R115 Lookout) refuels at 15,000 L/h, under which a tanker serves recipients of 20 HS or less only and would serve none of the cargo ships of this world.
 const tankerStatements = (fleetId, classId, surplus) => [
+  `update FCT_ShipClass set RefuellingRate = 450000 where ShipClassID = ${WORLD.tankerClass}`,
   'drop table if exists temp.VIR_Fleet',
   `create temp table VIR_Fleet as select * from FCT_Fleet where FleetID = ${TANKERS.source}`,
   `update temp.VIR_Fleet set FleetID = ${fleetId}, FleetName = '${TANKERS.fleetName}', SystemID = ${WORLD.destinationSystem}, OrbitBodyID = ${WORLD.destinationBody}, Xcor = 0, Ycor = 0, LastMoveTime = 0, ShippingLine = 0`,
@@ -1443,7 +1500,7 @@ const plantWorld = async (variants = VARIANTS) => {
   for (const variant of variants) {
     const file = path.join(folder, `${variant}.db`)
 
-    fs.copyFileSync(path.join(root, FALRYX), file)
+    fs.copyFileSync(path.join(root, BASE), file)
 
     const raw = await openRw(file)
 
@@ -2290,16 +2347,17 @@ const tankerProblems = (view, plans, truth, words) => plans.flatMap((plan) => {
   }
 
   const lines = parts[0].tankers.filter((line) => line.on).map((line) => line.text)
+  // The litres are read after the name of the ship: a name with a word that starts with a capital L after a space (R115 Lookout) reads as a litre figure.
   const problems = []
   const lineOf = (name) => lines.filter((line) => line.includes(name))
   const [eligible, blocked] = [lineOf(data.tanker.name), lineOf(data.blocked.name)]
   const wantedFigures = (plan.source.served ? [plan.source.entry, plan.source.residual] : [plan.source.entry]).map(figure)
 
-  if (eligible.length !== 1 || litreFigures(eligible[0]).join() !== wantedFigures.join()) {
+  if (eligible.length !== 1 || litreFigures(eligible[0].replace(data.tanker.name, '')).join() !== wantedFigures.join()) {
     problems.push([plan.name, 'the eligible tanker: the litres it had at entry and has left', eligible, wantedFigures])
   }
 
-  if (blocked.length !== 1 || !blocked[0].includes(words.reasons['no-system']) || litreFigures(blocked[0]).length) {
+  if (blocked.length !== 1 || !blocked[0].includes(words.reasons['no-system']) || litreFigures(blocked[0].replace(data.blocked.name, '')).length) {
     problems.push([plan.name, 'the tanker with no transfer system: its reason and no litres', blocked, words.reasons['no-system']])
   }
 
@@ -2814,6 +2872,16 @@ const CONTROL_FAULT = 'a tanker that cannot serve is drawn as giving'
 // The gate's grouped pass: the declared groups run, and no solo fault or rewrite does (owner, 2026-11-01, D1 option B).
 const GROUPS_ONLY = process.argv.includes('--groups')
 
+// The page reads the fixture as a save of the line, and its verdicts rest on the loading strength rule (`transport.handlingStrength`): a rule not verified for the line leaves every verdict not known, so the page's groups are not run, and the skip is printed with the real head, never counted, until the rule holds for the line.
+const LINE_VERSION = '3.1.x'
+let PAGE_VERIFIED = true
+
+const pageVerified = async () => {
+  const loaded = await loadUtilities(['provenance', 'transport'])
+
+  return loaded.provenance.ruleSupports('transport.handlingStrength', LINE_VERSION) === true
+}
+
 const variantsOf = (mutating) => {
   validatePageGroups()
   const plants = mutating && !GROUPS_ONLY
@@ -2821,11 +2889,19 @@ const variantsOf = (mutating) => {
   const requested = new Set([...(args.variants || []), ...(args.worker || [])])
   const aliases = plants ? [...PAGE_GROUP_OF].filter(([index]) => requested.has('page-fault:' + index)).map(([index, group]) => ({ key: 'page-fault:' + index, name: 'fault caught: ' + PAGE_FAULTS[Number(index)].name, pool: 'suite', needs: sessionsOf(group.keys), deadline: DEADLINES.page, run: () => pageGroup(group, [group.members.find((member) => member.key === index)]) })) : []
 
-  return [
+  const realHead = async () => {
+    await headOf(REAL_CHECKS, 'the saves')()
+
+    if (!PAGE_VERIFIED) {
+      console.log(`SKIP  page: needs tier b: the loading strength rule is not verified for the ${LINE_VERSION} line (owner AE-302-08), so the Fleets sailing together panel gives no verdict on any save the app accepts and its groups are not run (not run)`)
+    }
+  }
+
+  const variants = [
     { key: 'pure', name: 'the head: the ledger over constructed ships and sites', head: true, heading: 'The fuel ledger (utilities/fuel-ledger.js)', deadline: DEADLINES.pure, run: headOf(PURE_CHECKS, 'the module') },
     ...(mutating ? PURE_FAULTS.map((fault, index) => ({ key: `pure-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the ledger', deadline: DEADLINES.pure, run: faultOf(fault) })) : []),
     ...(mutating ? PURE_BENIGN.map((rewrite, index) => ({ key: `pure-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the ledger that say the same thing', deadline: DEADLINES.pure, run: rewriteOf(rewrite) })) : []),
-    { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: headOf(REAL_CHECKS, 'the saves') },
+    { key: 'real', name: 'the head: the ledger over the saves', head: true, heading: '\nThe ledger over the saves, read-only', deadline: DEADLINES.real, run: realHead },
     { key: 'page', name: 'the head: the Fleets sailing together panel as it is', head: true, heading: '\nThe Fleets sailing together panel of /information (scripts/lib/page-server.js over a planted copy of a save)', pool: 'suite', needs: VARIANTS, deadline: DEADLINES.pageHead, run: pageHeadOf(null, 'the page') },
     ...(plants ? [{ key: 'page-warm', name: 'the head: the Fleets sailing together panel as it is, in the session of the tankers', head: true, heading: '\nthe page again in one session, for the control of the warm page server', pool: 'suite', needs: sessionsOf(neededBy(WARM_CHECKS)), deadline: DEADLINES.page, run: pageHeadOf(WARM_CHECKS, 'the page in the session of the tankers') }] : []),
     ...(plants ? PAGE_FAULTS.flatMap((fault, index) => PAGE_GROUP_OF.has(String(index)) ? [] : [{ key: 'page-fault:' + index, name: 'fault caught: ' + fault.name, heading: '\nplanted faults of the page', pool: 'suite', needs: sessionsOf(neededBy(fault.fails, { least: true })), deadline: DEADLINES.page, run: pageFault(fault) }]) : []),
@@ -2833,13 +2909,17 @@ const variantsOf = (mutating) => {
     ...(plants ? PAGE_BENIGN.map((rewrite, index) => ({ key: `page-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', needs: sessionsOf(neededBy(rewrite.checks, { least: true })), deadline: DEADLINES.pageHead, run: pageRewrite(rewrite) })) : []),
     ...aliases,
   ]
+
+  return PAGE_VERIFIED ? variants : variants.filter(({ key }) => !key.startsWith('page'))
 }
 
 const main = async () => {
+  PAGE_VERIFIED = await pageVerified()
+
   const mutating = mayMutate() || GROUPS_ONLY
   const totals = await runSuite({
     script: __filename,
-    inputs: [SAVES.falryx, SAVES.egg, FALRYX],
+    inputs: [SAVES.falryx, SAVES.fixture],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
@@ -2866,7 +2946,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating && !GROUPS_ONLY ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page-warm', heading: '\nthe control of the warm page server' } : null,
+    control: mutating && !GROUPS_ONLY && PAGE_VERIFIED ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page-warm', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 
@@ -2881,4 +2961,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { plantWorld, WORLD, FLEETS, NAMES, FALRYX, LEG_KM }
+module.exports = { plantWorld, WORLD, FLEETS, NAMES, BASE, LEG_KM }

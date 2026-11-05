@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-industry-projects.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds a development project (the owner's decision Q7 of AE-31: none will be supplied), so each case plants rows into in-memory copies of the migrated fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784), as scripts/check-treasury-categories.js does. A planted project row is game-shaped: every column `Game.LoadIndustrialProjects` reads is set as `Game.SaveIndustrialProjects` writes it and `Population.method_147` makes it, on a design of the race that the game offers for a development project and the race has not researched (Population.method_178, method_179, method_180; Race.method_305), and the loader skips a row whose race, colony, species or wealth use the game does not hold, so the readers of the three kinds leave such a row out:
+  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds a development project (the owner's decision Q7 of AE-31: none will be supplied), so each case plants rows into in-memory copies of the migrated fixture (scripts/lib/fixtures.js, game 141, race 784), as scripts/check-treasury-categories.js does. A planted project row is game-shaped: every column `Game.LoadIndustrialProjects` reads is set as `Game.SaveIndustrialProjects` writes it and `Population.method_147` makes it, on a design of the race that the game offers for a development project and the race has not researched (Population.method_178, method_179, method_180; Race.method_305), and the loader skips a row whose race, colony, species or wealth use the game does not hold, so the readers of the three kinds leave such a row out:
   - `Population.ProcessIndustrialProjects` (Population.cs:2202-2213) takes the build points of a cycle from the construction capacity for Engineering, Ground Unit, Component, Construction and Space Station projects and from the ordnance capacity for Ordnance and Ordnance Projects; Light Naval has its own (`Game.LoadIndustrialProjects`, Game.cs:18652-18779, sets the category of a project from its type);
   - a development project's cost is twice the stored development cost of its item's tech and its minerals the item's, scaled by that cost over the item's own (Population.cs:8388-8479; `Game.cs:11499-11517` says what ProductionID is: the component of types 3 and 5, the missile of types 1 and 6, the ground unit class of type 7);
   - a completed Engineering Project adds the component to the colony's stock and researches its tech (Population.cs:2288-2300); an Ordnance Project adds ordnance and a Ground Unit Project adds nothing but the research (Population.cs:2264-2271 and 2301-2308);
@@ -36,11 +36,12 @@ const { renderTree, treeOf, attrsOf } = require('./lib/vue-render')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { mutating } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB-310-spookyerol-migrated.db'
-const GAME = 141
-const RACE = 784
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const SEPARATOR = '\''
 const NEAR = 1e-9
 

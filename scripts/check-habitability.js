@@ -9,6 +9,7 @@ const { assert, subjectModule, runChecks, judged, caughtAll } = require('./lib/f
 const { loadUtilities } = require('./lib/utilities')
 const { plantedPatch } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, INTERIM, fixturePath } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const file = path.join(root, 'src/renderer/utilities/habitability.js')
@@ -189,9 +190,10 @@ const compared = (h, bodies) => {
   return { count: bodies.length, match: valid.length - different.length, differ: different.length, invalid: invalid.length, moons: deltas.filter(({ moon }) => moon).length, minAbsDelta: abs[0] || 0, maxAbsDelta: abs[abs.length - 1] || 0, meanAbsDelta: abs.length ? abs.reduce((sum, delta) => sum + delta, 0) / abs.length : 0, maxAbsError: Math.max(0, ...abs), differences: different, invalidBodies: invalid }
 }
 
+// The first specimen is the interim fixture as recorded (INTERIM, not the default): its oracle is the 2.7 game's own stored temperatures and the count of its 59 bodies of eccentricity above 0.1, which stay with that save when `FIXTURE` moves.
 const oracle = async (h) => {
-  for (const [name, fixture] of [['migrated-2.7-temperatures', 'AuroraDB-310-spookyerol-migrated.db'], ['shipped-3.1-time-zero', 'AuroraDB_310_shipped.db']]) {
-    const filename = path.join(root, 'saves', fixture)
+  for (const [name, fixture] of [['migrated-2.7-temperatures', INTERIM.file], ['shipped-3.1-time-zero', 'saves/AuroraDB_310_shipped.db']]) {
+    const filename = path.join(root, fixture)
 
     if (!fs.existsSync(filename)) {
       console.log(`SKIP ${name}: ${fixture} is absent`)
@@ -255,14 +257,14 @@ const main = async () => {
 
   const modules = await loadUtilities(['colonization-data'], { stubs: { 'lodash/groupBy': GROUP_BY } })
   // The planner's loader on the migrated 3.1 save: the year inputs reach the rule and every gas row of an atmosphere carries the figures the rule reads (the share and the danger pairs in their 3.1 columns). It is not a temperature oracle.
-  const fixture = path.join(root, 'saves/AuroraDB-310-spookyerol-migrated.db')
+  const fixture = fixturePath()
 
   if (fs.existsSync(fixture)) {
     total += 1
     const database = new Database(fixture, { readonly: true })
 
     try {
-      const bodies = await modules['colonization-data'].loadBodies({ query: async (sql) => [database.query(sql).all()] }, { GameID: 141, RaceID: 784 })
+      const bodies = await modules['colonization-data'].loadBodies({ query: async (sql) => [database.query(sql).all()] }, { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId })
       const atmospheres = bodies.flatMap((body) => body.Atmosphere)
 
       assert.ok(bodies.length > 0 && bodies.every((body) => Number.isFinite(body.Year)), 'the planner loads every body year')

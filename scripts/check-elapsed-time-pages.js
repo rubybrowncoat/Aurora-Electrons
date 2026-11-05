@@ -3,8 +3,8 @@
 
   Run: bun scripts/check-elapsed-time-pages.js [--no-mutations] [--only=<text>|<text>...] [--probe] [--solo] [--faults=<original-index>[,<index>...]]
 
-  The save is a copy of saves/AuroraDB_271_skoormit_saved.db with the rows this script writes: a second way between two systems (a new pair of explored jump points, so that a way of two jumps and one of three both exist), the jump points of both ways given positions that make the two-jump way fly for hours between its jumps and the three-jump way a minute or two, two fleets with crews that draw different delays (one of them carrying a delay from a jump just made), and a speed typed into the page. The three-jump way is then the shortest and its waits make it the slower: Fewest jumps and Fastest time must choose the two-jump way, which flies about 150 times as far, and Shortest the three-jump one; a lower-case ranking would choose the three-jump way for Fastest time. Two more copies run in processes of their own (`WORLDS`): fleets that hold a speed of their own in a nebula (Hauling), and fleets set to their maximum speed with dust in the start system alone, whose cap the fleet carries past the jump into the clear system after it, so that the flight of the way is a range (Routes).
-  What the page should show is worked out here, in a clock and a search of the explored jump points written from the rules of the game's jump shock and nebulae and not from the modules of the app (nothing of src/renderer/utilities is imported): the ways between the two systems are enumerated from SQL rows, each flown at the speed with the delay of the crew drawn after every jump, and the wait at a jump is the delay less the time flown since the last one, with the longest case given two of the longest subpulses (12 hours) past the second the delay clears. A system with dust is flown at the cap the thinnest armour of the fleet allows there, and the longest case keeps the cap of each system left for a longest subpulse past its transit, as the game gives the speed back only at its next pass over the fleet. The page's figures are compared with that, each by the system and stop it belongs to:
+  The save is a copy of the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784) with the rows this script writes: five systems chosen from the explored jump points of the save, a second way between two of them (a new pair of explored jump points, so that a way of two jumps and one of three both exist), the jump points of both ways given positions that make the two-jump way fly for hours between its jumps and the three-jump way a minute or two, two fleets (the first two single-ship fleets with a cargo hold and engines) with crews that draw different delays (one of them carrying a delay from a jump just made) and a hold, a cargo shuttle bay, a technology and a spaceport that give the handling the oracle works out, and a speed typed into the page. The three-jump way is then the shortest and its waits make it the slower: Fewest jumps and Fastest time must choose the two-jump way, which flies about 150 times as far, and Shortest the three-jump one; a lower-case ranking would choose the three-jump way for Fastest time. Two more copies run in processes of their own (`WORLDS`): fleets that hold a speed of their own in a nebula (Hauling), and fleets set to their maximum speed with dust in the start system alone, whose cap the fleet carries past the jump into the clear system after it, so that the flight of the way is a range (Routes). The Transport and Hauling pages draw no round trip or cycle until the loading strength rule holds for the version of the save (owner AE-302-08): their checks and faults are printed as needs tier b and the world of the held speeds is skipped, and all of them run once the rule holds.
+  What the page should show is worked out here, in a clock and a search of the explored jump points written from the rules of the game's jump shock and nebulae and not from the modules of the app (the oracle imports nothing of src/renderer/utilities; only the gate of the Transport and Hauling pages reads whether the loading strength rule holds): the ways between the two systems are enumerated from SQL rows, each flown at the speed with the delay of the crew drawn after every jump, and the wait at a jump is the delay less the time flown since the last one, with the longest case given two of the longest subpulses (12 hours) past the second the delay clears. A system with dust is flown at the cap the thinnest armour of the fleet allows there, and the longest case keeps the cap of each system left for a longest subpulse past its transit, as the game gives the speed back only at its next pass over the fleet. The page's figures are compared with that, each by the system and stop it belongs to:
   - the route each order (Fewest jumps, Shortest, Fastest time) leaves on screen is the way that order picks in the oracle, by the names of the systems in the leg table;
   - each leg row's Flight, Transit, Wait (the range) and Elapsed (the upper case with the lower case beside it) lie within what the oracle gives, read as an interval of the width the display rounds to (a span reads 45 s, 3 min 20 s, 2 h 5 min, then 12.5 d, 4.1 mo, 2.3 y), and the Travel time tile and the start offset note agree;
   - the note under the Travel time tile gives the flight and the wait of the way, each the range from its lowest case to its highest, and their highest cases add up to the tile, where the cap carried past a jump makes the two cases of the flight differ;
@@ -27,32 +27,70 @@ const { declaredGroup } = require('./lib/suite-runner')
 const { plantedGroup } = require('./lib/mutant-source')
 const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE, fixtureRows } = require('./lib/fixtures')
+const { loadUtilities } = require('./lib/utilities')
 
 const root = path.resolve(__dirname, '..')
 const ROUTES_FILE = 'src/renderer/pages/routes.vue'
 const INFORMATION_FILE = 'src/renderer/pages/information.vue'
 const HAULING_FILE = 'src/renderer/pages/hauling.vue'
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const IDS = { GameID: 138, RaceID: 785 }
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+const SAVE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 // The bound of the run of each world of its own (a child process): the run of the fleets that hold a speed (its baseline, one fault and one rewrite) was measured at 28 s alone, the run of the carried cap (its control, baseline, one fault and one rewrite) at 29 s, and the bound is more than five times either.
 const WORLD_LIMIT = 150000
 const SPEED = 50000
 const YEAR = 31536000
 
-// The systems of the constructed pair of ways: the direct way runs start > mid > target (two jumps), the stepping way start > near > far > target (three, through the new pair of jump points between far and target).
-const SYSTEMS = { start: 21752, mid: 21756, near: 21759, far: 21766, target: 21762 }
-// Two fleets of one ship each at the start of both ways: `crew` has a crew of 400 grade points at 0.9 morale (a delay of 122 to 181 s) and no delay carried; `carrying` has the save's crew (grade 1000, a delay of 94 to 140 s) and 400 s of delay carried from a jump just made.
-const FLEETS = { crew: 460480, carrying: 460590 }
+// The systems of the constructed pair of ways: the direct way runs start > mid > target (two jumps), the stepping way start > near > far > target (three, through the new pair of jump points between far and target). Two fleets of one ship each at the start of both ways: `crew` has a crew of 400 grade points at 0.9 morale (a delay of 122 to 181 s) and no delay carried; `carrying` has the save's crew (grade 1000, a delay of 94 to 140 s) and 400 s of delay carried from a jump just made. The colonies of the Transport run: a colony of the race at the start and one in the far system. All of them are chosen from the save: five systems joined by one explored jump point each way along start-near, near-far, start-mid and mid-target, with no other explored link among them and with mid the only system next to both start and target and near the only one next to both start and far (so the fewest jumps is the direct way and the stepping way is the only other), a colony of the race at the start and in the far system, and the first two fleets of the race that hold one ship each with a cargo hold and engines.
+const worldOf = () => {
+  const links = fixtureRows('select a.SystemID as s, b.SystemID as t, count(*) as n from FCT_JumpPoint a inner join FCT_JumpPoint b on b.WarpPointID = a.WPLink inner join FCT_RaceJumpPointSurvey r on r.WarpPointID = a.WarpPointID and r.GameID = a.GameID and r.RaceID = ? and r.Explored = 1 where a.GameID = ? group by a.SystemID, b.SystemID order by a.SystemID, b.SystemID', IDS.RaceID, IDS.GameID)
+  const next = new Map()
+
+  links.forEach((link) => next.set(link.s, new Map([...(next.get(link.s) || []), [link.t, link.n]])))
+
+  const joined = (a, b) => next.has(a) && next.get(a).has(b)
+  const once = (a, b) => joined(a, b) && joined(b, a) && next.get(a).get(b) === 1 && next.get(b).get(a) === 1
+  const shared = (a, b) => [...next.get(a).keys()].filter((system) => joined(system, b)).length
+  const colony = (system) => (fixtureRows('select PopulationID as id from FCT_Population where GameID = ? and RaceID = ? and SystemID = ? order by PopulationID limit 1', IDS.GameID, IDS.RaceID, system)[0] || {}).id
+  let found = null
+
+  for (const [start, around] of next) {
+    for (const near of around.keys()) {
+      for (const mid of around.keys()) {
+        for (const far of near === mid || !once(start, near) || !once(start, mid) ? [] : next.get(near).keys()) {
+          for (const target of next.get(mid).keys()) {
+            const five = new Set([start, near, mid, far, target])
+            const alone = joined(start, far) || joined(start, target) || joined(near, target) || joined(mid, far) || joined(far, target) || joined(near, mid)
+
+            if (!found && five.size === 5 && once(near, far) && once(mid, target) && !alone && shared(start, target) === 1 && shared(start, far) === 1 && colony(start) && colony(far)) {
+              found = { start, near, mid, far, target }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const crews = fixtureRows('select f.FleetID as id from FCT_Fleet f inner join FCT_Ship s on s.FleetID = f.FleetID inner join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where f.GameID = ? and f.RaceID = ? and c.CargoCapacity > 0 and c.EnginePower > 500 group by f.FleetID having count(s.ShipID) = 1 order by f.FleetID limit 2', IDS.GameID, IDS.RaceID)
+
+  if (!found || crews.length < 2) {
+    throw new Error('the save has no five systems joined by explored jump points as the constructed ways need, with a colony of the race at the start and in the far system, or fewer than two fleets of one ship with a cargo hold and engines')
+  }
+
+  return { systems: found, fleets: { crew: crews[0].id, carrying: crews[1].id }, colonies: { origin: colony(found.start), destination: colony(found.far) } }
+}
+const WORLD = worldOf()
+const SYSTEMS = WORLD.systems
+const FLEETS = WORLD.fleets
 const CARRIED = 400
 // The longest subpulse the game runs (6 hours), after which its next pass over a fleet has come round; the longest wait carries a retry of two of them.
 const SUBPULSE = 21600
 const RETRY = 2 * SUBPULSE
 // The flights of the constructed ways, in seconds at SPEED: the stepping way is three short flights (the fleet to its first jump point, then inside near and far), the direct way two long ones, long enough to clear the delay of a jump but short of the retry's 12 hours.
 const FLIGHTS = { fleetToNear: 60, insideNear: 80, insideFar: 100, fleetToMid: 10000, insideMid: 20000 }
-// The colonies of the Transport run: the capital, and a colony in the target system. Their bodies are set where the star is and made to stay there, so that the run is flown from and to the points the clock below uses.
-const COLONIES = { origin: 48997, destination: 49085 }
+const COLONIES = WORLD.colonies
 const HAULING_JS = 'src/renderer/utilities/hauling.js'
 const TRANSPORT_JS = 'src/renderer/utilities/transport.js'
 // The handling oracle's constants, written from the rules of the game and not imported: seconds for one point of cargo at a strength of 1, the largest craft (in hull spaces) that lands with a strength of 1, the component type of a cargo shuttle bay, the commander bonus of Logistics (the fixture removes it, so that no officer scales a strength), and the move actions that load and unload minerals.
@@ -61,6 +99,9 @@ const SMALL_CRAFT = 10
 const SHUTTLE_BAY = 14
 const LOGISTICS_BONUS = 24
 const ACTIONS = { load: 223, unload: 63 }
+// What the constructed save gives every ship of the two fleets: the cargo it holds and the race's cargo shuttle technology (see `constructedSave`).
+const HOLD = 25000
+const TECHNOLOGY = 2
 // The order delay (seconds) the fixture gives each fleet's load or unload order.
 const DELAYS = { crew: { load: 3600 }, carrying: { unload: 5400 } }
 // The worlds of their own, each a copy of the save with these rows on top: both fleets set to their maximum speed or not (`maximum`), the thinnest armour of their ships and the dust of systems of the fixture. A cap is the armour times DUST_FACTOR over the density, cut to a whole number.
@@ -147,10 +188,21 @@ const constructedSave = async (world = null) => {
     await run(raw, `update FCT_ShipClass set MaxSpeed = ${SPEED}, Size = 1000.0 * EnginePower / ${SPEED} where ShipClassID in (select ShipClassID from FCT_Ship where FleetID in (${FLEETS.crew}, ${FLEETS.carrying}))`)
     await run(raw, `update FCT_SystemBody set OrbitalDistance = 0, Xcor = 0, Ycor = 0 where SystemBodyID in (select SystemBodyID from FCT_Population where PopulationID in (${COLONIES.origin}, ${COLONIES.destination}))`)
 
-    await run(raw, `update FCT_Fleet set Xcor = 0, Ycor = 0 where FleetID in (${FLEETS.crew}, ${FLEETS.carrying})`)
+    await run(raw, `update FCT_Fleet set SystemID = ${SYSTEMS.start}, Xcor = 0, Ycor = 0 where FleetID in (${FLEETS.crew}, ${FLEETS.carrying})`)
     await run(raw, `update FCT_Ship set GradePoints = 400, CrewMorale = 0.9, OverhaulFactor = 1, SensorDelay = 0 where FleetID = ${FLEETS.crew}`)
     await run(raw, `update FCT_Ship set GradePoints = 1000, CrewMorale = 1, OverhaulFactor = 1, SensorDelay = ${CARRIED} where FleetID = ${FLEETS.carrying}`)
     await run(raw, `delete from FCT_CommanderBonuses where BonusID = ${LOGISTICS_BONUS}`)
+
+    // The handling the oracle works out from: every ship of the two fleets holds 25,000 of cargo and no berths, carries one cargo shuttle bay of strength 1 and has its full crew; the race's technology is 2; the capital has one spaceport and the colony of the far system none (the installations that give a strength are taken from both first). So the capital loads at a strength of 4 and the far colony unloads at a strength of 2. A class of 500 engine power or less would come out at 10 hull spaces or less, which loads at a strength of 1, so the fleets are chosen above it.
+    const classes = `select ShipClassID from FCT_Ship where FleetID in (${FLEETS.crew}, ${FLEETS.carrying})`
+
+    await run(raw, `update FCT_ShipClass set CargoCapacity = ${HOLD}, ColonistCapacity = 0 where ShipClassID in (${classes})`)
+    await run(raw, `delete from FCT_ClassComponent where ClassID in (${classes}) and ComponentID in (select SDComponentID from FCT_ShipDesignComponents where ComponentTypeID = ${SHUTTLE_BAY})`)
+    await run(raw, `insert into FCT_ClassComponent (GameID, ClassID, ComponentID, NumComponent) select ${IDS.GameID}, ShipClassID, (select min(SDComponentID) from FCT_ShipDesignComponents where ComponentTypeID = ${SHUTTLE_BAY} and ComponentValue = 1), 1 from FCT_ShipClass where ShipClassID in (${classes})`)
+    await run(raw, `update FCT_Ship set CurrentCrew = (select Crew from FCT_ShipClass where ShipClassID = FCT_Ship.ShipClassID) where FleetID in (${FLEETS.crew}, ${FLEETS.carrying})`)
+    await run(raw, `update FCT_Race set CargoShuttleLoadModifier = ${TECHNOLOGY} where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID}`)
+    await run(raw, `delete from FCT_PopulationInstallations where PopID in (${COLONIES.origin}, ${COLONIES.destination}) and PlanetaryInstallationID in (select PlanetaryInstallationID from DIM_PlanetaryInstallation where CargoShuttleValue > 0)`)
+    await run(raw, `insert into FCT_PopulationInstallations (GameID, PopID, PlanetaryInstallationID, Amount) select ${IDS.GameID}, ${COLONIES.origin}, min(PlanetaryInstallationID), 1 from DIM_PlanetaryInstallation where CargoShuttleValue = 1`)
 
     // The Hauling page lists the fleets on repeat: both fleets cycle from the capital out by the stepping way to the colony in the far system and back, loading at the capital and unloading at that colony, the crew fleet with an hour of delay on its load order and the other with an hour and a half on its unload order. No officer bonus of Logistics is left, so that the strength is the race's technology alone.
     const bodies = Object.fromEntries((await all(raw, `select PopulationID as id, SystemBodyID as body from FCT_Population where PopulationID in (${COLONIES.origin}, ${COLONIES.destination})`)).map((row) => [row.id, row.body]))
@@ -652,16 +704,26 @@ const openEach = async (page, settle, names, spec, step) => {
   return seen
 }
 
-// Everything a player does on the Transport page: the run between two colonies opened, and the row of each fleet opened to show its round trip.
+// Everything a player does on the Transport page: the run between two colonies opened, the fleets picked, and the row of each fleet opened to show its round trip. The table lists every military fleet that carries cargo (the save has dozens, fifteen to a page), so the two fleets of the world are picked in the page's own selection of fleets, as a player narrows the table.
 const transportRun = async (page, settle, names, step) => {
   await open(page, `/information?from=colony:${COLONIES.origin}&to=colony:${COLONIES.destination}`, settle)
+  step('the two fleets are picked')
+  await page.waitForFunction(() => document.querySelector('[data-fleet-panel] .v-data-table') !== null, null, { timeout: TIMEOUT })
+  await page.evaluate((ids) => { let vm = document.querySelector('[data-fleet-panel] .v-data-table').__vue__; while (vm && !('fleetIds' in vm.$data)) { vm = vm.$parent } vm.fleetIds = ids }, Object.values(FLEETS))
+  await page.evaluate(async () => { await window.$app.$nextTick() })
+  await settle()
 
   return openEach(page, settle, names, SPEC, step)
 }
 
-// Everything a player does on the Hauling page: the table of repeating routes read, and the row of each fleet opened to show how its cycle adds up.
+// Everything a player does on the Hauling page: the table of repeating routes listed in full (the save has dozens of fleets on repeat, fifteen to a page, in the order of the tonnes they move a year, so the rows per page are set to All as a player does), and the row of each fleet opened to show how its cycle adds up.
 const haulingRun = async (page, settle, names, step) => {
   await open(page, '/hauling', settle)
+  step('every fleet on repeat is listed')
+  await page.waitForFunction(() => document.querySelector('[data-hauling-routes] .v-data-table') !== null, null, { timeout: TIMEOUT })
+  await page.evaluate(() => { let vm = document.querySelector('[data-hauling-routes] .v-data-table').__vue__; while (vm && !('routesTable' in vm.$data)) { vm = vm.$parent } vm.routesTable = { ...vm.routesTable, itemsPerPage: -1 } })
+  await page.evaluate(async () => { await window.$app.$nextTick() })
+  await settle()
 
   return openEach(page, settle, names, HAULING_SPEC, step)
 }
@@ -1199,8 +1261,8 @@ const FAULTS = [
   { name: 'the distance table states the lower case of the travel time', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.elapsed === null ? '—' : span(item.elapsed.hi) }}", "{{ item.elapsed === null ? '—' : span(item.elapsed.lo) }}"), fails: ['distance'] },
   { name: 'the order delays of the cycle count the hours twice', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span>', '<span data-part="delay">{{ fixed(item.delayHours * 2, 1) }}</span>'), fails: ['haul-delay', 'haul-reconcile'] },
   { name: 'the walk of a cycle leaves out the delay of an order', file: HAULING_JS, scope: 'hauling', change: swap(' + (order.OrderDelay || 0)', ''), fails: ['haul-cycle', 'haul-reconcile'] },
-  { name: 'a cargo point takes twice the seconds to load (Transport)', file: TRANSPORT_JS, scope: 'transport', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }', 'const HANDLING_SECONDS = { minerals: 40, installations: 20, colonists: 10 }'), fails: ['cycle-stops'] },
-  { name: 'a cargo point takes twice the seconds to load (Hauling)', file: TRANSPORT_JS, scope: 'hauling', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }', 'const HANDLING_SECONDS = { minerals: 40, installations: 20, colonists: 10 }'), fails: ['haul-stops'] },
+  { name: 'a cargo point takes twice the seconds to load (Transport)', file: TRANSPORT_JS, scope: 'transport', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, components: 20, colonists: 10 }', 'const HANDLING_SECONDS = { minerals: 40, installations: 20, components: 20, colonists: 10 }'), fails: ['cycle-stops'] },
+  { name: 'a cargo point takes twice the seconds to load (Hauling)', file: TRANSPORT_JS, scope: 'hauling', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, components: 20, colonists: 10 }', 'const HANDLING_SECONDS = { minerals: 40, installations: 20, components: 20, colonists: 10 }'), fails: ['haul-stops'] },
   { name: 'the days flown are named in hours', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.year.movingDays, 2) }}</span> days moving', '{{ fixed(item.year.movingDays, 2) }}</span> hours moving'), fails: ['haul-units'] },
   { name: 'the hours of handling are named in days', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading', '{{ fixed(item.handlingHours, 1) }}</span> days loading and unloading'), fails: ['haul-units'] },
   { name: 'the hours of order delays are named in days', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays', '<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> days of order delays'), fails: ['haul-units'] },
@@ -1276,8 +1338,8 @@ const BENIGN = [
   { name: 'the sentence of the cycle worded another way', file: HAULING_FILE, scope: 'hauling', change: swap('Each cycle: <span data-part="moving">', 'Per cycle: <span data-part="moving">') },
   { name: 'the days moving moved ahead of their figure', file: HAULING_FILE, scope: 'hauling', alone: true, change: swap('<span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving', 'moving for <span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days') },
   { name: 'the handling of the cycle worded with another suffix', file: HAULING_FILE, scope: 'hauling', change: swap(' hours loading and unloading<template v-if="item.delayHours > 0">', ' hours in loading and unloading<template v-if="item.delayHours > 0">') },
-  { name: 'the handling seconds listed in another order (Transport)', file: TRANSPORT_JS, scope: 'transport', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }', 'const HANDLING_SECONDS = { colonists: 10, installations: 20, minerals: 20 }') },
-  { name: 'the handling seconds listed in another order (Hauling)', file: TRANSPORT_JS, scope: 'hauling', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }', 'const HANDLING_SECONDS = { colonists: 10, installations: 20, minerals: 20 }') },
+  { name: 'the handling seconds listed in another order (Transport)', file: TRANSPORT_JS, scope: 'transport', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, components: 20, colonists: 10 }', 'const HANDLING_SECONDS = { colonists: 10, components: 20, installations: 20, minerals: 20 }') },
+  { name: 'the handling seconds listed in another order (Hauling)', file: TRANSPORT_JS, scope: 'hauling', change: swap('const HANDLING_SECONDS = { minerals: 20, installations: 20, components: 20, colonists: 10 }', 'const HANDLING_SECONDS = { colonists: 10, components: 20, installations: 20, minerals: 20 }') },
   { name: 'the hours of handling named by the letter', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading', '{{ fixed(item.handlingHours, 1) }}</span> h loading and unloading') },
   { name: 'the hours of order delays named by their short word', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays', '<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hrs of order delays') },
   { name: 'the unit of the days flown inside the figure\'s own text', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving', '<span data-part="moving">{{ fixed(item.year.movingDays, 2) }} days</span> moving') },
@@ -1365,9 +1427,32 @@ const PLANS = {
   capped: { title: 'The Routes page for a fleet that carries the cap of a nebula past a jump (a constructed copy of the save, in a process of its own)', prefix: 'carried cap: ', label: 'the carried cap', scopes: ['routes'], ids: CAPPED_CHECKS, expect: (truth) => expectationsOf(truth, { runs: CAPPED_RUNS }), controls: cappedControls },
 }
 
+// The Transport and Hauling pages draw a round trip and a cycle only where the loading strength rule (utilities/transport.js, `transport.handlingStrength`) holds for the version of the save: while it does not, no row, stop or sentence is drawn. The checks of those pages and the planted faults only they judge are then printed as needs tier b (owner AE-302-08) and run by themselves once the rule holds. The Routes page does not rest on it.
+const FIGURE_SCOPES = ['transport', 'hauling']
+const FIGURES_NOTE = 'needs tier b: the Transport and Hauling pages draw no round trip or cycle until the loading strength rule holds for the version of the save (owner AE-302-08)'
+
+const figuresHold = async () => {
+  const { provenance } = await loadUtilities(['provenance', 'transport'])
+
+  return provenance.ruleSupports('transport.handlingStrength', '3.1.x') === true
+}
+
 const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) => {
   const { startPageServer } = require('./lib/page-server')
   const plan = PLANS[world]
+  const figures = await figuresHold()
+  // The pages this run drives: the Routes page always, the Transport and Hauling pages where the loading strength rule holds for the version of the save. What the others judge is not run and is printed as needs tier b.
+  const driving = plan.scopes.filter((scope) => figures || !FIGURE_SCOPES.includes(scope))
+  const driven = (variant) => driving.includes(variant.scope)
+  const waiting = CHECKS.map(([id]) => id).filter((id) => (!plan.ids || plan.ids.includes(id)) && FIGURE_SCOPES.some((scope) => !driving.includes(scope) && SCOPES[scope].includes(id)))
+
+  if (!driving.length) {
+    console.log(plan.title)
+    console.log(`SKIP  ${plan.prefix}${waiting.length} checks: ${FIGURES_NOTE}`)
+
+    return
+  }
+
   const { folder, file } = await constructedSave(WORLDS[world] || null)
   const cleanups = [() => fs.rmSync(folder, { recursive: true, force: true })]
 
@@ -1444,7 +1529,7 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) 
       }
     }
 
-    const baseline = await view(plan.scopes)
+    const baseline = await view(driving)
 
     if (baseline.error !== null) {
       console.error(describe('the pages', baseline))
@@ -1473,10 +1558,14 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) 
       }
     }
 
-    const base = resultsOf(baseline, x, { strict: false, label: 'the pages', ids: judgedBy(plan.ids) })
+    const base = resultsOf(baseline, x, { strict: false, label: 'the pages', ids: judgedBy(plan.ids) }).filter(({ id }) => !waiting.includes(id))
 
     if (!only && !probing) {
       base.forEach(({ name, result }) => report(`${plan.prefix}${name}`, result))
+
+      if (waiting.length) {
+        console.log(`SKIP  ${plan.prefix}${waiting.length} checks of the Transport and Hauling pages: ${FIGURES_NOTE}`)
+      }
     }
 
     if (mutating && !unobserved(baseline)) {
@@ -1497,13 +1586,19 @@ const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) 
         }
         console.log('GROUP_TIMING ' + JSON.stringify({ group: 'route-bindings', members: batch.map((member) => member.key), mode: solo || batch.length === 1 ? 'solo' : 'grouped', seconds }))
       }
-      for (const fault of FAULTS.filter((variant, index) => !ROUTE_GROUP.some((member) => Number(member.key) === index) && !GROUPS_ONLY && wanted(variant) && mine(variant))) {
+      const skipped = [...FAULTS, ...BENIGN].filter((variant) => wanted(variant) && mine(variant) && !driven(variant)).length
+
+      if (skipped) {
+        console.log(`SKIP  ${plan.prefix}${skipped} planted faults and rewrites of the Transport and Hauling pages: ${FIGURES_NOTE}`)
+      }
+
+      for (const fault of FAULTS.filter((variant, index) => !ROUTE_GROUP.some((member) => Number(member.key) === index) && !GROUPS_ONLY && wanted(variant) && mine(variant) && driven(variant))) {
         report(`fault caught: ${fault.name}`, faultVerdict(await viewFault(fault, view), x, fault), `fails ${fault.fails.join(', ')}`)
       }
 
       console.log('\nrewrites that say the same thing')
 
-      const rewrites = GROUPS_ONLY ? [] : BENIGN.filter((one) => wanted(one) && mine(one))
+      const rewrites = GROUPS_ONLY ? [] : BENIGN.filter((one) => wanted(one) && mine(one) && driven(one))
       // Every retained rewrite runs once in its compatible stack; an explicitly selected singleton still runs.
       const served = stacksOf(rewrites, original)
 

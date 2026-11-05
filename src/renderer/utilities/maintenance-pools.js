@@ -13,7 +13,7 @@ export const DAYS_PER_YEAR = 365
 // A source or ship joins a location when both coordinates differ from the anchor's by less than this many units.
 export const CLUSTER_UNITS = 1
 
-const POOL_VERSIONS = ['2.7.x']
+const POOL_VERSIONS = ['3.1.x']
 
 registerRule({
   id: 'logistics.maintenancePool',
@@ -21,7 +21,7 @@ registerRule({
   units: 't, MSP',
   verification: 'estimated',
   structure: ['FCT_Population.MaintenanceFacilities and its body\'s FCT_SystemBody.Xcor, Ycor', 'FCT_Ship, FCT_Fleet.Xcor, Ycor, SystemID, AssignedPopulationID', 'FCT_ClassComponent and FCT_DamagedComponent (the undamaged maintenance modules and cargo shuttle bays)', 'FCT_ShipClass.Commercial, Size, Cost, SupplyShip, MinimumSupplies, MaintPriority', 'FCT_Ship.CurrentMaintSupplies, MaintenanceState, LastOverhaul'],
-  note: 'The location groups, capacity sources, assigned ships and stock providers as the game builds them for its maintenance step: the first source anchors a location and later ones join it within one unit on both axes (ships also in the same system). The grouping, the whole-ton cut of each source, the draw order and the cargo shuttle bay condition are the stated game rules; none is compared with a stored value, and a location near the one unit edge depends on the order the game meets its sources.',
+  note: 'The location groups, capacity sources, assigned ships and stock providers as the game builds them for its maintenance step: the first source anchors a location and later ones join it within one unit on both axes (ships also in the same system). The grouping, the whole-ton cut of each source, the draw order and the cargo shuttle bay condition are the stated game rules; none is compared with a stored value, and a location near the one unit edge depends on the order the game meets its sources. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['The sources are met colonies first, then ships, each by ID', 'Positions are the saved ones: bodies and ships that move shift the groups'],
 })
 
@@ -31,7 +31,7 @@ registerRule({
   units: 'MSP',
   verification: 'estimated',
   structure: ['logistics.maintenancePool', 'FCT_ShipClass.Cost, MaintPriority', 'FCT_Ship.MaintenanceState, LastOverhaul, CurrentMaintSupplies'],
-  note: 'The stock a location\'s ships would draw over the chosen period at their present states, in daily steps: ships by class priority, overhaul first, oldest clock first; each takes its cost share (a quarter of its yearly cost in ordinary upkeep, all of it in overhaul) times the capacity coverage from the colonies by stock, largest first, then from supply ships by stock, largest first (when the ship or the supply ship has an undamaged cargo shuttle bay), then from its own stock. Production, deliveries, finished overhauls and the clocks are not modelled.',
+  note: 'The stock a location\'s ships would draw over the chosen period at their present states, in daily steps: ships by class priority, overhaul first, oldest clock first; each takes its cost share (a quarter of its yearly cost in ordinary upkeep, all of it in overhaul) times the capacity coverage from the colonies by stock, largest first, then from supply ships by stock, largest first (when the ship or the supply ship has an undamaged cargo shuttle bay), then from its own stock. Production, deliveries, finished overhauls and the clocks are not modelled. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['No colony makes or receives supplies over the period', 'A ship stays in its state, at its place and in its class order', 'A day is the step; the game steps by its own increments'],
 })
 

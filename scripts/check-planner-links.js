@@ -103,6 +103,7 @@ const when = (condition, detail) => {
 // ---------- the fixtures of the Missile Designer ----------
 
 const FIXTURES = require('./lib/missile-fixtures.json').fixtures
+const { fixtureTriple } = require('./lib/fixtures')
 
 const STOCK = { label: 'stock-271-g138', race: 785 }
 const ORDINARY = 154630
@@ -1148,13 +1149,17 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
         return skipped('the stock save is not there')
       }
 
-      const [owned] = await stock.database.query('select FCT_TechSystem.TechSystemID as ID from FCT_TechSystem join FCT_RaceTech on FCT_RaceTech.TechID = FCT_TechSystem.TechSystemID and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race where FCT_TechSystem.TechTypeID = 122 and FCT_TechSystem.RaceID = :race limit 1', { replacements: { game: stock.GameID, race: stock.RaceID } })
-      const [others] = await stock.database.query('select FCT_MissileType.MissileID as ID from FCT_MissileType join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :game and FCT_TechSystem.RaceID is not null and FCT_TechSystem.RaceID <> :race limit 1', { replacements: { game: stock.GameID, race: stock.RaceID } })
+      // The fixture race holds no missile design of its own (the migrated game's designs belong to its alien races), so the missile identifiers are read for the race of the game that holds the most; a save whose own race holds designs keeps its own.
+      const [holders] = await stock.database.query('select FCT_TechSystem.RaceID as race, count(*) as n from FCT_TechSystem join FCT_RaceTech on FCT_RaceTech.TechID = FCT_TechSystem.TechSystemID and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = FCT_TechSystem.RaceID where FCT_TechSystem.TechTypeID = 122 group by FCT_TechSystem.RaceID order by n desc, race', { replacements: { game: stock.GameID } })
+      const holder = holders.some((row) => row.race === stock.RaceID) || !holders.length ? stock.RaceID : holders[0].race
+      const [owned] = await stock.database.query('select FCT_TechSystem.TechSystemID as ID from FCT_TechSystem join FCT_RaceTech on FCT_RaceTech.TechID = FCT_TechSystem.TechSystemID and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race where FCT_TechSystem.TechTypeID = 122 and FCT_TechSystem.RaceID = :race limit 1', { replacements: { game: stock.GameID, race: holder } })
+      const [others] = await stock.database.query('select FCT_MissileType.MissileID as ID from FCT_MissileType join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :game and FCT_TechSystem.RaceID is not null and FCT_TechSystem.RaceID <> :race limit 1', { replacements: { game: stock.GameID, race: holder } })
       const [component] = await stock.database.query('select FCT_RaceTech.TechID as ID from FCT_RaceTech join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race limit 1', { replacements: { game: stock.GameID, race: stock.RaceID } })
       const ids = { GameID: stock.GameID, RaceID: stock.RaceID }
-      const held = owned[0] ? await m.pl.loadMissileStanding(stock.database, ids, owned[0].ID) : null
-      const other = others[0] ? await m.pl.loadMissileStanding(stock.database, ids, others[0].ID) : null
-      const gone = await m.pl.loadMissileStanding(stock.database, ids, 987654321)
+      const missileIds = { GameID: stock.GameID, RaceID: holder }
+      const held = owned[0] ? await m.pl.loadMissileStanding(stock.database, missileIds, owned[0].ID) : null
+      const other = others[0] ? await m.pl.loadMissileStanding(stock.database, missileIds, others[0].ID) : null
+      const gone = await m.pl.loadMissileStanding(stock.database, missileIds, 987654321)
       const design = component[0] ? await m.pl.loadComponentStanding(stock.database, ids, component[0].ID) : null
       const missing = await m.pl.loadComponentStanding(stock.database, ids, 987654321)
 
@@ -1247,7 +1252,7 @@ const TEMPLATE_FAULTS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: mutating() }
+  const options = { stock: fixtureTriple(), mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {

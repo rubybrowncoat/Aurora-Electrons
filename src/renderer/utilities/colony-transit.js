@@ -11,7 +11,7 @@ import { KM_PER_AU, routeLegs, searchRoutes } from './jump-graph'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 import { hasGate } from './transport'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.1.x']
 const SECONDS_PER_DAY = 86400
 const ROUTE_INPUTS = ['the explored jump points', 'their positions', 'the colony and body positions']
 
@@ -21,7 +21,7 @@ registerRule({
   units: 'km/s',
   verification: 'assumed',
   structure: ['FCT_ShipClass.MaxSpeed'],
-  note: 'The one speed the representative ship flies the whole way: the figure entered under Transit, or the top speed of the ship class picked there. It is the player\'s choice, not the speed of any fleet; with none entered there is no travel time.',
+  note: 'The one speed the representative ship flies the whole way: the figure entered under Transit, or the top speed of the ship class picked there. It is the player\'s choice, not the speed of any fleet; with none entered there is no travel time. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['one speed all the way'],
 })
 
@@ -31,7 +31,7 @@ registerRule({
   units: 'km, jumps',
   verification: 'estimated',
   structure: ['FCT_JumpPoint.Xcor, Ycor, WPLink, JumpGateStrength', 'FCT_RaceJumpPointSurvey.Explored, Charted', 'FCT_LagrangePoint.Xcor, Ycor', 'FCT_Population.Capital, Population', 'FCT_SystemBody.Xcor, Ycor'],
-  note: 'The shortest route in kilometres from the nearest colony with people to the body, over the jump points the race has charted and explored that the chosen drive may cross, with the jumps it makes. The search is the one the Route Finder uses, which reproduced the game\'s fewest-transit routes; the kilometre route is the planner\'s reading, because the game\'s automatic route takes the fewest transits and a player may queue a shorter one. Not compared with a distance the game stores.',
+  note: 'The shortest route in kilometres from the nearest colony with people to the body, over the jump points the race has charted and explored that the chosen drive may cross, with the jumps it makes. The search is the one the Route Finder uses, which reproduced the game\'s fewest-transit routes; the kilometre route is the planner\'s reading, because the game\'s automatic route takes the fewest transits and a player may queue a shorter one. Not compared with a distance the game stores. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['a one-way trip from the nearest colony with people, the capital included', 'positions as saved: bodies, moons and the colonies on them keep moving, so each leg inside a system is a snapshot', 'military restriction, danger and alien-system avoidance are not applied'],
 })
 
@@ -41,7 +41,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['habitability.transitRoute', 'habitability.transitSpeed'],
-  note: 'The route\'s kilometres over the representative speed. A jump takes no time here; the jump shock after each, nebula and dust speed limits, acceleration and refuelling are left out, so the figure is not compared with a time the game stores.',
+  note: 'The route\'s kilometres over the representative speed. A jump takes no time here; the jump shock after each, nebula and dust speed limits, acceleration and refuelling are left out, so the figure is not compared with a time the game stores. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['no jump shock, nebula limits or refuelling stops'],
 })
 

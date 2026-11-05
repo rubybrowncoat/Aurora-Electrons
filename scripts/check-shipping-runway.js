@@ -7,7 +7,7 @@
 
   Each planted fault (a change of the utility, of the Finances utility, of the panel or of the page, made in an isolated copy by scripts/lib/mutant-source.js) must fail every group it declares, including each declared save witness. A save witness that did not run rejects the variant, even when its save-free group failed. Ordinary mutants retain their save mappings; composed replants declare only their save-free groups and deliberately do not read saves. Each fault is located by structure (the attribute, key or state it belongs to and its whole value), never by wording or a default. Benign edits must leave every save-free check green, one at a time and all together, and every planted fault must still apply exactly once and fail its declared checks on the source with every benign edit applied.
 
-  With saves (the modded AuroraDB.db game 140 race 784 and the stock saves/AuroraDB_271_skoormit_saved.db game 138 race 785) the head also reads the page's own reads and compares the no-change runway and the logged contracts with sums taken straight from the log. The head reports an absent save as not run; a mutant declaring a witness for that save fails instead. `--no-saves` keeps the head save-free but cannot credit an ordinary mutant that declares a save witness. Prints `N of N checks passed`; exit code 1 when a check fails.
+  With the save (the migrated 3.1 fixture of scripts/lib/fixtures.js) the head also reads the page's own reads and compares the no-change runway and the logged contracts with sums taken straight from the log. The head reports an absent save as not run; a mutant declaring a witness for that save fails instead. `--no-saves` keeps the head save-free but cannot credit an ordinary mutant that declares a save witness. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
@@ -21,6 +21,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -34,10 +35,7 @@ const L = 'ledger'
 const V = 'component'
 const P = 'page'
 const NAMES = ['shipping-runway', 'finances', 'provenance', 'civilian-tariff']
-const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',

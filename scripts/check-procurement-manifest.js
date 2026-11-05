@@ -6,7 +6,7 @@
 
   The manifest is run on hull plans, stock, claims and queued projects worked by hand (labelled synthetic): overlapping plans divide each stocked component once and the stock goes to the first plan in the order listed; the stock at the colony the hulls are needed at is used before the stock elsewhere (the colonies in its system first), and stock before queued manufacture, local before remote; what a task takes is taken when it is made, so a construction or refit task holds nothing, while an automatic refit, a task whose type is not known, an unread task list and a hand entry that is not a number hold back the whole stock of the component they could claim; a stock row with no amount is unknown and an absent row is none; a queued project is counted in whole units from the remaining amount and the part-built unit, a paused or unknown one is no supply, and an unread queue makes a shortage an upper bound; the export separates available, held back, queued and net shortage and local from remote stock, and an unknown figure is an empty cell, never 0.
 
-  The reads run on a small in-memory database of their own (a column or table the save lacks is unknown, not 0), the component and the page are run as pseudo instances and their text is read, and the saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only; one that is not there is skipped and counts as neither a pass nor a failure) give the real reads, compared with raw counts, the manifest of real classes with its allocation invariants, the shared component read (cost and mount counts) against the design data, and copies of the saves in memory (temporary tables over the read-only save) with an automatic refit that holds stock back and a stock row left without an amount.
+  The reads run on a small in-memory database of their own (a column or table the save lacks is unknown, not 0), the component and the page are run as pseudo instances and their text is read, and the save (the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141, race 784, read-only; one that is not there is skipped and counts as neither a pass nor a failure) gives the real reads, compared with raw counts, the manifest of real classes with its allocation invariants, the shared component read (cost and mount counts) against the design data, and copies of the save in memory (temporary tables over the read-only save) with an automatic refit that holds stock back and a stock row left without an amount.
 
   Each planted fault in a utility, the component or the page must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -18,6 +18,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const U = 'src/renderer/utilities/procurement-manifest.js'
@@ -28,10 +29,7 @@ const K = 'src/renderer/utilities/capabilities.js'
 const FILES = { [U]: 'procurement-manifest', [D]: 'procurement-data', [K]: 'capabilities' }
 const NAMES = ['csv-cell', 'procurement-manifest', 'procurement-data', 'component-calc', 'design-data', 'provenance', 'production', 'minerals', 'capabilities']
 const NO_SAVES = process.argv.includes('--no-saves')
-const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const SAVES = [fixtureSave()]
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',

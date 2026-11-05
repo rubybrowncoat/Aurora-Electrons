@@ -12,7 +12,7 @@
   - the record: a brief is a typed record of the campaign and race, seen on every branch, written only when the tab holds the file, and a brief made at a later game time is listed, flagged and not applied until moved; a stale save is refused unless asked to write over;
   - the page: its list, its draft, its preview, its saves and its notices on a pseudo instance (scripts/lib/page-loader.js);
   - the panel: the real component (its script loaded as the pages' are, its template compiled and rendered by Vue without a document): text that is not a figure is reported to the page and never given as a value, unfinished text stays through an update of the same brief and starts over when another is opened, and a range is drawn with its number in billions of km and the unit bn km beside it, each cell of a requirement read by its role (`data-brief-cell`);
-  - the browser: the page and panel together in the real renderer, served over a copy of AuroraDB.db (game and race Aurelian Empire, scripts/lib/page-server.js) and driven in Chromium (scripts/lib/browser-observe.js `observe`): text that is not a figure shows its error in place of the field's hint, marks the brief as changed and leaves Save doing nothing (a click on it draws no message), New asks before it drops such text (the text stays until Discard) and the text and its error do not carry over, and a range cell is drawn in bn km. The screen is read the way every page check reads it (`installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements, a state is read back through the module's own words (the hints of REQUIREMENTS, FIELD_ERRORS, BRIEF_WORDS), a figure is read whole in the grouping of the app's setting, and a cell by its role; every wait is on the operation the check started. Nothing is saved to the save;
+  - the browser: the page and panel together in the real renderer, served over a copy of the fixture of scripts/lib/fixtures.js (game Galactic Shogunate, race Shogunate, scripts/lib/page-server.js) and driven in Chromium (scripts/lib/browser-observe.js `observe`): text that is not a figure shows its error in place of the field's hint, marks the brief as changed and leaves Save doing nothing (a click on it draws no message), New asks before it drops such text (the text stays until Discard) and the text and its error do not carry over, and a range cell is drawn in bn km. The screen is read the way every page check reads it (`installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements, a state is read back through the module's own words (the hints of REQUIREMENTS, FIELD_ERRORS, BRIEF_WORDS), a figure is read whole in the grouping of the app's setting, and a cell by its role; every wait is on the operation the check started. Nothing is saved to the save;
   - each save: a cargo hold stores 50 per HS, a class's cargo and hangar capacity equal the sum of its holds' and hangars', the ships docked in a mother ship never total more than its hangar capacity, no light naval unit is over 20 HS, no commercial class mounts a military engine, and the loader's figures equal SQL of its own.
 
   The checks run through scripts/lib/fault-credit.js: a check's body is the call of the code under test, so a check that throws fails as a call that threw, and a verdict other than true is the check's own failure by value; the browser checks only read what the page showed, so one that throws is a defect of the harness, a failure over the real sources and a stop when a fault or a rewrite is judged (`judged`). Mutants: each deliberate fault in a copy of the utilities, of the page's script, of the panel or of the panel served to the browser is run with the checks it names and must fail each of them by a value, never by a throw (`caughtBy`, which stops the run when only checks that threw would credit a fault); each benign rewrite served to the browser must fail none, and a variant whose page does not get through is a defect of the harness, as nothing may be credited with it. The parts (`groups`, `page`, `panel`, `browser`, each mutant by its id such as `utility:3`, `page:0`, `panel:1`, `browser:0` or `browser-benign:0`, and each save by its label) run through scripts/lib/suite-runner.js, each with a deadline and a record that --resume continues: those in memory in a process each, those served to the browser one after another in a worker that starts one page server and one Chromium and warms them first, with the control `control:warm-reset`, which runs `browser:0` and then `browser` on the same server; `--variants=<key>,...` runs exactly the parts named. Prints `N of N checks passed`; exit code 1 when a check fails, 2 for a defect of the harness.
@@ -30,6 +30,7 @@ const { patched } = require('./lib/mutant-source')
 const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rolesRead, labelKey } = require('./lib/browser-observe')
 const { failure, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
+const { FIXTURE, fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1322,7 +1323,7 @@ const PANEL_MUTATIONS = [
 // ---------- the browser ----------
 
 // The panel inside the page in a real browser (scripts/lib/page-server.js over a copy of the save, Chromium through scripts/lib/browser-observe.js `observe`): the wiring between the two and the drawn cells, which the pseudo instance and the render without a document cannot show. Nothing is saved.
-const BROWSER_SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire' }
+const BROWSER_SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 90000
 
 // What the brief panel draws, read through the shared readers (`window.__screen`); runs in the page. Each part of the panel by its hook (`data-brief`) with the text it draws and whether it is on screen; the text the speed field shows and the line under it (its hint, or the error drawn in the hint's place); given the id of an alternative, the cells of its range requirement by their roles (`data-brief-cell`); and the "Thousands Separator" setting the figures are grouped by.
@@ -1632,7 +1633,7 @@ const mutatedCopy = (file, from, to) => {
 
 // The script's own arguments (those of scripts/lib/suite-runner.js taken out by `runnerArgs`).
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { mutations: true }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1646,7 +1647,7 @@ const parseArguments = (argv) => {
     }
   }
 
-  return options
+  return !options.modded && !options.stock ? { ...options, fixture: fixtureTriple() } : options
 }
 
 const openSave = (file) => new Promise((resolve, reject) => {
@@ -1773,7 +1774,10 @@ const MUTANTS = [
   ...BROWSER_BENIGN.map((rewrite, index) => ({ kind: 'browser-benign', id: `browser-benign:${index}`, ...rewrite })),
 ]
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
+
+// The saves a run reads: the fixture unless `--modded` or `--stock` names others.
+const savesOf = (options) => SAVE_LABELS.filter((label) => options[label])
 
 // The verdict on a fault over the checks it names (`named`, `[name, test]`): each start of `fails` must begin a check that failed by a value (`caughtBy`, which stops the run when only checks that threw would credit the fault, unless the fault declares `throws`). Returns [verdict, detail], the detail naming each check that failed and how.
 const faultVerdict = async (named, { name, fails, throws = false }, began) => {
@@ -1886,16 +1890,16 @@ const variantsOf = (options) => [
   { key: 'groups', name: 'the mission brief: units, evaluation, ranking, presets, alternatives and the record', head: true, heading: 'The mission brief: units, evaluation, ranking, presets, alternatives and the record', deadline: DEADLINES.part, run: () => runPart('groups', options) },
   { key: 'page', name: 'the propulsion page', head: true, heading: '\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)', deadline: DEADLINES.part, run: () => runPart('page', options) },
   { key: 'panel', name: 'the panel', head: true, heading: '\nThe panel (its script, template and Vue, without a document)', deadline: DEADLINES.part, run: () => runPart('panel', options) },
-  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the page and the panel over a copy of AuroraDB.db, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser', options) },
+  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the page and the panel over a copy of the fixture, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser', options) },
   ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind === 'browser-benign' ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id, options) })) : []),
-  ...SAVE_LABELS.map((label) => ({ key: label, name: `the ${label} save`, head: true, deadline: DEADLINES.save, run: () => runPart(label, options) })),
+  ...savesOf(options).map((label) => ({ key: label, name: `the ${label} save`, head: true, deadline: DEADLINES.save, run: () => runPart(label, options) })),
 ]
 
 const run = async () => {
   const options = parseArguments(runnerArgs().rest)
   const totals = await runSuite({
     script: __filename,
-    inputs: [options.modded[0], options.stock[0]],
+    inputs: savesOf(options).map((label) => options[label][0]),
     variants: variantsOf(options),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

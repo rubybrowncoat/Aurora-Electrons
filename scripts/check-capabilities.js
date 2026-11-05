@@ -6,9 +6,9 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report is supported, and the columns the reports lack are exactly those `RENAMED_READS` lists, the columns Aurora 3.1 renamed or removed that a read of a page still names with the inputs and reports that still name each, so a half-migrated set of reads fails rather than passing as the item's whole set (it is empty since AE-308-02 and AE-308-03 deleted their entries), none of them a column of DIM_Gases or FCT_AtmosphericGas. The altered copies and the report-level checks are made from the 2.7 base save instead, given the 3.1 names the pages read (`baseStatements`);
+  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture of scripts/lib/fixtures.js): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report is supported, and the columns the reports lack are exactly those `RENAMED_READS` lists, the columns Aurora 3.1 renamed or removed that a read of a page still names with the inputs and reports that still name each, so a half-migrated set of reads fails rather than passing as the item's whole set (it is empty since AE-308-02 and AE-308-03 deleted their entries), none of them a column of DIM_Gases or FCT_AtmosphericGas. The altered copies and the report-level checks are made from the shipped 3.1 save;
   - the saves from before the line (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): refused as a save from before Aurora 3.0, naming the seven columns Aurora 3.0 added that the file lacks, with every report still evaluated so that the layout alone holds each page back, and no formula version (the direct loader states none for them either);
-  - copies of the 2.7 base save (AuroraDB_270_base.db, once made a copy with the star component column renamed to ComponentNumber and the gas tables of the shipped 3.1 save) in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
+  - copies of the shipped 3.1 save, in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
   - the alien-class reads, on the interim fixture that holds 32 alien classes (the shipped saves and the export hold none, so the preflight says nothing of their queries): the Intelligence page's three reads, the recovery ledger's statements (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History), Route Finder's small places and the known wrecks check of Warnings run through the page loader and loadUtilities and return rows; a read the 3.1 line blocks by a column another item owns (`RENAMED_READS`) is recorded with that item, not fixed;
   - the structures the catalogue declares before a page reads them (`DECLARED`: the ordnance series tables, the Lagrange anchor columns and the option, archaeology and light-naval columns): the saves of the line hold every column of every entry and each item lists its own; the saves from before the line hold none of them and no report loses a status for it; no declared field is an input of a report, and the preflight is shown the save of the line without each of them in turn, each absent and no report's status changed (a model carries an attribute only where a page reads the column); a copy of the code whose model regains an unread attribute widens the read, and the same probe withholds that report, which the check must notice; and a copy of the code that misspells a declared column or leaves a declared table out of the preflight's schema read names a field absent that the save holds, which the save's check must notice;
@@ -38,6 +38,7 @@ const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
+const { FIXTURE, PLAYED } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
@@ -48,9 +49,9 @@ const PLANNED_ROUTES = new Set(['/settings', '/about'])
 const REAL = [
   { label: 'shipped 3.0 save', file: 'saves/AuroraDB_300_shipped.db', expect: 'accepted' },
   { label: 'shipped 3.1 save', file: 'saves/AuroraDB_310_shipped.db', expect: 'accepted' },
-  { label: 'migrated 3.1 save', file: 'saves/AuroraDB-310-spookyerol-migrated.db', expect: 'accepted' },
+  { label: 'migrated 3.1 save', file: FIXTURE.file, expect: 'accepted' },
   { label: 'shipped 3.2 save', file: 'saves/AuroraDB_320_shipped.db', expect: 'accepted' },
-  { label: 'played 3.2 save', file: 'saves/AuroraDB-320-fetterkrolle-1.db', expect: 'accepted' },
+  { label: 'played 3.2 save', file: PLAYED.file, expect: 'accepted' },
   { label: 'modded 2.7 save', file: 'AuroraDB.db', expect: 'refused' },
   { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db', expect: 'refused' },
 ]
@@ -73,27 +74,8 @@ const DAMAGED_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Ship.ShipSeniorCO', 'FCT_
 // The columns Aurora 3.1 renamed or removed that a read of a page still names, with the item that rewrites the reads, the number of inputs that name the column and the reports those inputs belong to, as this commit leaves them: a save of the line lacks each of them and no other column a report reads, so the reports that are not supported on it rest on these. An item that lands deletes its entries, and the check of a save of the line fails on an entry no report names any more as on a column that is not listed. The count and the reports pin the state the migration starts from: an item that renames some of its reads changes them, and the check then fails until the item restates what it still has to do or deletes the entry, so a half-migrated read cannot pass as the whole of what the item claims (`renamedReaders`). None is left: AE-308-02 (the star's component number, held by `starColumnChecks`) and AE-308-03 (the gas columns, held by the gas checks of `registryChecks`) rewrote theirs. One removed column is named by no read the preflight sees: DIM_AssignmentTypeFilter.Fighter by nothing.
 const RENAMED_READS = {}
 
-// The star's component number: `after` is its name in the 3.1 line (AE-308-02), `before` the name the 2.7 base save the altered copies are made from still has.
+// The star's component number: `after` is its name in the 3.1 line (AE-308-02), `before` the name it had in the 2.7 line, which no save of the line holds and no input of the registry names.
 const STAR_NUMBER = { table: 'FCT_Star', before: 'Component', after: 'ComponentNumber' }
-
-// The statements that make the 2.7 base save a save the pages' reads run on, given `gases`, a copy of a save of the line. Every copy the base checks use is made from the base save with these applied, so the reports it holds supported stay supported by the pages' columns, whatever else the 2.7 file lacks: the star's component number under its 3.1 name, as the line has it (AE-308-02), and the gas tables of the line, DIM_Gases and FCT_AtmosphericGas with their 3.1 columns, the share of a gas and the danger pair of each of the four breathers (AE-308-03).
-// The columns of the line that pages read and the 2.7 file lacks follow: the ship's Senior CO setting (AE-302-11), the colour of an alien race and the hostile contact setting of a system (AE-309-07), the race's No Research Projects setting (AE-302-09), each with the type and default the shipped 3.1 database gives it.
-const baseStatements = (gases) => [
-  `alter table ${STAR_NUMBER.table} rename column ${STAR_NUMBER.before} to ${STAR_NUMBER.after}`,
-  `attach database '${gases.replaceAll("'", "''")}' as line`,
-  'drop table DIM_Gases',
-  'create table DIM_Gases as select * from line.DIM_Gases',
-  'drop table FCT_AtmosphericGas',
-  'create table FCT_AtmosphericGas as select * from line.FCT_AtmosphericGas',
-  'detach database line',
-  'alter table FCT_Ship add column ShipSeniorCO INTEGER DEFAULT 0',
-  'alter table FCT_AlienRace add column AlienRaceColour INTEGER DEFAULT 0',
-  'alter table FCT_AlienRaceSystemStatus add column NoHostileInterrupt Boolean DEFAULT FALSE',
-  'alter table FCT_Race add column NoResearchProjects BOOLEAN DEFAULT FALSE',
-]
-
-// The ones of the seven columns of `LINE_COLUMNS` that the statements above give the base, because a page reads them (AE-302-11, AE-302-09): the base lacks the other five and states no formula version from them.
-const BASE_LINE_COLUMNS = ['FCT_Ship.ShipSeniorCO', 'FCT_Race.NoResearchProjects']
 
 // The inputs of the registry that name a column, as `[{ route, key }]`: what a renamed read still has, compared with what `RENAMED_READS` pins.
 const renamedReaders = (capabilities, field) => {
@@ -677,7 +659,7 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
     return
   }
 
-  // `RENAMED_READS` lists the column names that Aurora 3.1 renamed or removed that a page still reads (none is left), so a save of the line leaves the reports that rest on them unsupported until the item that rewrites the reads lands: this checks that those columns are the only ones a report lacks, and the line, the formula, the lookups and the shell of a real save of the line. The changed-column checks below run on the 2.7 base save given the 3.1 names the pages read (`baseStatements`).
+  // `RENAMED_READS` lists the column names that Aurora 3.1 renamed or removed that a page still reads (none is left), so a save of the line leaves the reports that rest on them unsupported until the item that rewrites the reads lands: this checks that those columns are the only ones a report lacks, and the line, the formula, the lookups and the shell of a real save of the line. The changed-column checks below run on copies of the shipped save of the line.
   check(`${save.label}: every report is evaluated`, allReported(capabilities, result), Object.keys(result.reports).length)
   check(`${save.label}: the shell is supported`, result.shell.status === 'supported', JSON.stringify(result.shell))
   check(`${save.label}: every lookup row reads as expected`, failedGates(result).length === 0, failedGates(result).join(', '))
@@ -811,7 +793,7 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_Commander.RankID dropped degrades /commanders, naming the field and the rank group', rankReport.status === 'degraded' && rankReport.missing.length === 0 && rankReport.groups.rank === false && rankReport.groups.age === true && rankReport.degraded.some((entry) => entry.group && entry.key === 'rank' && entry.fields.includes('FCT_Commander.RankID')), JSON.stringify(rankReport))
     check('altered: FCT_Commander.RankID dropped degrades the reports that read the naval admin ranks by the shared group, naming the field and what is left out, and leaves them in service', NAVAL_ADMIN_ROUTES.every((route) => rank.reports[route].status === 'degraded' && rank.reports[route].missing.length === 0 && rank.reports[route].groups.navalRank === false && rank.reports[route].degraded.some((entry) => entry.group && entry.key === 'navalRank' && entry.fields.includes('FCT_Commander.RankID') && /rates|outlook|output/.test(entry.affects))), NAVAL_ADMIN_ROUTES.map((route) => rank.reports[route].status).join())
     check('altered: FCT_Commander.RankID dropped leaves the reports that do not read it supported, and makes the others unsupported only by that read', SEPARATE.every((route) => rank.reports[route].status === 'supported') && alsoReading(rank, '/commanders', 'FCT_Commander.RankID'), notSupported(rank).map((report) => report.route).join(', '))
-    check('altered: the 2.7 base save states no formula version, naming the columns of the seven Aurora 3.0 added that it lacks', baseline.formula.status === 'unavailable' && baseline.formula.value === null && baseline.formula.inputs.missing.length === LINE_COLUMNS.length - BASE_LINE_COLUMNS.length, JSON.stringify(baseline.formula.inputs))
+    check('altered: the base save, a save of the line, states the formula version with none of the seven columns Aurora 3.0 added missing', baseline.formula.status === 'assumed' && baseline.formula.value === capabilities.STATED_FORMULA_VERSION && baseline.formula.inputs.missing.length === 0, JSON.stringify(baseline.formula.inputs))
     check('altered: the formula version and the lookups are unaffected by a rank column', rank.formula.status === baseline.formula.status && rank.formula.inputs.missing.join() === baseline.formula.inputs.missing.join() && failedGates(rank).length === 0)
 
     const coreReport = core.reports['/commanders']
@@ -1153,7 +1135,7 @@ const ALIEN_READERS = {
 // The alien-class reads, run where a save holds alien classes: the interim fixture is the only save of the line that does (the time-zero export and the shipped databases hold none), so the preflight's column check proves nothing of their queries. These are the pages' and utilities' own reads, through the page loader and `loadUtilities`, with the game and the player's race as the app reads them from FCT_Race. A read the 3.1 line blocks by a column another named item owns (`RENAMED_READS`) is recorded with that item and not fixed (a check red for a reason a pending item owns is recorded, not fixed); any other failure fails this check.
 const alienClassChecks = async (capabilities, file) => {
   if (!fs.existsSync(file)) {
-    console.log('SKIP  alien: saves/AuroraDB-310-spookyerol-migrated.db is not there, so the alien-class reads are not run (not run)')
+    console.log(`SKIP  alien: ${FIXTURE.file} is not there, so the alien-class reads are not run (not run)`)
 
     return
   }
@@ -2009,9 +1991,9 @@ const main = async () => {
   }
 
   // The alien-class reads the preflight cannot run: the interim fixture holds the alien classes (the shipped saves and the export hold none), so the pages' own reads run there.
-  await alienClassChecks(capabilities, path.resolve(repo, 'saves/AuroraDB-310-spookyerol-migrated.db'))
+  await alienClassChecks(capabilities, path.resolve(repo, FIXTURE.file))
   // The life pod, wreck and waypoint queries the anchor columns are declared for (AE-308-06), run where the save holds the objects.
-  await anchorReadChecks(path.resolve(repo, 'saves/AuroraDB-310-spookyerol-migrated.db'))
+  await anchorReadChecks(path.resolve(repo, FIXTURE.file))
 
   const real260 = path.resolve(repo, 'AuroraDB_260_base.db')
 
@@ -2025,9 +2007,7 @@ const main = async () => {
     console.log('SKIP  line: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
   }
 
-  // The base save the altered copies and the report-level checks are made from: the 2.7 base save given the 3.1 names the pages read (`baseStatements`: the star's component number, and the gas tables of the shipped 3.1 save), so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. The saves of the line support every report as well, `RENAMED_READS` being empty, and `realSaveChecks` asserts it.
-  const baseFile = path.resolve(repo, 'AuroraDB_270_base.db')
-  // A save of the line: the checks of the line itself and the store's accepted-copy test.
+  // A save of the line, the shipped 3.1 save: the checks of the line itself, the store's accepted-copy test, and the base the altered copies and the report-level checks are made from (each copy is this save with one thing altered; it holds every column the pages read, so every report is supported on it and the line gate accepts it).
   const lineSource = path.resolve(repo, 'saves/AuroraDB_310_shipped.db')
 
   if (fs.existsSync(lineSource)) {
@@ -2037,12 +2017,8 @@ const main = async () => {
     console.log('SKIP  line: saves/AuroraDB_310_shipped.db is not there, so the line is not checked on a copy (not run)')
   }
 
-  if (fs.existsSync(baseFile) && fs.existsSync(lineSource)) {
-    const gases = await alteredCopy(lineSource, 'gases', [])
-    const source = await alteredCopy(baseFile, 'base', baseStatements(gases))
-
-    removeOwnedCopy(gases)
-
+  if (fs.existsSync(lineSource)) {
+    const source = await alteredCopy(lineSource, 'base', [])
     await alteredChecks(capabilities, source)
     await dependencyChecks(capabilities, source, scan)
     const mods = await consumerChecks(lineSource)
@@ -2055,7 +2031,7 @@ const main = async () => {
     // What the missing naval admin ranks and a blocked Mining bonus leave unknown (scripts/lib/capability-chains.js).
     await chainChecks({ check, stubs: STUBS, source, alteredCopy, mutatedCopy, preflightOf, capabilities, caughtValues, openConsumer, removeOwnedCopy, rememberFailure })
   } else {
-    console.log('SKIP  altered copies: AuroraDB_270_base.db and saves/AuroraDB_310_shipped.db are needed (not run)')
+    console.log('SKIP  altered copies: saves/AuroraDB_310_shipped.db is needed (not run)')
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

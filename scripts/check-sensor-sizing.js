@@ -21,6 +21,7 @@ const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { INTERIM } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1639,12 +1640,14 @@ const rebuildActive = (m, save) => once(m, `active ${save.file}`, async () => {
 
 // The saved sensors and beam fire controls whose stored cost figures were made under the 2.7.1 rule, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not, so each stored figure is the rebuilt one times the factor of the hardening level the row's CTD names (1.25 in the modded and migrated saves, 2 in the 2.6 save). 500400 of the migrated save stores a further tenth of that rule's figures (the rebuilt ones times 1.25, divided by 10), a difference of its own that this rule does not explain. The list is exact: a row that differs and is not here, a pinned row that no longer differs, and any move of a pinned row's stored or rebuilt figures is a change to look at. The stored figures are the designs' own and are kept as stored, never rewritten. A pinned row is only checked where the save it belongs to is among those read: with a save not there its rows cannot be observed, and reporting them as no longer differing would be a claim about a file no check opened.
 const premiumRow = (file, game, race, id, factor, stored, rebuilt, scale = 1) => Object.freeze({ key: `${file}|${game}|${race}|${id}`, file, factor, scale, stored: Object.freeze(stored), rebuilt: Object.freeze(rebuilt) })
+// The first five rows are the stored premiums of the interim fixture as recorded (INTERIM, not the default: the figures are of that very save and stay with it when `FIXTURE` moves); the others are recorded saves of earlier releases, named as saved.
+const INTERIM_FILE = path.basename(INTERIM.file)
 const PREMIUM_ROWS = Object.freeze([
-  premiumRow('AuroraDB-310-spookyerol-migrated.db', 141, 784, 500351, 1.25, [10, 12.5, 2.5], [8, 10, 2]),
-  premiumRow('AuroraDB-310-spookyerol-migrated.db', 141, 784, 500363, 1.25, [450, 562.5, 112.5], [360, 450, 90]),
-  premiumRow('AuroraDB-310-spookyerol-migrated.db', 141, 784, 500394, 1.25, [1350, 1687.5, 337.5], [1080, 1350, 270]),
-  premiumRow('AuroraDB-310-spookyerol-migrated.db', 141, 784, 500400, 1.25, [14400, 18000, 3600], [115200, 144000, 28800], 0.1),
-  premiumRow('AuroraDB-310-spookyerol-migrated.db', 141, 784, 500426, 1.25, [180, 225, 45], [144, 180, 36]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500351, 1.25, [10, 12.5, 2.5], [8, 10, 2]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500363, 1.25, [450, 562.5, 112.5], [360, 450, 90]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500394, 1.25, [1350, 1687.5, 337.5], [1080, 1350, 270]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500400, 1.25, [14400, 18000, 3600], [115200, 144000, 28800], 0.1),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500426, 1.25, [180, 225, 45], [144, 180, 36]),
   premiumRow('AuroraDB_26Simple.db', 139, 779, 154008, 2, [720, 1440, 720], [360, 720, 360]),
   premiumRow('AuroraDB_270_unknown.db', 140, 784, 500211, 1.25, [22.5, 28.125, 5.625], [18, 22.5, 4.5]),
   premiumRow('AuroraDB_270_unknown.db', 140, 784, 500262, 1.25, [90, 112.5, 22.5], [72, 90, 18]),

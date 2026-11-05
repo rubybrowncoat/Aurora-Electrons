@@ -3,7 +3,7 @@
 
   node scripts/check-production-cycle.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785). With --no-mutations it plants no fault, starts no mutant child and replays the stock save alone, the cheaper of the two.
+  With no options it runs on the migrated 3.1 fixture of scripts/lib/fixtures.js. With --no-mutations it plants no fault and starts no mutant child.
 
   The reference model is the game's rule for one colony's construction cycle, written out here from the rule and not from the app: each project that is out of the queue and not paused, in some order, is allocated its share of the colony's capacity times the years since the last cycle, builds that many units (the allocation over the build points a unit takes, at most the units it has left), cuts the build to what the colony's stock of each mineral covers (the stock the projects ahead of it left, in tonnes and fractions of a unit, the build rounded to 4 decimals), takes the minerals of what it built out of that stock, and adds the build to its partial completion, whole units delivered at once. A project that finishes lets the queued ones start in the next cycle.
 
@@ -36,12 +36,10 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const DEFAULT_SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [fixtureSave()]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
@@ -95,8 +93,8 @@ const diverges = (name, detail = '') => {
   console.log(`DIVERGES  ${name}${detail ? `  [${detail}]` : ''}`)
 }
 
-// A quick run replays the stock save alone: it has 64,779 candidates of the search to the modded save's 168,284 and takes the shorter replay, and the full run replays both.
-const defaultSaves = () => (mutating() ? DEFAULT_SAVES : DEFAULT_SAVES.filter((save) => save.game === 138))
+// The default save is the fixture alone, replayed by a quick run and by a full run.
+const defaultSaves = () => DEFAULT_SAVES
 
 const parseArguments = (argv) => {
   const saves = []

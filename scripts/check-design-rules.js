@@ -1,7 +1,7 @@
 /*
   Checks the planners' design rules (src/renderer/utilities/design-rules.js) against a save: every stored engine, class speed, class range input, jump drive and class maintenance figure (annual failure rate, maintenance supplies, damage roll and thresholds) of one race is recomputed from the rows it was designed with and compared with what the game wrote.
 
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]
+  node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]
 
   Zero mismatches means the rules reproduce every stored row. A row the rules cannot reproduce for a reason outside them (a modded tech, a missing tech row, a design made under older rules) is counted as explained, with its reason; any other difference is a mismatch and sets exit code 1. The race's components are the FCT_ShipDesignComponents rows of its game that it holds through FCT_RaceTech (TechID = SDComponentID), the way the Propulsion Planner selects them; --all-game checks every component of the game instead, other races' designs included. Each check is printed under the id, verification and game versions of the rules it checks, read from the rule registry (utilities/provenance.js, filled by design-rules.js), and a registered rule that no check run covers is listed at the end. The save is opened read-only through the same sqlite3 module the app uses.
 
@@ -10,8 +10,8 @@
   The sensor check rebuilds every active sensor, missile fire control, passive sensor and beam fire control the race owns from the techs its components name, each tech found by its tech type and never by the slot it sits in, and compares the strength, range, cost with its Uridium and Corbomite, crew, HTK, ECCM and CTD and, for a beam fire control, the size, range, tracking and special function with what the game stored (utilities/design-data.js `loadSensorFixture`; the rules are the design.*Sensor* and design.beamFireControl* ones of utilities/design-rules.js, the comparison is scripts/lib/sensor-reconcile.js). A figure whose tech the component does not name, names twice or names by a row the save lacks is counted as unknown and never as 0. A difference is explained only by an alternative of the reconciliation that fits (the techs the stored figures imply, a tenth of the cost, an uncapped range) or by a row of KNOWN_SENSOR_ROWS pinned to its stored and computed figures; any other is a mismatch.
 
   node scripts/check-design-rules.js --fixtures [--no-mutations]  runs the missile and sensor reports on the fixtures in scripts/lib/missile-fixtures.json and scripts/lib/sensor-fixtures.json, the checks of the rules and of the candidate evaluator (utilities/design-rules.js `evaluateMissile`) on them, and every planted fault of the rules, the loaders and the reconciliations (each must fail the checks it names); no save is read; --no-mutations leaves out the planted faults
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]   writes the designs of the scope into the fixtures file
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]    writes the sensors and fire controls of the scope into the fixtures file
+  node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]   writes the designs of the scope into the fixtures file
+  node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]    writes the sensors and fire controls of the scope into the fixtures file
   node scripts/check-design-rules.js --run-mutant <name>        one planted fault of the rules in this process, its result printed as JSON: what --fixtures starts for each fault, so no fault shares module state with another or with the checks
 */
 const fs = require('fs')
@@ -20,6 +20,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixturePath } = require('./lib/fixtures')
 const { inParallel, jobs, runChild } = require('./lib/check-pool')
 
 const RULES = ['engine', 'speed', 'range', 'jump', 'maintenance', 'missile', 'sensor']
@@ -91,8 +92,14 @@ const parseArguments = (argv) => {
     }
   }
 
+  // No save named: the fixture of scripts/lib/fixtures.js and its player race (a named save needs its race named as well).
+  if (!options.fixtures && options.mutant === null && !options.save) {
+    options.save = fixturePath()
+    options.race = Number.isInteger(options.race) ? options.race : FIXTURE.raceId
+  }
+
   if (!options.fixtures && options.mutant === null && (!options.save || !Number.isInteger(options.race))) {
-    fail('Usage: node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]\n       node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js --fixtures')
+    fail('Usage: node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]\n       node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js --fixtures')
   }
 
   if ((options.exportFile || options.sensorExportFile) && !options.label) {
@@ -122,7 +129,7 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
 })
 
 const loadRules = async () => {
-  const { 'design-rules': rules, provenance: registry } = await loadUtilities(['design-rules', 'provenance'])
+  const { 'design-rules': rules, provenance: registry } = await loadUtilities(['design-rules', 'design-data', 'provenance'])
 
   return { ...rules, registry, isAvailable: registry.isAvailable }
 }

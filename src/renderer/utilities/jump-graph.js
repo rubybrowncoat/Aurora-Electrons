@@ -10,7 +10,7 @@ const hasPosition = (point) => Number.isFinite(point.Xcor) && Number.isFinite(po
 const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 
 // The rules of a route over the explored jump points, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The plan-level ones (totals, travel time, speed, avoid options) are in utilities/route-plan.js.
-const ROUTE_VERSIONS = ['2.7.x']
+const ROUTE_VERSIONS = ['3.1.x']
 
 registerRule({
   id: 'route.jumps',
@@ -18,7 +18,7 @@ registerRule({
   units: 'jumps',
   verification: 'confirmed',
   structure: ['FCT_JumpPoint.WPLink', 'FCT_RaceJumpPointSurvey.Explored', 'FCT_RaceJumpPointSurvey.Charted'],
-  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes. A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route.',
+  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes. A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -27,7 +27,7 @@ registerRule({
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_JumpPoint.Xcor, Ycor', 'FCT_LagrangePoint.Xcor, Ycor', 'FCT_SystemBody.Xcor, Ycor'],
-  note: 'The straight-line distances flown inside each system between the places the route passes, summed; a jump takes no distance and a system\'s centre is where the galactic map measures from. Arithmetic over saved positions: a place with no position in the save has no distance.',
+  note: 'The straight-line distances flown inside each system between the places the route passes, summed; a jump takes no distance and a system\'s centre is where the galactic map measures from. Arithmetic over saved positions: a place with no position in the save has no distance. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 const ROUTE_INPUTS = ['the explored jump points', 'their positions']
