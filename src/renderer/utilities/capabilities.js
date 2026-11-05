@@ -1,4 +1,4 @@
-// What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other.
+// What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other. Whether the save is of the Aurora line the app reads at all is decided by its shape alone (`lineResult`): a save without the seven columns Aurora 3.0 added over 2.7.1 is refused as a save from before the 3.1 line, while a save of 3.0 or 3.1 is that line, the two being schema-identical. The formula version rests on the same seven (`formulaResult`): a save with all of them is the stated one, assumed, and a save missing any of them states none.
 //
 // The reads of every report come from utilities/capability-reads.js, written by `node scripts/check-capabilities.js --write` from the pages' own queries, one entry per tracked input (`tracked('<key>', ...)` in a page, a check of the warnings page, the app shell's reads). This module adds what the scan cannot know: the columns a query builds by name or lists without its table (`EXTRA_READS`, `MARKER_COLUMNS`, and `MARKER_USES` where a page uses a known part of what it builds), the reads that guard themselves (`TOLERATED`), which inputs a page can really do without (`OPTIONAL`), the column groups a report can lose without the rest (`SOFT`), and the lookup rows whose meaning is checked (`BONUS_NAMES`, `COMPONENT_TYPES`).
 //
@@ -6,7 +6,20 @@
 import { READS } from './capability-reads'
 import { fieldWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-export const STATED_FORMULA_VERSION = '2.7.x'
+export const STATED_FORMULA_VERSION = '3.1.x'
+
+// The columns Aurora 3.0 added over 2.7.1, by table, which tell a save of the 3.1 line from one from before it: every save of the line has all of them, and a save without all of them is from before it, so one that lacks some but not all is still read as the line, damaged. Aurora 3.0 and 3.1 are not told apart, since the shipped 3.0.0 and 3.1.0 databases are identical in tables and columns and a save holds no version string, so both are read as the 3.1 line. Read from the diff of the shipped databases of 2.7.1 and 3.0.0: every other table and column is the same. The fields are built from the pairs, not written out, so that the scan of the pages does not take them for reads of the pages.
+const SIGNATURE_COLUMNS = Object.freeze({
+  FCT_Game: Object.freeze(['LostColonies', 'GenerateNonOxygenRaces', 'NoShieldTechnology', 'OrbitalMovementInSubPulse']),
+  FCT_Ship: Object.freeze(['ShipSeniorCO']),
+  FCT_Race: Object.freeze(['NoResearchProjects']),
+  FCT_Population: Object.freeze(['AlienArtifacts']),
+})
+
+export const LINE_SIGNATURE = Object.freeze(Object.entries(SIGNATURE_COLUMNS).flatMap(([table, columns]) => columns.map((column) => [table, column].join('.'))))
+
+// The columns the formula version rests on: the same seven, since a save has all of them only when it is of the line, and a save that is not is not known to be played under the rules the app states.
+const FORMULA_COLUMNS = LINE_SIGNATURE
 
 const FORMULA = 'capability.formulaVersion'
 const BONUS = 'capability.bonusName'
@@ -16,8 +29,8 @@ registerRule({
   id: FORMULA,
   versions: [STATED_FORMULA_VERSION],
   verification: 'assumed',
-  structure: ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics'],
-  note: 'A save carries no version label. The two game settings that came with the current release line (whether civilian mining complexes are allowed and whether ancient relics are on) are stored together, so a save with both is taken as played under the rules the app states, and a save without one of them has no formula version. That is a fact about the schema, not a verified version.',
+  structure: FORMULA_COLUMNS,
+  note: 'A save carries no version label. The seven columns Aurora 3.0 added over 2.7.1 are in every save of the line, whose 3.0 and 3.1 shapes are identical in schema, so a save with all seven is taken as played under the rules the app states, and a save missing one of them has no formula version. That is a fact about the schema, not a verified version.',
 })
 
 registerRule({
@@ -310,36 +323,13 @@ const GATE_TABLES = Object.freeze({
   DIM_ComponentType: ['ComponentTypeID', 'TypeDescription'],
 })
 
-const FORMULA_COLUMNS = Object.freeze(['AllowCMC', 'AncientRelics'])
-
-// What each formula column stores, in words for a missing input.
-const FORMULA_SETTINGS = Object.freeze({ AllowCMC: 'the game setting that allows civilian mining complexes', AncientRelics: 'the game setting for ancient relics' })
-
-// The columns Aurora 2.7 added over 2.6, as 'Table.Column', which tell a 2.7 save from an older one: a save carries no version label, and no 2.7 save is without all of them. Read from the saves on disk (AuroraDB_270_base.db against AuroraDB_260_base.db: every other table and column is the same).
-export const LINE_SIGNATURE = Object.freeze([
-  'FCT_Game.AllowCMC',
-  'FCT_Game.AncientRelics',
-  'FCT_DesignPhilosophy.MaintenanceModules',
-  'FCT_Fleet.AutoLP',
-  'FCT_Population.AcademyNameThemeID',
-  'FCT_Population.BuildReplacements',
-  'FCT_Population.ReplacementCapacity',
-  'FCT_Population.UseAcademyNameTheme',
-  'FCT_Race.RandomClassName',
-  'FCT_Race.chkCometNames',
-  'FCT_Race.chkComets',
-  'FCT_Ship.MaxActiveResolution',
-  'FCT_Ship.SLRetire',
-  'FCT_ShipClassTemplate.CrewDesignEfficiency',
-])
-
-// The Aurora line the app is for, as its major and minor ('2.7'): the stated formula version without its patch.
+// The Aurora line the app is for, as its major and minor ('3.1'): the stated formula version without its patch.
 export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
 
 // The words of a refusal, by the reason of `lineResult`: `notice` is the sentence the Unsupported save panel opens with, `status` the line the save status says.
 export const REFUSALS = Object.freeze({
   'not-aurora': Object.freeze({ notice: 'The file has no game table, so it is not an Aurora save.', status: 'refused: no game table' }),
-  'pre-2.7': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora ${LINE_NAME} added is in it.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns of Aurora ${LINE_NAME})` }),
+  'pre-3.0': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added is in it. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, releases 2.7.N from the release/2.7 branch (2.7.11 as of this release); a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added)` }),
 })
 
 const allTables = () => {
@@ -384,14 +374,22 @@ const hasTable = (schema, table) => schema.has(table.toLowerCase())
 
 const hasColumn = (schema, table, column) => hasTable(schema, table) && schema.get(table.toLowerCase()).has(column.toLowerCase())
 
-// The formula version of the save as a result of 'capability.formulaVersion': the stated one, assumed, when the save has both formula columns of FCT_Game, unavailable (naming the absent settings in words) otherwise. Separate from the structure checks: a save can have every column a report reads and still be of another game version.
+// The formula version of the save as a result of 'capability.formulaVersion': the stated one, assumed, when the save has every column of the line's signature, unavailable (naming the absent columns in words) otherwise, so a save from before 3.0 and a damaged 3.x save state no formula version. Separate from the structure checks: a save can have every column a report reads and still be of another game version.
 export const formulaResult = (schema) => {
-  const missing = FORMULA_COLUMNS.filter((column) => !hasColumn(schema, 'FCT_Game', column)).map((column) => FORMULA_SETTINGS[column])
+  const missing = FORMULA_COLUMNS.filter((field) => {
+    const [table, column] = field.split('.')
 
-  return missing.length ? unavailable({ rule: FORMULA, missing, present: qualified(FORMULA_COLUMNS.filter((column) => hasColumn(schema, 'FCT_Game', column)), 'FCT_Game') }) : ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: qualified(FORMULA_COLUMNS, 'FCT_Game') } })
+    return !hasColumn(schema, table, column)
+  })
+
+  if (missing.length) {
+    return unavailable({ rule: FORMULA, missing: missing.map(fieldWords), present: FORMULA_COLUMNS.filter((field) => !missing.includes(field)) })
+  }
+
+  return ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: FORMULA_COLUMNS } })
 }
 
-// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-2.7' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 2.7: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 2.7 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora's later lines are not told apart (a 3.0 save is expected to hold every column of the signature).
+// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-3.0' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 3.0: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 3.1 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora 3.0 and 3.1 are not told apart: the two shipped databases are identical in schema, and both read as the 3.1 line.
 export const lineResult = (schema) => {
   if (!hasTable(schema, 'FCT_Game')) {
     return Object.freeze({ status: 'refused', reason: 'not-aurora', line: null, missing: Object.freeze([]) })
@@ -404,21 +402,19 @@ export const lineResult = (schema) => {
   })
 
   if (missing.length === LINE_SIGNATURE.length) {
-    return Object.freeze({ status: 'refused', reason: 'pre-2.7', line: null, missing: Object.freeze(missing) })
+    return Object.freeze({ status: 'refused', reason: 'pre-3.0', line: null, missing: Object.freeze(missing) })
   }
 
   return Object.freeze({ status: 'accepted', reason: null, line: STATED_FORMULA_VERSION, missing: Object.freeze(missing) })
 }
 
-// The formula version the save's schema stands for: the stated one ('2.7.x') for a save with both 2.7 columns of FCT_Game, null for any other shape, and the landing rule is then not settled (`landingThreshold`).
+// The formula version the save's schema stands for: the stated one ('3.1.x') for a save with every column of the line's signature, null for any other shape, and the landing rule is then not settled (`landingThreshold`). The signature spans four tables, so all of them are read here.
 export const loadFormulaVersion = async (database) => {
-  const [rows] = await database.query(schemaSql(['FCT_Game']))
+  const tables = [...new Set(FORMULA_COLUMNS.map((field) => field.split('.')[0]))]
+  const [rows] = await database.query(schemaSql(tables))
 
   return valueOrNull(formulaResult(schemaOf(rows)))
 }
-
-// 'Table.Column' of each column; joined by name so that the scan of the pages does not take these for reads of the pages.
-const qualified = (columns, table) => columns.map((column) => [table, column].join('.'))
 
 const fieldText = (gap) => (gap.column ? `${gap.table}.${gap.column}` : `${gap.table} (table)`)
 

@@ -1,13 +1,13 @@
 /*
   Checks that the app moves between saves as one step: the real store, the real database module over real SQLite saves, the real recorder plugin, the real watcher and the real save service of the main process, with only the Electron pieces stood in for (the IPC calls are answered by the real service over a window registry, the file dialog and the file-watching library are fakes, or the real chokidar for the watcher checks).
 
-  Each case builds a fresh app over two saves that share a game and race number (GameID 140, race 784) but are different campaigns: a copy of AuroraDB.db, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
+  Each case builds a fresh app over two saves that share a game and race number (GameID 141, race 784) but are different campaigns: a copy of saves/AuroraDB-310-spookyerol-migrated.db, a save of the 3.1 line, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
 
-  A copy that is refused as a save of another Aurora line (the schema answered with the fourteen columns of the line left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
+  A copy that is refused as a save of another Aurora line (the schema answered with the seven columns Aurora 3.0 added left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
 
   The 57 head cases run in six parts. With 77 mutation descriptors, a full run has 83 isolated variants and 134 checks; --no-mutations has six variants and 57 checks. Existing mutation indexes stay in place when a descriptor is appended.
 
-  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and at most four parts or mutations run side by side, each in a process of its own with its own fixtures. CHECK_JOBS budgets scripts, not this suite's isolated variants. Run: bun scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs ./AuroraDB.db.
+  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and at most four parts or mutations run side by side, each in a process of its own with its own fixtures. CHECK_JOBS budgets scripts, not this suite's isolated variants. Run: bun scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs saves/AuroraDB-310-spookyerol-migrated.db.
 */
 const fs = require('fs')
 const os = require('os')
@@ -24,10 +24,11 @@ const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
 const requireHere = createRequire(`${repo}/`)
 
-const GAME = 140
+const GAME = 141
 const RACE = 784
 const FLAG = 'probe-flag.png'
-const SAVE = path.join(repo, 'AuroraDB.db')
+// The 3.1 fixture: a save of the line, so the app reads it (a save from before 3.0 is refused, and the recorder holds it).
+const SAVE = path.join(repo, 'saves', 'AuroraDB-310-spookyerol-migrated.db')
 
 // The packages the sources import. The real sequelize and sqlite3 open the real files; the others are as small as the cases allow. electron-store keeps its stores in `globalThis.__stores`, except while a case sets `globalThis.__SettingsClient`: every store opened then is that class's, the window's own store client (src/preload/store-client.js) built by the case.
 const STUBS = {
@@ -979,7 +980,7 @@ const defineSuite = (m, fixtures, base) => {
 
     return file
   }
-  const SECOND_GAME = `create temp table g as select * from FCT_Game where GameID = ${GAME}; update g set GameID = 141, GameName = 'Second Game'; insert into FCT_Game select * from g; create temp table r as select * from FCT_Race where GameID = ${GAME} and RaceID = ${RACE}; update r set GameID = 141, RaceID = 9001, RaceTitle = 'Second Game Empire'; insert into FCT_Race select * from r;`
+  const SECOND_GAME = `create temp table g as select * from FCT_Game where GameID = ${GAME}; update g set GameID = ${GAME + 1}, GameName = 'Second Game'; insert into FCT_Game select * from g; create temp table r as select * from FCT_Race where GameID = ${GAME} and RaceID = ${RACE}; update r set GameID = ${GAME + 1}, RaceID = 9001, RaceTitle = 'Second Game Empire'; insert into FCT_Race select * from r;`
   const SECOND_RACE = `create temp table r as select * from FCT_Race where GameID = ${GAME} and RaceID = ${RACE}; update r set RaceID = 9002, RaceTitle = 'Second Empire'; insert into FCT_Race select * from r;`
   const REMOVE_GAME = `delete from FCT_Race where GameID = ${GAME}; delete from FCT_Game where GameID = ${GAME};`
   const REMOVE_RACE = `delete from FCT_Race where GameID = ${GAME} and RaceID = ${RACE};`
@@ -1278,18 +1279,18 @@ const defineSuite = (m, fixtures, base) => {
       await until(() => w.store.state.empires.dropped, 'the removed game to be dropped', 20000)
 
       assert.equal(w.store.state.empires.dropped.kind, 'game')
-      assert.equal(w.store.state.empires.dropped.name, 'Aurelian Empire')
+      assert.equal(w.store.state.empires.dropped.name, 'Galactic Shogunate')
       assert.equal(w.store.state.GameID, null, 'the selection of a removed game was kept or given to another game')
       assert.equal(w.store.state.RaceID, null)
-      assert.deepEqual(w.store.state.empires.games.map((game) => game.GameID), [141])
+      assert.deepEqual(w.store.state.empires.games.map((game) => game.GameID), [GAME + 1])
       assert.deepEqual(w.store.state.peeks.lines, {}, 'what was derived from the removed game was kept')
       assert.deepEqual(w.store.state.navigation.entries.map((entry) => entry.path), ['/'], 'the pages visited for the removed game were kept')
       assert.equal(w.store.$router.currentRoute.path, '/', 'the page of the removed game stayed open')
 
       // Picking again is the person's choice, and takes the notice away.
-      await pick(w, 141, 9001)
+      await pick(w, GAME + 1, 9001)
       assert.equal(w.store.state.empires.dropped, null)
-      assert.equal(w.store.state.GameID, 141)
+      assert.equal(w.store.state.GameID, GAME + 1)
     })
   })
 
@@ -1798,8 +1799,8 @@ const defineSuite = (m, fixtures, base) => {
     assert.equal(w.store.getters['capabilities/status'], 'failed')
   })
 
-  const LINE_COLUMNS = ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics', 'FCT_DesignPhilosophy.MaintenanceModules', 'FCT_Fleet.AutoLP', 'FCT_Population.AcademyNameThemeID', 'FCT_Population.BuildReplacements', 'FCT_Population.ReplacementCapacity', 'FCT_Population.UseAcademyNameTheme', 'FCT_Race.RandomClassName', 'FCT_Race.chkCometNames', 'FCT_Race.chkComets', 'FCT_Ship.MaxActiveResolution', 'FCT_Ship.SLRetire', 'FCT_ShipClassTemplate.CrewDesignEfficiency']
-  // The schema of a copy as a save of another Aurora line answers it: with the fourteen columns of the line left out.
+  const LINE_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Game.GenerateNonOxygenRaces', 'FCT_Game.NoShieldTechnology', 'FCT_Game.OrbitalMovementInSubPulse', 'FCT_Ship.ShipSeniorCO', 'FCT_Race.NoResearchProjects', 'FCT_Population.AlienArtifacts']
+  // The schema of a copy as a save of another Aurora line answers it: with the seven columns Aurora 3.0 added left out.
   const withoutLine = (answer) => [answer[0].filter((row) => !LINE_COLUMNS.includes(`${row.tbl}.${row.name}`)), ...answer.slice(1)]
 
   test('a recording pass whose copy was replaced while its capability check was pending claims no recording lock, though the copy that replaced it is refused', async () => {
@@ -1842,7 +1843,7 @@ const defineSuite = (m, fixtures, base) => {
 
   test('a recording pass of a copy that is refused as a save of another Aurora line records nothing, claims no recording lock and settles no campaign', async () => {
     const held = installLocks()
-    // The schema the copy answers for is the save's with the fourteen columns of the line left out: the check of the capabilities refuses it, as it does a real older save.
+    // The schema the copy answers for is the save's with the seven columns Aurora 3.0 added left out: the check of the capabilities refuses it, as it does a real older save.
     const w = await world({
       recording: true,
       onDatabase: (database) => {
@@ -2522,7 +2523,7 @@ const main = async () => {
   }
 
   if (!fs.existsSync(SAVE)) {
-    console.log(`AuroraDB.db is not here (${SAVE}); the check needs it.`)
+    console.log(`saves/AuroraDB-310-spookyerol-migrated.db is not here (${SAVE}); the check needs it.`)
     process.exit(1)
   }
 

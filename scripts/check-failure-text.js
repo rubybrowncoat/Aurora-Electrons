@@ -592,7 +592,7 @@ const statementsOf = async (sources) => {
       }
     }
 
-    const vm = instantiate(options, { $store: { getters: {}, state: {} }, data: { line: { reason: 'pre-2.7', missing: ['FCT_Ship.ShippingLineID', 'FCT_Fleet.NoMovement'] }, status: 'ready' } })
+    const vm = instantiate(options, { $store: { getters: {}, state: {} }, data: { line: { reason: 'pre-3.0', missing: ['FCT_Ship.ShippingLineID', 'FCT_Fleet.NoMovement'] }, status: 'ready' } })
     const listed = vm.missingWords
 
     if (!Array.isArray(listed) || listed.length !== 2) {
