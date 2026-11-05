@@ -961,6 +961,7 @@ const defineCases = (modules) => {
   // ---- Designed tech and technologies ----
   const research = modules.research
   const designedTech = modules['designed-tech']
+  const designRules = modules['design-rules']
   const provenance = modules.provenance
   const counter = { count: (value) => (value === null || value === undefined ? '—' : String(value)) }
   const labProject = (extra = {}) => ({ ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, OutputPerLab: 10, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null, ...extra })
@@ -1130,6 +1131,32 @@ const defineCases = (modules) => {
     assert.equal(noCost.MeasurePerCost, null)
     assert.equal(noCost.MeasurePerHS, 5)
     assert.ok(designedTech.figureResult(noCost, 'MeasurePerCost').inputs.missing.some((name) => name.includes('build cost')))
+  })
+
+  invariant('designed tech', 'two otherwise identical designs of the current rule, one with electronic hardening and one without, show the same stored cost and strength per BP in the designs table, while a design stored under the 2.7.1 rule shows the cost it stored', () => {
+    const designed = (hardeningRating) => designRules.activeSensorDesign({ sizeHS: 1, resolution: 100, strengthTech: 21, emTech: 1, hardeningRating, eccmRating: 3, eccmCost: 1.3, mode: designRules.SENSOR_MODES.missileFireControl })
+    const rowOf = (id, figures) => designedTech.augmentComponent({ SDComponentID: id, Name: `Design ${id}`, CategoryID: 24, ComponentTypeID: 25, Size: figures.sizeHS, Cost: figures.cost, Crew: figures.crew, HTK: figures.htk, ComponentValue: figures.strength, MaxSensorRange: figures.rangeKm, Resolution: 100, ECCM: figures.eccm, ElectronicCTD: figures.ctd, Uridium: figures.uridium, Corbomite: figures.corbomite, Obsolete: 0, MilitarySystem: 1, ShippingLineSystem: 0, Baseline: 0 })
+    const columns = designedTech.columnsFor(24)
+    const cost = columns.find((entry) => entry.value === 'Cost')
+    const perCost = columns.find((entry) => entry.value === 'MeasurePerCost')
+    const cell = (column, item) => designedTech.cellOf(column, item, counter)
+    const hardened = rowOf(1, designed(70))
+    const plain = rowOf(2, designed(0))
+
+    // The two rows are the same design but for the hardening tech, whose rating is the CTD; the cost reads the ECCM factor alone.
+    assert.equal(hardened.ElectronicCTD, 70)
+    assert.equal(plain.ElectronicCTD, 0)
+    assert.equal(hardened.Cost, plain.Cost)
+    assert.equal(cell(cost, hardened).text, cell(cost, plain).text)
+    assert.equal(hardened.MeasurePerCost, plain.MeasurePerCost)
+    assert.equal(cell(perCost, hardened).text, cell(perCost, plain).text)
+
+    // The 1973 save's 154931 (a missile fire control of size 1 and strength 21, ECCM 3, CTD 70) was designed under the 2.7.1 rule, which multiplied its 1.15 hardening cost factor into the stored 31.46 BP; this rule gives 27.3. The table shows the figure the save stores.
+    const stored = rowOf(154931, { sizeHS: 1, cost: 31.46, crew: 2, htk: 1, strength: 21, rangeKm: 79602591.77778593, eccm: 3, ctd: 70, uridium: 24.2, corbomite: 7.26 })
+
+    assert.equal(cell(cost, stored).text, '31.46')
+    assert.equal(stored.MeasurePerCost, 21 / 31.46)
+    assert.equal(designed(70).cost, 27.3)
   })
 
   invariant('designed tech', 'a beam weapon with no stored damage, shots or capacitor figure has no damage, interval or damage per second; it never works out as 0 or NaN', () => {
@@ -2140,6 +2167,7 @@ const main = async () => {
     'commanders',
     'research',
     'designed-tech',
+    'design-rules',
     'production',
     'terraform-capacity',
     'logistics',

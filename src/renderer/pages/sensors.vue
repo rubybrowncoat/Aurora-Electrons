@@ -437,7 +437,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">Use it to choose the hardening and ECCM levels a jammed target calls for. The sizes stay those of the proposed pair at the chosen resolution. The levels change the cost and the ECCM the pair meets the jammer with. Hardening sets the Uridium of the sensor, and ECCM sets the Corbomite on top of it. The tinted row is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair. A missile target takes no jammer, so the ECCM changes no reach against it.</div>
+            <div class="panel-foot caption text--secondary">Use it to choose the hardening and ECCM levels a jammed target calls for. The sizes stay those of the proposed pair at the chosen resolution. The ECCM level changes the cost and the ECCM the pair meets the jammer with: it sets the Corbomite on top of the sensor's Uridium. Under the current design rule hardening does not change the cost; it sets the chance the pair's electronics are destroyed by electronic damage. The tinted row is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair. A missile target takes no jammer, so the ECCM changes no reach against it.</div>
           </v-card>
 
           <v-card class="panel" data-summary="Review researched active sensors and missile fire controls, with their stored figures and detection ranges." elevation="1">

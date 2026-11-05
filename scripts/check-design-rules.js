@@ -1520,87 +1520,114 @@ const MISSILE_MUTANTS = [
 
 // ---------- sensors and fire controls ----------
 
-// Sensor and fire control differences checked by hand, each pinned to its game, component, field and the stored and computed figures observed (the library's `knownDifference` explains a difference only while both still match, in that game). The computed figure is the rule at the component's tech rows. All of them are rows of the modded save (game 140). The reconciliation's alternatives (implied techs, a tenth of the cost, an uncapped range) are diagnostics that point at the pattern of a row; they explain nothing, so a row not pinned here is a mismatch.
-const TENTH_TIE = "the stored Cost is a tenth of the rule's with the .25 tie kept as .3 (the Uridium 1125 or 525 times the ECCM factor 1.25 is a figure ending in .25, stored rounded up to 1 decimal, and the Corbomite is the stored Cost less the Uridium); the other modded fire controls on the same techs store the exact tenth, and the cause is not identified"
-const TENTH_PLUS = "the stored Cost is 1.1 and 0.6 over the Uridium times the ECCM factor on these two multi-weapon fire controls whose Uridium is the exact tenth of the rule's at the stored (uncapped) range, and the Corbomite is the stored Cost less the Uridium; the cause is not identified"
+// Sensor and fire control differences checked by hand, each pinned to its game, component, field and the stored and computed figures observed (the library's `knownDifference` explains a difference only while both still match, in that game). The computed figure is this rule at the component's tech rows. All but three are rows of the modded save (game 140); those three are 154931 of the 1973 save, also game 140. A component designed under the 2.7.1 rule stores that rule's cost figures, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not (`premium`), so a stored cost figure on a hardened component is that factor away from it. The reconciliation's alternatives (implied techs, a tenth of the cost, an uncapped range) are diagnostics that point at the pattern of a row; they explain nothing, so a row not pinned here is a mismatch.
+const TENTH_TIE = "the stored Cost is a tenth of the 2.7.1 rule's with the .25 tie kept as .3 (the Uridium 1125 or 525 times the ECCM factor 1.25 is a figure ending in .25, stored rounded up to 1 decimal, and the Corbomite is the stored Cost less the Uridium); the other modded fire controls on the same techs store the exact tenth, that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause of the tenth is not identified"
+const TENTH_PLUS = "the stored Cost is 1.1 and 0.6 over the Uridium times the ECCM factor on these two multi-weapon fire controls whose Uridium is the exact tenth of the 2.7.1 rule's at the stored (uncapped) range, and the Corbomite is the stored Cost less the Uridium; that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause of the tenth is not identified"
 const TRACKING_FLOOR = 'a tracking multiplier of 0.33 on the speed rating 300000 gives 99000 km/s and the save stores 100000, which is the speed rating of another tech in the modded save; no tracking speed the rules give from the techs this fire control names matches, and the cause is not identified'
-const TENTH_SHORT = "the stored cost figures are a tenth of the rule's at the tracking 99000 the rules give, within 0.1 to 0.2 under it (for example 1732.4 against 1732.5); the stored tracking is 100000 and the cause is not identified"
+const TENTH_SHORT = "the stored cost figures are a tenth of the 2.7.1 rule's at the tracking 99000 the rules give, within 0.1 to 0.2 under it (for example 1732.4 against 1732.5); the stored tracking is 100000, that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause is not identified"
 
-const TENTH = "the stored cost figures are one tenth of the rule's (the Uridium agrees at a tenth, and so do the other cost figures of the component); the cause is not identified"
+const TENTH = "the stored cost figures are one tenth of the 2.7.1 rule's (the Uridium agrees at a tenth, and so do the other cost figures of the component); that rule multiplied this save's 1.25 hardening cost factor into them and this rule does not, and the cause of the tenth is not identified"
 const UNCAPPED = 'the save stores the range uncapped, above the 1,400,000 km limit the rules apply, and the figures that follow the range are those of the stored one; the cause is not identified'
-const UNCAPPED_TENTH = "the save stores the range uncapped, above the 1,400,000 km limit the rules apply, and the stored cost figures are one tenth of the rule's at that stored range; the cause is not identified"
-const IMPLIED_DISTANCE_UNCAPPED_TENTH = "the stored figures are those of a distance rating other than the one the tech row holds (the stored range over the range multiplier), at which they agree, with the range stored uncapped above 1,400,000 km and the cost figures one tenth of the rule's; the cause is not identified"
-const IMPLIED_STRENGTH = 'the stored figures are those of an active sensor strength other than the one the tech row holds (the stored strength over the size), at which the range and the cost figures also agree; the cause is not identified'
-const IMPLIED_SENSITIVITY_TENTH = "the stored figures are those of a sensitivity other than the one the tech row holds (the stored sensitivity over the size), at which they agree, with the cost figures one tenth of the rule's; the cause is not identified"
+const UNCAPPED_TENTH = "the save stores the range uncapped, above the 1,400,000 km limit the rules apply, and the stored cost figures are one tenth of the 2.7.1 rule's at that stored range; that rule multiplied this save's 1.25 hardening cost factor into them and this rule does not, and the cause is not identified"
+const IMPLIED_DISTANCE_UNCAPPED_TENTH = "the stored figures are those of a distance rating other than the one the tech row holds (the stored range over the range multiplier), at which they agree, with the range stored uncapped above 1,400,000 km and the cost figures one tenth of the 2.7.1 rule's; that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause is not identified"
+const IMPLIED_STRENGTH = 'the stored figures are those of an active sensor strength other than the one the tech row holds (the stored strength over the size), at which the range agrees and the cost figures are the 2.7.1 rule\'s; that rule multiplied this save\'s 1.25 hardening cost factor into them and this rule does not, and the cause is not identified'
+const IMPLIED_SENSITIVITY_TENTH = "the stored figures are those of a sensitivity other than the one the tech row holds (the stored sensitivity over the size), at which the sensitivity agrees and the cost figures are one tenth of the 2.7.1 rule's; that rule multiplied this save's 1.25 hardening cost factor into them and this rule does not, and the cause is not identified"
+
+// The stored cost figures of a component designed under the 2.7.1 rule, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not, so the stored figures differ by that factor and every other figure of the component agrees.
+const premium = (factor) => `the stored cost figures are the 2.7.1 rule's, which multiplied this component's ${factor} hardening cost factor into the Uridium and so into the Cost and Corbomite, and this rule does not; every other figure of the component agrees`
 
 const KNOWN_SENSOR_ROWS = [
-  { game: 140, id: 500238, field: 'Cost', stored: 1406.3, computed: 5468.75, reason: TENTH_TIE },
-  { game: 140, id: 500238, field: 'Corbomite', stored: 281.3, computed: 1093.75, reason: TENTH_TIE },
-  { game: 140, id: 500265, field: 'Cost', stored: 656.3, computed: 6562.5, reason: TENTH_TIE },
-  { game: 140, id: 500265, field: 'Corbomite', stored: 131.3, computed: 1312.5, reason: TENTH_TIE },
+  { game: 140, id: 154931, field: 'Cost', stored: 31.46, computed: 27.3, reason: premium(1.15) },
+  { game: 140, id: 154931, field: 'Uridium', stored: 24.2, computed: 21, reason: premium(1.15) },
+  { game: 140, id: 154931, field: 'Corbomite', stored: 7.26, computed: 6.3, reason: premium(1.15) },
+  { game: 140, id: 500211, field: 'Cost', stored: 28.125, computed: 22.5, reason: premium(1.25) },
+  { game: 140, id: 500211, field: 'Uridium', stored: 22.5, computed: 18, reason: premium(1.25) },
+  { game: 140, id: 500211, field: 'Corbomite', stored: 5.625, computed: 4.5, reason: premium(1.25) },
+  { game: 140, id: 500238, field: 'Cost', stored: 1406.3, computed: 4375, reason: TENTH_TIE },
+  { game: 140, id: 500238, field: 'Corbomite', stored: 281.3, computed: 875, reason: TENTH_TIE },
+  { game: 140, id: 500239, field: 'Cost', stored: 2734.375, computed: 2187.5, reason: premium(1.25) },
+  { game: 140, id: 500239, field: 'Uridium', stored: 2187.5, computed: 1750, reason: premium(1.25) },
+  { game: 140, id: 500239, field: 'Corbomite', stored: 546.875, computed: 437.5, reason: premium(1.25) },
+  { game: 140, id: 500262, field: 'Cost', stored: 112.5, computed: 90, reason: premium(1.25) },
+  { game: 140, id: 500262, field: 'Uridium', stored: 90, computed: 72, reason: premium(1.25) },
+  { game: 140, id: 500262, field: 'Corbomite', stored: 22.5, computed: 18, reason: premium(1.25) },
+  { game: 140, id: 500265, field: 'Cost', stored: 656.3, computed: 5250, reason: TENTH_TIE },
+  { game: 140, id: 500265, field: 'Corbomite', stored: 131.3, computed: 1050, reason: TENTH_TIE },
   { game: 140, id: 500380, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500380, field: 'Cost', stored: 2165.6, computed: 5414, reason: TENTH_SHORT },
-  { game: 140, id: 500380, field: 'Uridium', stored: 1732.4, computed: 4331.2, reason: TENTH_SHORT },
-  { game: 140, id: 500380, field: 'Corbomite', stored: 433.2, computed: 1082.8, reason: TENTH_SHORT },
+  { game: 140, id: 500380, field: 'Cost', stored: 2165.6, computed: 4331.25, reason: TENTH_SHORT },
+  { game: 140, id: 500380, field: 'Uridium', stored: 1732.4, computed: 3465, reason: TENTH_SHORT },
+  { game: 140, id: 500380, field: 'Corbomite', stored: 433.2, computed: 866.25, reason: TENTH_SHORT },
+  { game: 140, id: 500381, field: 'Cost', stored: 112.5, computed: 90, reason: premium(1.25) },
+  { game: 140, id: 500381, field: 'Uridium', stored: 90, computed: 72, reason: premium(1.25) },
+  { game: 140, id: 500381, field: 'Corbomite', stored: 22.5, computed: 18, reason: premium(1.25) },
+  { game: 140, id: 500382, field: 'Cost', stored: 225, computed: 180, reason: premium(1.25) },
+  { game: 140, id: 500382, field: 'Uridium', stored: 180, computed: 144, reason: premium(1.25) },
+  { game: 140, id: 500382, field: 'Corbomite', stored: 45, computed: 36, reason: premium(1.25) },
+  { game: 140, id: 500393, field: 'Cost', stored: 108000, computed: 86400, reason: premium(1.25) },
+  { game: 140, id: 500393, field: 'Uridium', stored: 86400, computed: 69120, reason: premium(1.25) },
+  { game: 140, id: 500393, field: 'Corbomite', stored: 21600, computed: 17280, reason: premium(1.25) },
   { game: 140, id: 500598, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500598, field: 'Cost', stored: 5568.8, computed: 10828.125, reason: TENTH_SHORT },
-  { game: 140, id: 500598, field: 'Uridium', stored: 4454.8, computed: 8662.5, reason: TENTH_SHORT },
-  { game: 140, id: 500598, field: 'Corbomite', stored: 1114, computed: 2165.625, reason: TENTH_SHORT },
+  { game: 140, id: 500598, field: 'Cost', stored: 5568.8, computed: 8662.5, reason: TENTH_SHORT },
+  { game: 140, id: 500598, field: 'Uridium', stored: 4454.8, computed: 6930, reason: TENTH_SHORT },
+  { game: 140, id: 500598, field: 'Corbomite', stored: 1114, computed: 1732.5, reason: TENTH_SHORT },
   { game: 140, id: 500599, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500599, field: 'Cost', stored: 2784.4, computed: 5414, reason: TENTH_SHORT },
-  { game: 140, id: 500599, field: 'Uridium', stored: 2227.4, computed: 4331.2, reason: TENTH_SHORT },
-  { game: 140, id: 500599, field: 'Corbomite', stored: 557, computed: 1082.8, reason: TENTH_SHORT },
+  { game: 140, id: 500599, field: 'Cost', stored: 2784.4, computed: 4331.25, reason: TENTH_SHORT },
+  { game: 140, id: 500599, field: 'Uridium', stored: 2227.4, computed: 3465, reason: TENTH_SHORT },
+  { game: 140, id: 500599, field: 'Corbomite', stored: 557, computed: 866.25, reason: TENTH_SHORT },
+  { game: 140, id: 500729, field: 'Cost', stored: 1800, computed: 1440, reason: premium(1.25) },
+  { game: 140, id: 500729, field: 'Uridium', stored: 1440, computed: 1152, reason: premium(1.25) },
+  { game: 140, id: 500729, field: 'Corbomite', stored: 360, computed: 288, reason: premium(1.25) },
   { game: 140, id: 500809, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500809, field: 'Cost', stored: 4331.2, computed: 10828.125, reason: TENTH_SHORT },
-  { game: 140, id: 500809, field: 'Uridium', stored: 3464.8, computed: 8662.5, reason: TENTH_SHORT },
-  { game: 140, id: 500809, field: 'Corbomite', stored: 866.4, computed: 2165.625, reason: TENTH_SHORT },
-  { game: 140, id: 500810, field: 'Cost', stored: 15001.1, computed: 6562.5, reason: TENTH_PLUS },
-  { game: 140, id: 500810, field: 'Corbomite', stored: 3001.1, computed: 1312.5, reason: TENTH_PLUS },
-  { game: 140, id: 500811, field: 'Cost', stored: 7500.6, computed: 3281.25, reason: TENTH_PLUS },
-  { game: 140, id: 500811, field: 'Corbomite', stored: 1500.6, computed: 656.25, reason: TENTH_PLUS },
-  { game: 140, id: 500208, field: 'Cost', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500208, field: 'Uridium', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500209, field: 'Cost', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500209, field: 'Uridium', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500213, field: 'Cost', stored: 2625, computed: 26250, reason: TENTH },
-  { game: 140, id: 500213, field: 'Uridium', stored: 2100, computed: 21000, reason: TENTH },
-  { game: 140, id: 500213, field: 'Corbomite', stored: 525, computed: 5250, reason: TENTH },
+  { game: 140, id: 500809, field: 'Cost', stored: 4331.2, computed: 8662.5, reason: TENTH_SHORT },
+  { game: 140, id: 500809, field: 'Uridium', stored: 3464.8, computed: 6930, reason: TENTH_SHORT },
+  { game: 140, id: 500809, field: 'Corbomite', stored: 866.4, computed: 1732.5, reason: TENTH_SHORT },
+  { game: 140, id: 500810, field: 'Cost', stored: 15001.1, computed: 5250, reason: TENTH_PLUS },
+  { game: 140, id: 500810, field: 'Corbomite', stored: 3001.1, computed: 1050, reason: TENTH_PLUS },
+  { game: 140, id: 500811, field: 'Cost', stored: 7500.6, computed: 2625, reason: TENTH_PLUS },
+  { game: 140, id: 500811, field: 'Corbomite', stored: 1500.6, computed: 525, reason: TENTH_PLUS },
+  { game: 140, id: 500208, field: 'Cost', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500208, field: 'Uridium', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500209, field: 'Cost', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500209, field: 'Uridium', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500213, field: 'Cost', stored: 2625, computed: 21000, reason: TENTH },
+  { game: 140, id: 500213, field: 'Uridium', stored: 2100, computed: 16800, reason: TENTH },
+  { game: 140, id: 500213, field: 'Corbomite', stored: 525, computed: 4200, reason: TENTH },
   { game: 140, id: 500238, field: 'Range', stored: 3600000, computed: 1400000, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500238, field: 'Uridium', stored: 1125, computed: 4375, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500238, field: 'Uridium', stored: 1125, computed: 3500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
   { game: 140, id: 500240, field: 'Range', stored: 2400000, computed: 1400000, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500240, field: 'Cost', stored: 3750, computed: 21875, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500240, field: 'Uridium', stored: 3000, computed: 17500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500240, field: 'Corbomite', stored: 750, computed: 4375, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500243, field: 'Cost', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500243, field: 'Uridium', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500244, field: 'Cost', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500244, field: 'Uridium', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500265, field: 'Uridium', stored: 525, computed: 5250, reason: TENTH },
+  { game: 140, id: 500240, field: 'Cost', stored: 3750, computed: 17500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500240, field: 'Uridium', stored: 3000, computed: 14000, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500240, field: 'Corbomite', stored: 750, computed: 3500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500243, field: 'Cost', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500243, field: 'Uridium', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500244, field: 'Cost', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500244, field: 'Uridium', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500265, field: 'Uridium', stored: 525, computed: 4200, reason: TENTH },
   { game: 140, id: 500380, field: 'Range', stored: 5600000, computed: 1400000, reason: UNCAPPED },
-  { game: 140, id: 500383, field: 'Cost', stored: 2500, computed: 25000, reason: TENTH },
-  { game: 140, id: 500383, field: 'Uridium', stored: 2500, computed: 25000, reason: TENTH },
-  { game: 140, id: 500384, field: 'Cost', stored: 2500, computed: 25000, reason: TENTH },
-  { game: 140, id: 500384, field: 'Uridium', stored: 2500, computed: 25000, reason: TENTH },
+  { game: 140, id: 500383, field: 'Cost', stored: 2500, computed: 20000, reason: TENTH },
+  { game: 140, id: 500383, field: 'Uridium', stored: 2500, computed: 20000, reason: TENTH },
+  { game: 140, id: 500384, field: 'Cost', stored: 2500, computed: 20000, reason: TENTH },
+  { game: 140, id: 500384, field: 'Uridium', stored: 2500, computed: 20000, reason: TENTH },
   { game: 140, id: 500389, field: 'Range', stored: 19200000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500389, field: 'Cost', stored: 4500, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500389, field: 'Uridium', stored: 3600, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500389, field: 'Corbomite', stored: 900, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500389, field: 'Cost', stored: 4500, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500389, field: 'Uridium', stored: 3600, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500389, field: 'Corbomite', stored: 900, computed: 525, reason: UNCAPPED_TENTH },
   { game: 140, id: 500390, field: 'Range', stored: 12000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500390, field: 'Cost', stored: 2812.5, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500390, field: 'Uridium', stored: 2250, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500390, field: 'Corbomite', stored: 562.5, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500390, field: 'Cost', stored: 2812.5, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500390, field: 'Uridium', stored: 2250, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500390, field: 'Corbomite', stored: 562.5, computed: 525, reason: UNCAPPED_TENTH },
   { game: 140, id: 500391, field: 'Range', stored: 19200000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500391, field: 'Cost', stored: 9000, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500391, field: 'Uridium', stored: 7200, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500391, field: 'Corbomite', stored: 1800, computed: 1312.5, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500391, field: 'Cost', stored: 9000, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500391, field: 'Uridium', stored: 7200, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500391, field: 'Corbomite', stored: 1800, computed: 1050, reason: UNCAPPED_TENTH },
   { game: 140, id: 500392, field: 'Range', stored: 12000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500392, field: 'Cost', stored: 5625, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500392, field: 'Uridium', stored: 4500, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500392, field: 'Corbomite', stored: 1125, computed: 1312.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500394, field: 'Cost', stored: 62500, computed: 625000, reason: TENTH },
-  { game: 140, id: 500394, field: 'Uridium', stored: 62500, computed: 625000, reason: TENTH },
-  { game: 140, id: 500395, field: 'Cost', stored: 62500, computed: 625000, reason: TENTH },
-  { game: 140, id: 500395, field: 'Uridium', stored: 62500, computed: 625000, reason: TENTH },
+  { game: 140, id: 500392, field: 'Cost', stored: 5625, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500392, field: 'Uridium', stored: 4500, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500392, field: 'Corbomite', stored: 1125, computed: 1050, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500394, field: 'Cost', stored: 62500, computed: 500000, reason: TENTH },
+  { game: 140, id: 500394, field: 'Uridium', stored: 62500, computed: 500000, reason: TENTH },
+  { game: 140, id: 500395, field: 'Cost', stored: 62500, computed: 500000, reason: TENTH },
+  { game: 140, id: 500395, field: 'Uridium', stored: 62500, computed: 500000, reason: TENTH },
   { game: 140, id: 500598, field: 'Range', stored: 7200000, computed: 1400000, reason: UNCAPPED },
   { game: 140, id: 500599, field: 'Range', stored: 7200000, computed: 1400000, reason: UNCAPPED },
   { game: 140, id: 500607, field: 'Strength', stored: 0.2, computed: 0.04, reason: IMPLIED_STRENGTH },
@@ -1609,41 +1636,47 @@ const KNOWN_SENSOR_ROWS = [
   { game: 140, id: 500607, field: 'Uridium', stored: 0.2, computed: 0, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500607, field: 'Corbomite', stored: 0.05, computed: 0, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500608, field: 'Sensitivity', stored: 200, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500608, field: 'Cost', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500608, field: 'Uridium', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500608, field: 'Cost', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500608, field: 'Uridium', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
   { game: 140, id: 500609, field: 'Sensitivity', stored: 200, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500609, field: 'Cost', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500609, field: 'Uridium', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500609, field: 'Cost', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500609, field: 'Uridium', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
   { game: 140, id: 500730, field: 'Strength', stored: 144, computed: 460.8, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500730, field: 'Range', stored: 1354053417.33037, computed: 2422204389.057253, reason: IMPLIED_STRENGTH },
-  { game: 140, id: 500730, field: 'Cost', stored: 225, computed: 720, reason: IMPLIED_STRENGTH },
-  { game: 140, id: 500730, field: 'Uridium', stored: 180, computed: 576, reason: IMPLIED_STRENGTH },
-  { game: 140, id: 500730, field: 'Corbomite', stored: 45, computed: 144, reason: IMPLIED_STRENGTH },
+  { game: 140, id: 500730, field: 'Cost', stored: 225, computed: 576, reason: IMPLIED_STRENGTH },
+  { game: 140, id: 500730, field: 'Uridium', stored: 180, computed: 460.8, reason: IMPLIED_STRENGTH },
+  { game: 140, id: 500730, field: 'Corbomite', stored: 45, computed: 115.2, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500809, field: 'Range', stored: 5600000, computed: 1400000, reason: UNCAPPED },
   { game: 140, id: 500810, field: 'Range', stored: 32000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500810, field: 'Uridium', stored: 12000, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500810, field: 'Uridium', stored: 12000, computed: 4200, reason: UNCAPPED_TENTH },
   { game: 140, id: 500811, field: 'Range', stored: 32000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500811, field: 'Uridium', stored: 6000, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501040, field: 'Cost', stored: 6250, computed: 62500, reason: TENTH },
-  { game: 140, id: 501040, field: 'Uridium', stored: 6250, computed: 62500, reason: TENTH },
-  { game: 140, id: 501041, field: 'Cost', stored: 6250, computed: 62500, reason: TENTH },
-  { game: 140, id: 501041, field: 'Uridium', stored: 6250, computed: 62500, reason: TENTH },
+  { game: 140, id: 500811, field: 'Uridium', stored: 6000, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500823, field: 'Cost', stored: 109.375, computed: 87.5, reason: premium(1.25) },
+  { game: 140, id: 500823, field: 'Uridium', stored: 87.5, computed: 70, reason: premium(1.25) },
+  { game: 140, id: 500823, field: 'Corbomite', stored: 21.875, computed: 17.5, reason: premium(1.25) },
+  { game: 140, id: 501040, field: 'Cost', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501040, field: 'Uridium', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501041, field: 'Cost', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501041, field: 'Uridium', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501042, field: 'Cost', stored: 3600, computed: 2880, reason: premium(1.25) },
+  { game: 140, id: 501042, field: 'Uridium', stored: 2880, computed: 2304, reason: premium(1.25) },
+  { game: 140, id: 501042, field: 'Corbomite', stored: 720, computed: 576, reason: premium(1.25) },
   { game: 140, id: 501139, field: 'Range', stored: 24000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501139, field: 'Cost', stored: 5625, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501139, field: 'Uridium', stored: 4500, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501139, field: 'Corbomite', stored: 1125, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501139, field: 'Cost', stored: 5625, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501139, field: 'Uridium', stored: 4500, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501139, field: 'Corbomite', stored: 1125, computed: 525, reason: UNCAPPED_TENTH },
   { game: 140, id: 501140, field: 'Range', stored: 24000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501140, field: 'Cost', stored: 11250, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501140, field: 'Uridium', stored: 9000, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501140, field: 'Corbomite', stored: 2250, computed: 1312.5, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501140, field: 'Cost', stored: 11250, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501140, field: 'Uridium', stored: 9000, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501140, field: 'Corbomite', stored: 2250, computed: 1050, reason: UNCAPPED_TENTH },
   { game: 140, id: 501141, field: 'Range', stored: 40000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501141, field: 'Cost', stored: 18750, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501141, field: 'Uridium', stored: 15000, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501141, field: 'Corbomite', stored: 3750, computed: 1312.5, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501141, field: 'Cost', stored: 18750, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501141, field: 'Uridium', stored: 15000, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501141, field: 'Corbomite', stored: 3750, computed: 1050, reason: UNCAPPED_TENTH },
   { game: 140, id: 501142, field: 'Range', stored: 40000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501142, field: 'Cost', stored: 9375, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501142, field: 'Uridium', stored: 7500, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501142, field: 'Corbomite', stored: 1875, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501142, field: 'Cost', stored: 9375, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501142, field: 'Uridium', stored: 7500, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501142, field: 'Corbomite', stored: 1875, computed: 525, reason: UNCAPPED_TENTH },
 ]
 
 const loadSensorFixtures = () => new Map(JSON.parse(fs.readFileSync(SENSOR_FIXTURES, 'utf8')).fixtures.map((fixture) => [fixture.label, fixture]))
@@ -1685,11 +1718,15 @@ const checkSensors = async (context) => {
   return reconcileSensorFixture(library, fixture, allGame ? 'every sensor and fire control a race of the game holds' : 'the sensors and fire controls the race owns')
 }
 
-// The components that differ from the rules in the sensor fixtures, as `fixture|component`, each explained by a pinned row above, and how many comparisons of each fixture differ. The stock fixtures have none. A comparison that moves in or out is a change to look at, not one to absorb.
+// The components that differ from the rules in the sensor fixtures, as `fixture|component`, each explained by a pinned row above, and how many comparisons of each fixture differ. The stock fixtures have one: 154931 of the 1973 save, designed under the 2.7.1 rule, whose cost rows carry that rule's hardening cost factor. A comparison that moves in or out is a change to look at, not one to absorb.
 const EXPECTED_SENSOR_DIFFER = new Set([
-  ...['500208', '500209', '500213', '500238', '500240', '500243', '500244', '500265', '500380', '500383', '500384', '500389', '500390', '500391', '500392', '500394', '500395', '500598', '500599', '500607', '500608', '500609', '500730', '500809', '500810', '500811', '501040', '501041', '501139', '501140', '501141', '501142'].map((id) => `modded-g140|${id}`),
+  ...['500208', '500209', '500211', '500213', '500238', '500239', '500240', '500243', '500244', '500262', '500265', '500380', '500381', '500382', '500383', '500384', '500389', '500390', '500391', '500392', '500393', '500394', '500395', '500598', '500599', '500607', '500608', '500609', '500729', '500730', '500809', '500810', '500811', '500823', '501040', '501041', '501042', '501139', '501140', '501141', '501142'].map((id) => `modded-g140|${id}`),
+  'boscodiogigia-1973-g140|154931',
 ])
-const EXPECTED_SENSOR_DIFFERENCES = { 'modded-g140': 110 }
+const EXPECTED_SENSOR_DIFFERENCES = { 'modded-g140': 137, 'boscodiogigia-1973-g140': 3 }
+
+// The one stock component whose stored cost figures were made under the 2.7.1 rule, which multiplied the 1.15 hardening cost factor into them: this rule gives them without it, so its Cost, Uridium and Corbomite differ and are pinned above, and its other figures still agree. It is left out of the exhaustive rebuild, which would otherwise count its three cost rows as differences.
+const PREMIUM_271_COMPONENTS = new Set(['boscodiogigia-1973-g140|154931'])
 
 // The figures of the sensor fixtures the rules leave unknown, as `fixture|component|field`, each for the reason the reconciliation gives: a fire control of the 1973 save that names no ECCM tech (it stores ECCM 8, cost 0 and Corbomite -25.6) has no ECCM factor to take its cost and Corbomite from. An unknown that is not listed, or a listed one that is known now, is a change to look at.
 const EXPECTED_SENSOR_UNKNOWN = new Set(['boscodiogigia-1973-g140|154909|Cost', 'boscodiogigia-1973-g140|154909|Corbomite', 'boscodiogigia-1973-g140|154909|ECCM'])
@@ -1768,10 +1805,11 @@ const sensorFixtureProblems = (library, data) => {
 }
 
 const SENSOR_CHECK_NAMES = {
-  iris: 'the stored Iris of the modded save is rebuilt: range 239,365,088.371173 km, strength 18, cost 28.125 (Uridium 22.5, Corbomite 5.625), size 0.1, resolution 1, ECCM 15, CTD 1',
+  iris: 'the Iris of the modded save is rebuilt: range 239,365,088.371173 km, strength 18, cost 22.5 (Uridium 18, Corbomite 4.5), size 0.1, resolution 1, ECCM 15, CTD 1; the save stores 28.125 (Uridium 22.5, Corbomite 5.625), which is the 2.7.1 rule with its 1.25 hardening cost factor',
   active: 'every owned active sensor and missile fire control of the stock saves is rebuilt: strength, range, cost, minerals, crew, HTK, ECCM and CTD',
   pair: 'a missile fire control has twice the range of the search sensor of the same techs, size and resolution, with its strength, and the rules reproduce both',
-  passive: 'the thermal and EM sensors of the stock saves are rebuilt: the sensitivity is the size times the tech, the cost that times the hardening factor to 1 decimal, all of it Uridium',
+  passive: 'the thermal and EM sensors of the stock saves are rebuilt: the sensitivity is the size times the tech, the cost is that rounded to 1 decimal, all of it Uridium, with the hardening tech giving the CTD and no cost premium',
+  unhardened: 'electronic hardening is the CTD and no cost premium: an active sensor, a missile fire control, a passive sensor and a beam fire control with a hardening tech and without one carry the same Uridium, Cost and Corbomite at the same size, techs and ECCM, and a hardening cost factor passed to the design changes nothing',
   resolution: 'a signature under the resolution cuts the range by the square of the ratio, and one at or over it cuts nothing',
   jammer: 'a sensor jammer cuts the range by 0.75 to the jammer less the ECCM only when the jammer is the stronger, and the missile hit penalty is another rule',
   signature: 'a missile is seen by a signature of its size in MSP over 20 HS, never below 0.3',
@@ -1787,7 +1825,7 @@ const SENSOR_CHECK_NAMES = {
   trunc: 'the cost of a fire control uses the tracking in thousands cut to a whole number',
   request: 'a requested range and tracking are met by the smallest legal multipliers, on the tracking the game stores (rounded) and not the unrounded ratio; the next smaller falls short, a range over the limit is beyond the largest, a missing tech is unavailable, and every request is an estimate under the inverse sizing rule',
   roles: 'the techs of a component are found by tech type and not by slot; two of one type are ambiguous, a missing or unheld one makes its figures unknown, and a figure the save lacks is unknown',
-  techNumbers: 'a tech row that stores no number a figure needs makes only the figures that need it unknown (the rating for the CTD or ECCM, the cost factor for the Uridium, Cost and Corbomite) and never reads it as 0',
+  techNumbers: 'a tech row that stores no number a figure needs makes only the figures that need it unknown (the rating for the CTD or ECCM, the ECCM cost factor for the Cost and Corbomite) and never reads it as 0',
   descriptions: 'the tech types the roles are found by are those DIM_TechType describes in every save',
   explanations: 'a difference is explained only by an audited pin of its game, component, field and figures: the alternatives (implied techs, a tenth, an uncapped range) are diagnostics, and an unpinned figure, another game, a changed figure and a re-identified component are mismatches',
   fixtures: 'the sensor fixtures reconcile: the stock saves agree everywhere, the modded save differs only where pinned, no comparison explains itself, and nothing is unknown or unsupported',
@@ -1817,7 +1855,7 @@ const sensorChecks = (library, data) => {
     let count = 0
 
     for (const fixture of unmodded) {
-      for (const component of ofTypes(fixture, wanted).filter((part) => ![...EXPECTED_SENSOR_UNKNOWN].some((key) => key.startsWith(`${fixture.label}|${part.id}|`)))) {
+      for (const component of ofTypes(fixture, wanted).filter((part) => ![...EXPECTED_SENSOR_UNKNOWN].some((key) => key.startsWith(`${fixture.label}|${part.id}|`)) && !PREMIUM_271_COMPONENTS.has(`${fixture.label}|${part.id}`))) {
         const failure = expectVerdicts(library, library.reconcileSensor(fixture, component), fields, 'agree')
 
         if (failure !== true) {
@@ -1867,7 +1905,7 @@ const sensorChecks = (library, data) => {
       const iris = componentOf(modded, 500211).row
       const result = rebuilt(modded, 500211)
 
-      return firstFailure(expectNear('stored range', iris.MaxSensorRange, 239365088.371173), expectNear('stored cost', iris.Cost, 28.125), expectNear('stored Uridium', iris.Uridium, 22.5), expectNear('stored Corbomite', iris.Corbomite, 5.625), expectNear('stored size', iris.Size, 0.1), expectNear('stored resolution', iris.Resolution, 1), expectNear('stored ECCM', iris.ECCM, 15), expectNear('stored CTD', iris.ElectronicCTD, 1), expectNear('stored strength', iris.ComponentValue, 18), expectNear('range', computedOf(result, 'Range'), 239365088.371173), expectNear('strength', computedOf(result, 'Strength'), 18), expectNear('cost', computedOf(result, 'Cost'), 28.125), expectNear('Uridium', computedOf(result, 'Uridium'), 22.5), expectNear('Corbomite', computedOf(result, 'Corbomite'), 5.625), expectNear('ECCM', computedOf(result, 'ECCM'), 15), expectNear('CTD', computedOf(result, 'CTD'), 1), expectVerdicts(library, result, SENSOR_ACTIVE_FIELDS, 'agree'))
+      return firstFailure(expectNear('stored range', iris.MaxSensorRange, 239365088.371173), expectNear('stored cost', iris.Cost, 28.125), expectNear('stored Uridium', iris.Uridium, 22.5), expectNear('stored Corbomite', iris.Corbomite, 5.625), expectNear('stored size', iris.Size, 0.1), expectNear('stored resolution', iris.Resolution, 1), expectNear('stored ECCM', iris.ECCM, 15), expectNear('stored CTD', iris.ElectronicCTD, 1), expectNear('stored strength', iris.ComponentValue, 18), expectNear('range', computedOf(result, 'Range'), 239365088.371173), expectNear('strength', computedOf(result, 'Strength'), 18), expectNear('cost', computedOf(result, 'Cost'), 22.5), expectNear('Uridium', computedOf(result, 'Uridium'), 18), expectNear('Corbomite', computedOf(result, 'Corbomite'), 4.5), expectNear('ECCM', computedOf(result, 'ECCM'), 15), expectNear('CTD', computedOf(result, 'CTD'), 1), expectVerdicts(library, result, ['Strength', 'Range', 'Crew', 'HTK', 'ECCM', 'CTD'], 'agree'), expectVerdicts(library, result, ['Cost', 'Uridium', 'Corbomite'], 'differ'))
     }],
     [S.active, () => firstFailure(reproduces([types.active, types.missileFireControl], SENSOR_ACTIVE_FIELDS, 60), expectThat('the stock saves hold no resolution 50 or more fire control', unmodded.some((fixture) => ofTypes(fixture, [types.missileFireControl]).some((component) => component.row.Resolution >= 50))))],
     [S.pair, () => {
@@ -1884,10 +1922,18 @@ const sensorChecks = (library, data) => {
       }))
     }],
     [S.passive, () => {
-      const small = library.passiveSensorDesign({ sizeHS: 0.3, sensitivityTech: 5, hardeningRating: 100, hardeningCost: 1.23 })
-      const large = library.passiveSensorDesign({ sizeHS: 2, sensitivityTech: 5, hardeningRating: 100, hardeningCost: 1 })
+      const small = library.passiveSensorDesign({ sizeHS: 0.3, sensitivityTech: 5, hardeningRating: 100 })
+      const large = library.passiveSensorDesign({ sizeHS: 2, sensitivityTech: 5, hardeningRating: 100 })
 
-      return firstFailure(reproduces([types.thermal, types.em], SENSOR_PASSIVE_FIELDS, 40), expectNear('sensitivity of 0.3 HS at 5', small.sensitivity, 1.5), expectNear('cost to 1 decimal', small.cost, 1.8), expectNear('all of it Uridium', small.uridium, small.cost), expectNear('crew of 2 HS', large.crew, 4), expectNear('HTK of 2 HS', large.htk, 1), expectNear('HTK of 0.3 HS', small.htk, 0), expectNear('sensitivity of 2 HS at 5', large.sensitivity, 10), expectNear('CTD', large.ctd, 100), expectVerdicts(library, rebuilt(stock, 154091), SENSOR_PASSIVE_FIELDS, 'agree'), expectNear('thermal 1 HS sensitivity', computedOf(rebuilt(stock, 154091), 'Sensitivity'), 5), expectNear('EM 0.1 HS sensitivity', computedOf(rebuilt(stock, 154090), 'Sensitivity'), 0.5), expectNear('EM 0.1 HS crew', computedOf(rebuilt(stock, 154090), 'Crew'), 0))
+      return firstFailure(reproduces([types.thermal, types.em], SENSOR_PASSIVE_FIELDS, 40), expectNear('sensitivity of 0.3 HS at 5', small.sensitivity, 1.5), expectNear('cost to 1 decimal and no premium for the hardening tech', small.cost, 1.5), expectNear('all of it Uridium', small.uridium, small.cost), expectNear('crew of 2 HS', large.crew, 4), expectNear('HTK of 2 HS', large.htk, 1), expectNear('HTK of 0.3 HS', small.htk, 0), expectNear('sensitivity of 2 HS at 5', large.sensitivity, 10), expectNear('CTD', large.ctd, 100), expectVerdicts(library, rebuilt(stock, 154091), SENSOR_PASSIVE_FIELDS, 'agree'), expectNear('thermal 1 HS sensitivity', computedOf(rebuilt(stock, 154091), 'Sensitivity'), 5), expectNear('EM 0.1 HS sensitivity', computedOf(rebuilt(stock, 154090), 'Sensitivity'), 0.5), expectNear('EM 0.1 HS crew', computedOf(rebuilt(stock, 154090), 'Crew'), 0))
+    }],
+    [S.unhardened, () => {
+      const active = (hardeningRating, extra) => library.activeSensorDesign({ sizeHS: 1.5, resolution: 5, strengthTech: 40, emTech: 100, hardeningRating, eccmRating: 2, eccmCost: 1.3, ...extra })
+      const passive = (hardeningRating, extra) => library.passiveSensorDesign({ sizeHS: 1.5, sensitivityTech: 40, hardeningRating, ...extra })
+      const beam = (hardeningRating, extra) => library.beamFireControlDesign({ rangeMultiplier: 1.4, trackingMultiplier: 2.5, distanceRating: 100000, speedRating: 5000, weaponNumber: 1, hardeningRating, eccmRating: 2, eccmCost: 1.3, ...extra })
+      const sameCost = (label, hardened, plain) => firstFailure(expectNear(`${label} Cost with the hardening tech and without it`, hardened.cost, plain.cost), expectNear(`${label} Uridium with the hardening tech and without it`, hardened.uridium, plain.uridium), expectThat(`${label}: the Corbomite is ${hardened.corbomite} with the hardening tech and ${plain.corbomite} without it`, hardened.corbomite === plain.corbomite), expectThat(`${label}: the CTD is ${hardened.ctd} with the hardening tech and ${plain.ctd} without it, not 100 and 0`, hardened.ctd === 100 && plain.ctd === 0))
+
+      return firstFailure(sameCost('an active sensor', active(100), active(0)), sameCost('a missile fire control', active(100, { mode: library.SENSOR_MODES.missileFireControl }), active(0, { mode: library.SENSOR_MODES.missileFireControl })), sameCost('a passive sensor', passive(100), passive(0)), sameCost('a beam fire control', beam(100), beam(0)), expectNear('an active sensor Cost with a hardening cost factor passed', active(0, { hardeningCost: 4 }).cost, active(0).cost), expectNear('a passive sensor Cost with a hardening cost factor passed', passive(0, { hardeningCost: 4 }).cost, passive(0).cost), expectNear('a beam fire control Cost with a hardening cost factor passed', beam(0, { hardeningCost: 4 }).cost, beam(0).cost))
     }],
     [S.resolution, () => {
       const iris = componentOf(modded, 500211).row.MaxSensorRange
@@ -1998,10 +2044,10 @@ const sensorChecks = (library, data) => {
       return firstFailure(expectNear('range of 4 times 8,000,000', capped.rangeKm, 1400000), expectNear('range before the limit', capped.uncappedRangeKm, 32000000), expectThat('the range is not marked clamped', capped.rangeCapped === true), expectNear('Uridium follows the clamped range', capped.uridium, 700), expectNear('range at the limit', atLimit.rangeKm, 1400000), expectThat('the range at the limit is marked clamped', atLimit.rangeCapped === false), expectNear('range just over the limit', over.rangeKm, 1400000), expectThat('the range just over the limit is not marked clamped', over.rangeCapped === true), expectNear('Uridium with another limit', wider.uridium, 16000), expectNear('size of 0.1 and 0.1', floored.sizeHS, 0.01), expectThat('the floor is not marked', floored.sizeFloored === true), expectNear('size at half a weapon number', smallest.sizeHS, 0.01), expectNear('size of 0.1 and 0.2', edge.sizeHS, 0.01), expectThat('the size at the floor is marked floored', edge.sizeFloored === false), expectNear('stored floor size', row.Size, 0.01), expectNear('size of the modded 0.1 by 0.1 fire control', computedOf(result, 'Size'), 0.01), expectNear('its crew', computedOf(result, 'Crew'), 0), expectNear('its HTK', computedOf(result, 'HTK'), 0), expectVerdicts(library, result, ['Size', 'Crew', 'HTK', 'Range', 'Tracking'], 'agree'))
     }],
     [S.trunc, () => {
-      const design = (extra) => library.beamFireControlDesign({ rangeMultiplier: 1, trackingMultiplier: 3.625, distanceRating: 100000, speedRating: 10000, weaponNumber: 1, hardeningRating: 100, hardeningCost: 1.5, eccmRating: 0, eccmCost: 1, ...extra })
+      const design = (extra) => library.beamFireControlDesign({ rangeMultiplier: 1, trackingMultiplier: 3.625, distanceRating: 100000, speedRating: 10000, weaponNumber: 1, hardeningRating: 100, eccmRating: 0, eccmCost: 1, ...extra })
       const stored = componentOf(stock, 154634).row
 
-      return firstFailure(expectNear('tracking', design({}).trackingKmS, 36250), expectNear('Uridium at tracking 36250', design({}).uridium, 270), expectNear('Uridium at tracking 36999', design({ trackingMultiplier: 3.6999 }).uridium, 270), expectNear('Uridium at tracking 37000', design({ trackingMultiplier: 3.7 }).uridium, 277.5), expectNear('the stored Uridium of 154634', stored.Uridium, 33.6), expectNear('its tracking', stored.TrackingSpeed, 7590), expectThat('the stored Uridium is on the tracking in whole thousands', Math.abs(stored.Uridium - 192000 / 20000 * 7.59 * 0.5) > 1), expectVerdicts(library, rebuilt(stock, 154634), ['Uridium', 'Cost', 'Tracking'], 'agree'))
+      return firstFailure(expectNear('tracking', design({}).trackingKmS, 36250), expectNear('Uridium at tracking 36250', design({}).uridium, 180), expectNear('Uridium at tracking 36999', design({ trackingMultiplier: 3.6999 }).uridium, 180), expectNear('Uridium at tracking 37000', design({ trackingMultiplier: 3.7 }).uridium, 185), expectNear('the stored Uridium of 154634', stored.Uridium, 33.6), expectNear('its tracking', stored.TrackingSpeed, 7590), expectThat('the stored Uridium is on the tracking in whole thousands', Math.abs(stored.Uridium - 192000 / 20000 * 7.59 * 0.5) > 1), expectVerdicts(library, rebuilt(stock, 154634), ['Uridium', 'Cost', 'Tracking'], 'agree'))
     }],
     [S.request, () => {
       const result = (extra) => library.beamFireControlForRequest({ rangeKm: 123456, trackingKmS: 4321, ...beamTechs, ...extra })
@@ -2038,8 +2084,9 @@ const sensorChecks = (library, data) => {
       const halfway = request({ trackingKmS: 162.5, speedRating: 1250 })
       const sources = [['an ordinary request', result({})], ['a request beyond the range limit', result({ rangeKm: 1500000, distanceRating: 400000 })], ['a request beyond the largest tracking', result({ trackingKmS: 30000 })], ['a request at the multiplier floors', result({ rangeKm: 1000, trackingKmS: 100 })]]
       const missing = result({ speedRating: null })
+      const unfactored = request({ hardeningCost: null })
 
-      return firstFailure(...cases, ...swept, expectNear('range multiplier of 28,000 km on 80,000', exact.range.multiplier, 0.35), expectNear('tracking multiplier of 1,750 km/s on 5,000', exact.tracking.multiplier, 0.35), expectThat('a request on a multiplier is not sized to it', exact.range.smaller === 0.34), expectThat(`1000 km is ${small.range.status}`, small.range.status === 'minimum-bound' && small.range.smaller === null && small.range.multiplier === 0.1), expectThat(`a tracking of 30000 is ${fast.tracking.status}`, fast.tracking.status === 'beyond-largest' && fast.design === null), expectThat(`1,500,000 km is ${far.range.status}`, far.range.status === 'beyond-largest' && far.design === null), expectNear('138 km/s on the speed rating 1250 is stored by the multiplier 0.11 (137.5 rounds to 138)', rounded.tracking.multiplier, 0.11), expectNear('the design of 0.11 on 1250', rounded.design.trackingKmS, 138), expectNear('162.5 km/s on the speed rating 1250 needs 0.14, since 0.13 stores 162', halfway.tracking.multiplier, 0.14), expectThat('the exact tracking multiplier is the unrounded ratio', Math.abs(rounded.tracking.exactMultiplier - 138 / 1250) < 1e-12), expectThat('the floored request is sized at 0.1 and 0.1', small.tracking.multiplier === 0.1 && small.design.sizeHS === 0.01 && small.design.sizeFloored === true), expectThat('a missing speed rating gives a request', !isAvailable(missing)), expectThat('a request with no speed rating is certified by the inverse sizing rule', missing.rule.id === 'design.sensorInverseSizing'), expectThat('a complete request is unavailable', isAvailable(result({}))), ...sources.map(([label, built]) => firstFailure(expectThat(`${label} is certified by ${built.rule.id}, not the inverse sizing rule`, built.rule.id === 'design.sensorInverseSizing'), expectThat(`${label} is ${built.status}, not estimated`, built.status === 'estimated'))), expectThat('the design of a request is the confirmed forward rule', result({}).value.design !== null && result({}).value.design.trackingKmS >= 4321))
+      return firstFailure(...cases, ...swept, expectNear('range multiplier of 28,000 km on 80,000', exact.range.multiplier, 0.35), expectNear('tracking multiplier of 1,750 km/s on 5,000', exact.tracking.multiplier, 0.35), expectThat('a request on a multiplier is not sized to it', exact.range.smaller === 0.34), expectThat(`1000 km is ${small.range.status}`, small.range.status === 'minimum-bound' && small.range.smaller === null && small.range.multiplier === 0.1), expectThat(`a tracking of 30000 is ${fast.tracking.status}`, fast.tracking.status === 'beyond-largest' && fast.design === null), expectThat(`1,500,000 km is ${far.range.status}`, far.range.status === 'beyond-largest' && far.design === null), expectNear('138 km/s on the speed rating 1250 is stored by the multiplier 0.11 (137.5 rounds to 138)', rounded.tracking.multiplier, 0.11), expectNear('the design of 0.11 on 1250', rounded.design.trackingKmS, 138), expectNear('162.5 km/s on the speed rating 1250 needs 0.14, since 0.13 stores 162', halfway.tracking.multiplier, 0.14), expectThat('the exact tracking multiplier is the unrounded ratio', Math.abs(rounded.tracking.exactMultiplier - 138 / 1250) < 1e-12), expectThat('the floored request is sized at 0.1 and 0.1', small.tracking.multiplier === 0.1 && small.design.sizeHS === 0.01 && small.design.sizeFloored === true), expectThat('a missing speed rating gives a request', !isAvailable(missing)), expectThat('a request with no speed rating is certified by the inverse sizing rule', missing.rule.id === 'design.sensorInverseSizing'), expectThat('a complete request is unavailable', isAvailable(result({}))), ...sources.map(([label, built]) => firstFailure(expectThat(`${label} is certified by ${built.rule.id}, not the inverse sizing rule`, built.rule.id === 'design.sensorInverseSizing'), expectThat(`${label} is ${built.status}, not estimated`, built.status === 'estimated'))), expectThat('the design of a request is the confirmed forward rule', result({}).value.design !== null && result({}).value.design.trackingKmS >= 4321), expectThat('a request whose hardening level stores no cost factor is still sized, the factor no figure reads', unfactored !== null && unfactored.design !== null))
     }],
     [S.roles, () => {
       const slots = (row, values) => TECH_SLOTS.forEach((slot, index) => {
@@ -2059,7 +2106,7 @@ const sensorChecks = (library, data) => {
       }).result
       const reasons = (result, field) => String(entryOf(result, field).reason || '')
 
-      return firstFailure(expectThat('the permuted component computes differently', SENSOR_ACTIVE_FIELDS.every((field) => computedOf(permuted, field) === computedOf(base, field))), expectVerdicts(library, permuted, SENSOR_ACTIVE_FIELDS, 'agree'), expectVerdicts(library, twice, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, twice, ['Strength', 'Range', 'Uridium', 'CTD'], 'agree'), expectThat('a tech of the type twice is not reported as two techs of the type', reasons(twice, 'ECCM').includes('are of type 83')), expectVerdicts(library, unnamed, ['CTD', 'Uridium', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, unnamed, ['Range', 'Strength', 'ECCM'], 'agree'), expectThat('a hardening tech the component does not name is read as 0', computedOf(unnamed, 'CTD') === null && computedOf(unnamed, 'Cost') === null), expectVerdicts(library, unheld, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, unheld, ['Range', 'CTD'], 'agree'), expectThat('a tech row the save lacks is read as 0', computedOf(unheld, 'ECCM') === null), expectThat('the reason of a tech row the save lacks says so', reasons(unheld, 'ECCM').includes('no tech row')), expectVerdicts(library, lacking, ['Uridium'], 'unknown'), expectVerdicts(library, lacking, ['Range'], 'unknown'), expectThat('a figure the save lacks is read as 0', entryOf(lacking, 'Uridium').stored === null && entryOf(lacking, 'Range').computed === null))
+      return firstFailure(expectThat('the permuted component computes differently', SENSOR_ACTIVE_FIELDS.every((field) => computedOf(permuted, field) === computedOf(base, field))), expectVerdicts(library, permuted, ['Strength', 'Range', 'Crew', 'HTK', 'ECCM', 'CTD'], 'agree'), expectVerdicts(library, twice, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, twice, ['Strength', 'Range', 'CTD'], 'agree'), expectThat('the Uridium is not made unknown by an ECCM tech named twice', computedOf(twice, 'Uridium') !== null), expectThat('a tech of the type twice is not reported as two techs of the type', reasons(twice, 'ECCM').includes('are of type 83')), expectVerdicts(library, unnamed, ['CTD'], 'unknown'), expectVerdicts(library, unnamed, ['Range', 'Strength', 'ECCM'], 'agree'), expectThat('a hardening tech the component does not name leaves the cost figures known', ['Uridium', 'Cost', 'Corbomite'].every((field) => computedOf(unnamed, field) !== null)), expectThat('a hardening tech the component does not name is read as 0', computedOf(unnamed, 'CTD') === null), expectVerdicts(library, unheld, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, unheld, ['Range', 'CTD'], 'agree'), expectThat('a tech row the save lacks is read as 0', computedOf(unheld, 'ECCM') === null), expectThat('the reason of a tech row the save lacks says so', reasons(unheld, 'ECCM').includes('no tech row')), expectVerdicts(library, lacking, ['Uridium'], 'unknown'), expectVerdicts(library, lacking, ['Range'], 'unknown'), expectThat('a figure the save lacks is read as 0', entryOf(lacking, 'Uridium').stored === null && entryOf(lacking, 'Range').computed === null))
     }],
     [S.techNumbers, () => {
       const without = (fixture, id, role, member) => edited(fixture, id, (copy) => {
@@ -2072,7 +2119,7 @@ const sensorChecks = (library, data) => {
       const noStrength = without(stock, 154596, 'strength', 'info')
       const beam = without(later, 155094, 'hardening', 'info2')
 
-      return firstFailure(expectVerdicts(library, noFactor, ['Cost', 'Uridium', 'Corbomite'], 'unknown'), expectVerdicts(library, noFactor, ['CTD', 'Range', 'Strength', 'ECCM', 'Crew', 'HTK'], 'agree'), expectThat('a cost factor the tech row lacks is read as 0', ['Cost', 'Uridium', 'Corbomite'].every((field) => computedOf(noFactor, field) === null)), expectVerdicts(library, noRating, ['CTD'], 'unknown'), expectVerdicts(library, noRating, ['Cost', 'Uridium', 'Corbomite', 'Range', 'ECCM'], 'agree'), expectThat('a rating the tech row lacks is read as 0', computedOf(noRating, 'CTD') === null), expectVerdicts(library, noEccmFactor, ['Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, noEccmFactor, ['Uridium', 'ECCM', 'CTD', 'Range'], 'agree'), expectVerdicts(library, noEccmRating, ['ECCM'], 'unknown'), expectVerdicts(library, noEccmRating, ['Cost', 'Uridium', 'Corbomite', 'CTD'], 'agree'), expectVerdicts(library, noStrength, ['Strength', 'Range', 'Cost', 'Uridium', 'Corbomite'], 'unknown'), expectVerdicts(library, noStrength, ['CTD', 'ECCM', 'Crew'], 'agree'), expectThat('a strength the tech row lacks is read as 0', computedOf(noStrength, 'Strength') === null && computedOf(noStrength, 'Range') === null), expectVerdicts(library, beam, ['Uridium', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, beam, ['Range', 'Tracking', 'Size', 'Crew', 'HTK', 'ECCM', 'CTD', 'SpecialFunction'], 'agree'), expectThat('a cost factor the tech row of a fire control lacks is read as 0', ['Uridium', 'Cost', 'Corbomite'].every((field) => computedOf(beam, field) === null)))
+      return firstFailure(expectVerdicts(library, noFactor, ['Cost', 'Uridium', 'Corbomite', 'CTD', 'Range', 'Strength', 'ECCM', 'Crew', 'HTK'], 'agree'), expectThat('a hardening cost factor the tech row lacks is read as 0', ['Cost', 'Uridium', 'Corbomite'].every((field) => computedOf(noFactor, field) !== null)), expectVerdicts(library, noRating, ['CTD'], 'unknown'), expectVerdicts(library, noRating, ['Cost', 'Uridium', 'Corbomite', 'Range', 'ECCM'], 'agree'), expectThat('a rating the tech row lacks is read as 0', computedOf(noRating, 'CTD') === null), expectVerdicts(library, noEccmFactor, ['Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, noEccmFactor, ['Uridium', 'ECCM', 'CTD', 'Range'], 'agree'), expectVerdicts(library, noEccmRating, ['ECCM'], 'unknown'), expectVerdicts(library, noEccmRating, ['Cost', 'Uridium', 'Corbomite', 'CTD'], 'agree'), expectVerdicts(library, noStrength, ['Strength', 'Range', 'Cost', 'Uridium', 'Corbomite'], 'unknown'), expectVerdicts(library, noStrength, ['CTD', 'ECCM', 'Crew'], 'agree'), expectThat('a strength the tech row lacks is read as 0', computedOf(noStrength, 'Strength') === null && computedOf(noStrength, 'Range') === null), expectVerdicts(library, beam, ['Range', 'Tracking', 'Size', 'Crew', 'HTK', 'ECCM', 'CTD', 'SpecialFunction', 'Uridium', 'Cost', 'Corbomite'], 'agree'), expectThat('a hardening cost factor the tech row of a fire control lacks is read as 0', ['Uridium', 'Cost', 'Corbomite'].every((field) => computedOf(beam, field) !== null)))
     }],
     [S.descriptions, () => {
       const described = { thermal: 'Thermal Sensor Sensitivity', em: 'EM Sensor Sensitivity', strength: 'Active Sensor Strength', hardening: 'Hardening', eccm: 'ECCM', distance: 'Fire Control Distance Rating', speed: 'Fire Control Speed Rating', singleWeapon: 'Single Weapon Fire Control' }
@@ -2086,10 +2133,6 @@ const sensorChecks = (library, data) => {
       const alternative = (result, field) => entryOf(result, field)?.alternative || null
       const impliedAll = edited(modded, 500607, (copy) => {
         copy.techs[strengthOf.id].info = implied
-      }).result
-      const tenth = edited(modded, 500208, (_copy, component) => {
-        component.row.Cost *= 10
-        component.row.Uridium *= 10
       }).result
       const uncapped = rebuilt(modded, 500389)
       const row = componentOf(modded, 500389).row
@@ -2115,7 +2158,7 @@ const sensorChecks = (library, data) => {
       const pinnedFigures = [[500607, 'Strength'], [500607, 'Range'], [500208, 'Cost'], [500389, 'Range'], [500389, 'Cost'], [500238, 'Cost'], [500238, 'Range'], [500608, 'Sensitivity'], [500810, 'Cost'], [500380, 'Tracking']]
       const pins = pinnedFigures.map(([id, field]) => firstFailure(expectThat(`${id} ${field} is ${classified(rebuilt(modded, id), field).verdict} with no pin, not a mismatch`, classified(rebuilt(modded, id), field).verdict === 'differ' && !classified(rebuilt(modded, id), field).reason), expectThat(`${id} ${field} is not explained by its pin`, Boolean(classified(rebuilt(modded, id), field, KNOWN_SENSOR_ROWS).reason)), expectThat(`${id} ${field} is explained by a pin of another game`, !classified(rebuilt(modded, id), field, KNOWN_SENSOR_ROWS, 138).reason)))
 
-      return firstFailure(...pins, expectNear('strength the stored figure implies', implied, 10), expectThat('the stored strength of 500607 is the tech row', Math.abs(strengthOf.info - implied) > 1), expectVerdicts(library, impliedAll, SENSOR_ACTIVE_FIELDS, 'agree'), expectThat('the techs a stored strength implies are not diagnosed', Boolean(alternative(rebuilt(modded, 500607), 'Strength'))), expectVerdicts(library, tenth, SENSOR_PASSIVE_FIELDS, 'agree'), expectThat('a tenth of the stored cost is not diagnosed', Boolean(alternative(rebuilt(modded, 500208), 'Cost'))), expectThat('an uncapped range is not diagnosed', Boolean(alternative(uncapped, 'Range'))), expectNear('the range of the rule with no limit', wide.rangeKm, row.ComponentValue), expectNear('the Uridium of the rule with no limit at a tenth', wide.uridium / 10, row.Uridium), expectThat('a strength alone is diagnosed by the techs it implies', alternative(lone, 'Strength') === null), expectThat('a range off by 1.5 is diagnosed', alternative(off, 'Range') === null), expectThat('a strength alone is not a mismatch', classified(lone, 'Strength', KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(lone, 'Strength', KNOWN_SENSOR_ROWS, 138).reason), expectThat('a range off by 1.5 is not a mismatch', classified(off, 'Range', KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(off, 'Range', KNOWN_SENSOR_ROWS, 138).reason), expectThat('a changed pinned Cost is explained', classified(moved, 'Cost', KNOWN_SENSOR_ROWS).verdict === 'differ' && !classified(moved, 'Cost', KNOWN_SENSOR_ROWS).reason), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not differences', ['Cost', 'Uridium'].every((field) => library.judge(entryOf(tenthOfStock, field)) === 'differ')), expectThat('the Cost and Uridium of a stock sensor of another id cut to a tenth are explained', ['Cost', 'Uridium'].every((field) => classified(tenthOfStock, field, KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(tenthOfStock, field, KNOWN_SENSOR_ROWS, 138).reason)), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not diagnosed as a tenth', ['Cost', 'Uridium'].every((field) => Boolean(alternative(tenthOfStock, field)))), expectThat('a comparison explains a difference by itself', modded.components.every((component) => library.reconcileSensor(modded, component).comparisons.every((entry) => !entry.explain))))
+      return firstFailure(...pins, expectNear('strength the stored figure implies', implied, 10), expectThat('the stored strength of 500607 is the tech row', Math.abs(strengthOf.info - implied) > 1), expectVerdicts(library, impliedAll, SENSOR_ACTIVE_FIELDS, 'agree'), expectThat('the techs a stored strength implies are not diagnosed', Boolean(alternative(rebuilt(modded, 500607), 'Strength'))), expectThat('an uncapped range is not diagnosed', Boolean(alternative(uncapped, 'Range'))), expectNear('the range of the rule with no limit', wide.rangeKm, row.ComponentValue), expectNear('the Uridium of the 2.7.1 rule with no limit at a tenth', wide.uridium * uncapped.roles.hardening.info2 / 10, row.Uridium), expectThat('a strength alone is diagnosed by the techs it implies', alternative(lone, 'Strength') === null), expectThat('a range off by 1.5 is diagnosed', alternative(off, 'Range') === null), expectThat('a strength alone is not a mismatch', classified(lone, 'Strength', KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(lone, 'Strength', KNOWN_SENSOR_ROWS, 138).reason), expectThat('a range off by 1.5 is not a mismatch', classified(off, 'Range', KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(off, 'Range', KNOWN_SENSOR_ROWS, 138).reason), expectThat('a changed pinned Cost is explained', classified(moved, 'Cost', KNOWN_SENSOR_ROWS).verdict === 'differ' && !classified(moved, 'Cost', KNOWN_SENSOR_ROWS).reason), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not differences', ['Cost', 'Uridium'].every((field) => library.judge(entryOf(tenthOfStock, field)) === 'differ')), expectThat('the Cost and Uridium of a stock sensor of another id cut to a tenth are explained', ['Cost', 'Uridium'].every((field) => classified(tenthOfStock, field, KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(tenthOfStock, field, KNOWN_SENSOR_ROWS, 138).reason)), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not diagnosed as a tenth', ['Cost', 'Uridium'].every((field) => Boolean(alternative(tenthOfStock, field)))), expectThat('a comparison explains a difference by itself', modded.components.every((component) => library.reconcileSensor(modded, component).comparisons.every((entry) => !entry.explain))))
     }],
     [S.fixtures, () => {
       const problems = sensorFixtureProblems(library, data)
@@ -2132,8 +2175,9 @@ const SENSOR_MUTANTS = [
   { name: 'the resolution exponent of the sensor range taken as a half', find: 'export const SENSOR_RESOLUTION_EXPONENT = 2 / 3', replace: 'export const SENSOR_RESOLUTION_EXPONENT = 0.5', fails: [S.active] },
   { name: 'the sensor range unit taken as 100,000 km', find: 'export const SENSOR_RANGE_UNIT_KM = 1000000', replace: 'export const SENSOR_RANGE_UNIT_KM = 100000', fails: [S.iris, S.active, S.inverse] },
   { name: 'the strength of a sensor taken as twice the tech times the size', find: 'const strength = strengthTech * sizeHS', replace: 'const strength = 2 * strengthTech * sizeHS', fails: [S.iris, S.active] },
-  { name: 'the Uridium of a sensor taken without the hardening factor', find: 'roundHalfEven(sizeHS * strengthTech * hardeningCost, 1)', replace: 'roundHalfEven(sizeHS * strengthTech, 1)', fails: [S.iris] },
+  { name: 'the Uridium of a sensor multiplied by the hardening rating', find: 'const uridium = roundHalfEven(sizeHS * strengthTech, 1)', replace: 'const uridium = roundHalfEven(sizeHS * strengthTech * hardeningRating / 100, 1)', fails: [S.unhardened, S.iris] },
   { name: 'the crew of a sensor taken as a HS', find: 'export const SENSOR_CREW_PER_HS = 2', replace: 'export const SENSOR_CREW_PER_HS = 1', fails: [S.active, S.passive] },
+  { name: 'the cost of a passive sensor multiplied by the hardening rating', find: 'const cost = roundHalfEven(sensitivity, 1)', replace: 'const cost = roundHalfEven(sensitivity * hardeningRating / 100, 1)', fails: [S.unhardened] },
   { name: 'the Uridium of a passive sensor left out', find: 'uridium: cost, crew:', replace: 'uridium: 0, crew:', fails: [S.passive] },
   { name: 'the HTK of a passive sensor always 1', find: 'htk: sizeHS < 1 ? 0 : 1, ctd: Math.trunc(hardeningRating), sizeHS, tons: sizeHS * TONS_PER_HS', replace: 'htk: 1, ctd: Math.trunc(hardeningRating), sizeHS, tons: sizeHS * TONS_PER_HS', fails: [S.passive] },
   { name: 'the resolution cut taken as the plain ratio', find: '(signature / resolution) ** 2 : 1', replace: '(signature / resolution) : 1', fails: [S.resolution] },
@@ -2156,6 +2200,7 @@ const SENSOR_MUTANTS = [
   { name: 'the fire control of a pair sized as a search sensor', find: 'fireControl: sensorSizeForRange({ ...request, mode: SENSOR_MODES.missileFireControl })', replace: 'fireControl: sensorSizeForRange({ ...request, mode: SENSOR_MODES.search })', fails: [S.pairSize] },
   { name: 'a sizing request that needs no EM sensitivity tech', find: "['EM sensitivity tech', emTech, POSITIVE, 'the EM sensitivity tech above zero'],", replace: '', fails: [S.unavailable] },
   { name: 'a fire control request that needs no speed rating tech', find: "['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],", replace: '', fails: [S.request] },
+  { name: 'a fire control request that requires the hardening cost factor', find: "export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, eccmRating, eccmCost }) => {\n  const rule = SENSOR_RULES.sizing\n  const { present, missing } = sensorInputs([\n    ['wanted range', rangeKm, POSITIVE, 'the range wanted, above zero'],\n    ['wanted tracking speed', trackingKmS, POSITIVE, 'the tracking speed wanted, above zero'],\n    ['distance rating tech', distanceRating, POSITIVE, 'the fire control distance rating tech above zero'],\n    ['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],\n    ['single weapon number', weaponNumber, POSITIVE, 'the single weapon fire control tech\\'s number above zero'],\n    ['hardening', hardeningRating, NON_NEGATIVE, 'the hardening tech\\'s rating'],", replace: "export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost }) => {\n  const rule = SENSOR_RULES.sizing\n  const { present, missing } = sensorInputs([\n    ['wanted range', rangeKm, POSITIVE, 'the range wanted, above zero'],\n    ['wanted tracking speed', trackingKmS, POSITIVE, 'the tracking speed wanted, above zero'],\n    ['distance rating tech', distanceRating, POSITIVE, 'the fire control distance rating tech above zero'],\n    ['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],\n    ['single weapon number', weaponNumber, POSITIVE, 'the single weapon fire control tech\\'s number above zero'],\n    ['hardening', hardeningRating, NON_NEGATIVE, 'the hardening tech\\'s rating'],\n    ['hardening cost factor', hardeningCost, NON_NEGATIVE, 'the hardening tech\\'s cost factor'],", fails: [S.request] },
   { name: 'a fire control request over the limit sized', find: 'const range = rangeKm > BEAM_FIRE_CONTROL_MAX_RANGE_KM ?', replace: 'const range = false ?', fails: [S.request] },
   { name: 'a fire control range multiplier met only above the wanted range', find: 'multiplier * distanceRating >= rangeKm * (1 - SENSOR_RANGE_TOLERANCE)', replace: 'multiplier * distanceRating > rangeKm', fails: [S.request] },
   { name: 'a fire control tracking multiplier chosen from the unrounded ratio', find: 'fireControlTracking(multiplier, speedRating) >= trackingKmS * (1 - SENSOR_RANGE_TOLERANCE)', replace: 'multiplier * speedRating >= trackingKmS * (1 - SENSOR_RANGE_TOLERANCE)', fails: [S.request] },
@@ -2169,7 +2214,7 @@ const SENSOR_MUTANTS = [
   { name: 'the tracking of a fire control cost not cut', find: 'Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP)', replace: '(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP)', fails: [S.trunc, S.beam] },
   { name: 'the fire control cost step of 500', find: 'export const BEAM_FIRE_CONTROL_TRACKING_COST_STEP = 1000', replace: 'export const BEAM_FIRE_CONTROL_TRACKING_COST_STEP = 500', fails: [S.trunc, S.beam] },
   { name: 'the fire control cost range unit of 10,000 km', find: 'export const BEAM_FIRE_CONTROL_KM_PER_COST_UNIT = 20000', replace: 'export const BEAM_FIRE_CONTROL_KM_PER_COST_UNIT = 10000', fails: [S.beam, S.trunc] },
-  { name: 'the fire control Uridium without the hardening factor', find: 'hardeningCost * weaponNumber, 1)', replace: 'weaponNumber, 1)', fails: [S.trunc] },
+  { name: 'the fire control Uridium multiplied by the hardening rating', find: 'Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * weaponNumber, 1)', replace: 'Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * weaponNumber * hardeningRating / 100, 1)', fails: [S.unhardened] },
   { name: 'the fire control size rounded to a tenth', find: 'trackingMultiplier / 2 * weaponNumber, 2)', replace: 'trackingMultiplier / 2 * weaponNumber, 1)', fails: [S.beam] },
   { name: 'the fire control size not halved', find: 'rangeMultiplier * trackingMultiplier / 2 * weaponNumber', replace: 'rangeMultiplier * trackingMultiplier * weaponNumber', fails: [S.beam] },
   { name: 'the crew of a fire control of 2 a HS', find: 'export const FIRE_CONTROL_CREW_PER_HS = 4', replace: 'export const FIRE_CONTROL_CREW_PER_HS = 2', fails: [S.beam] },
@@ -2187,7 +2232,7 @@ const SENSOR_MUTANTS = [
   { name: 'a difference explained by the alternative that fits it', find: 'alternative: alternatives.get(item.entry.name) || null', replace: 'explain: alternatives.get(item.entry.name) || null', fails: [S.explanations, S.fixtures] },
   { name: 'a cost factor a tech row lacks read as 0', find: 'const info2 = finite(found.info2) ? found.info2 : NaN', replace: 'const info2 = finite(found.info2) ? found.info2 : 0', fails: [S.techNumbers] },
   { name: 'a rating a tech row lacks read as 0', find: 'const info = finite(found.info) ? found.info : NaN', replace: 'const info = finite(found.info) ? found.info : 0', fails: [S.techNumbers] },
-  { name: 'the Uridium of an active sensor needing the hardening rating', find: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardeningCost'], (design) => design.uridium", replace: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardening'], (design) => design.uridium", fails: [S.techNumbers] },
+  { name: 'the Uridium of an active sensor needing the hardening rating', find: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength'], (design) => design.uridium", replace: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardening'], (design) => design.uridium", fails: [S.techNumbers] },
 ]
 
 const ALL_MUTANTS = [...MISSILE_MUTANTS, ...SENSOR_MUTANTS]

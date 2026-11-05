@@ -75,8 +75,8 @@ export const SENSOR_MODE_LINES = Object.freeze(Object.fromEntries(['active', 'pa
 
 const LINE_LABELS = Object.freeze(Object.fromEntries(SENSOR_TECH_LINES.map((entry) => [entry.role, entry.label])))
 
-// The lines whose tech row holds a rating and a cost factor.
-const COST_ROLES = Object.freeze(['hardening', 'eccm'])
+// The lines whose tech row holds a rating and a cost factor. Only the ECCM tech's cost factor is read by a figure; the hardening tech's rating is the CTD and its factor is not a cost input, so a row that stores none leaves no figure unavailable.
+const COST_ROLES = Object.freeze(['eccm'])
 
 const levelOf = (level) => (level ? Object.freeze({ id: level.id, name: level.name, info: figureOf(level.info), info2: figureOf(level.info2), cost: level.cost }) : null)
 
@@ -408,8 +408,8 @@ const tradeoffMember = ({ member, entryHardening, entryEccm, tech, pair }) => {
 
   missingLines(tech, ['strength', 'em']).forEach((name) => missing.push(name))
 
-  if (entryHardening.level.info === null || entryHardening.level.info2 === null) {
-    missing.push(`the rating and the cost factor of ${entryHardening.level.name}`)
+  if (entryHardening.level.info === null) {
+    missing.push(`the rating of ${entryHardening.level.name}`)
   }
 
   if (entryEccm.level.info === null || entryEccm.level.info2 === null) {
