@@ -19,7 +19,7 @@ registerRule({
   units: '×',
   verification: 'estimated',
   structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_DamagedComponent', 'FCT_CommanderBonuses.BonusValue'],
-  note: 'A ship with an undamaged jump point stabilisation module takes 2 minus its captain\'s Production bonus times as long, and Class Crew / Current Crew times as long again while it is short of crew. The sources do not say whether the bonus divides the time or is taken off the 2, so the bonus term is not checked against a stabilisation the save records. A ship with no crew aboard is skipped and contributes nothing to the time, whatever its class needs (3.1; in 2.7 its division by zero aborted the calculation).',
+  note: 'A ship with an undamaged jump point stabilisation module takes 2 minus its captain\'s Production bonus times as long, and Class Crew / Current Crew times as long again while it is short of crew. The sources do not say whether the bonus divides the time or is taken off the 2, so the bonus term is not checked against a stabilisation the save records. A ship with no crew aboard is skipped and contributes nothing to the time, whatever its class needs: the game leaves it out rather than dividing by its crew.',
 })
 
 registerRule({
@@ -28,7 +28,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Mass', 'lagrange.stabilisationMultiplier'],
-  note: '60 / the square root of the body\'s mass in Earth masses months of 30 days, times the quickest usable ship\'s multiplier, and capped at Int32.MaxValue seconds, the largest duration the game\'s integer time can hold (3.1; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918). The trip to the body is left out.',
+  note: '60 / the square root of the body\'s mass in Earth masses months of 30 days, times the quickest usable ship\'s multiplier, and capped at 2,147,483,647 seconds (24,855.13 days), the largest duration the game\'s 32-bit integer time can hold. The trip to the body is left out.',
   assumptions: ['the quickest usable ship does the work', 'the trip to the body takes no time'],
 })
 
@@ -75,7 +75,7 @@ export const stabilisationMultiplier = (ship, version = null) => {
   if (fraction === null || aboard === null) {
     return { state: 'unknown', result: unavailable({ rule, missing: ['the ship\'s crew or its class crew'] }) }
   } else if (!aboard) {
-    return { state: 'no-crew', result: unavailable({ rule, missing: ['a crew aboard (3.1 skips a ship with no crew whatever its class needs, so it adds no time)'], present: ['the ship\'s crew and its class crew'] }) }
+    return { state: 'no-crew', result: unavailable({ rule, missing: ['a crew aboard (the game skips a ship with no crew whatever its class needs, so it adds no time)'], present: ['the ship\'s crew and its class crew'] }) }
   }
 
   const bonus = Number.isFinite(ship.ProductionBonus) ? ship.ProductionBonus : 1
