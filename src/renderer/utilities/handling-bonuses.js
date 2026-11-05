@@ -18,7 +18,7 @@ export const CLASS_ONLY = Object.freeze({ mode: 'class' })
 
 registerRule({
   id: 'transport.logisticsBonuses',
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: '×',
   verification: 'estimated',
   structure: ['FCT_CommanderBonuses.BonusValue (Logistics)', 'FCT_Commander.CommandType, CommandID', 'FCT_Fleet.ParentCommandID', 'FCT_NavalAdminCommand', 'DIM_NavalAdminCommandType.Logistics', 'FCT_RaceSysSurvey.SectorID'],

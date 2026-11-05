@@ -709,13 +709,13 @@ check('template', 'the panel is a top-level .panel with a data-summary of one sh
   assert.ok(/<provenance-mark rule="logistics\.empireSummary" label \/>/.test(text), 'the head carries the rule\'s mark')
 })
 
-check('rule', 'the summary rule is registered for the 3.1 line alone, confirmed, and names what it reads', async (w) => {
+check('rule', 'the summary rule is registered for the 3.2 line alone, confirmed, and names what it reads', async (w) => {
   const { provenance } = await w.modules()
   const rule = provenance.getRule('logistics.empireSummary')
 
   assert.ok(rule, 'the rule is registered')
-  assert.deepEqual(rule.versions, ['3.1.x'], 'for the 3.1 line')
-  assert.equal(provenance.ruleSupports('logistics.empireSummary', '3.1.x'), true, 'it holds there')
+  assert.deepEqual(rule.versions, ['3.2.x'], 'for the 3.2 line')
+  assert.equal(provenance.ruleSupports('logistics.empireSummary', '3.2.x'), true, 'it holds there')
   assert.equal(provenance.ruleSupports('logistics.empireSummary', '2.7.x'), false, 'and not on the earlier line')
   assert.equal(rule.verification, 'confirmed', 'confirmed against the capture')
   assert.ok(rule.structure.length >= 6 && rule.assumptions.length >= 2, 'it names its reads and its assumptions')
@@ -854,8 +854,8 @@ const FAULTS = [
   { name: 'the fuel counts in thousands', target: 'util', from: 'export const FUEL_UNIT = 1e6', to: 'export const FUEL_UNIT = 1e3', fails: ['rounding', 's4', 'component'] },
   { name: 'the listing is read by ID', target: 'util', from: 'order by FCT_Population.rowid`', to: 'order by FCT_Population.PopulationID`', fails: ['s4', 'oracle', 'loader'] },
   { name: 'the colonies of every race are listed', target: 'util', from: 'where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} order by', to: 'where FCT_Population.GameID = ${GameID} order by', fails: ['loader'] },
-  { name: 'the rule is registered for the earlier line', target: 'util', from: "const SUMMARY_VERSIONS = ['3.1.x']", to: "const SUMMARY_VERSIONS = ['2.7.x']", fails: ['rule'] },
-  { name: 'the rule is registered for both lines', target: 'util', from: "const SUMMARY_VERSIONS = ['3.1.x']", to: "const SUMMARY_VERSIONS = ['2.7.x', '3.1.x']", fails: ['rule'] },
+  { name: 'the rule is registered for the earlier line', target: 'util', from: "const SUMMARY_VERSIONS = ['3.2.x']", to: "const SUMMARY_VERSIONS = ['2.7.x']", fails: ['rule'] },
+  { name: 'the rule is registered for both lines', target: 'util', from: "const SUMMARY_VERSIONS = ['3.2.x']", to: "const SUMMARY_VERSIONS = ['2.7.x', '3.2.x']", fails: ['rule'] },
   { name: 'the rule is estimated', target: 'util', from: "verification: 'confirmed',", to: "verification: 'estimated',", fails: ['rule'] },
   { name: 'the component writes M-PROD amber for red', target: 'component', from: "return row.productionState === 'short' ? 'warning--text' : 'error--text'", to: "return row.productionState === 'short' ? 'error--text' : 'warning--text'", fails: ['s4', 'component'] },
   { name: 'the component writes the tonnage with no colour', target: 'component', from: "if (key === 'tons' && row.tonsAbove) {\n        return 'warning--text'", to: "if (key === 'tons' && row.tonsAbove) {\n        return ''", fails: ['component'] },
@@ -873,7 +873,7 @@ const FAULTS = [
   { name: 'the data-summary carries a figure', target: 'component', from: 'data-summary="List each colony\'s maintenance capacity', to: 'data-summary="List each of the 45 colonies\' maintenance capacity', fails: ['template'] },
   { name: 'the data-summary speaks to a person', target: 'component', from: "as the game's empire logistics list gives them.\"", to: "as your game's empire logistics list gives them.\"", fails: ['template'] },
   { name: 'the foot opens with something else', target: 'component', from: 'Use it to read each colony\'s maintenance', to: 'Read each colony\'s maintenance', fails: ['template'] },
-  { name: 'the foot names a release', target: 'component', from: 'The Maintenance table\'s capacity leaves the economic modifier out', to: 'The Maintenance table\'s capacity in 3.1 leaves the economic modifier out', fails: ['template'] },
+  { name: 'the foot names a release', target: 'component', from: 'The Maintenance table\'s capacity leaves the economic modifier out', to: 'The Maintenance table\'s capacity in 3.2 leaves the economic modifier out', fails: ['template'] },
   { name: 'the foot speaks to a person', target: 'component', from: 'and to find colonies whose maintained tonnage', to: 'and to find your colonies whose maintained tonnage', fails: ['template'] },
   { name: 'the foot does not set the figures apart from the Maintenance table\'s', target: 'component', from: 'The Maintenance table\'s capacity leaves the economic modifier out, so the two differ only where it is not 1. ', to: '', fails: ['template'] },
   { name: 'the foot does not set the production apart from the other tables', target: 'component', from: 'The Fuel table and the Maintenance table count a part of a refinery or a facility as that part of its output, and the Maintenance table stops at what the minerals in stock allow, so their production can differ from the production here. ', to: '', fails: ['template'] },

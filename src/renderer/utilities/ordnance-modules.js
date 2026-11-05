@@ -6,7 +6,7 @@ import { navalAdminChain } from './minerals'
 import { MINING_BONUS } from './mining-data'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 const NONE = new Set()
 
 // DIM_ComponentType: Orbital Mining Module and Ordnance Factory Module.

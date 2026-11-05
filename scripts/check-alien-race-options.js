@@ -457,7 +457,7 @@ check('text', 'the page draws the swatch beside the race\'s name, the colour amo
 
   for (const [label, words] of [['the facts footer', facing], ['the Systems and species footer', placing]]) {
     assert.ok(!/\b(I|we|you|your|our)\b/i.test(words), `${label} is in the impersonal voice`)
-    assert.ok(!/\d+\.\d+\.\d+|\b[23]\.[01]\b/.test(words), `${label} names no release`)
+    assert.ok(!/\d+\.\d+\.\d+|\b[23]\.[012]\b/.test(words), `${label} names no release`)
   }
 
   const help = g.PAGE_HELP['/intelligence'].usage.find((line) => /^Race colour is the colour picked/.test(line))

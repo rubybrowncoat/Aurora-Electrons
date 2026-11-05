@@ -195,7 +195,7 @@ const synthetic = ({ hit, provenance }) => {
     const limit = versionLimit(null)
     const carried = scenario({ version: null }).capped.assumptions.includes(limit)
 
-    return /does not state which game rules/.test(limit) && carried && versionLimit('3.1.x') === '' && versionLimit('3.1') === '' && versionLimit('2.7.1') !== '' && versionLimit('2.6') !== ''
+    return /does not state which game rules/.test(limit) && carried && versionLimit('3.2.x') === '' && versionLimit('3.2') === '' && versionLimit('2.7.1') !== '' && versionLimit('2.6') !== ''
   })
   add('multi-warhead: 4 warheads at 70% expect 2.8 hits, each warhead rolling alone', () => {
     const scene = scenario({}, { ...arrow, warheads: 4 })
@@ -289,7 +289,7 @@ const synthetic = ({ hit, provenance }) => {
   add('the expected hits rule is a planner assumption, not a game rule, and says it is not penetration or survival', () => getRule(HIT_RULES.hits).verification === 'assumed' && /not a count of penetrating damage/.test(getRule(HIT_RULES.hits).note) && /point defence/.test(getRule(HIT_RULES.hits).note))
   add('the rules hold for the line of the migrated fixture; a save of no known version adds the unverified assumption, a save of that line does not', () => {
     const unknown = raw({ version: null })
-    const stock = raw({ version: '3.1.x' })
+    const stock = raw({ version: '3.2.x' })
     const other = raw({ version: '2.7.1' })
     const text = (result) => result.assumptions.join(' | ')
 
@@ -297,7 +297,7 @@ const synthetic = ({ hit, provenance }) => {
   })
   add('the version note reaches the capped and expected hit results', () => {
     const scene = scenario({ version: null }, { ...arrow, warheads: 2 })
-    const stock = scenario({ version: '3.1.x' }, { ...arrow, warheads: 2 })
+    const stock = scenario({ version: '3.2.x' }, { ...arrow, warheads: 2 })
 
     return [scene.capped, scene.roll, scene.hitsCapped].every((result) => result.assumptions.some((text) => /does not state which game rules/.test(text))) && [stock.capped, stock.roll, stock.hitsCapped].every((result) => !result.assumptions.some((text) => /does not state which game rules/.test(text)))
   })

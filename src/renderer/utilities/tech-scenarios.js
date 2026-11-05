@@ -17,7 +17,7 @@ export const HYPOTHETICAL_PREFIX = 'Hypothetical tech: '
 // The only way a choice enters a record: a level of the race's next research.
 export const NEXT_TECH = 'next-tech'
 
-const SCENARIO_VERSIONS = ['3.1.x']
+const SCENARIO_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'tech.scenarioChoice',

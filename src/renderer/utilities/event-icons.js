@@ -244,4 +244,5 @@ export const EVENT_ICONS = Object.freeze({
   379: 'mdi-account-multiple', // New Allied Alien Ship
   380: 'mdi-mine', // Mining Colony Update
   381: 'mdi-wrench', // Incomplete Salvage
+  382: 'mdi-content-save', // Game Saved
 })

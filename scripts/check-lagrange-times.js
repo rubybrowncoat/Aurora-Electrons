@@ -9,7 +9,7 @@
   - a current crew that is not in the save is unknown, not crewless, whatever its class needs: a class that needs none with its crew missing gives no time and is disclosed in a mixed fleet as possibly quicker, while its activities that the class never scales keep the share of 1;
   - the duration is 60 / sqrt(mass) months of 30 days times that multiplier, and the game's 32-bit integer time caps it at 2,147,483,647 seconds (24855.13 days): a tiny body or a very short crew gives the cap and never a larger or non-finite figure;
   - on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784: the values the 2.7 game stored under the 3.1 schema) every body of the page's list is timed from the save's stored mass, crew and captain's Production bonus read by SQL here, a crew of 0 planted in a copy of the save leaves no ship and no time, and a crew of 1 gives the cap on the light bodies and a figure below it on the heavy ones;
-  - the stabilisation activity of a zero-crew ship is blocked at factor 0, never an unsupported figure, a class that needs none whose current crew is missing is unknown there rather than blocked, and the two timing rules and `crew.stabilisation` stand for 3.1.x.
+  - the stabilisation activity of a zero-crew ship is blocked at factor 0, never an unsupported figure, a class that needs none whose current crew is missing is unknown there rather than blocked, and the two timing rules and `crew.stabilisation` stand for 3.2.x.
   The fixture holds no zero-crew stabilisation ship of the race (specimen S18 is tier b of AE-310-03), so the zero-crew cases are written into copies of the save here, and the fixture's own stored values are the 2.7 game's. A save that is not there reads UNSUPPORTED.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
@@ -62,9 +62,9 @@ const zeroCrew = (overrides = {}) => ship({ CurrentCrew: 0, ...overrides })
 const near = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b))
 const value = (result) => (result && result.status !== 'unavailable' ? result.value : null)
 
-const multiplierOf = (l, row, version = '3.1.x') => l.stabilisationMultiplier(row, version)
+const multiplierOf = (l, row, version = '3.2.x') => l.stabilisationMultiplier(row, version)
 const bestOf = (l, rows) => l.bestStabilisation(rows.map((row) => multiplierOf(l, row)))
-const daysOf = (l, mass, row, version = '3.1.x') => l.stabilisationDays(mass, multiplierOf(l, row, version).result)
+const daysOf = (l, mass, row, version = '3.2.x') => l.stabilisationDays(mass, multiplierOf(l, row, version).result)
 
 // ---- The fixture, read by SQL, and the copies with a crew planted -------------------------------------------------
 const shipSql = `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, Captain.Name as CaptainName, Captain.ProductionBonus, exists (select 1 from FCT_DamagedComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_DamagedComponent.ComponentID where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_ShipDesignComponents.ComponentTypeID = ${COMPONENT}) as Damaged
@@ -228,17 +228,17 @@ check('days', 'the duration is 60 / sqrt(mass) months of 30 days times the multi
   assert.equal(value(noCrew), null)
 })
 
-check('crew', 'the stabilisation activity of a ship with no crew aboard is blocked at factor 0 (nothing is stabilised, as the 3.1 game skips the ship), a class that needs no crew but carries none included, a class that needs none whose current crew is not in the save is unknown there while its other activities keep the share of 1, the short-crewed ship keeps its share, and the timing rules and crew.stabilisation stand for 3.1.x', async (w) => {
+check('crew', 'the stabilisation activity of a ship with no crew aboard is blocked at factor 0 (nothing is stabilised, as the 3.1 game skips the ship), a class that needs no crew but carries none included, a class that needs none whose current crew is not in the save is unknown there while its other activities keep the share of 1, the short-crewed ship keeps its share, and the timing rules and crew.stabilisation stand for 3.2.x', async (w) => {
   const { crew: c, lagrange: l, provenance: p } = await w.modules()
   const modules = { [COMPONENT]: { designed: 1, working: 1 } }
   const row = (crew) => ({ CurrentCrew: crew, ClassCrew: 100, CargoCapacity: 0, ColonistCapacity: 0, TroopCapacity: 0, CrewMorale: 1, GradePoints: 0 })
-  const of = (ship) => c.crewEffects(ship, { modules, holds: false, version: '3.1.x' }).find((effect) => effect.key === 'stabilisation')
+  const of = (ship) => c.crewEffects(ship, { modules, holds: false, version: '3.2.x' }).find((effect) => effect.key === 'stabilisation')
   const stopped = of(row(0))
   const short = of(row(50))
   const classZero = of({ ...row(0), ClassCrew: 0 })
   const classZeroCrewed = of({ ...row(50), ClassCrew: 0 })
   const classZeroMissing = of({ ...row(null), ClassCrew: 0 })
-  const classZeroMissingHandling = c.crewEffects({ ...row(null), ClassCrew: 0 }, { modules, holds: true, version: '3.1.x' }).find((effect) => effect.key === 'handling')
+  const classZeroMissingHandling = c.crewEffects({ ...row(null), ClassCrew: 0 }, { modules, holds: true, version: '3.2.x' }).find((effect) => effect.key === 'handling')
 
   assert.ok(stopped, 'the ship with a stabilisation module has the stabilisation activity')
   assert.equal(stopped.state, 'blocked', `a zero-crew ship stabilises nothing, not ${stopped.state}`)
@@ -254,8 +254,8 @@ check('crew', 'the stabilisation activity of a ship with no crew aboard is block
   assert.equal(value(classZeroMissing.result), null)
   assert.ok(classZeroMissingHandling.state === 'full' && near(classZeroMissingHandling.factor, 1), `a class that needs no crew is never scaled for its missing current crew, not ${classZeroMissingHandling.state} at ${classZeroMissingHandling.factor}`)
   assert.ok(near(short.factor, 0.5) && short.state === 'reduced', `a short-crewed ship keeps the share of its crew aboard, not ${short.factor}`)
-  assert.ok(['lagrange.stabilisationMultiplier', 'lagrange.stabilisationDays', 'crew.stabilisation'].every((id) => p.ruleSupports(id, '3.1.x') === true), 'the timing rules and crew.stabilisation are registered for 3.1.x')
-  assert.ok(!multiplierOf(l, ship({ ProductionBonus: 1.25 })).result.assumptions.some((text) => /does not state which game rules/.test(text)), 'a 3.1 save carries no unverified-save assumption on the multiplier')
+  assert.ok(['lagrange.stabilisationMultiplier', 'lagrange.stabilisationDays', 'crew.stabilisation'].every((id) => p.ruleSupports(id, '3.2.x') === true), 'the timing rules and crew.stabilisation are registered for 3.2.x')
+  assert.ok(!multiplierOf(l, ship({ ProductionBonus: 1.25 })).result.assumptions.some((text) => /does not state which game rules/.test(text)), 'a 3.2 save carries no unverified-save assumption on the multiplier')
 })
 
 check('save', 'on the interim 3.1 fixture every body of the page\'s list is timed from the save\'s stored mass, crew and captain, a crew of 0 planted in a copy leaves no ship and no time (never 0), and a crew of 1 gives the cap on the light bodies and the formula\'s figure on the heavy ones', async (w) => {

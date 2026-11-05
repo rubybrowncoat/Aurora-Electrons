@@ -10,7 +10,7 @@ export const DEFAULT_STEP_DAYS = 5
 const VERSIONS = ['2.7.x']
 
 // The rules of the wealth ledger that check-treasury-categories exercises on copies of the fixture with logged amounts planted from the game's own source: the stored amounts added up by cycle and by use, the cycle length, the span of a window, the yearly scaling and the shares of a side.
-const LEDGER_VERSIONS = ['3.1.x']
+const LEDGER_VERSIONS = ['3.2.x']
 const WEALTH_STRUCTURE = ['FCT_WealthData.UseID, TimeUsed, Amount', 'DIM_WealthUse.Description, Income, DisplayOrder', 'FCT_Game.GameTime']
 
 registerRule({

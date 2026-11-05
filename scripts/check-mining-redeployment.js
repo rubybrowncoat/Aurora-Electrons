@@ -34,7 +34,7 @@ const STUBS = {
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const KEY = 'mining-redeployment'
-const VERSION = '3.1.0'
+const VERSION = '3.2.0'
 const MISSING = (result) => (result && result.inputs ? result.inputs.missing : [])
 
 let failures = 0
@@ -396,7 +396,7 @@ const sqlStatements = (m) => [
 
 // ---------- the warning on a fake database of fixture rows ----------
 
-// The seven columns of the 3.1 line's signature (written here from the shipped databases, as scripts/check-capabilities.js does): a fake save that has them all is of the line, whose formula version the app states.
+// The seven columns of the 3.2 line's signature (written here from the shipped databases, as scripts/check-capabilities.js does): a fake save that has them all is of the line, whose formula version the app states.
 const LINE_COLUMNS = [['FCT_Game', 'LostColonies'], ['FCT_Game', 'GenerateNonOxygenRaces'], ['FCT_Game', 'NoShieldTechnology'], ['FCT_Game', 'OrbitalMovementInSubPulse'], ['FCT_Ship', 'ShipSeniorCO'], ['FCT_Race', 'NoResearchProjects'], ['FCT_Population', 'AlienArtifacts']].map(([tbl, name]) => ({ tbl, name }))
 
 const fakeDatabase = ({ colonies, mines, fleets, speeds, formula = true, speedColumn = true }) => ({
@@ -619,7 +619,7 @@ const registryStatements = (m) => [
       assert.ok(rule && rule.structure.length > 0 && ['confirmed', 'estimated', 'assumed'].includes(rule.verification), id)
     })
     assert.equal(m.provenance.getRule('miningRedeployment.queue').verification, 'estimated')
-    assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', '3.1.0'), true)
+    assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', '3.2.0'), true)
     assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', '2.6.4'), false)
     assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', null), null)
   }],

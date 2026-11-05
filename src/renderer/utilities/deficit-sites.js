@@ -9,7 +9,7 @@ import { depositForecastResult, miningSum, surfaceRateResult } from './mineral-o
 import { depositForecast, depositStateAt } from './minerals'
 import { combine, failureWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 const DAYS_PER_YEAR = 365
 
 // Hold tonnes of cargo one tonne of mineral takes. A class's cargo capacity is hold tonnes; mines are carried at their own cargo points each, minerals at this many hold tonnes to the tonne.

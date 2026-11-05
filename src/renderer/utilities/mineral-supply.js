@@ -6,7 +6,7 @@ import { MINERALS, massDriverRateResult } from './minerals'
 import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
-const SUPPLY_VERSIONS = ['3.1.x']
+const SUPPLY_VERSIONS = ['3.2.x']
 // The rules that read the packet the complexes' output goes into, and the route that says it goes (a known mismatch, owner AE-309-13): the 3.1.0 and 3.0.0 game fills a colony's stockpile up to its reserve from the purchased civilian output first and ships only the rest (Population.ProcessMiningProduction; the 2.7.1 GClass146.method_10 does not), which these rules and the route's note do not model (scripts/check-mineral-supply.js, group save-reserve), so they stay on the earlier line.
 const PACKET_VERSIONS = ['2.7.x']
 

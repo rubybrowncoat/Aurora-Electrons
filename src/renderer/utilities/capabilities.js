@@ -1,4 +1,4 @@
-// What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other. Whether the save is of the Aurora line the app reads at all is decided by its shape alone (`lineResult`): a save without the seven columns Aurora 3.0 added over 2.7.1 is refused as a save from before the 3.1 line, while a save of 3.0 or 3.1 is that line, the two being schema-identical. The formula version rests on the same seven (`formulaResult`): a save with all of them is the stated one, assumed, and a save missing any of them states none.
+// What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other. Whether the save is of the Aurora line the app reads at all is decided by its shape alone (`lineResult`): a save without the seven columns Aurora 3.0 added over 2.7.1 is refused as a save from before Aurora 3.0, while a save of 3.0, 3.1 or 3.2 is of the 3.2 line, the three being schema-identical. The formula version rests on the same seven (`formulaResult`): a save with all of them is the stated one, assumed, and a save missing any of them states none.
 //
 // The reads of every report come from utilities/capability-reads.js, written by `node scripts/check-capabilities.js --write` from the pages' own queries, one entry per tracked input (`tracked('<key>', ...)` in a page, a check of the warnings page, the app shell's reads). This module adds what the scan cannot know: the columns a query builds by name or lists without its table (`EXTRA_READS`, `MARKER_COLUMNS`, and `MARKER_USES` where a page uses a known part of what it builds), the reads that guard themselves (`TOLERATED`), which inputs a page can really do without (`OPTIONAL`), the column groups a report can lose without the rest (`SOFT`), the lookup rows whose meaning is checked (`BONUS_NAMES`, `COMPONENT_TYPES`) and the 3.1 tables and columns declared before a page reads them (`DECLARED`, which gate nothing).
 //
@@ -6,9 +6,9 @@
 import { READS } from './capability-reads'
 import { fieldWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-export const STATED_FORMULA_VERSION = '3.1.x'
+export const STATED_FORMULA_VERSION = '3.2.x'
 
-// The columns Aurora 3.0 added over 2.7.1, by table, which tell a save of the 3.1 line from one from before it: every save of the line has all of them, and a save without all of them is from before it, so one that lacks some but not all is still read as the line, damaged. Aurora 3.0 and 3.1 are not told apart, since the shipped 3.0.0 and 3.1.0 databases are identical in tables and columns and a save holds no version string, so both are read as the 3.1 line. Read from the diff of the shipped databases of 2.7.1 and 3.0.0: every other table and column is the same. The fields are built from the pairs, not written out, so that the scan of the pages does not take them for reads of the pages.
+// The columns Aurora 3.0 added over 2.7.1, by table, which tell a save of the 3.2 line from one from before it: every save of the line has all of them, and a save without all of them is from before it, so one that lacks some but not all is still read as the line, damaged. Aurora 3.0, 3.1 and 3.2 are not told apart, since the shipped 3.0.0, 3.1.0 and 3.2.0 databases are identical in tables and columns and a save holds no version string, so all three are read as the 3.2 line. Read from the diff of the shipped databases of 2.7.1 and 3.0.0: every other table and column is the same. The fields are built from the pairs, not written out, so that the scan of the pages does not take them for reads of the pages.
 const SIGNATURE_COLUMNS = Object.freeze({
   FCT_Game: Object.freeze(['LostColonies', 'GenerateNonOxygenRaces', 'NoShieldTechnology', 'OrbitalMovementInSubPulse']),
   FCT_Ship: Object.freeze(['ShipSeniorCO']),
@@ -30,7 +30,7 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'assumed',
   structure: FORMULA_COLUMNS,
-  note: 'A save carries no version label. The seven columns the 3.0 schema added over the earlier line are in every save of the line, whose 3.0 and 3.1 shapes are identical in schema, so a save with all seven is taken as played under the rules the app states, and a save missing one of them has no formula version. That is a fact about the schema, not a verified version.',
+  note: 'A save carries no version label. The seven columns the first release of the line added over the earlier line are in every save of the line, whose three releases are identical in schema, so a save with all seven is taken as played under the rules the app states, and a save missing one of them has no formula version. That is a fact about the schema, not a verified version.',
 })
 
 registerRule({
@@ -38,7 +38,7 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'confirmed',
   structure: ['DIM_CommanderBonusType.BonusID', 'DIM_CommanderBonusType.Description', 'DIM_CommanderBonusType.Percentage'],
-  note: 'The commander bonus IDs the planners read were compared with the commander bonus types of the shipped Aurora 3.0.0 and 3.1.0 databases and of a played save migrated to 3.1: each stands for the same bonus, a multiplier or a rating, in all three. The line removed Fighter Combat (26) and added Light Tactical (39), and the planners read neither, so neither is gated. A save whose row differs is not mapped.',
+  note: 'The commander bonus IDs the planners read were compared with the commander bonus types of the three shipped databases of the line and of a played save migrated to it: each stands for the same bonus, a multiplier or a rating, in all four. The line removed Fighter Combat (26) and added Light Tactical (39), and the planners read neither, so neither is gated. A save whose row differs is not mapped.',
 })
 
 registerRule({
@@ -46,7 +46,7 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'confirmed',
   structure: ['DIM_ComponentType.ComponentTypeID', 'DIM_ComponentType.TypeDescription'],
-  note: 'Component type 29 is Jump Point Stabilisation in the shipped Aurora 3.0.0 and 3.1.0 databases and in a played save migrated to 3.1, so a save whose type differs is not mapped. The line removed Fighter Pod Bay (65) and added Ordnance Factory Module (72); no planner reads the removed type, and the planners that read the module key on it like the other module types, so neither is gated.',
+  note: 'Component type 29 is Jump Point Stabilisation in the three shipped databases of the line and in a played save migrated to it, so a save whose type differs is not mapped. The line removed Fighter Pod Bay (65) and added Ordnance Factory Module (72); no planner reads the removed type, and the planners that read the module key on it like the other module types, so neither is gated.',
 })
 
 // The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page and its other reads (each check shows its own failure in place, the idle fleets check among them, whose key the scan cannot read, and a snooze stamp that cannot be read is left as no stamp), the ships, the jump point infrastructure and the gate builders of the Lagrange page (its map and saved points do not read them, and the infrastructure table marks the figures it cannot give as unknown), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals, the fleet stations' fleets, bodies and orders and the panel's own picker of bodies on the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the ships' fuel service of the Logistics page (the tanker panel and the harvesters' fuel service column name what they could not read, with a Retry; the stock figures do not rest on it), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the colony costs of the Galaxy Map (the habitability layer and the habitable mark say that the costs could not be worked out; no other layer or figure of the map rests on them), the bodies the notes of the Notebook page link to (a failed read is kept as an error that the form names, and a link to a body then reads as not checked, never as gone; the notes do not rest on it), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
@@ -355,7 +355,7 @@ export const DECLARED = Object.freeze([
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-304-01', table: 'FCT_AlienClass', columns: Object.freeze(['AlienClassType']) }),
 ])
 
-// The Aurora line the app is for, as its major and minor ('3.1'): the stated formula version without its patch.
+// The Aurora line the app is for, as its major and minor ('3.2'): the stated formula version without its patch.
 export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
 
 // The words of a refusal, by the reason of `lineResult`: `notice` is the sentence the Unsupported save panel opens with, `status` the line the save status says.
@@ -422,7 +422,7 @@ export const formulaResult = (schema) => {
   return ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: FORMULA_COLUMNS } })
 }
 
-// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-3.0' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 3.0: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 3.1 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora 3.0 and 3.1 are not told apart: the two shipped databases are identical in schema, and both read as the 3.1 line.
+// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-3.0' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 3.0: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 3.2 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora 3.0, 3.1 and 3.2 are not told apart: the three shipped databases are identical in schema, and all read as the 3.2 line.
 export const lineResult = (schema) => {
   if (!hasTable(schema, 'FCT_Game')) {
     return Object.freeze({ status: 'refused', reason: 'not-aurora', line: null, missing: Object.freeze([]) })
@@ -441,7 +441,7 @@ export const lineResult = (schema) => {
   return Object.freeze({ status: 'accepted', reason: null, line: STATED_FORMULA_VERSION, missing: Object.freeze(missing) })
 }
 
-// The formula version the save's schema stands for: the stated one ('3.1.x') for a save with every column of the line's signature, null for any other shape, and the landing rule is then not settled (`landingThreshold`). The signature spans four tables, so all of them are read here.
+// The formula version the save's schema stands for: the stated one ('3.2.x') for a save with every column of the line's signature, null for any other shape, and the landing rule is then not settled (`landingThreshold`). The signature spans four tables, so all of them are read here.
 export const loadFormulaVersion = async (database) => {
   const tables = [...new Set(FORMULA_COLUMNS.map((field) => field.split('.')[0]))]
   const [rows] = await database.query(schemaSql(tables))

@@ -1,5 +1,5 @@
 /*
-  Checks the Game Log's triage (src/renderer/utilities/event-triage.js and log-visit.js) against the DIM_EventType export (.github/exports/DIM_EventType.csv, the Aurora 3.1.0 export).
+  Checks the Game Log's triage (src/renderer/utilities/event-triage.js and log-visit.js) against the DIM_EventType export (.github/exports/DIM_EventType.csv, the Aurora 3.2.0 export).
 
   node scripts/check-event-triage.js [--no-mutations]
 

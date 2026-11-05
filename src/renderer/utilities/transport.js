@@ -46,7 +46,7 @@ export const shuttleServiceJoin = (gameId, populationColumn) => `left join (sele
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). Evidence: docs/plans/backlog/evidence/AE-080-01.md, AE-081-01.md and AE-082-01.md.
 const TRANSPORT_VERSIONS = ['2.7.x']
 // The loading rules the later line states: the colony's spaceport or cargo shuttle station joins the base of a ship's strength before any officer multiplies it, and a ship with no undamaged cargo shuttle bays counts one bay, so that no ship's bays keep it from loading at a colony.
-const LOADING_VERSIONS = ['3.1.x']
+const LOADING_VERSIONS = ['3.2.x']
 
 // Source of the later line's difference: it has no landing size, since every loader tests Ship.GetCargoShuttleTransferMultiplier against zero (rule transport.cargoEligibility) and its own term keeps only the Size <= 10m branch (rule transport.ownStrength).
 registerRule({

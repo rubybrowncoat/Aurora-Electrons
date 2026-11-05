@@ -1,6 +1,6 @@
 // Triage of the Game Log: the built-in categories of event types, and the presets (named keyword and type selections) the player saves. Everything here filters in memory over rows already read; no keyword or preset ever enters an SQL statement.
 
-// The categories in the order the type selector lists them, each with the EventTypeIDs of `DIM_EventType` it holds (.github/exports/DIM_EventType.csv, the Aurora 3.1.0 export). Every type of the export is listed once, and every type flagged `AttackEvent` is in Combat (scripts/check-event-triage.js checks both). A type the table has not listed, including one the open save's DIM_EventType lacks, belongs to `OTHER`.
+// The categories in the order the type selector lists them, each with the EventTypeIDs of `DIM_EventType` it holds (.github/exports/DIM_EventType.csv, the Aurora 3.2.0 export). Every type of the export is listed once, and every type flagged `AttackEvent` is in Combat (scripts/check-event-triage.js checks both). A type the table has not listed, including one the open save's DIM_EventType lacks, belongs to `OTHER`.
 export const CATEGORIES = Object.freeze([
   { id: 'combat', name: 'Combat', types: [11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28, 52, 53, 75, 97, 119, 173, 174, 177, 178, 200, 219, 220, 221, 227, 237, 258, 294, 297, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 313, 314, 324, 326, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 351, 352, 354, 365, 366, 368] },
   { id: 'contacts', name: 'Contacts and intelligence', types: [55, 106, 139, 147, 157, 180, 181, 182, 183, 184, 186, 187, 191, 203, 204, 206, 207, 208, 209, 210, 232, 233, 285, 293, 298, 315, 356, 357, 362, 363, 364, 367, 377, 378, 379] },
@@ -8,7 +8,7 @@ export const CATEGORIES = Object.freeze([
   { id: 'colonies', name: 'Colonies and industry', types: [1, 9, 64, 66, 76, 77, 80, 81, 100, 101, 115, 133, 148, 149, 179, 211, 212, 228, 276, 279, 281, 284, 310, 311, 312, 316, 320, 328, 329, 359, 360, 376, 380] },
   { id: 'research', name: 'Research and personnel', types: [10, 35, 60, 63, 88, 90, 98, 99, 127, 128, 129, 215, 216, 217, 229, 235, 238, 256, 257, 280, 286, 287, 289, 290, 291, 292, 296, 299, 318, 322, 323, 325, 370, 371, 372] },
   { id: 'exploration', name: 'Exploration and survey', types: [37, 43, 44, 57, 138, 141, 142, 143, 195, 218, 260, 288, 373, 374, 375] },
-  { id: 'notices', name: 'Log notices', types: [0, 117, 169, 265, 355, 358, 369] },
+  { id: 'notices', name: 'Log notices', types: [0, 117, 169, 265, 355, 358, 369, 382] },
 ])
 
 // The fallback: types no category lists. Its group is always offered by the type selector, even while the log holds none of them.

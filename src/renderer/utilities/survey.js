@@ -21,7 +21,7 @@ const SURVEY_BONUS = 2
 const GROUND_POST = 5
 // The game versions the rules hold for: the sensor and ground rates were checked on saves of the earlier line, the officer factor follows the light naval limit of the stated formula version.
 const SURVEY_VERSIONS = ['2.7.x']
-const OFFICER_VERSIONS = ['3.1.x']
+const OFFICER_VERSIONS = ['3.2.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 registerRule({

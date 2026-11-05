@@ -1,5 +1,5 @@
 /*
-  Checks the light naval rules the 3.1 line gives the planners: the captain of a ship of 20 hull spaces or less counts in full where a larger ship's captain counts halved (utilities/survey.js `officerFactor` and `fleetSurveyRate`, utilities/commanders.js `specialistPost` and the Commanders page's ships read), the Industry tab and the Production page name Light Naval capacity (pages/production.vue, utilities/warnings/industry.js, mixins/production-modifiers.js), no read of the removed `FCT_ShipClass.FighterClass` is left, and the landing size stays 10 hull spaces with the verdict for a bayless ship over it left unresolved (utilities/transport.js).
+  Checks the light naval rules the 3.2 line gives the planners: the captain of a ship of 20 hull spaces or less counts in full where a larger ship's captain counts halved (utilities/survey.js `officerFactor` and `fleetSurveyRate`, utilities/commanders.js `specialistPost` and the Commanders page's ships read), the Industry tab and the Production page name Light Naval capacity (pages/production.vue, utilities/warnings/industry.js, mixins/production-modifiers.js), no read of the removed `FCT_ShipClass.FighterClass` is left, and the landing size stays 10 hull spaces with the verdict for a bayless ship over it left unresolved (utilities/transport.js).
 
   Run: bun scripts/check-light-naval.js [--no-mutations]
 
@@ -358,7 +358,7 @@ check('page', 'the Commanders page\'s own ships read delivers the class size, an
   }
 })
 
-check('landing', 'the landing size is 10 hull spaces on the line the rule is registered for (a craft of 10 lands, one over it with no bays at a colony with no spaceport is blocked) and on the 3.1 line the same limit is the source\'s shuttle branch, over which a bayless craft still loads at a colony with no spaceport (its ship term counts one bay), the light naval limit of 20 moving nothing', async (w) => {
+check('landing', 'the landing size is 10 hull spaces on the line the rule is registered for (a craft of 10 lands, one over it with no bays at a colony with no spaceport is blocked) and on the 3.2 line the same limit is the source\'s shuttle branch, over which a bayless craft still loads at a colony with no spaceport (its ship term counts one bay), the light naval limit of 20 moving nothing', async (w) => {
   const { transport: t } = await w.modules()
   const colony = t.colonyEndpoint({ PopName: 'Mars', ShuttleCapacity: 0, ServiceNames: '', PopulationID: 7, SystemID: 3 })
   const ship = (size) => ({ ShipName: 'Hauler', ClassName: 'Hauler', Size: size, ShuttleStrength: 0, DesignedShuttleStrength: 0, CurrentCrew: 10, ClassCrew: 10 })
@@ -370,12 +370,12 @@ check('landing', 'the landing size is 10 hull spaces on the line the rule is reg
   assert.equal(verdict(15, '2.7.1').status, 'blocked', 'a bayless craft of 15 hull spaces, 750 t, is blocked there too: the light naval limit does not move the landing size')
   assert.equal(verdict(20, '2.7.1').status, 'blocked', 'nor does 20 hull spaces, 1,000 t')
 
-  assert.equal(t.landingThreshold('3.1.x'), 10, 'the shuttle limit of the 3.1 source is 10 hull spaces, not the light naval 20')
-  assert.equal(verdict(5, '3.1.x').status, 'permitted', 'a small craft loads at a colony with no spaceport on the 3.1 line')
-  assert.equal(verdict(10, '3.1.x').status, 'permitted', 'the limit included')
+  assert.equal(t.landingThreshold('3.2.x'), 10, 'the shuttle limit of the 3.1 source is 10 hull spaces, not the light naval 20')
+  assert.equal(verdict(5, '3.2.x').status, 'permitted', 'a small craft loads at a colony with no spaceport on the 3.2 line')
+  assert.equal(verdict(10, '3.2.x').status, 'permitted', 'the limit included')
 
   for (const size of [10.5, 15, 20]) {
-    assert.equal(verdict(size, '3.1.x').status, 'permitted', `a bayless craft of ${size} hull spaces loads at a colony with no spaceport on the 3.1 line, not ${verdict(size, '3.1.x').status}: its ship term counts one bay`)
+    assert.equal(verdict(size, '3.2.x').status, 'permitted', `a bayless craft of ${size} hull spaces loads at a colony with no spaceport on the 3.2 line, not ${verdict(size, '3.2.x').status}: its ship term counts one bay`)
   }
 
   const unknown = verdict(15, null)
@@ -462,7 +462,7 @@ const FAULTS = [
   { name: 'a class whose size is not stored is read as a small ship by the Commanders post', target: 'commanders', from: '} else if (!isKnownNumber(ship.ClassSize)) {', to: '} else if (false) {', fails: ['post'] },
   { name: 'the Commanders page\'s ships read leaves the class size out', target: 'commandersPage', from: 'FCT_ShipClass.Size as ClassSize, ', to: '', fails: ['page'] },
   { name: 'the landing size follows the light naval limit, 20 hull spaces', target: 'transport', from: 'const SMALL_CRAFT_SIZE = 10', to: 'const SMALL_CRAFT_SIZE = 20', fails: ['landing'] },
-  { name: 'a bayless craft over 10 hull spaces is refused at a colony with no spaceport on the 3.1 line as on the 2.7 line', target: 'transport', from: '} else if (zeroBayBase(version)) {', to: '} else if (false) {', fails: ['landing'] },
+  { name: 'a bayless craft over 10 hull spaces is refused at a colony with no spaceport on the 3.2 line as on the 2.7 line', target: 'transport', from: '} else if (zeroBayBase(version)) {', to: '} else if (false) {', fails: ['landing'] },
   { name: 'the Production page names the production type 2 Fighter again', target: 'productionTypes', from: '[PRODUCTION_TYPE.LIGHT_NAVAL]: \'Light Naval\',', to: '[PRODUCTION_TYPE.LIGHT_NAVAL]: \'Fighter\',', fails: ['names'] },
   { name: 'the idle capacity column reads Fighters again', target: 'productionPage', from: '{ key: \'fighter\', text: \'Light Naval\', bp: true }', to: '{ key: \'fighter\', text: \'Fighters\', bp: true }', fails: ['names'] },
   { name: 'the Industry check is titled free fighter production capacity again', target: 'industry', from: 'with free light naval production capacity', to: 'with free fighter production capacity', fails: ['names'] },

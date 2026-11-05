@@ -3,7 +3,7 @@
 import { MAINTENANCE_MODULE, ORDINARY_SHARE, undamagedCount, withinUnits } from './maintenance-pools'
 import { registerRule, unavailable } from './provenance'
 
-const SUMMARY_VERSIONS = ['3.1.x']
+const SUMMARY_VERSIONS = ['3.2.x']
 export const SUMMARY_RULE = 'logistics.empireSummary'
 // Tons of ship in a hull space, and the litres the fuel columns count in.
 export const TONS_PER_HULL_SPACE = 50

@@ -6,7 +6,7 @@ import capabilityGates from './capability-gates'
 
 registerRule({
   id: 'production.populationCapacity',
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['FCT_Race.ConstructionProduction, OrdnanceProduction, FighterProduction, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PlanetaryInstallation.ConstructionValue, OrdnanceProductionValue, FighterProductionValue (the Light Naval Factory, installation 35)', 'FCT_PopulationInstallations.Amount', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_GroundUnitClass.ConstructionRating'],

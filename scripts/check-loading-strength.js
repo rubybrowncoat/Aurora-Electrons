@@ -1,5 +1,5 @@
 /*
-  Checks the cargo loading strength of the 3.1 line (src/renderer/utilities/transport.js `handlingBreakdown`, `stopHandling`, `transferCategory`, hauling.js `cycleCargo` and `cycleHandling`): the base strength of a ship at a stop is its own term, the bays it has times the race's cargo handling technology, plus the technology once more where a spaceport or cargo shuttle station serves the colony, and the officers' Logistics bonuses multiply that whole base; a ship over 10 hull spaces with no undamaged bays counts one bay; and Load All Ship Components (move action 237) is a cargo load with a handling time.
+  Checks the cargo loading strength of the 3.2 line (src/renderer/utilities/transport.js `handlingBreakdown`, `stopHandling`, `transferCategory`, hauling.js `cycleCargo` and `cycleHandling`): the base strength of a ship at a stop is its own term, the bays it has times the race's cargo handling technology, plus the technology once more where a spaceport or cargo shuttle station serves the colony, and the officers' Logistics bonuses multiply that whole base; a ship over 10 hull spaces with no undamaged bays counts one bay; and Load All Ship Components (move action 237) is a cargo load with a handling time.
 
   Run: bun scripts/check-loading-strength.js [--no-mutations]
 
@@ -12,7 +12,7 @@
   - `fleet-timer`: component tonnes times 20 divided by crew and ship-to-ship strength, with the receiving fleet's addition after the commander and naval command, no landing exemption, governor or sector;
   - `component-display`: the real page's computed route and compiled moved-cargo slot display components delivered, not counted in tonnage, on components-only and mixed routes;
   - `unserved`: a ship with its crew aboard loads at a colony with no spaceport or cargo shuttle station whatever bays it has (`Ship.GetCargoShuttleTransferMultiplier` is positive there, `Ship.method_159` counting one bay for none): a craft of 10 hull spaces or less, a ship over it with no bays or with every bay damaged and a ship with bays, in the stop, the Transport round trip and the Hauling cycle;
-  - `versions`: the loading rules hold for the 3.1 line only, the landing rule stays registered for 2.7 alone while the 10 hull space limit of the ship term is the 3.1 line's own, a ship with no bays has a verdict there, and the rule notes cite the members of the source;
+  - `versions`: the loading rules hold for the 3.2 line only, the landing rule stays registered for 2.7 alone while the 10 hull space limit of the ship term is the 3.2 line's own, a ship with no bays has a verdict there, and the rule notes cite the members of the source;
   - `footers`: the footers of Hauling and Information say that a ship with no bays loads at the technology alone, not that loading at a colony with no service is not settled;
   - `fixture`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the loaders' ship and colony columns, the officers' bonuses and the strength and time of a stop at a colony with a spaceport and one without each equal what is worked out here from the stored rows by SQL and arithmetic written apart from the loaders, for the fleet's ships as saved and for copies in which a freighter class has no bays or a ship has its bay damaged (the fixture has no such ship);
   - `recorded`: the loading times the migrated save stores for loads in progress (the time still to run, the full time is not stored) are no longer than the full-hold time of the same fleet at the same colony by the rule above.
@@ -38,7 +38,7 @@ const root = path.resolve(__dirname, '..')
 const SAVE = FIXTURE.file
 const GAME = FIXTURE.gameId
 const RACE = FIXTURE.raceId
-const VERSION = '3.1.x'
+const VERSION = '3.2.x'
 // The Logistics commander bonus (DIM_CommanderBonusType 24) and the cargo shuttle bay component type (DIM_ComponentType 14).
 const LOGISTICS = 24
 const BAY_TYPE = 14
@@ -180,7 +180,7 @@ check('formula', 'the base strength is the ship\'s own term plus the colony\'s a
   // The worked example: technology 1, no bays at all, a spaceport and no officer bonus: (1 x 1 + 1) x 1 = 2, so 50,000 x 20 / 2 = 500,000 s each way.
   const bayless = at(transport, { tech: 1, extra: { ShuttleStrength: 0, DesignedShuttleStrength: 0 } })
 
-  assert.ok(bayless, 'the 3.1 line has a loading strength')
+  assert.ok(bayless, 'the 3.2 line has a loading strength')
   near(bayless.own, 1, 'the ship term of a ship with no bays')
   near(bayless.ownTerm, 1)
   near(bayless.additive, 1)
@@ -626,26 +626,26 @@ check('unserved', 'a ship with its crew aboard loads and unloads at a colony wit
   assert.deepEqual(transport.shipEligibility(ship({ Size: 600, ShuttleStrength: 0, DesignedShuttleStrength: 3 }), bare, '2.7.1').reasons.map((reason) => [reason.status, reason.code]), [['blocked', 'damaged-bays']])
 })
 
-check('versions', 'the loading rules hold for the 3.1 line only (the order of the officers and the colony\'s addition and the zero-bay ship term are that line\'s), the landing rule stays registered for 2.7 alone while the 10 hull space limit of the ship term is the 3.1 line\'s own, a ship with no bays has a verdict on 3.1, a colony with a spaceport lets the ship load, the officers\' rule is the 3.1 one, and the members of the source are cited in a comment above each rule while the notes, which a tooltip shows, name none', async (w) => {
+check('versions', 'the loading rules hold for the 3.2 line only (the order of the officers and the colony\'s addition and the zero-bay ship term are that line\'s), the landing rule stays registered for 2.7 alone while the 10 hull space limit of the ship term is the 3.2 line\'s own, a ship with no bays has a verdict on 3.2, a colony with a spaceport lets the ship load, the officers\' rule is the 3.2 one, and the members of the source are cited in a comment above each rule while the notes, which a tooltip shows, name none', async (w) => {
   const { transport, provenance } = await w.modules()
   const versions = (id) => (provenance.getRule(id) || {}).versions
   const note = (id) => (provenance.getRule(id) || {}).note || ''
 
   for (const id of ['transport.cargoEligibility', 'transport.handlingStrength', 'transport.ownStrength', 'transport.shuttleTechnology', 'transport.colonyAddition', 'transport.handlingTime', 'transport.logisticsBonuses']) {
-    assert.deepEqual(versions(id), ['3.1.x'], `${id} is a 3.1 rule`)
+    assert.deepEqual(versions(id), ['3.2.x'], `${id} is a 3.2 rule`)
   }
 
   assert.deepEqual(versions('transport.landingThreshold'), ['2.7.x'], 'the landing rule is the 2.7 line\'s')
-  assert.equal(transport.landingThreshold('3.1.x'), 10, 'the shuttle limit of the 3.1 source is 10 hull spaces')
+  assert.equal(transport.landingThreshold('3.2.x'), 10, 'the shuttle limit of the 3.1 source is 10 hull spaces')
   assert.equal(transport.landingThreshold('2.7.1'), 10)
   assert.equal(transport.landingThreshold(null), null, 'a save that states no game rules has no limit')
-  assert.ok(at(transport, { extra: { Size: 20, ShuttleStrength: 0, DesignedShuttleStrength: 0 } }).strength > 0, 'a bayless freighter has a strength on the 3.1 line')
+  assert.ok(at(transport, { extra: { Size: 20, ShuttleStrength: 0, DesignedShuttleStrength: 0 } }).strength > 0, 'a bayless freighter has a strength on the 3.2 line')
   assert.equal(transport.handlingBreakdown(ship(), transport.colonyEndpoint(colony()), 1.5, '2.7.1', support()), null, 'the 2.7 line has no loading strength of this rule')
 
   const bareColony = transport.colonyEndpoint(colony(UNSERVED))
   const bayless = ship({ ShuttleStrength: 0, DesignedShuttleStrength: 0 })
 
-  assert.equal(transport.shipEligibility(bayless, bareColony, VERSION).status, 'permitted', 'a bayless freighter at a colony with no service loads on the 3.1 line')
+  assert.equal(transport.shipEligibility(bayless, bareColony, VERSION).status, 'permitted', 'a bayless freighter at a colony with no service loads on the 3.2 line')
   assert.equal(transport.shipEligibility(bayless, transport.colonyEndpoint(colony()), VERSION).status, 'permitted', 'a spaceport lets it load')
   assert.equal(transport.shipEligibility(ship(), bareColony, VERSION).status, 'permitted', 'undamaged bays let it load')
 
@@ -821,7 +821,7 @@ check('fixture', 'on the fixture the loaders\' ship columns, colony service, rac
 
 const FRESH_LOADS = [356308, 3629660, 3629790, 3629923, 3630056, 3630130]
 
-check('recorded', 'of the loads in progress the migrated save stores a time for, six equal the rule\'s time for the fleet to load a full hold at the colony to the second (the game keeps whole seconds, these are loads that have just begun), the time of each of the rest is no longer than that full time, and the order of the officers and the colony\'s addition before the 3.1 line matches none of them', async (w) => {
+check('recorded', 'of the loads in progress the migrated save stores a time for, six equal the rule\'s time for the fleet to load a full hold at the colony to the second (the game keeps whole seconds, these are loads that have just begun), the time of each of the rest is no longer than that full time, and the order of the officers and the colony\'s addition before the 3.2 line matches none of them', async (w) => {
   const { transport, 'handling-support': handlingSupport } = await w.modules()
   const { intact } = clones()
   const ships = oracleShips(intact)
@@ -900,21 +900,21 @@ const FAULTS = [
   { name: 'the stop does not tell the destination of its order to the category', target: 'transport', from: 'transferCategory(order.MoveActionID, order.DestinationType)', to: 'transferCategory(order.MoveActionID)', fails: ['components'] },
   { name: 'an unload of one component takes every component', target: 'cargo', from: 'new Set([141, 177, 179])', to: 'new Set([177, 179])', fails: ['components'] },
   { name: 'a load of one component loads no item', target: 'cargo', from: 'new Set([140, 176, 178, 180])', to: 'new Set([176, 178, 180])', fails: ['components'] },
-  { name: 'the loading rules are registered for the earlier line', target: 'transport', from: "const LOADING_VERSIONS = ['3.1.x']", to: "const LOADING_VERSIONS = ['2.7.x']", fails: ['formula', 'bays', 'load-all', 'unserved', 'versions', 'fixture', 'recorded'] },
-  { name: 'the loading rules are registered for both lines', target: 'transport', from: "const LOADING_VERSIONS = ['3.1.x']", to: "const LOADING_VERSIONS = ['2.7.x', '3.1.x']", fails: ['versions'] },
-  { name: 'the landing rule of the earlier line is registered for the later one too', target: 'transport', from: "const TRANSPORT_VERSIONS = ['2.7.x']", to: "const TRANSPORT_VERSIONS = ['2.7.x', '3.1.x']", fails: ['versions'] },
+  { name: 'the loading rules are registered for the earlier line', target: 'transport', from: "const LOADING_VERSIONS = ['3.2.x']", to: "const LOADING_VERSIONS = ['2.7.x']", fails: ['formula', 'bays', 'load-all', 'unserved', 'versions', 'fixture', 'recorded'] },
+  { name: 'the loading rules are registered for both lines', target: 'transport', from: "const LOADING_VERSIONS = ['3.2.x']", to: "const LOADING_VERSIONS = ['2.7.x', '3.2.x']", fails: ['versions'] },
+  { name: 'the landing rule of the earlier line is registered for the later one too', target: 'transport', from: "const TRANSPORT_VERSIONS = ['2.7.x']", to: "const TRANSPORT_VERSIONS = ['2.7.x', '3.2.x']", fails: ['versions'] },
   { name: 'a ship with no undamaged bays is refused at a colony with no service', target: 'transport', from: '} else if (zeroBayBase(version)) {', to: '} else if (false) {', fails: ['unserved', 'versions', 'fixture'] },
   { name: 'a craft of 10 hull spaces or less is let load as a ship with no bays', target: 'transport', from: 'ship.Size <= SMALL_CRAFT_SIZE ? `a craft of', to: 'false ? `a craft of', fails: ['unserved'] },
   { name: 'a ship whose bays are not in the save waits for them to be told whether it loads', target: 'transport', from: "} else if (zeroBayBase(version)) {\n    return verdict('permitted'", to: "} else if (zeroBayBase(version) && Number.isFinite(bays)) {\n    return verdict('permitted'", fails: ['unserved'] },
   { name: 'a ship with no crew aboard is let load', target: 'transport', from: '} else if (share === 0) {', to: '} else if (false) {', fails: ['unserved'] },
-  { name: 'the 10 hull space limit is not the 3.1 line\'s own', target: 'transport', from: " || ruleSupports('transport.ownStrength', version) ? SMALL_CRAFT_SIZE : null", to: ' ? SMALL_CRAFT_SIZE : null', fails: ['versions', 'unserved'] },
+  { name: 'the 10 hull space limit is not the 3.2 line\'s own', target: 'transport', from: " || ruleSupports('transport.ownStrength', version) ? SMALL_CRAFT_SIZE : null", to: ' ? SMALL_CRAFT_SIZE : null', fails: ['versions', 'unserved'] },
   { name: 'the comment of the own strength leaves out the helper that counts one bay for none', target: 'transport', from: 'Ship.method_159 (Ship.cs 6991-7024)', to: 'the bay helper (Ship.cs 6991-7024)', fails: ['versions'] },
   { name: 'the comment of the eligibility rule leaves out the order list that does not offer the order', target: 'transport', from: 'HasSelfShuttledCargoCapacity', to: 'HasShuttles', fails: ['versions'] },
   { name: 'the note of the eligibility rule names the transfer multiplier of the source', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: 'Every loader and unloader of the game (Ship.GetCargoShuttleTransferMultiplier) proceeds on that test alone', fails: ['versions'] },
   { name: 'the plan footer of Hauling says loading at a colony with no service is not settled', target: 'haulingPage', from: 'so it loads at a colony with no spaceport or cargo shuttle station at the technology alone', to: 'and whether it can load at a colony with no spaceport or cargo shuttle station is not settled', fails: ['footers'] },
   { name: 'the routes footer of Hauling says loading at a colony with no service is not settled', target: 'haulingPage', from: 'so it loads and unloads at a colony with no spaceport or cargo shuttle station at the technology alone', to: 'and whether it can load or unload at a colony with no spaceport or cargo shuttle station is not settled', fails: ['footers'] },
   { name: 'the footer of Information says loading at a colony with no service is not settled', target: 'informationPage', from: 'so it loads at a colony with no spaceport or cargo shuttle station at the technology alone', to: 'and whether it can load at a colony with no spaceport or cargo shuttle station is not settled', fails: ['footers'] },
-  { name: 'the officers\' rule is registered for the earlier line', target: 'bonuses', from: "versions: ['3.1.x']", to: "versions: ['2.7.x']", fails: ['versions'] },
+  { name: 'the officers\' rule is registered for the earlier line', target: 'bonuses', from: "versions: ['3.2.x']", to: "versions: ['2.7.x']", fails: ['versions'] },
   { name: 'the landing size is 20 hull spaces', target: 'transport', from: 'const SMALL_CRAFT_SIZE = 10', to: 'const SMALL_CRAFT_SIZE = 20', fails: ['bays', 'fixture'] },
   { name: 'the rows carry the ship term for the base', target: 'transport', from: '    base: breakdown.base,\n', to: '    base: breakdown.ownTerm,\n', fails: ['formula'] },
   { name: 'a typed unload treats unknown bulk composition as its selected type', target: 'hauling', from: 'item !== null && entries.some((entry) => entry.item === null && entry.amount > 0)', to: 'false', fails: ['component-types'] },

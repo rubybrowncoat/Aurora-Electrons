@@ -13,7 +13,7 @@ const MONTHS_PER_YEAR = 12
 export const WORKER_TOLERANCE = 0.005
 const COLONY_VERSIONS = ['2.7.x']
 // The growth rule alone: check-workforce-demand runs every colony of the fixture through it against the rate the 3.1 source gives.
-const GROWTH_VERSIONS = ['3.1.x']
+const GROWTH_VERSIONS = ['3.2.x']
 const TOTALS = 'colonies.totals'
 
 registerRule({

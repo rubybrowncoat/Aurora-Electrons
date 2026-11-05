@@ -13,7 +13,7 @@ export const DAYS_PER_YEAR = 365
 // A source or ship joins a location when both coordinates differ from the anchor's by less than this many units.
 export const CLUSTER_UNITS = 1
 
-const POOL_VERSIONS = ['3.1.x']
+const POOL_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'logistics.maintenancePool',

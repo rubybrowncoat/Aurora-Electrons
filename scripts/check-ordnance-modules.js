@@ -19,7 +19,7 @@
   - `orbital-place`: a fleet or body with no saved position is matched by the body the fleet orbits, and a fleet with neither leaves the colonies it may count for unavailable, naming the position;
   - `capacity`: the colony's ordnance capacity adds the term after the installations' product and never multiplies it by the colony's modifier, and the other capacities and a row without the term are as before;
   - `mixin`: the production modifiers mixin reads the term on the planted copy and gives the colony's capacity through `populationCapacityResult`;
-  - `registry`: the rules the figures name are registered for the 3.1 line, and their notes carry no code.
+  - `registry`: the rules the figures name are registered for the 3.2 line, and their notes carry no code.
   Where the source does not give a rule the check does not guess it: no figure here is compared with a build rate the game wrote, because none exists.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
@@ -541,14 +541,14 @@ check('mixin', 'the production modifiers mixin reads the orbital term of a plant
   assert.ok(near(claimed.populationCapacityResult(COLONY, 'ordnance').value, claimedRow.OrdnanceProduction * claimedRow.OverallProductionModifier * claimedRow.OrdnanceProductionPower + TERM + 3 * UNIT), 'the capacity adds the miner and the three unassigned fleets the colony counts, and not the fleet a unit off')
 })
 
-check('registry', 'the rules the figures name are registered for the 3.1 line with their structure, and their notes carry no code', async (w) => {
+check('registry', 'the rules the figures name are registered for the 3.2 line with their structure, and their notes carry no code', async (w) => {
   const { '../utilities/provenance': provenance } = await w.modules()
 
   for (const id of ['ordnance.classModules', 'ordnance.classProduction', 'production.orbitalOrdnance']) {
     const rule = provenance.getRule(id)
 
     assert.ok(rule, `${id} is registered`)
-    assert.deepEqual(rule.versions, ['3.1.x'], `${id}: the 3.1 line`)
+    assert.deepEqual(rule.versions, ['3.2.x'], `${id}: the 3.2 line`)
     assert.ok(rule.structure.length > 0, `${id}: its structure`)
     assert.ok(!/[`]|\b[A-Z][a-z]+[A-Z]\w*\b/.test(rule.note), `${id}: the note carries no code name: ${rule.note}`)
     assert.ok(!/\b(?:2|3)\.\d+(?:\.\d+)?\b/.test(rule.note), `${id}: the note names no release`)

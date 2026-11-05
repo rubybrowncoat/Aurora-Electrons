@@ -2,7 +2,7 @@
 //
 // The default is the interim fixture of AE-310-01 (tier a): the owner's 2.7 campaign "Galactic Shogunate" migrated to the 3.1 schema, whose stored values are the 2.7 game's own (sha256 449dfc4e0eba10fbd3851c00b386381313320a25525b990b8320866eb5ac49fe, 215 tables). A value only the 3.1 game writes cannot be read from it, so a rule whose oracle is such a value is reported 'needs tier b' by its check rather than passed. The played 3.1 save of AE-310-03 replaces `FIXTURE` below when it arrives; nothing else names a save as a default, so that one line moves every check that follows the default (the figures a check pins from the fixture are re-pinned with it).
 //
-// The 2.x campaign saves under `artifacts/` and the named 2.x saves under `saves/` that named checks replay are recorded data, not defaults, and stay named in those checks; `convertedSave` below gives such a save the 3.1 names the app reads, and, for a check that drives the app's pages over it, the seven columns the app looks for to accept a save as of the 3.1 line.
+// The 2.x campaign saves under `artifacts/` and the named 2.x saves under `saves/` that named checks replay are recorded data, not defaults, and stay named in those checks; `convertedSave` below gives such a save the 3.1 names the app reads, and, for a check that drives the app's pages over it, the seven columns the app looks for to accept a save as of the 3.2 line.
 const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
@@ -24,7 +24,7 @@ const fixtureTriple = () => [FIXTURE.file, FIXTURE.gameId, FIXTURE.raceId]
 
 const fixturePath = () => path.join(root, FIXTURE.file)
 
-// The played save: a campaign the game itself wrote under Aurora 3.2.0 (3.2.0 changed no table or column, it is the 3.1 line), registered by the owner. It is an additional witness, never the default: a check that takes `--save` can be run on it to compare a rule with values the 3.x game stored (stored colony cost, stored surface temperature, saved research, a one-year wealth ledger), and a rule is read as exercised by it only where that check names it.
+// The played save: a campaign the game itself wrote under Aurora 3.2.0 (3.2.0 changed no table or column, so it is of the 3.2 line the app states), registered by the owner. It is an additional witness, never the default: a check that takes `--save` can be run on it to compare a rule with values the 3.x game stored (stored colony cost, stored surface temperature, saved research, a one-year wealth ledger), and a rule is read as exercised by it only where that check names it.
 const PLAYED = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-1.db', gameId: 161, raceId: 909, gameName: 'UEF' })
 
 // The played save as the `[file, GameID, RaceID]` triple of a `--save`, `--stock` or `--modded` option.
@@ -45,7 +45,7 @@ const fixtureRows = (sql, ...params) => {
 // The one statement that gives a recorded 2.x save the 3.1 name of the star's component number (AE-308-02): the column was Component. Every other column a 2.x save lacks is read only by checks that skip it with a printed reason.
 const STAR_STATEMENT = 'alter table FCT_Star rename column Component to ComponentNumber'
 
-// The seven columns the app looks for to accept a save as of the 3.1 line (the line signature of src/renderer/utilities/capabilities.js), as [table, column, definition] with the type and the default the shipped 3.1 database gives each. A save of the earlier release has none of them and the app refuses it as such, so a check that opens one in the browser asks for them with the `line` option of `convertedSave`; they carry the defaults and no value of a game.
+// The seven columns the app looks for to accept a save as of the 3.2 line (the line signature of src/renderer/utilities/capabilities.js), as [table, column, definition] with the type and the default the shipped 3.1 database gives each. A save of the earlier release has none of them and the app refuses it as such, so a check that opens one in the browser asks for them with the `line` option of `convertedSave`; they carry the defaults and no value of a game.
 const LINE_COLUMNS = Object.freeze([
   ['FCT_Game', 'LostColonies', 'INTEGER default 0'],
   ['FCT_Game', 'GenerateNonOxygenRaces', 'INTEGER default 1'],

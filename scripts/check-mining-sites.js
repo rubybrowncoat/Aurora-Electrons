@@ -94,7 +94,7 @@ const fleet = (over = {}) => ({ FleetID: 100, FleetName: 'Miner', AssignedPopula
 
 const worked = (model) => {
   const { assessMiningSites, depositState, missingNeeds, unknownNeeds, deliveryVerdict } = model
-  const assess = (colonies, fleets = [], version = '3.1.0') => assessMiningSites({ colonies, fleets }, { RaceID: RACE, version })
+  const assess = (colonies, fleets = [], version = '3.2.0') => assessMiningSites({ colonies, fleets }, { RaceID: RACE, version })
   const only = (row, version) => assess([row], [], version).colonies[0]
   const keys = (needs) => needs.map((need) => need.key)
   const text = (site, options) => missingNeeds(site, options).map((need) => need.text).join('; ')
@@ -153,8 +153,8 @@ const worked = (model) => {
   check('worked: with no version the stored facts still decide: an empty body is idle', only(colony({ Deposits: 0 }), null).idle === 1)
   check('worked: an earlier version is not the rules of the line either', only(colony({ Efficiency: 0 }), '2.6.4').idle === null)
   check('worked: with no version the radiation cut-off is unknown, the stored level stays readable and no output verdict is made from it', only(colony({ RadiationLevel: 10000 }), null).idle === null && only(colony({ RadiationLevel: 10000 }), null).row.RadiationLevel === 10000 && missingNeeds(only(colony({ RadiationLevel: 10000 }), null)).length === 0 && unknownNeeds(only(colony({ RadiationLevel: 10000 }), null)).some((need) => need.key === 'radiation' && need.inputs.some((input) => input.includes('version'))))
-  check('worked: an earlier version leaves the radiation cut-off unknown too, and the line applies it', only(colony({ RadiationLevel: 10000 }), '2.6.4').idle === null && only(colony({ RadiationLevel: 10000 }), '3.1.0').idle === 1)
-  check('worked: an automated-only site on a save with no version is not judged by the radiation rule, nor reported idle, nor given a verdict of 0', only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), null).idle === null && only(colony({ Manned: 0, Automated: 3 }), null).idle === null && only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), '3.1.0').idle === 1 && only(colony({ Manned: 0, Automated: 3 }), '3.1.0').idle === 0)
+  check('worked: an earlier version leaves the radiation cut-off unknown too, and the line applies it', only(colony({ RadiationLevel: 10000 }), '2.6.4').idle === null && only(colony({ RadiationLevel: 10000 }), '3.2.0').idle === 1)
+  check('worked: an automated-only site on a save with no version is not judged by the radiation rule, nor reported idle, nor given a verdict of 0', only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), null).idle === null && only(colony({ Manned: 0, Automated: 3 }), null).idle === null && only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), '3.2.0').idle === 1 && only(colony({ Manned: 0, Automated: 3 }), '3.2.0').idle === 0)
   check('worked: with no version a missing deposit or no mine production still stops an automated-only site', only(colony({ Manned: 0, Automated: 3, Deposits: 0 }), null).idle === 1 && only(colony({ Manned: 0, Automated: 3, MineProduction: 0 }), null).idle === 1)
 
   const good = orbitalOnly({})
@@ -183,7 +183,7 @@ const worked = (model) => {
   check('worked: a class with no crew requirement is crewed (the game never scales it)', orbitalOnly({ ClassCrew: 0, CurrentCrew: 0 }).fleets[0].producing === 1)
   check('worked: with no game version the colony and assignment of an orbital miner are unknown', orbitalOnly({}, null).fleets[0].producing === null && unknownNeeds(orbitalOnly({}, null).fleets[0]).some((need) => need.key === 'colony'))
   check('worked: an orbital miner that does not work gives its colony no output, and a colony with mines still counts', orbitalOnly({ Diameter: 5000 }).colonies.length === 1 && orbitalOnly({ Diameter: 5000 }).colonies[0].output === 0 && deliveryVerdict(orbitalOnly({ Diameter: 5000 }).colonies[0]) === 0)
-  const two = assessMiningSites({ colonies: [colony({ Manned: 0, Automated: 0, Civilian: 0, Efficiency: 0 })], fleets: [fleet({ FleetID: 1, Diameter: 5000 }), fleet({ FleetID: 2, ShipID: 2 })] }, { RaceID: RACE, version: '3.1.0' })
+  const two = assessMiningSites({ colonies: [colony({ Manned: 0, Automated: 0, Civilian: 0, Efficiency: 0 })], fleets: [fleet({ FleetID: 1, Diameter: 5000 }), fleet({ FleetID: 2, ShipID: 2 })] }, { RaceID: RACE, version: '3.2.0' })
   check('worked: a colony whose orbital miners include a working one has output', two.colonies[0].output === 1 && two.colonies[0].orbital.length === 2)
   check('worked: the fleet sites join the ships of one fleet into one site', assess([colony(noMines)], [fleet({ ShipID: 1 }), fleet({ ShipID: 2, CurrentCrew: 0 })]).fleets.length === 1)
 
@@ -201,7 +201,7 @@ const warningsWorked = (common, mining) => {
   const { needInputs, needsCell } = common
   const ctx = { unknown: (names) => ({ unknown: names }) }
   const row = (over) => ({ ...colony(over) })
-  const site = (over, version = '3.1.0') => mining.assessMiningSites({ colonies: [row(over)], fleets: [] }, { RaceID: RACE, version }).colonies[0]
+  const site = (over, version = '3.2.0') => mining.assessMiningSites({ colonies: [row(over)], fleets: [] }, { RaceID: RACE, version }).colonies[0]
   const lacks = needsCell(ctx, site({ Deposits: 0, Efficiency: 0 }))
   const unsure = needsCell(ctx, site({ Surveyed: 0, Deposits: 0 }))
   const mixed = needsCell(ctx, site({ Surveyed: 0, Deposits: 0, RadiationLevel: 20000 }))
@@ -217,7 +217,7 @@ const rulesRegistered = (provenance) => {
   const ids = ['miningSites.deposit', 'miningSites.surface', 'miningSites.orbital', 'miningSites.delivery']
 
   ids.forEach((id) => check(`rule ${id} is registered with a structure and a verification`, Boolean(provenance.getRule(id)) && provenance.getRule(id).structure.length > 0 && ['confirmed', 'estimated', 'assumed'].includes(provenance.getRule(id).verification)))
-  check('the game rules are bound to the 3.1 line: true for 3.1.0, false for 2.6.4, null with no version', provenance.ruleSupports('miningSites.surface', '3.1.0') === true && provenance.ruleSupports('miningSites.surface', '2.6.4') === false && provenance.ruleSupports('miningSites.orbital', null) === null)
+  check('the game rules are bound to the 3.2 line: true for 3.2.0, false for 2.6.4, null with no version', provenance.ruleSupports('miningSites.surface', '3.2.0') === true && provenance.ruleSupports('miningSites.surface', '2.6.4') === false && provenance.ruleSupports('miningSites.orbital', null) === null)
 }
 
 const ids = (rows) => rows.map((row) => row.id)

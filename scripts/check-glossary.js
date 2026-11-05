@@ -179,7 +179,7 @@ const synthetic = (m, tree) => {
     ['no entry names a rule or a verification, or carries a review date or a version label', async () => firstProblem(TERMS.flatMap((item) => FORBIDDEN_FIELDS.map((field) => [`${item.id}`, Object.prototype.hasOwnProperty.call(item, field) ? `has a ${field} field` : ''])))],
 
     ['no registered rule states a table or column name, a code span or a release number in its note or assumptions', async () => {
-      const code = /\b(?:FCT|DIM|VIR)_\w+|`[^`]*`|\b2\.[67](?:\.\d+|\.x)?\b|\b[a-z]+[A-Za-z]*\.[a-z][A-Za-z]+\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|\b[A-Z]{2,}_[A-Z_]+\b|[A-Za-z-]+\.js\b/
+      const code = /\b(?:FCT|DIM|VIR)_\w+|`[^`]*`|\b(?:2\.[67]|3\.[0-2])(?:\.\d+|\.x)?\b|\b[a-z]+[A-Za-z]*\.[a-z][A-Za-z]+\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|\b[A-Z]{2,}_[A-Z_]+\b|[A-Za-z-]+\.js\b/
       const rules = provenance.listRules()
 
       return firstProblem(rules.flatMap((rule) => [rule.note, ...rule.assumptions].map((text) => [rule.id, code.test(text) ? `says "${code.exec(text)[0]}"` : ''])))
@@ -445,6 +445,7 @@ const MUTATIONS = [
   ['a term names a rule', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ rule: \'finances.treasury\', id, term: name, units, definition })', ['no entry names a rule or a verification']],
   ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
+  ['a rule note names a release of the line', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as the 3.2 schema stores it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a missing site input named by its saved column', path.join('utilities', 'minerals.js'), "const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']", "const DEPOSIT_INPUTS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']", ['no unavailable result names a table or column']],
   ['a missing starting delay named by its saved column', path.join('utilities', 'route-time.js'), "const START_DELAY_GAP = 'the delay the fleet starts with'", "const START_DELAY_GAP = 'the delay the fleet starts with (FCT_Ship.SensorDelay)'", ['no unavailable result names a table or column']],
   ['a missing post named by its bare column', path.join('utilities', 'commanders.js'), 'missing: [`the post of $' + '{person.Name}`]', 'missing: [`CommandType of $' + '{person.Name}`]', ['no unavailable result names a table or column']],

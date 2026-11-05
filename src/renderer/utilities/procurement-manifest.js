@@ -7,7 +7,7 @@ import { registerRule } from './provenance'
 
 registerRule({
   id: 'production.procurementManifest',
-  versions: ['2.7.x', '3.1.x'],
+  versions: ['2.7.x', '3.2.x'],
   units: 'component units',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.NumComponent', 'FCT_PopComponent.Amount', 'FCT_IndustrialProjects.ProductionID, ProductionType (3 and 5 are component supply; 6 and 7 are counted by kind), Amount, PartialCompletion, Pause, Queue', 'FCT_ShipyardTask.TaskTypeID, UseComponents, ClassID, RefitID', 'FCT_ShipDesignComponents.Size, Cost', 'FCT_Population.SystemID'],

@@ -11,7 +11,7 @@ import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, UNLOADS } from './transport'
 
 const ROUTE_VERSIONS = ['2.7.x']
-const GROUP_VERSIONS = ['3.1.x']
+const GROUP_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'hauling.routeGroup',

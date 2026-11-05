@@ -44,7 +44,7 @@ const FALLBACK_THEME = 1
 
 registerRule({
   id: 'groundOrganisation.role',
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: '',
   verification: 'estimated',
   structure: ['FCT_GroundUnitFormationElement.ClassID, Units', 'FCT_GroundUnitClass.BaseType, Size, ComponentA, ComponentB, ComponentC, ComponentD', 'DIM_GroundComponentType.LogisticsPoints, BombardmentWeapon, AAWeapon, Construction, Geosurvey, Xenoarchaeology, Decontamination, STO'],
@@ -54,7 +54,7 @@ registerRule({
 
 registerRule({
   id: 'groundOrganisation.symbol',
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: '',
   verification: 'estimated',
   structure: ['FCT_GroundUnitFormationTemplate.SymbolType', 'FCT_GroundUnitFormationElement.ClassID, Units', 'FCT_GroundUnitClass.BaseType, Size, HQCapacity, STOWeapon, ComponentA, ComponentB, ComponentC, ComponentD', 'DIM_GroundComponentType.LogisticsPoints, BombardmentWeapon, AAWeapon, Construction, Geosurvey, Xenoarchaeology, Decontamination, STO', 'FCT_GroundUnitFormation.ParentFormationID, PopulationID'],
@@ -64,7 +64,7 @@ registerRule({
 
 registerRule({
   id: 'groundOrganisation.echelon',
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: '',
   verification: 'estimated',
   structure: ['FCT_GroundUnitFormationTemplate.EchelonLevel', 'FCT_GroundUnitFormation.RequiredRank', 'FCT_Ranks.RankID, Priority, RankType'],

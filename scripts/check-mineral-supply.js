@@ -204,7 +204,7 @@ const pure = (ctx) => {
   add('versions: the route, the packet output, the stock added and the supply list the earlier line only while the reserve top-up of the 3.1.0 game is not modelled (owner AE-309-13; the planted case is the group save-reserve)', () => {
     const ids = ['mineralSupply.route', 'mineralSupply.packetOutput', 'mineralSupply.localStock', 'mineralSupply.supply']
 
-    return same(ids.map((id) => [id, provenance.getRule(id).versions.includes('3.1.x')]), ids.map((id) => [id, false]))
+    return same(ids.map((id) => [id, provenance.getRule(id).versions.includes('3.2.x')]), ids.map((id) => [id, false]))
   })
 
   // ----- a productive mine with no route -----
@@ -1245,7 +1245,7 @@ const saveStatements = async (ctx, save) => {
         }
       })
 
-      return apart.length === 1 && apart[0][0] === 'Duranium' && apart[0][2] === 0 && apart[0][1] > 0 ? true : short(apart.length ? apart : 'the rules and the game agree: the mismatch is gone, so the route, packetOutput, localStock and supply list the 3.1 line (the group versions)')
+      return apart.length === 1 && apart[0][0] === 'Duranium' && apart[0][2] === 0 && apart[0][1] > 0 ? true : short(apart.length ? apart : 'the rules and the game agree: the mismatch is gone, so the route, packetOutput, localStock and supply list the 3.2 line (the group versions)')
     })
     addSave('save-drivers: a site whose mass drivers ship stock names its destination and sends, a year at a time, what the ledger records it sending, and the destination receives what the ledger records over the window', () => {
       const bad = []
@@ -1423,7 +1423,7 @@ const MUTATIONS = [
   { name: 'the extraction taken as what stays in the site\'s stock', file: U, find: 'compute: ({ extraction: dug, packetOutput: shipped }) => dug - shipped', replace: 'compute: ({ extraction: dug, packetOutput: shipped }) => dug', fails: ['conservation', 'save-conservation'] },
   { name: 'the packet output taken from every kind of mine', file: U, find: 'surfaceRateResult({ ...row, ...CIVILIAN_ONLY }, true)', replace: 'surfaceRateResult(row, true)', fails: ['conservation', 'destinations', 'save-output'] },
   { name: 'the packet output dropped for a site whose complexes are bought', file: U, find: 'if (routed !== null && routed.state === \'packets\') {', replace: 'if (false) {', fails: ['conservation', 'throughput', 'save-output'] },
-  ...['route', 'packetOutput', 'localStock', 'supply'].map((name) => ({ name: `the ${name} rule listed on the 3.1 line while the reserve top-up is not modelled`, file: U, find: `id: 'mineralSupply.${name}',\n  versions: PACKET_VERSIONS,`, replace: `id: 'mineralSupply.${name}',\n  versions: SUPPLY_VERSIONS,`, fails: ['versions'] })),
+  ...['route', 'packetOutput', 'localStock', 'supply'].map((name) => ({ name: `the ${name} rule listed on the 3.2 line while the reserve top-up is not modelled`, file: U, find: `id: 'mineralSupply.${name}',\n  versions: PACKET_VERSIONS,`, replace: `id: 'mineralSupply.${name}',\n  versions: SUPPLY_VERSIONS,`, fails: ['versions'] })),
   { name: 'a packet counted in the destination\'s stock and in flight', file: U, find: 'compute: ({ stock, inbound }) => stock + inbound }),\n      fromSites', replace: 'compute: ({ stock, inbound }) => stock + inbound + inbound }),\n      fromSites', fails: ['packets', 'save-packets'] },
   { name: 'a packet bound for a colony the race lacks dropped', file: U, find: 'results: lostKeys.map((key) => inFlightOf(key)) })', replace: 'results: [] })', fails: ['packets', 'save-packets'] },
   { name: 'the packets in flight left out of what the race holds', file: U, find: 'parts: { stock, inFlight, aboard }, compute: (values) => values.stock + values.inFlight + values.aboard })', replace: 'parts: { stock, inFlight, aboard }, compute: (values) => values.stock + values.aboard })', fails: ['packets', 'save-packets'] },

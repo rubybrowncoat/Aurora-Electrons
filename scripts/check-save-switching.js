@@ -1,7 +1,7 @@
 /*
   Checks that the app moves between saves as one step: the real store, the real database module over real SQLite saves, the real recorder plugin, the real watcher and the real save service of the main process, with only the Electron pieces stood in for (the IPC calls are answered by the real service over a window registry, the file dialog and the file-watching library are fakes, or the real chokidar for the watcher checks).
 
-  Each case builds a fresh app over two saves that share a game and race number (the game and the race of scripts/lib/fixtures.js, 141 and 784) but are different campaigns: a copy of the fixture, a save of the 3.1 line, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
+  Each case builds a fresh app over two saves that share a game and race number (the game and the race of scripts/lib/fixtures.js, 141 and 784) but are different campaigns: a copy of the fixture, a save of the 3.2 line, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
 
   A copy that is refused as a save of another Aurora line (the schema answered with the seven columns Aurora 3.0 added left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
 

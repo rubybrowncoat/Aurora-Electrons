@@ -34,7 +34,7 @@ export const resourceOf = (key) => RESOURCES.find((resource) => resource.key ===
 export const resourcesOf = (group) => RESOURCES.filter((resource) => resource.group === group).map((resource) => resource.key)
 
 const EPSILON = 1e-9
-const LEDGER_VERSIONS = ['3.1.x']
+const LEDGER_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'reserveLedger.shortfall',

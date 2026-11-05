@@ -394,7 +394,7 @@ check('retention', 'the Finances page states under its sources panel the retenti
   assert.ok(/by its Income flag in the wealth use table, never by a list kept in the app/.test(foot), 'and that the sides come from the table')
   assert.ok(/engineering, ordnance and ground unit projects and Lost to Independence are marked as spending/.test(foot), 'and which uses of the item the table marks as spending')
   assert.ok(!/\b(I|we|you|your|our)\b/i.test(foot.replace(/<[^>]*>/g, '')), 'in the impersonal voice')
-  assert.ok(!/\d+\.\d+\.\d+|\b[23]\.[01]\b/.test(foot), 'with no release number')
+  assert.ok(!/\d+\.\d+\.\d+|\b[23]\.[012]\b/.test(foot), 'with no release number')
 
   const help = g.PAGE_HELP['/finances']
 

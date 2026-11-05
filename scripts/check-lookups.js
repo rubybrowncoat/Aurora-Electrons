@@ -1,9 +1,9 @@
 /*
-  Checks the ID-keyed lookup constants of the app against the Aurora 3.1.0 export (.github/exports/, the CSV export of the shipped 3.1.0 database, 213 files).
+  Checks the ID-keyed lookup constants of the app against the Aurora 3.2.0 export (.github/exports/, the CSV export of the shipped 3.2.0 database, 213 files).
 
   node scripts/check-lookups.js [--no-mutations]
 
-  A lookup table the app keys by ID must mean what the export says: the event icons (utilities/event-icons.js), the move actions the cargo actions read (utilities/transport.js, utilities/cargo-actions.js), the wealth uses of the civilian tariff (utilities/civilian-tariff.js), the commander bonuses and component types the planners gate (utilities/capabilities.js) name rows the export holds, under the names the export gives them, and no row the line removed. The rows the line added and removed are checked on the export as well, for the tables no constant keys: move actions 211-214 gone and 237 added, standing order 57, wealth uses 53-54-55, tech types 286-288, installations 53 and 54, event types 233 and 319 renamed and 373-381 added, the gases of 21 and 23-27 and the terrain's 76 rows. Each constant is read from its own module, so a constant that drifts from the export fails here rather than at a page.
+  A lookup table the app keys by ID must mean what the export says: the event icons (utilities/event-icons.js), the move actions the cargo actions read (utilities/transport.js, utilities/cargo-actions.js), the wealth uses of the civilian tariff (utilities/civilian-tariff.js), the commander bonuses and component types the planners gate (utilities/capabilities.js) name rows the export holds, under the names the export gives them, and no row the line removed. The rows the line added and removed are checked on the export as well, for the tables no constant keys: move actions 211-214 gone and 237 added, standing order 57, wealth uses 53-54-55, tech types 286-288, installations 53 and 54, event types 233 and 319 renamed and 373-382 added, the gases of 21 and 23-27 and the terrain's 76 rows. Each constant is read from its own module, so a constant that drifts from the export fails here rather than at a page.
 
   A row of the export is matched by its ID column (`ID_COLUMNS`; most tables list it first, `DIM_StandingOrders` lists the description first) and its name by the column the app keys it with (Description, Name, TypeDescription). The export is read as a CSV with quoted cells.
   Prints `N of N checks passed`; any failed check sets exit code 1. A planted fault is a copy of one module's source with one constant changed, and the check that names it must fail there; with --no-mutations no fault is planted.
@@ -90,6 +90,11 @@ check('the nine event types the line added are drawn', ({ icons }) => {
   added.forEach((id) => assert.ok(id in icons.EVENT_ICONS, `type ${id} has no icon`))
 })
 
+check('the event type Aurora 3.2 added is drawn, and is the export\'s Game Saved', ({ icons }) => {
+  assert.ok(382 in icons.EVENT_ICONS, 'type 382 has no icon')
+  assert.equal(nameOf('DIM_EventType', 382), 'Game Saved')
+})
+
 check('the name each icon carries is the description of the export', ({ iconNames }) => {
   Object.entries(iconNames).forEach(([id, name]) => {
     const description = nameOf('DIM_EventType', Number(id))
@@ -104,7 +109,7 @@ check('the event rows the line changed are the export\'s rows', () => {
   assert.equal(nameOf('DIM_EventType', 233), 'New Hostile Alien Ship')
   assert.equal(nameOf('DIM_EventType', 319), 'Light Naval Construction')
   assert.deepEqual([373, 374, 375, 376, 377, 378, 379, 380, 381].map((id) => nameOf('DIM_EventType', id)), ['Xenoarchaeology Research', 'Artifacts Recovered', 'Aether Gate Detected', 'All Minerals Exhausted', 'New Neutral Alien Ship', 'New Friendly Alien Ship', 'New Allied Alien Ship', 'Mining Colony Update', 'Incomplete Salvage'])
-  assert.equal(EXPORT.DIM_EventType.rows.length, 249)
+  assert.equal(EXPORT.DIM_EventType.rows.length, 250)
   ;[122, 143].forEach((id) => assert.equal(EXPORT.DIM_EventType.byId.get(id).PlayerInterrupt, '1', `type ${id}`))
 })
 
@@ -223,6 +228,7 @@ const FAULTS = [
   { name: 'an event icon is drawn for a type the export lacks', key: 'event-icons', from: "  367: 'mdi-account-search', // Interrogation Update", to: "  367: 'mdi-account-search', // Interrogation Update\n  400: 'mdi-account-search', // No Such Type", fails: ['every event type an icon is drawn for is a type of the export'] },
   { name: 'a move action the line removed is classified again', key: 'transport', from: "export const LOADS = { 4: 'colonists'", to: "export const LOADS = { 211: 'colonists', 4: 'colonists'", fails: ['the move actions the line removed are gone and Load All Ship Components is in'] },
   { name: 'a commander bonus is read under another name', key: 'capabilities', from: "2: Object.freeze({ name: 'Survey'", to: "2: Object.freeze({ name: 'Surveying'", fails: ['every commander bonus the planners gate is an export row under its name, on the side of the ledger the app reads'] },
+  { name: 'the icon of the event type Aurora 3.2 added is dropped', key: 'event-icons', from: "  382: 'mdi-content-save', // Game Saved\n", to: '', fails: ['the event type Aurora 3.2 added is drawn, and is the export\'s Game Saved'] },
 ]
 
 const failedChecks = async (context) => {

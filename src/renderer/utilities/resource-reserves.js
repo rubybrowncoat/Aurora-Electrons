@@ -28,7 +28,7 @@ export const PLAN_KINDS = Object.freeze({ withdraw: 'Withdrawal', refill: 'Refil
 
 const FUEL = FUEL_RESOURCE
 
-const RESERVE_VERSIONS = ['3.1.x']
+const RESERVE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'reserveLedger.player',

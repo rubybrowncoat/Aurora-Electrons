@@ -5,8 +5,8 @@
 import { CMC_MINERAL_IDS, MINERALS, betterSite, bodyPotentialResult, depositForecast, depositReadable, qualifiesForCmc, surfaceRate } from './minerals'
 import { combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-// Aurora 3.1 renamed and changed the founding rule: the candidate rules hold for the 3.1 line (the excluded bodies are the page's `cmcBlocked`).
-const CANDIDATE_VERSIONS = ['3.1.x']
+// Aurora 3.1 renamed and changed the founding rule: the candidate rules hold for the 3.2 line (the excluded bodies are the page's `cmcBlocked`).
+const CANDIDATE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'cmcCandidate.input',

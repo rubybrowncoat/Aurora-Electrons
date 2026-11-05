@@ -11,7 +11,7 @@ import { KM_PER_AU, routeLegs, searchRoutes } from './jump-graph'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 import { hasGate } from './transport'
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 const SECONDS_PER_DAY = 86400
 const ROUTE_INPUTS = ['the explored jump points', 'their positions', 'the colony and body positions']
 

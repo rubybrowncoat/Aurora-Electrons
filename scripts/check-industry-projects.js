@@ -1,5 +1,5 @@
 /*
-  Checks the three development projects of the 3.1 line (Engineering, Ordnance and Ground Unit Projects, production types 5, 6 and 7) wherever the app reads them, and the race that starts no research projects (FCT_Race.NoResearchProjects): the capacity a project draws on (utilities/production-types.js, used by utilities/production.js `categoryOf`, utilities/minerals.js, utilities/legacy-consumption.js and utilities/warnings/industry.js), the Industry jobs of the Production page with the item, cost and minerals of each project (pages/production.vue, utilities/development-projects.js), the procurement manifest's count of them (utilities/procurement-data.js, utilities/procurement-manifest.js, components/production/ProcurementManifest.vue), and the Research page, the research warnings and the Commanders research suggestions for a race that starts no research projects (pages/technologies.vue, utilities/warnings/research.js, utilities/research-data.js, utilities/commanders.js, pages/commanders.vue).
+  Checks the three development projects of the 3.2 line (Engineering, Ordnance and Ground Unit Projects, production types 5, 6 and 7) wherever the app reads them, and the race that starts no research projects (FCT_Race.NoResearchProjects): the capacity a project draws on (utilities/production-types.js, used by utilities/production.js `categoryOf`, utilities/minerals.js, utilities/legacy-consumption.js and utilities/warnings/industry.js), the Industry jobs of the Production page with the item, cost and minerals of each project (pages/production.vue, utilities/development-projects.js), the procurement manifest's count of them (utilities/procurement-data.js, utilities/procurement-manifest.js, components/production/ProcurementManifest.vue), and the Research page, the research warnings and the Commanders research suggestions for a race that starts no research projects (pages/technologies.vue, utilities/warnings/research.js, utilities/research-data.js, utilities/commanders.js, pages/commanders.vue).
 
   Run: bun scripts/check-industry-projects.js [--no-mutations]
 
@@ -856,7 +856,7 @@ check('registry', 'the capability registry no longer declares the No Research co
   const { capabilities: c } = await w.modules()
 
   assert.ok(!c.DECLARED.some((entry) => entry.table === 'FCT_Race' && entry.columns.includes('NoResearchProjects')), 'FCT_Race.NoResearchProjects is not declared as unread any more')
-  assert.ok(c.LINE_SIGNATURE.includes('FCT_Race.NoResearchProjects'), 'it is still a column of the 3.1 line signature')
+  assert.ok(c.LINE_SIGNATURE.includes('FCT_Race.NoResearchProjects'), 'it is still a column of the 3.2 line signature')
 
   const input = (route, key) => c.INPUTS[route].find((one) => one.key === key)
 
@@ -906,7 +906,7 @@ check('text', 'the Industry panel foot says what the line under a development jo
   }
 
   for (const sentence of [data.NO_RESEARCH_WORDS, pm.developmentNote({ components: 0, engineering: 1, ordnance: 1, groundUnit: 1 })]) {
-    assert.ok(!/\b[23]\.[01](\.\d+|\.x)?\b/.test(sentence), `with no release number: ${sentence}`)
+    assert.ok(!/\b[23]\.[012](\.\d+|\.x)?\b/.test(sentence), `with no release number: ${sentence}`)
   }
 })
 

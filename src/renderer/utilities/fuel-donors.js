@@ -12,7 +12,7 @@ const HARVESTER = 32
 export const LOW_RATE_LPH = 20000
 export const LOW_RATE_RECIPIENT_HS = 20
 
-const FUEL_SERVICE_VERSIONS = ['3.1.x']
+const FUEL_SERVICE_VERSIONS = ['3.2.x']
 registerRule({
   id: 'fuelService.stored',
   versions: FUEL_SERVICE_VERSIONS,

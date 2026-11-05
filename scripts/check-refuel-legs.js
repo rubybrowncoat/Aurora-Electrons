@@ -601,7 +601,7 @@ const motionOf = async (ctx) => {
     const endpoints = { origin: loaded.transport.colonyEndpoint(columns[0]), destination: loaded.transport.colonyEndpoint(columns[1]) }
     const setup = { fleet: { FleetID: 5, FleetName: 'Moving timing' }, profile, reach: { pending: false, route }, ledgerable: true }
     const depot = closing ? depotFleet([tanker(601, { Fuel: 1100000, RefuellingRate: 450000 })], { OrbitBodyID: 10 }) : depotFleet([tanker(501, { Fuel: 5000000, RefuellingRate: 15000 }), tanker(502, { Fuel: 5000000, RefuellingRate: 450000, TransferSystems: systems })], { OrbitBodyID: 20 })
-    const vm = { ...methods, ...counts, separator: '\'', origin: places[0], destination: places[1], avoid: { active: false }, positionRead: facts, useLagrange: false, database: null, officerSupport: null, systemDust: {}, formulaVersion: '3.1.x', fuelSites: sitesOf(columns, [depot]), fuelReserveReader: { ship: () => 5, colony: () => 0 }, fillRequired: required, loadErrors: { fuelSites: null } }
+    const vm = { ...methods, ...counts, separator: '\'', origin: places[0], destination: places[1], avoid: { active: false }, positionRead: facts, useLagrange: false, database: null, officerSupport: null, systemDust: {}, formulaVersion: '3.2.x', fuelSites: sitesOf(columns, [depot]), fuelReserveReader: { ship: () => 5, colony: () => 0 }, fillRequired: required, loadErrors: { fuelSites: null } }
     const held = vm.fleetLedgers([setup], (entry) => [entry.reach.route.km, entry.reach.route.km]).get(5)
     const stage = vm.fleetStageOf(setup, endpoints, held)
     const ledger = vm.fleetLedgers([setup], (entry) => vm.flownLegs(entry, stage)).get(5)
@@ -2881,7 +2881,7 @@ const CONTROL_FAULT = 'a tanker that cannot serve is drawn as giving'
 const GROUPS_ONLY = process.argv.includes('--groups')
 
 // The page reads the fixture as a save of the line, and its verdicts rest on the loading strength rule (`transport.handlingStrength`): a rule not verified for the line leaves every verdict not known, so the page's groups are not run, and the skip is printed with the real head, never counted, until the rule holds for the line.
-const LINE_VERSION = '3.1.x'
+const LINE_VERSION = '3.2.x'
 let PAGE_VERIFIED = true
 
 const pageVerified = async () => {

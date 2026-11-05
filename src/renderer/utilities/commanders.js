@@ -164,7 +164,7 @@ registerRule({
 
 registerRule({
   id: POST,
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: 'post',
   verification: 'estimated',
   structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired, Size', 'FCT_Ship.ShipSeniorCO', 'FCT_Ranks.RankType (the count of the naval ranks)', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)'],

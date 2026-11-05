@@ -1106,17 +1106,17 @@ const page = (ctx) => {
 
     return cases.length >= 30 && !disagree.length ? true : short(disagree.slice(0, 3))
   }))
-  add('rules: every cmcCandidate rule holds for the 3.1 line', () => {
+  add('rules: every cmcCandidate rule holds for the 3.2 line', () => {
     const ids = ['cmcCandidate.input', 'cmcCandidate.deposit', 'cmcCandidate.reserve', 'cmcCandidate.accessibility', 'cmcCandidate.rate', 'cmcCandidate.lifetime', 'cmcCandidate.term', 'cmcCandidate.score']
     const versions = ids.map((id) => provenance.getRule(id).versions)
 
-    return versions.every((list) => same(list, ['3.1.x']) === true) ? true : short(versions)
+    return versions.every((list) => same(list, ['3.2.x']) === true) ? true : short(versions)
   })
-  add('rules: the exclusion rule holds for the 3.1 line and its note says how a fleet is matched to a colony (position within one unit, the orbited body where a position is not saved), that the output is the undamaged modules, that an empty colony does not exclude, and that an alien colony the race has no record of cannot be read', async () => {
+  add('rules: the exclusion rule holds for the 3.2 line and its note says how a fleet is matched to a colony (position within one unit, the orbited body where a position is not saved), that the output is the undamaged modules, that an empty colony does not exclude, and that an alien colony the race has no record of cannot be read', async () => {
     const planner = await plannerOf(ctx)
     const rule = planner.provenance.getRule('cmcSite.excluded')
 
-    return rule && same(rule.versions, ['3.1.x']) === true && /within one unit/.test(rule.note) && /orbits instead/.test(rule.note) && /undamaged/.test(rule.note) && /empty colony does not/.test(rule.note) && /cannot be read/.test(rule.note) ? true : short(rule)
+    return rule && same(rule.versions, ['3.2.x']) === true && /within one unit/.test(rule.note) && /orbits instead/.test(rule.note) && /undamaged/.test(rule.note) && /empty colony does not/.test(rule.note) && /cannot be read/.test(rule.note) ? true : short(rule)
   })
 
   // ----- the panel, as Vue renders it over the page -----
@@ -1881,8 +1881,8 @@ const MUTATIONS = [
   { name: 'the blocks of the page not taken from the shared read', file: P, find: 'const cmcBlocked = blocked.has(row.SystemBodyID)', replace: 'const cmcBlocked = false', fails: ['page', 'data'] },
   { name: 'the blocks read tracked under another name', file: P, find: 'get: tracked(\'cmcBlocks\'', replace: 'get: tracked(\'cmcBlock\'', fails: ['read'] },
   { name: 'a blocked body listed among the candidates', file: U, find: '!body.bare && !(body.complexes > 0) && !body.cmcBlocked && body.cmcInReach', replace: '!body.bare && !(body.complexes > 0) && body.cmcInReach', fails: ['page'] },
-  { name: 'the candidate rules left on the 2.7 line', file: U, find: "const CANDIDATE_VERSIONS = ['3.1.x']", replace: "const CANDIDATE_VERSIONS = ['2.7.x']", fails: ['rules'] },
-  { name: 'the exclusion rule left on the 2.7 line', file: C, find: "const CMC_VERSIONS = ['3.1.x']", replace: "const CMC_VERSIONS = ['2.7.x']", fails: ['rules'] },
+  { name: 'the candidate rules left on the 2.7 line', file: U, find: "const CANDIDATE_VERSIONS = ['3.2.x']", replace: "const CANDIDATE_VERSIONS = ['2.7.x']", fails: ['rules'] },
+  { name: 'the exclusion rule left on the 2.7 line', file: C, find: "const CMC_VERSIONS = ['3.2.x']", replace: "const CMC_VERSIONS = ['2.7.x']", fails: ['rules'] },
   { name: 'a colony\'s people not blocking its body', file: C, find: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }', replace: 'BlocksCmc: colony.Installations > 0 || modules > 0 }', fails: ['data', 'save-fixture'] },
   { name: 'orbital miners not blocking the body they work at', file: C, find: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }', replace: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 }', fails: ['data', 'save-fixture'] },
   { name: 'an empty colony blocking its body', file: C, find: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }', replace: 'BlocksCmc: true }', fails: ['data', 'save-fixture'] },

@@ -6,7 +6,7 @@ import { countText } from './math'
 import { withinOrbitalReach } from './minerals'
 import { registerRule, ruleSupports } from './provenance'
 
-const SITE_VERSIONS = ['3.1.x']
+const SITE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'miningSites.deposit',

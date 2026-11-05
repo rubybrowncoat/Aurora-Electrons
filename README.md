@@ -26,7 +26,7 @@ bun run lint
 
 The app reads `AuroraDB.db` from the project root in development. A sample save lives in `fixtures/AuroraDB.zip` (`unzip fixtures/AuroraDB.zip`).
 
-The build reads Aurora 3.1.x saves (the 3.0 and 3.1 shapes) and refuses a pre-3.0 shape: a save with none of the seven columns Aurora 3.0 added, or without an `FCT_Game` table, is not read, and the app says so in place of the pages. A save from before Aurora 2.7 needs Aurora Electrons 0.11.0, the last release that read them. The Aurora 2.7.x line continues on the `release/2.7` branch (cut at `v2.7.11-cut`, last release 2.7.11, fixes only) and reads Aurora 2.7.x saves; this branch (`3.1`) is the Aurora 3.1 line, released as 3.1.N.
+The build reads Aurora 3.2.x saves (the 3.0, 3.1 and 3.2 shapes) and refuses a pre-3.0 shape: a save with none of the seven columns Aurora 3.0 added, or without an `FCT_Game` table, is not read, and the app says so in place of the pages. A save from before Aurora 2.7 needs Aurora Electrons 0.11.0, the last release that read them. The Aurora 2.7.x line continues on the `release/2.7` branch (cut at `v2.7.11-cut`, last release 2.7.11, fixes only) and reads Aurora 2.7.x saves; this branch (`3.2`) is the Aurora 3.2 line, released as 3.2.N.
 
 # Contributions
 

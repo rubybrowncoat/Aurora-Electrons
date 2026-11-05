@@ -797,10 +797,10 @@ check('ship-reuse', 'a milestone linked to a ship stays linked while it is the s
   assert.equal(JSON.stringify([...kept.objects.ownWreck.keys()]), JSON.stringify([...lost.objects.ownWreck.keys()]), 'the same wrecks')
 })
 
-// ---- A save played under the 3.1 line ---------------------------------------------------------------------------------------
+// ---- A save played under the 3.2 line ---------------------------------------------------------------------------------------
 const PLAYED = { file: 'saves/AuroraDB-320-fetterkrolle-1.db', GameID: 161, RaceID: 909 }
 
-check('played-save', 'a save played under the 3.1 line (8 wrecks of another race, 1 of them in a system the race knows, no life pod, no officer in a pod, no Lagrange anchor) is read by every statement of the ledger, and the wreck is listed with the fingerprint and the observation worked from its own row', async (w) => {
+check('played-save', 'a save played under the 3.2 line (8 wrecks of another race, 1 of them in a system the race knows, no life pod, no officer in a pod, no Lagrange anchor) is read by every statement of the ledger, and the wreck is listed with the fingerprint and the observation worked from its own row', async (w) => {
   const { 'recovery-ledger': ledger, 'place-data': placeData, 'warnings/index': warnings, 'warnings/common': common } = await w.modules()
   const database = new Database(path.join(root, PLAYED.file), { readonly: true })
 

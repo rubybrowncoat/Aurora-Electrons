@@ -214,7 +214,7 @@ const reportChecks = {
   id: 'report',
   name: 'the tanker totals are the fuel aboard of the counted tankers even when no surplus exists, and the ships that cannot serve are listed and not dropped',
   run: ({ mod }) => {
-    const report = mod.tankerReport(REPORT_SHIPS, { version: '3.1.x' })
+    const report = mod.tankerReport(REPORT_SHIPS, { version: '3.2.x' })
     const counted = report.rows.filter((row) => row.counted).map((row) => row.ShipID)
     const listed = report.rows.filter((row) => row.listed).map((row) => row.ShipID)
 

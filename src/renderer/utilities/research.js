@@ -15,7 +15,7 @@ export const BLOCKED = 'blocked'
 
 const RESEARCH_VERSIONS = ['2.7.x']
 // The rules that state the saved points and the carry into a queued tech, checked against the current game's research processing (Population.cs:851-949 and 5107-5142) as well as the older line they were written for.
-const SAVED_VERSIONS = ['2.7.x', '3.1.x']
+const SAVED_VERSIONS = ['2.7.x', '3.2.x']
 const RATE_RULE = 'research.projectRate'
 const LANDING_RULE = 'research.landing'
 // The key a construct row with no research field is kept under, so every field's bonus reads as unknown.

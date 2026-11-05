@@ -66,7 +66,7 @@ check('inputs', 'eccentric wet bodies require an orbital year, and moons require
   assert.ok(!h.missingBodyInputs(bodyOf({ AtmosPress: 0, HydroExt: 0, Year: undefined })).includes('body orbital year'))
 })
 
-// The gases of DIM_Gases the checks below price, each with its four breathers' danger pairs as the 3.1 export holds them (DatabaseExport/DIM_Gases.csv): a gas is dangerous to a breather by the rating of the pair of the breathing gas, above the parts per million of the atmosphere the pair gives.
+// The gases of DIM_Gases the checks below price, each with its four breathers' danger pairs as the 3.2 export holds them (DatabaseExport/DIM_Gases.csv): a gas is dangerous to a breather by the rating of the pair of the breathing gas, above the parts per million of the atmosphere the pair gives.
 const gasOf = (AtmosGasID, AtmosGasPercentage, GasAtm, danger) => ({ AtmosGasID, AtmosGasPercentage, GasAtm, FrozenOut: 0, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, DangerousOxygen: danger[0], DangerousPPMOxygen: danger[1], DangerousMethane: danger[2], DangerousPPMMethane: danger[3], DangerousSulphur: danger[4], DangerousPPMSulphur: danger[5], DangerousAmmonia: danger[6], DangerousPPMAmmonia: danger[7] })
 const METHANE = (share) => gasOf(3, share, share / 100, [2, 500, 0, 0, 0, 0, 2, 10000])
 const AMMONIA = (share) => gasOf(4, share, share / 100, [2, 50, 2, 500, 2, 1000, 0, 0])

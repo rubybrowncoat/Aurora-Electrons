@@ -2645,7 +2645,7 @@ const FIGURES_NOTE = 'needs tier b: the fleets have no freight figure in the tab
 const figuresHold = async () => {
   const { provenance } = await loadUtilities(['provenance', 'transport'], { stubs: STUBS })
 
-  return provenance.ruleSupports('transport.handlingStrength', '3.1.x') === true
+  return provenance.ruleSupports('transport.handlingStrength', '3.2.x') === true
 }
 
 // The page server, the browser and the world the page variants of a worker share, started by `prepare`.

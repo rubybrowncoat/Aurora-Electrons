@@ -10,7 +10,7 @@ const hasPosition = (point) => Number.isFinite(point.Xcor) && Number.isFinite(po
 const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 
 // The rules of a route over the explored jump points, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The plan-level ones (totals, travel time, speed, avoid options) are in utilities/route-plan.js.
-const ROUTE_VERSIONS = ['3.1.x']
+const ROUTE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'route.jumps',

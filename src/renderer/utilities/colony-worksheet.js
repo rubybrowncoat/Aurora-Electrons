@@ -7,7 +7,7 @@ import { isKnownNumber } from './math'
 import { MINERALS } from './minerals'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 const SURVEY_INPUT = 'a geological survey of the body by the race'
 const COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 

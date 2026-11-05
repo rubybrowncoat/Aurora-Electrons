@@ -145,7 +145,7 @@ registerRule({
   note: 'A figure the save stores and the page shows as it is: an observed class\'s speed, armour and shields, a colony\'s signatures and counts, a sensor\'s strength and range, a ground unit\'s counters, race intelligence points and damage received. A missing one is unavailable, never 0.',
 })
 
-const RACE_OPTION_VERSIONS = ['3.1.x']
+const RACE_OPTION_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'intelligence.raceColour',

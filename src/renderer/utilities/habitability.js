@@ -51,7 +51,7 @@ const ICE_SHEET_ALBEDO_STEP = 0.0015
 const WATER_BOILING_KELVIN = 369
 const WATER_FREEZING_KELVIN = 245
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 registerRule({

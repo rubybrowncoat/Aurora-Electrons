@@ -69,7 +69,7 @@ const near = (actual, expected, epsilon = 1e-9) => assert.ok(typeof actual === '
 // ---------- the fixture ----------
 
 const M = 1e6
-const VERSION = '3.1.x'
+const VERSION = '3.2.x'
 const TECH = 1.5
 const jp = (id, system, link, x, y, explored = 1) => ({ WarpPointID: id, SystemID: system, WPLink: link, Distance: 0, Xcor: x * M, Ycor: y * M, JumpGateStrength: 0, Explored: explored, MilitaryRestricted: 0, IgnoreForDistance: 0 })
 

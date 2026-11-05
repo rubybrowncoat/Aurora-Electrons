@@ -644,7 +644,7 @@ check('version', 'the hangar clock and the shore-leave recovery are given for a 
   const ships = byId(old)
   const now = byId(current)
 
-  assert.equal(current.formulaVersion, '3.1.x')
+  assert.equal(current.formulaVersion, '3.2.x')
   assert.equal(old.formulaVersion, null, 'a save without the columns of the line has no version')
   assert.equal(now[1].deployment.recovery.status, 'estimated')
   assert.equal(now[3].maintenance.clockMode, 'advanced')
@@ -908,7 +908,7 @@ const FAULTS = [
   ['the yard age rate is given under the ordinary age rule', 'runtime', 'ofRule({ rule: YARD_AGE_RATE,', 'ofRule({ rule: AGE_RATE,', ['shipyard-tasks']],
   ['the yard age rate carries the no-yard-task assumption', 'runtime', 'rule: YARD_AGE_RATE, value: 0, ', 'rule: YARD_AGE_RATE, value: 0, assumptions: [\'no yard task refits the ship, which would hold the age as it is\'], ', ['shipyard-tasks']],
   ['a task state the save does not show is taken as an ordinary ship', 'runtime', 'yardTask === null) {', 'yardTask === null && false) {', ['shipyard-tasks']],
-  ['the version is taken as the stated one without asking the save', 'runtime', 'version: formulaVersion, npr', 'version: \'3.1.x\', npr', ['version']],
+  ['the version is taken as the stated one without asking the save', 'runtime', 'version: formulaVersion, npr', 'version: \'3.2.x\', npr', ['version']],
   ['a missing hit threshold is read as 1', 'runtime', "components.has('ChanceToHit') ? 'FCT_ClassComponent.ChanceToHit' : 'null'", "components.has('ChanceToHit') ? 'FCT_ClassComponent.ChanceToHit' : '1'", ['old-schema-thresholds']],
   ['an empty list of classes reads every class', 'runtime', 'classIds === null || classIds === undefined', 'classIds === null || classIds === undefined || classIds.length === 0', ['class-selection']],
   ['an id that is not a whole number is dropped without a word', 'runtime', '...asked.invalid, ', '', ['class-selection']],
@@ -966,7 +966,7 @@ const VERSION_CHECKS = new Set(['provenance', 'increment', 'clock-modes', 'recov
 const rulesHold = async (w) => {
   const { provenance } = await w.modules()
 
-  return ['shipRuntime.shoreLeaveRecovery', 'shipRuntime.maintenanceAgeRate'].every((rule) => provenance.ruleSupports(rule, '3.1.x') === true)
+  return ['shipRuntime.shoreLeaveRecovery', 'shipRuntime.maintenanceAgeRate'].every((rule) => provenance.ruleSupports(rule, '3.2.x') === true)
 }
 
 const main = async () => {

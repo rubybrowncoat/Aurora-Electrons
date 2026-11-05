@@ -2,7 +2,7 @@ import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailab
 
 // The hit chance of a missile against a target, as scenarios: the raw continuous chance the speeds, guidance, tactical modifier and jammer give, the chance capped at 100, and the whole-number chance one warhead has on its roll, each its own figure with its own rule so none is read for another. Every function is pure and returns provenance results (utilities/provenance.js): a missing, zero or invalid input leaves a result with no value, never 0.
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 
 export const HIT_CAP = 100
 export const JAMMER_FACTOR = 0.75

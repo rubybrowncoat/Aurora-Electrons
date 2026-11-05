@@ -6,7 +6,7 @@ import { shipRate, shipyardUpgradeRate } from './production'
 import { capacityKind } from './production-types'
 import { combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, weakestStatus } from './provenance'
 
-const VERSIONS = ['3.1.x']
+const VERSIONS = ['3.2.x']
 // The shipbuilding rule stays on the earlier line: the migrated fixture's ledger holds no shipyard activity, so the activity half of the rule has no case to check there (it needs a played 3.1 save), and its figure rests on the shipyard rates of production.js.
 const SHIPBUILDING_VERSIONS = ['2.7.x']
 

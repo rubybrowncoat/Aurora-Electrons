@@ -10,7 +10,7 @@ import { combine, isAvailable, ofRule, registerRule, unavailable } from './prove
 const VERSIONS = ['2.7.x']
 
 // The two rules the fixture's colonies exercise: the loader that reads them (check-colonist-floor, group save-loader, against raw counts of the population table). The other rules of the module have worked colonies only, so they keep the line they were verified on.
-const FIXTURE_VERSIONS = ['3.1.x']
+const FIXTURE_VERSIONS = ['3.2.x']
 
 // Workers in millions: a balance this close to zero counts as staffed when the removable population is searched for.
 const EPSILON = 1e-9

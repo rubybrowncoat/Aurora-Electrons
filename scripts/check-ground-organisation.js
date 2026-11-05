@@ -7,7 +7,7 @@
   - `role`: the five vehicle bases, infantry and static; the exact 40% and 60% ties (also with fractional sizes, where a float sum would round the wrong way); logistics against twice the rest; the order of the kinds; the class's surface-to-orbit weapon, which counts for the symbol and not for the role; a component counted once per class; a logistics vehicle that counts as a vehicle while the rest leaves logistics out.
   - `symbol`: the template's own symbol type, the auto detection in the game's order, a template that is none, missing, foreign or not stored, the headquarters pass (the commonest symbol below, ties by the order of the game's own string comparison, which puts A2 before A-2 where JavaScript's puts it after and leaves a tie it does not order unknown, only formations at the same colony, a ship-borne formation outside the chart), and the symbol types the game has no name for.
   - `echelon`: the template's own echelon, the place of the ground rank of the required rank's priority among the race's ground ranks (company to army, army above), a naval rank that holds a ground rank's priority, one whose priority no ground rank holds, a required rank of 0 or one the race has not, and ranks not read.
-  - `naming`: the numbered themes, a themed template with its name count and random flag, a theme the catalogue lacks (read as the name plus a number), and the themes the 3.1 line added.
+  - `naming`: the numbered themes, a themed template with its name count and random flag, a theme the catalogue lacks (read as the name plus a number), and the themes the 3.2 line added.
   - `unknown`: an element, class, component, size, unit type or setting the save does not give leaves the figure it feeds unknown, naming what is missing in plain words, never a table or column.
   - `fixture`: every formation of every race of two saves (the interim 3.1 save, 5,337 formations of race 784, and the played 3.2 save, 1,236 formations of eleven races) agrees with the independent working, the stored symbol text is empty in all of them, and the template settings are the ones the saves hold.
   - `planted`: game-shaped template rows on copies of the interim save (every column the game's template loader reads is stored; the settings take values of the game's enumerations): a template that sets its symbol, echelon and naming, the seven naming themes of the 3.1 line with their name counts, a theme the catalogue lacks, required ranks of 0, of a naval rank, of a naval rank whose priority no ground rank holds and of another race's, and a save without a column the rules start from, which keeps the rest of the model and reads the organisation as unknown naming the field.
@@ -821,7 +821,7 @@ const loadedOn = async (w, database) => {
   return g.loadGroundFormations(loaderOf(database), IDS)
 }
 
-check('planted', 'game-shaped template rows on copies of the interim save: a template that sets its symbol, echelon and naming; the seven themes of the 3.1 line with their name counts; a theme the catalogue lacks; required ranks of 0, a naval rank, a naval rank whose priority no ground rank holds and another race\'s; and a save without a column the rules start from', async (w) => {
+check('planted', 'game-shaped template rows on copies of the interim save: a template that sets its symbol, echelon and naming; the seven themes of the 3.2 line with their name counts; a theme the catalogue lacks; required ranks of 0, a naval rank, a naval rank whose priority no ground rank holds and another race\'s; and a save without a column the rules start from', async (w) => {
   if (!present('migrated')) {
     return
   }
@@ -847,7 +847,7 @@ check('planted', 'game-shaped template rows on copies of the interim save: a tem
     assert.deepEqual(explicit.byId.get(node.id).organisation, node.organisation, `formation ${node.id}: another template's formations are unchanged`)
   })
 
-  // The seven themes the 3.1 line added, each readable with its own name count.
+  // The seven themes the 3.2 line added, each readable with its own name count.
   const themed = await loadedOn(w, planted('themes'))
   const database = planted('themes')
   const checked = []

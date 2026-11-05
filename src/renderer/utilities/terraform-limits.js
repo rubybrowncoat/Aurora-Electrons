@@ -23,7 +23,7 @@ export const STAGE_ASSUMPTIONS = Object.freeze([
 
 registerRule({
   id: 'habitability.terraformLimits',
-  versions: ['3.1.x'],
+  versions: ['3.2.x'],
   units: 'colony cost',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity, Year, StarLuminosity', 'FCT_SystemBody.ParentOrbitalDistance, ParentEccentricity, ParentYear', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species'],

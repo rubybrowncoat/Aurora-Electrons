@@ -1434,7 +1434,7 @@ const FIGURES_NOTE = 'needs tier b: the Transport and Hauling pages draw no roun
 const figuresHold = async () => {
   const { provenance } = await loadUtilities(['provenance', 'transport'])
 
-  return provenance.ruleSupports('transport.handlingStrength', '3.1.x') === true
+  return provenance.ruleSupports('transport.handlingStrength', '3.2.x') === true
 }
 
 const runWorld = async ({ world, probing, mutating, only, wanted, mine, solo }) => {

@@ -62,7 +62,7 @@ const memo = (make) => {
 }
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
-const VERSION = '3.1.x'
+const VERSION = '3.2.x'
 // The race's cargo shuttle technology (the load modifier): every strength below is worked from it by hand.
 const TECH = 1.5
 const IDS = { GameID: 1, RaceID: 2 }

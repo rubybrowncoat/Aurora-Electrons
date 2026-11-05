@@ -240,7 +240,7 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
 // Before the race's rules load, no body is a ready site.
 export const NO_CMC_RULES = { allowed: false, shipyard: false, settledColonies: 0, largestColony: {} }
 
-const CMC_VERSIONS = ['3.1.x']
+const CMC_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'cmcSite.excluded',
