@@ -1,13 +1,44 @@
 // What a body costs a species to live on, from the game's own rules: the colony cost now and at the extremes of its orbit, checked against the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony cost).
 //
-// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, Year, ParentOrbitalDistance, ParentEccentricity, ParentYear, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasAmount (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel }`. A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
+// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, Year, ParentOrbitalDistance, ParentEccentricity, ParentYear, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasPercentage (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen, DangerousMethane, DangerousPPMMethane, DangerousSulphur, DangerousPPMSulphur, DangerousAmmonia, DangerousPPMAmmonia }` (`gasDanger` picks the danger pair of the species' breathing gas). A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
 
 import { ofRule, registerRule, unavailable } from './provenance'
 
 export const BODY_CLASS = { PLANET: 1, MOON: 2, ASTEROID: 3, COMET: 5 }
 export const BODY_TYPE = { GAS_GIANT: 4, SUPERJOVIAN: 5 }
 export const HYDROSPHERE = { NONE: 1, VAPOUR: 2, LIQUID: 3, ICE_SHEET: 4 }
-export const GAS = { WATER_VAPOUR: 5 }
+export const GAS = { METHANE: 3, AMMONIA: 4, WATER_VAPOUR: 5, OXYGEN: 10, SULPHUR_DIOXIDE: 15 }
+
+// The DIM_Gases columns that say how dangerous a gas is to a breather of each breathing gas, as [rating, level in parts per million of the atmosphere]. The game picks the pair by the species' breathing gas (SystemBody.method_54); a breathing gas without a pair has no dangerous gas.
+const BREATHER_DANGER = Object.freeze({
+  [GAS.OXYGEN]: Object.freeze(['DangerousOxygen', 'DangerousPPMOxygen']),
+  [GAS.METHANE]: Object.freeze(['DangerousMethane', 'DangerousPPMMethane']),
+  [GAS.SULPHUR_DIOXIDE]: Object.freeze(['DangerousSulphur', 'DangerousPPMSulphur']),
+  [GAS.AMMONIA]: Object.freeze(['DangerousAmmonia', 'DangerousPPMAmmonia']),
+})
+const NO_DANGER = Object.freeze({ dangerous: 0, ppm: 0 })
+
+// Every danger column of DIM_Gases, one pair for each breathing gas.
+export const DANGER_COLUMNS = Object.freeze(Object.values(BREATHER_DANGER).flat())
+
+// How dangerous a gas row is to a breather of `breathingGas` (the species' BreatheID, oxygen where none is given): `dangerous` is the rating the colony cost takes and `ppm` the share of the atmosphere, in parts per million, above which the gas counts.
+export const gasDanger = (gas, breathingGas = GAS.OXYGEN) => {
+  const pair = BREATHER_DANGER[breathingGas]
+
+  return pair ? { dangerous: gas[pair[0]], ppm: gas[pair[1]] } : NO_DANGER
+}
+
+// The danger columns of a DIM_Gases row (`info`), 0 where the table holds none, for the row of an atmosphere that a plan adds a gas to.
+export const dangerColumnsOf = (info) => Object.fromEntries(DANGER_COLUMNS.map((column) => [column, info[column] || 0]))
+
+const SHARE_DECIMALS = 1e9
+
+// The atmosphere rows with the share of each gas in the air (`AtmosGasPercentage`), recomputed from the pressures as the atmosphere refresh of the game does: the gas's pressure over the total, in percent, to nine decimals; a body with no air has no share.
+export const withAtmosphereShares = (rows) => {
+  const total = rows.reduce((sum, gas) => sum + gas.GasAtm, 0)
+
+  return rows.map((gas) => ({ ...gas, AtmosGasPercentage: total > 0 ? Math.round((gas.GasAtm / total) * 100 * SHARE_DECIMALS) / SHARE_DECIMALS : 0 }))
+}
 
 // A gas above this share of the atmosphere is too much of a good thing.
 export const MAX_BREATHABLE_PERCENT = 30
@@ -52,7 +83,8 @@ const SWING_INPUTS = [['BaseTemp', 'base temperature', true], ['Albedo', 'albedo
 const ECCENTRIC_INPUTS = [...SWING_INPUTS, ['OrbitalDistance', 'orbital distance', true]]
 const MOON_INPUTS = [...SWING_INPUTS, ['ParentOrbitalDistance', 'planet orbital distance', true], ['ParentEccentricity', 'planet eccentricity']]
 const DUST_INPUTS = [['DustLevel', 'dust level']]
-const GAS_INPUTS = [['AtmosGasID', 'gas'], ['GasAtm', 'gas pressure'], ['AtmosGasAmount', 'gas share'], ['FrozenOut', 'frozen-out flag'], ['BoilingPoint', 'boiling point'], ['GHGas', 'greenhouse flag'], ['AntiGHGas', 'anti-greenhouse flag'], ['Dangerous', 'danger'], ['DangerousLevel', 'danger level']]
+const DANGER_INPUTS = [['DangerousOxygen', 'danger to oxygen breathers'], ['DangerousPPMOxygen', 'danger level for oxygen breathers'], ['DangerousMethane', 'danger to methane breathers'], ['DangerousPPMMethane', 'danger level for methane breathers'], ['DangerousSulphur', 'danger to sulphur dioxide breathers'], ['DangerousPPMSulphur', 'danger level for sulphur dioxide breathers'], ['DangerousAmmonia', 'danger to ammonia breathers'], ['DangerousPPMAmmonia', 'danger level for ammonia breathers']]
+const GAS_INPUTS = [['AtmosGasID', 'gas'], ['GasAtm', 'gas pressure'], ['AtmosGasPercentage', 'gas share'], ['FrozenOut', 'frozen-out flag'], ['BoilingPoint', 'boiling point'], ['GHGas', 'greenhouse flag'], ['AntiGHGas', 'anti-greenhouse flag'], ...DANGER_INPUTS]
 const SPECIES_INPUTS = [['IdealTemperature', 'ideal temperature'], ['TemperatureDeviation', 'temperature deviation', true], ['IdealBreathePressure', 'breathing gas pressure'], ['BreathePressureDeviation', 'breathing gas deviation'], ['MaximumPressure', 'maximum pressure', true], ['IdealGravity', 'ideal gravity'], ['GravityDeviation', 'gravity deviation'], ['PopulationDensityModifier', 'population density', true], ['BreatheID', 'breathing gas']]
 
 const usable = (source, [key, , positive]) => isNumber(source[key]) && (!positive || source[key] > 0)
@@ -180,13 +212,17 @@ export const temperatureAtDistance = (body, distance) => {
   return temperature
 }
 
-// The worst dangerous gas that is present beyond its limit, never the species' own breathing gas.
+// The worst dangerous gas, to a breather of the species' breathing gas, that is present beyond its limit, never the species' own breathing gas.
 const dangerousGas = (body, species, temperature, planned) => {
   let worst = null
+  let rating = 0
 
   body.Atmosphere.forEach((gas) => {
-    if (gas.Dangerous > (worst ? worst.Dangerous : 0) && gas.AtmosGasID !== species.BreatheID && !frozenOut(gas, temperature, planned) && gas.AtmosGasAmount > gas.DangerousLevel / 10000) {
+    const { dangerous, ppm } = gasDanger(gas, species.BreatheID)
+
+    if (dangerous > rating && gas.AtmosGasID !== species.BreatheID && !frozenOut(gas, temperature, planned) && gas.AtmosGasPercentage > ppm / 10000) {
       worst = gas
+      rating = dangerous
     }
   })
 
@@ -200,7 +236,7 @@ export const BREATHING_PENALTY = 2
 export const breathingFails = (body, species) => {
   const breathing = body.Atmosphere.filter((candidate) => candidate.AtmosGasID === species.BreatheID)
   const pressure = breathing.reduce((total, candidate) => total + candidate.GasAtm, 0)
-  const share = breathing.reduce((total, candidate) => total + candidate.AtmosGasAmount, 0)
+  const share = breathing.reduce((total, candidate) => total + candidate.AtmosGasPercentage, 0)
 
   return pressure < species.MinimumBreathablePressure || pressure > species.MaximumBreathablePressure || share > MAX_BREATHABLE_PERCENT
 }
@@ -220,7 +256,7 @@ export const costFactors = (body, species, temperature, planned = false) => {
 
   const pressureCost = body.AtmosPress > species.MaximumPressure ? Math.max(2, body.AtmosPress / species.MaximumPressure) : 0
   const gas = dangerousGas(body, species, temperature, planned)
-  const dangerCost = gas ? gas.Dangerous : 0
+  const dangerCost = gas ? gasDanger(gas, species.BreatheID).dangerous : 0
   let cost = Math.max(dangerCost, temperatureCost, pressureCost)
   let breathableCost = 0
 

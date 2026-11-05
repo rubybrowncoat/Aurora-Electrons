@@ -6,7 +6,7 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report supported is asserted on the 2.7 base save instead, whose column names the pages are still written for, until the items that rewrite the reads of the renamed and removed columns land (`RENAMED_READS`: FCT_Star.Component by AE-308-02 and the gas columns by AE-308-03, each with the inputs and reports that still name it, so a half-migrated set of reads fails rather than passing as the item's whole set): the saves of the line read 10 supported, 4 degraded and 12 unsupported reports, and the columns those reports lack are exactly the listed ones;
+  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report supported is asserted on the 2.7 base save instead, whose column names the pages are still written for (but for the gas tables, which the copy is given from the shipped 3.1 save, `gasStatements`), until the item that rewrites the reads of the renamed column lands (`RENAMED_READS`: FCT_Star.Component by AE-308-02, with the inputs and reports that still name it, so a half-migrated set of reads fails rather than passing as the item's whole set): the saves of the line read 10 supported, 4 degraded and 12 unsupported reports, and the columns those reports lack are exactly the listed one, none of them a column of DIM_Gases or FCT_AtmosphericGas;
   - the saves from before the line (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): refused as a save from before Aurora 3.0, naming the seven columns Aurora 3.0 added that the file lacks, with every report still evaluated so that the layout alone holds each page back, and no formula version (the direct loader states none for them either);
   - copies of the 2.7 base save (AuroraDB_270_base.db) in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
@@ -68,10 +68,17 @@ const DAMAGED_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Ship.ShipSeniorCO', 'FCT_
 // The columns Aurora 3.1 renamed or removed that a read of a page still names, with the item that rewrites the reads, the number of inputs that name the column and the reports those inputs belong to, as this commit leaves them: a save of the line lacks each of them and no other column a report reads, so the reports that are not supported on it rest on these. An item that lands deletes its entries, and the check of a save of the line fails on an entry no report names any more as on a column that is not listed. The count and the reports pin the state the migration starts from: an item that renames some of its reads changes them, and the check then fails until the item restates what it still has to do or deletes the entry, so a half-migrated read cannot pass as the whole of what the item claims (`renamedReaders`). One removed column is named by no read the preflight sees: DIM_AssignmentTypeFilter.Fighter by nothing.
 const RENAMED_READS = {
   'FCT_Star.Component': { owner: 'AE-308-02', reads: 66, reports: ['/colony-outlook', '/habitability', '/hauling', '/information', '/lagrange', '/log', '/logistics', '/map', '/mineral-outlook', '/minerals', '/notebook', '/production', '/routes', '/shipyards', '/survey-progress', '/warnings'] },
-  'DIM_Gases.Dangerous': { owner: 'AE-308-03', reads: 3, reports: ['/habitability', '/map'] },
-  'DIM_Gases.DangerousLevel': { owner: 'AE-308-03', reads: 3, reports: ['/habitability', '/map'] },
-  'FCT_AtmosphericGas.AtmosGasAmount': { owner: 'AE-308-03', reads: 2, reports: ['/habitability', '/map'] },
 }
+
+// The statements that give a copy of the 2.7 base save the gas tables of a save of the line, DIM_Gases and FCT_AtmosphericGas with their 3.1 columns (the share of a gas, and the danger pair of each of the four breathers), whose file is `gases`. Every copy the base checks use is made from the base save with these applied, so the reports it holds supported stay supported by the pages' columns, whatever else the 2.7 file lacks.
+const gasStatements = (gases) => [
+  `attach database '${gases.replaceAll("'", "''")}' as line`,
+  'drop table DIM_Gases',
+  'create table DIM_Gases as select * from line.DIM_Gases',
+  'drop table FCT_AtmosphericGas',
+  'create table FCT_AtmosphericGas as select * from line.FCT_AtmosphericGas',
+  'detach database line',
+]
 
 // The inputs of the registry that name a column, as `[{ route, key }]`: what a renamed read still has, compared with what `RENAMED_READS` pins.
 const renamedReaders = (capabilities, field) => {
@@ -526,6 +533,20 @@ const registryChecks = (capabilities, scan, navigation) => {
     check(`registry: ${field}, which ${entry.owner} rewrites, is still named by the ${entry.reads} inputs on the ${entry.reports.length} reports pinned for it and by no other, so a half-migrated set of reads fails here (an item that lands deletes its entry, and a read it did not rewrite then makes a save of the line lack a column the list does not name)`, readers.length === entry.reads && sameFields(reports, entry.reports), `${readers.length} inputs on ${reports.join(', ')}`)
   })
 
+  // The gas columns are read in their 3.1 names (AE-308-03): the share of a gas is the percentage, and the danger of a gas is one pair for each of the four breathing gases, every input that reads one pair reading all four.
+  const gasInputs = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.reads.DIM_Gases || input.reads.FCT_AtmosphericGas).map((input) => ({ route, key: input.key, gases: input.reads.DIM_Gases || [], atmosphere: input.reads.FCT_AtmosphericGas || [] })))
+  const named = (input) => `${input.route} ${input.key}`
+  const dangerColumns = ['DangerousOxygen', 'DangerousPPMOxygen', 'DangerousMethane', 'DangerousPPMMethane', 'DangerousSulphur', 'DangerousPPMSulphur', 'DangerousAmmonia', 'DangerousPPMAmmonia']
+  const dangerOf = (input) => input.gases.filter((column) => /^Danger/.test(column)).sort().join()
+  const strayOf = (input) => [...input.gases.filter((column) => /^Danger/.test(column) && !dangerColumns.includes(column)), ...input.atmosphere.filter((column) => /^AtmosGas/.test(column) && !['AtmosGasID', 'AtmosGasPercentage'].includes(column))]
+  const strays = gasInputs.filter((input) => strayOf(input).length).map((input) => `${named(input)}: ${strayOf(input).join()}`)
+  const dangerReaders = gasInputs.filter((input) => dangerOf(input))
+  const shareReaders = gasInputs.filter((input) => input.atmosphere.includes('AtmosGasPercentage'))
+
+  check('registry: every danger column of a gas an input reads is one of the eight of the four breathers, and the share of a gas is read as the percentage', strays.length === 0, strays.join('; '))
+  check('registry: every input that reads the danger of a gas reads the pairs of all four breathers, and /habitability and /map both do', dangerReaders.every((input) => dangerOf(input) === [...dangerColumns].sort().join()) && ['/habitability', '/map'].every((route) => dangerReaders.some((input) => input.route === route)), dangerReaders.map((input) => `${named(input)}: ${dangerOf(input)}`).join('; '))
+  check('registry: /habitability and /map read the percentage of a gas in the atmosphere', ['/habitability', '/map'].every((route) => shareReaders.some((input) => input.route === route)), shareReaders.map(named).join(', '))
+
   check('registry: every route a lookup gate names is a report', [...gated].every((route) => capabilities.REPORT_ROUTES.includes(route)), [...gated].filter((route) => !capabilities.REPORT_ROUTES.includes(route)).join(', '))
   check('registry: no lookup gate keys on a row the 3.1 line removed (commander bonus 26, Fighter Combat; component type 65, Fighter Pod Bay), which no save of the line holds, so a gate on it would never read as expected', !(26 in capabilities.BONUS_NAMES) && !(65 in capabilities.COMPONENT_TYPES), `${Object.keys(capabilities.BONUS_NAMES).join()}; ${Object.keys(capabilities.COMPONENT_TYPES).join()}`)
   check('registry: Hauling rests on the Production bonus (5, the colonies\' production rates of the reserve panel) and the cargo handling bonus (24) and on no other lookup, so the Shipbuilding and Ground Construction bonuses leave it supported', Object.entries(capabilities.BONUS_NAMES).filter(([, bonus]) => bonus.routes.includes('/hauling')).map(([id]) => id).join() === '5,24')
@@ -613,6 +634,7 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
   check(`${save.label}: the save is of the 3.1 line, with none of the ${LINE_COLUMNS.length} columns missing`, result.line.status === 'accepted' && result.line.reason === null && result.line.line === capabilities.STATED_FORMULA_VERSION && result.line.missing.length === 0, JSON.stringify(result.line))
   check(`${save.label}: the commanders soft groups are both whole`, result.reports['/commanders'].groups.rank === true && result.reports['/commanders'].groups.age === true)
   check(`${save.label}: the columns its reports lack are the ${Object.keys(RENAMED_READS).length} renamed or removed ones a read still names (${[...new Set(Object.values(RENAMED_READS).map((entry) => entry.owner))].join(', ')}), and no other`, sameFields(namedFields(result), Object.keys(RENAMED_READS)), namedFields(result).join(', '))
+  check(`${save.label}: no report lacks a column of DIM_Gases or FCT_AtmosphericGas, so the gas reads of the pages are all in the 3.1 header rows`, namedFields(result).every((field) => !/^(DIM_Gases|FCT_AtmosphericGas)\./.test(field)), namedFields(result).filter((field) => /^(DIM_Gases|FCT_AtmosphericGas)\./.test(field)).join(', '))
 
   const bonusRows = await all(file, 'select BonusID, Description, Percentage from DIM_CommanderBonusType where BonusID in (26, 39)')
   const componentRows = await all(file, 'select ComponentTypeID, TypeDescription from DIM_ComponentType where ComponentTypeID in (65, 72)')
@@ -1779,8 +1801,8 @@ const main = async () => {
     console.log('SKIP  line: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
   }
 
-  // The base save the altered copies and the report-level checks are made from: a 2.7 save, whose column names the pages are still written for, so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. It moves to a save of the line once the items that rewrite the pages' reads of the renamed and removed columns land (`RENAMED_READS`: FCT_Star.Component to ComponentNumber, AE-308-02, and the gas columns, AE-308-03), and `realSaveChecks` then asserts every report supported on the 3.0 and 3.1 saves again.
-  const source = path.resolve(repo, 'AuroraDB_270_base.db')
+  // The base save the altered copies and the report-level checks are made from: a 2.7 save, whose column names the pages are still written for but for the gas tables (`gasStatements`), so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. It moves to a save of the line once the item that rewrites the pages' reads of the renamed star column lands (`RENAMED_READS`: FCT_Star.Component to ComponentNumber, AE-308-02), and `realSaveChecks` then asserts every report supported on the 3.0 and 3.1 saves again.
+  const baseFile = path.resolve(repo, 'AuroraDB_270_base.db')
   // A save of the line: the checks of the line itself and the store's accepted-copy test.
   const lineSource = path.resolve(repo, 'saves/AuroraDB_310_shipped.db')
 
@@ -1790,7 +1812,12 @@ const main = async () => {
     console.log('SKIP  line: saves/AuroraDB_310_shipped.db is not there, so the line is not checked on a copy (not run)')
   }
 
-  if (fs.existsSync(source) && fs.existsSync(lineSource)) {
+  if (fs.existsSync(baseFile) && fs.existsSync(lineSource)) {
+    const gases = await alteredCopy(lineSource, 'gases', [])
+    const source = await alteredCopy(baseFile, 'base', gasStatements(gases))
+
+    removeOwnedCopy(gases)
+
     await alteredChecks(capabilities, source)
     await dependencyChecks(capabilities, source, scan)
     const mods = await consumerChecks(lineSource)

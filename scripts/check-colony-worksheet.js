@@ -7,7 +7,7 @@
 
   The panel is the component the app ships: its script is loaded the way the pages' are (with the real persisted-view mixin), its template is compiled and rendered by Vue without a document, and what is read is the text and the attributes of the nodes. The body detail is rendered the same way, and the cost and the population limit the worksheet shows for a species are read against its two headlines. The Planner's own shownEvaluation is run for the evaluation it shows.
 
-  The saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only) give the real figures: the worksheet's deposits against the raw rows and its cost and limit against the assessment. A save that is not there is skipped.
+  The save (saves/AuroraDB-310-spookyerol-migrated.db, game 141, read-only, as races 784 and 785, the two that know bodies both surveyed and not) gives the real figures: the worksheet's deposits against the raw rows and its cost and limit against the assessment. A save that is not there is skipped.
 
   Each planted fault in a source must fail the checks it names, none of them a check of a save. Exit code 1 when a check fails.
 */
@@ -42,8 +42,8 @@ const FILES = {
 
 const NAMES = ['colony-worksheet', 'colonization', 'colonization-data', 'habitability', 'colonies', 'minerals', 'provenance', 'math']
 const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 784 },
+  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 785 },
 ]
 
 const STUBS = {
@@ -98,7 +98,7 @@ const HIDDEN_ACCESS = 0.8765
 const earth = { Radius: 6371, Gravity: 1, BaseTemp: 255, SurfaceTemp: 288, HydroID: 3, HydroExt: 70, Albedo: 0.3, AtmosPress: 1, TidalLock: 0, DustLevel: 0, OrbitalDistance: 1, DistanceToParent: 1, Eccentricity: 0, FixedBody: 0, BodyClass: 1, BodyTypeID: 1, GroundMineralSurvey: 0, StarID: 1, SystemID: 1, GameID: GAME, ParentBodyID: 0, ParentBodyType: 0, Xcor: 0, Ycor: 0 }
 
 const BODIES = [
-  { ...earth, SystemBodyID: 101, PlanetNumber: 1, OrbitNumber: 0, Eccentricity: 0.3, SurfaceTemp: 250, HydroID: 4, HydroExt: 60, name: 'Alpha' },
+  { ...earth, SystemBodyID: 101, PlanetNumber: 1, OrbitNumber: 0, Eccentricity: 0.3, Year: 8760, SurfaceTemp: 250, HydroID: 4, HydroExt: 60, name: 'Alpha' },
   { ...earth, SystemBodyID: 102, PlanetNumber: 2, OrbitNumber: 0, SurfaceTemp: 281, name: 'Beta' },
   { ...earth, SystemBodyID: 103, PlanetNumber: 3, OrbitNumber: 0, SurfaceTemp: 300, Gravity: 0.7, name: 'Gamma' },
   { ...earth, SystemBodyID: 104, PlanetNumber: 4, OrbitNumber: 0, Gravity: null, name: 'Delta' },
@@ -108,16 +108,19 @@ const BODIES = [
 
 const SURVEYED = [101, 103, 104, 105, 106]
 
+// The danger of a gas to a breather is a pair of columns for each of the four breathing gases (oxygen is gas 10); the Carbon Dioxide row is dangerous to an oxygen breather (rating 1) above 5 ppm.
+const NO_DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
+
 const GASES = [
-  { GasID: 1, Name: 'Oxygen', BoilingPoint: 90, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0 },
-  { GasID: 2, Name: 'Nitrogen', BoilingPoint: 77, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0 },
-  { GasID: 5, Name: 'Water Vapour', BoilingPoint: 373, GHGas: 1, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0 },
-  { GasID: 20, Name: 'Carbon Dioxide', BoilingPoint: 195, GHGas: 1, AntiGHGas: 0, Dangerous: 1, DangerousLevel: 5 },
+  { GasID: 10, Name: 'Oxygen', BoilingPoint: 90, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 2, Name: 'Nitrogen', BoilingPoint: 77, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 5, Name: 'Water Vapour', BoilingPoint: 373, GHGas: 1, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 20, Name: 'Carbon Dioxide', BoilingPoint: 195, GHGas: 1, AntiGHGas: 0, ...NO_DANGER, DangerousOxygen: 1, DangerousPPMOxygen: 5 },
 ]
 
 const SPECIES = [
-  { SpeciesID: 1, SpeciesName: 'Humans', BreatheID: 1, Oxygen: 0.21, OxyDev: 0.15, PressMax: 4, Temperature: 288, TempDev: 20, Gravity: 1, GravDev: 0.4, PopulationDensityModifier: 1 },
-  { SpeciesID: 2, SpeciesName: 'Cold-bloods', BreatheID: 1, Oxygen: 0.21, OxyDev: 0.15, PressMax: 4, Temperature: 270, TempDev: 15, Gravity: 0.8, GravDev: 0.5, PopulationDensityModifier: 1.5 },
+  { SpeciesID: 1, SpeciesName: 'Humans', BreatheID: 10, Oxygen: 0.21, OxyDev: 0.15, PressMax: 4, Temperature: 288, TempDev: 20, Gravity: 1, GravDev: 0.4, PopulationDensityModifier: 1 },
+  { SpeciesID: 2, SpeciesName: 'Cold-bloods', BreatheID: 10, Oxygen: 0.21, OxyDev: 0.15, PressMax: 4, Temperature: 270, TempDev: 15, Gravity: 0.8, GravDev: 0.5, PopulationDensityModifier: 1.5 },
 ]
 
 // The deposits of the fixture by body: [MaterialID, Amount, Accessibility, HalfOriginalAmount, OriginalAcc].
@@ -143,8 +146,8 @@ const rowsOfFixture = () => {
   BODIES.forEach(({ name, ...body }) => {
     tables.push(['FCT_SystemBody', body])
     tables.push(['FCT_SystemBodyName', { SystemBodyID: body.SystemBodyID, RaceID: RACE, Name: name }])
-    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: body.SystemBodyID, AtmosGasID: 1, AtmosGasAmount: 21, GasAtm: 0.21, FrozenOut: 0 }])
-    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: body.SystemBodyID, AtmosGasID: 2, AtmosGasAmount: 79, GasAtm: 0.79, FrozenOut: 0 }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: body.SystemBodyID, AtmosGasID: 10, AtmosGasPercentage: 21, GasAtm: 0.21, FrozenOut: 0 }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: body.SystemBodyID, AtmosGasID: 2, AtmosGasPercentage: 79, GasAtm: 0.79, FrozenOut: 0 }])
   })
   SURVEYED.forEach((id) => tables.push(['FCT_SystemBodySurveys', { SystemBodyID: id, RaceID: RACE }]))
   tables.push(['FCT_SystemBodySurveys', { SystemBodyID: 102, RaceID: SURVEYED_BY_OTHER }])
@@ -1160,7 +1163,7 @@ const saveStatements = async (ctx, save) => {
   return {
     close: () => db.close(),
     statements: [
-      [`save-worksheet: ${save.file}: the deposits of three bodies are the raw rows of the bodies the race surveyed, nothing of the others, and the cost and the limit are the assessment's`, async () => {
+      [`save-worksheet: ${save.file} race ${save.race}: the deposits of three bodies are the raw rows of the bodies the race surveyed, nothing of the others, and the cost and the limit are the assessment's`, async () => {
         const { rows, assessed } = await pipelineOf()
         const surveyed = rows.filter((row) => row.minerals.surveyed && row.body.Minerals.length)
         const unsurveyed = rows.filter((row) => !row.minerals.surveyed)

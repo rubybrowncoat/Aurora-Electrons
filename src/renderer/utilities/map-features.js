@@ -178,7 +178,7 @@ from FCT_SystemBody
 ${known}
 where ${where}
 group by FCT_SystemBody.SystemID`),
-    rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel
+    rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasPercentage, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.DangerousOxygen, DIM_Gases.DangerousPPMOxygen, DIM_Gases.DangerousMethane, DIM_Gases.DangerousPPMMethane, DIM_Gases.DangerousSulphur, DIM_Gases.DangerousPPMSulphur, DIM_Gases.DangerousAmmonia, DIM_Gases.DangerousPPMAmmonia
 from FCT_AtmosphericGas
 inner join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID
@@ -196,7 +196,7 @@ from FCT_AtmosphericGas
 left join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID
 ${known}
-where ${where} and (${fields}) is not null and (FCT_AtmosphericGas.GasAtm is null or FCT_AtmosphericGas.AtmosGasAmount is null or FCT_AtmosphericGas.FrozenOut is null or DIM_Gases.GasID is null or DIM_Gases.Dangerous is null or DIM_Gases.DangerousLevel is null)`),
+where ${where} and (${fields}) is not null and (FCT_AtmosphericGas.GasAtm is null or FCT_AtmosphericGas.AtmosGasPercentage is null or FCT_AtmosphericGas.FrozenOut is null or DIM_Gases.GasID is null or DIM_Gases.DangerousOxygen is null or DIM_Gases.DangerousPPMOxygen is null or DIM_Gases.DangerousMethane is null or DIM_Gases.DangerousPPMMethane is null or DIM_Gases.DangerousSulphur is null or DIM_Gases.DangerousPPMSulphur is null or DIM_Gases.DangerousAmmonia is null or DIM_Gases.DangerousPPMAmmonia is null)`),
   ])
   const gaps = {}
   const gasGapped = new Set(gasGaps.map(({ SystemBodyID }) => SystemBodyID))

@@ -47,21 +47,28 @@ const deepFreeze = (value) => {
 }
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
+// The ids the game gives the two breathing gases the fixtures use: the danger of a gas is read by the id of the species' breathing gas.
+const OXYGEN_ID = 10
+const METHANE_ID = 3
+
 // A species that lives between 258 and 318 K, breathes oxygen between 0.1 and 0.3 atm, bears up to 4 atm and gravity from 0.5 to 1.5. The climate of a fixture body is the game's: base temperature times 1 + pressure / 10 + greenhouse gas, with an albedo of 1, so each surface temperature below is worked by hand.
-const SPECIES_ROW = { IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: 2, BreatheName: 'Oxygen', PopulationDensityModifier: 1 }
+const SPECIES_ROW = { IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: OXYGEN_ID, BreatheName: 'Oxygen', PopulationDensityModifier: 1 }
+const METHANE_SPECIES_ROW = { ...SPECIES_ROW, BreatheID: METHANE_ID, BreatheName: 'Methane' }
 
-const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount, extra = {}) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, FrozenOut: 0, ...extra })
-const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, ...extra })
+const DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
+const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, extra = {}) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, FrozenOut: 0, ...extra })
+const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, ...extra })
 
-// Methane is dangerous (rating 2) above a share of 0.05 %, and warms.
-const METHANE = { Dangerous: 2, DangerousLevel: 500, GHGas: 1 }
-const GASES = { 1: gasRow('Methane', METHANE), 2: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
+// Methane is dangerous (rating 2) to an oxygen breather above a share of 0.05 % (500 ppm), and warms. Oxygen is dangerous (rating 3) to a methane breather above 0.005 % (50 ppm): the pair a gas has for each breather is the figure of the DatabaseExport/DIM_Gases.csv row.
+const METHANE = { DangerousOxygen: 2, DangerousPPMOxygen: 500, GHGas: 1 }
+const OXYGEN = { DangerousMethane: 3, DangerousPPMMethane: 50 }
+const GASES = { [METHANE_ID]: gasRow('Methane', METHANE), [OXYGEN_ID]: gasRow('Oxygen', OXYGEN), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
 const GAS_LIST = Object.entries(GASES).map(([id, row]) => ({ GasID: Number(id), Name: row.AtmosGasName, ...row }))
 const gasInfo = (id) => GASES[id]
 
-const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 275, BaseTemp: 250, Albedo: 1, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Year: 8760, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
+const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 275, BaseTemp: 250, Albedo: 1, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Year: 8760, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
 const airless = (extra = {}) => earthlike({ SurfaceTemp: 250, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
-const withMethane = [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(1, 'Methane', 0.05, 5, METHANE)]
+const withMethane = [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(METHANE_ID, 'Methane', 0.05, 5, METHANE)]
 const thick = [gas(7, 'Nitrogen', 6, 100)]
 
 // An atmosphere of nitrogen, Aestusium (warms), Frigusium (cools), methane and oxygen at the given pressures, shares worked from them.
@@ -69,7 +76,7 @@ const crowded = (nitrogen, warming, cooling, methane, oxygen) => {
   const total = nitrogen + warming + cooling + methane + oxygen
   const share = (atm) => (atm / total) * 100
 
-  return [gas(7, 'Nitrogen', nitrogen, share(nitrogen)), gas(20, 'Aestusium', warming, share(warming), { GHGas: 1 }), gas(22, 'Frigusium', cooling, share(cooling), { AntiGHGas: 1 }), gas(1, 'Methane', methane, share(methane), METHANE), gas(2, 'Oxygen', oxygen, share(oxygen))]
+  return [gas(7, 'Nitrogen', nitrogen, share(nitrogen)), gas(20, 'Aestusium', warming, share(warming), { GHGas: 1 }), gas(22, 'Frigusium', cooling, share(cooling), { AntiGHGas: 1 }), gas(METHANE_ID, 'Methane', methane, share(methane), METHANE), gas(OXYGEN_ID, 'Oxygen', oxygen, share(oxygen))]
 }
 
 // Hand-worked starts: `airless` is a cold body with no air and no water: the breathing gas (2) and the water (2) tie. `toxic` has methane at 5 % (rating 2) and 10 % water (1). `thick` holds 6 atm of nitrogen at 400 K (temperature 2.7333, pressure 2, water 2). `thin` holds 0.1 atm of nitrogen and no oxygen. `trace` holds 0.0005 atm of methane under its dangerous share.
@@ -79,11 +86,11 @@ const BODIES = {
   airlessLow: airless({ Gravity: 0.4 }),
   toxic: earthlike({ HydroExt: 10, SurfaceTemp: 287.5, Atmosphere: withMethane }),
   toxicLow: earthlike({ Gravity: 0.4, HydroExt: 10, SurfaceTemp: 287.5, Atmosphere: withMethane }),
-  frozenToxic: earthlike({ HydroExt: 10, SurfaceTemp: 287.5, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(1, 'Methane', 0.05, 5, { ...METHANE, FrozenOut: 1 })] }),
+  frozenToxic: earthlike({ HydroExt: 10, SurfaceTemp: 287.5, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(METHANE_ID, 'Methane', 0.05, 5, { ...METHANE, FrozenOut: 1 })] }),
   thick: earthlike({ HydroExt: 0, HydroID: 1, AtmosPress: 6, SurfaceTemp: 400, Atmosphere: thick }),
   thickLocked: earthlike({ HydroExt: 0, HydroID: 1, AtmosPress: 6, SurfaceTemp: 400, Atmosphere: thick, TidalLock: 1 }),
   thin: earthlike({ AtmosPress: 0.1, SurfaceTemp: 252.5, Atmosphere: [gas(7, 'Nitrogen', 0.1, 100)] }),
-  trace: earthlike({ AtmosPress: 1.0005, Atmosphere: [gas(2, 'Oxygen', 0.2, 19.99), gas(7, 'Nitrogen', 0.8, 79.99), gas(1, 'Methane', 0.0005, 0.05, { Dangerous: 2, DangerousLevel: 500 })] }),
+  trace: earthlike({ AtmosPress: 1.0005, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 19.99), gas(7, 'Nitrogen', 0.8, 79.99), gas(METHANE_ID, 'Methane', 0.0005, 0.05, { DangerousOxygen: 2, DangerousPPMOxygen: 500 })] }),
   eccentric: airless({ Eccentricity: 0.3 }),
   moon: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, ParentYear: 8760, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [] }),
   moonLocked: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, ParentYear: 8760, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [], TidalLock: 1 }),
@@ -95,7 +102,7 @@ const BODIES = {
   tooHeavy: airless({ Gravity: 2 }),
   tooLight: airless({ Gravity: 0.05 }),
   // Methane (danger 2) hides the missing breathing gas: removing it reveals the breathing penalty.
-  hidden: earthlike({ SurfaceTemp: 287.5, Atmosphere: [gas(7, 'Nitrogen', 0.95, 95), gas(1, 'Methane', 0.05, 5, METHANE)] }),
+  hidden: earthlike({ SurfaceTemp: 287.5, Atmosphere: [gas(7, 'Nitrogen', 0.95, 95), gas(METHANE_ID, 'Methane', 0.05, 5, METHANE)] }),
   // 4.05 atm that the first operations hold at the species' pressure limit and the water step lifts over it again; low gravity stands at 1 throughout.
   floorSwing: earthlike({ BaseTemp: 200, SurfaceTemp: 300, Gravity: 0.4, HydroExt: 10, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
   // The same air on an eccentric orbit at normal gravity: water condenses over 2.5 years after the last operation.
@@ -233,7 +240,7 @@ check('start', 'the first stage prices the body as the body detail does: the sam
 check('dampening', 'every planned stage recomputes the stored climate from its own pressure and ocean, the stage cost uses the dampened lunar extreme, and the plan reads its target body\'s swing', async (w) => {
   const { habitability, terraforming } = await w.modules()
   const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
-  const body = earthlike({ Eccentricity: 0.6, AtmosPress: 5, HydroExt: 100, BaseTemp: 187, SurfaceTemp: 280.5, StarLuminosity: (187 / 255) ** 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 4), gas(7, 'Nitrogen', 4.8, 96)] })
+  const body = earthlike({ Eccentricity: 0.6, AtmosPress: 5, HydroExt: 100, BaseTemp: 187, SurfaceTemp: 280.5, StarLuminosity: (187 / 255) ** 4, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 4), gas(7, 'Nitrogen', 4.8, 96)] })
 
   // With f = 0.8 the orbit stays between 268.75 and 313.10 K; without it the hot end exceeds 443 K.
   assert.equal(terraforming.assessTerraforming(body, species, 1, gasInfo).outcome, 'done')
@@ -269,7 +276,7 @@ check('dampening', 'every planned stage recomputes the stored climate from its o
 check('position', 'the liveability verdict reads the dampened swing at the semi-major axis, not where the body is now', async (w) => {
   const { habitability, terraforming } = await w.modules()
   const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
-  const orbit = { Eccentricity: 0.6, AtmosPress: 5, HydroExt: 100, StarLuminosity: (187 / 255) ** 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 4), gas(7, 'Nitrogen', 4.8, 96)] }
+  const orbit = { Eccentricity: 0.6, AtmosPress: 5, HydroExt: 100, StarLuminosity: (187 / 255) ** 4, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 4), gas(7, 'Nitrogen', 4.8, 96)] }
   const readings = [0.4, 1, 1.6].map((present) => {
     const climate = earthlike({ ...orbit, BaseTemp: 187 / Math.sqrt(present), DistanceToParent: present })
     const body = { ...climate, SurfaceTemp: habitability.surfaceTemperature(climate, 1.5, 1) }
@@ -290,7 +297,7 @@ check('position', 'the liveability verdict reads the dampened swing at the semi-
 check('phase', 'the liveability verdict reads the phase-aware extremes the colony cost prices, an ice-albedo step included', async (w) => {
   const { habitability, terraforming } = await w.modules()
   const species = habitability.speciesLimits({ ...SPECIES_ROW, IdealTemperature: 310, TemperatureDeviation: 75 })
-  const body = earthlike({ BaseTemp: 255, SurfaceTemp: 280.5, Albedo: 1, StarLuminosity: 1, Eccentricity: 0.5, OrbitalDistance: 1, Year: 8760, HydroExt: 50, HydroID: 3, AtmosPress: 1, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)] })
+  const body = earthlike({ BaseTemp: 255, SurfaceTemp: 280.5, Albedo: 1, StarLuminosity: 1, Eccentricity: 0.5, OrbitalDistance: 1, Year: 8760, HydroExt: 50, HydroID: 3, AtmosPress: 1, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)] })
   const { distance, eccentricity } = habitability.orbitOf(body)
   const periapsis = habitability.temperatureAtDistance(body, distance * (1 - eccentricity))
   const apoapsis = habitability.temperatureAtDistance(body, distance * (1 + eccentricity))
@@ -353,7 +360,7 @@ check('targetSearch', 'the atmosphere search re-aims within the species range to
 check('targetSearchNonMonotone', 'the bounded search selects a full priced target across a non-monotone atmosphere and ice-albedo response', async (w) => {
   const { habitability, terraforming, limits } = await w.modules()
   const species = habitability.speciesLimits({ ...SPECIES_ROW, IdealTemperature: 235, TemperatureDeviation: 30, MaximumPressure: 10 })
-  const body = earthlike({ BaseTemp: 300, SurfaceTemp: 294, Albedo: 0.7, StarLuminosity: (300 / 255) ** 4, Eccentricity: 0.1, DistanceToParent: 1, Year: 2000, HydroExt: 70, HydroID: 3, AtmosPress: 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] })
+  const body = earthlike({ BaseTemp: 300, SurfaceTemp: 294, Albedo: 0.7, StarLuminosity: (300 / 255) ** 4, Eccentricity: 0.1, DistanceToParent: 1, Year: 2000, HydroExt: 70, HydroID: 3, AtmosPress: 4, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] })
   const plan = terraforming.planTerraforming(body, species, gasInfo)
 
   assert.ok(plan && !plan.partial, 'the public planner finds a full plan without changing the 205–265 K bounds')
@@ -942,16 +949,70 @@ check('wiring', 'the page hosting the body detail binds every prop the component
   assert.equal(delivered, marker, 'the page hands the body detail its loaded gases')
 })
 
+check('breathers', 'a gas dangerous to the species\' breathing gas is removed as toxic and priced by the pair of that breathing gas: methane for an oxygen breather, oxygen for a methane breather', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const air = earthlike({ HydroExt: 10, SurfaceTemp: 287.5, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20, OXYGEN), gas(7, 'Nitrogen', 0.75, 75), gas(METHANE_ID, 'Methane', 0.05, 5, METHANE)] })
+  const oxygenBreather = habitability.speciesLimits(SPECIES_ROW)
+  const methaneBreather = habitability.speciesLimits(METHANE_SPECIES_ROW)
+  const toxic = (species) => {
+    const { plan } = terraforming.assessTerraforming(air, species, 1, gasInfo)
+
+    return plan ? plan.steps.filter(({ key }) => key === 'toxic').map(({ gasId }) => gasId) : null
+  }
+  const danger = (species) => habitability.colonyCost(air, species, 1).factors.danger
+
+  assert.deepEqual(toxic(oxygenBreather), [METHANE_ID], 'the plan for an oxygen breather removes the methane')
+  assert.deepEqual(toxic(methaneBreather), [OXYGEN_ID], 'the plan for a methane breather removes the oxygen')
+  assert.equal(danger(oxygenBreather), 2, 'methane rates 2 for an oxygen breather')
+  assert.equal(danger(methaneBreather), 3, 'oxygen rates 3 for a methane breather')
+})
+
+// Terra's r1 finding: the rows a planned atmosphere is priced on carry each gas's share of the air, as the game stores it (its pressure over the total, in percent), not its pressure.
+check('plannedShares', 'a planned atmosphere carries each gas\'s share of the whole air, and the priced breathing and danger verdicts read that share', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits(SPECIES_ROW)
+  const body = airless()
+  // The plan's end state by role: the gases it leaves, as a plan of `planTerraforming` states them.
+  const planOf = (breathable, neutral, neutralSide = []) => ({
+    target: { breathable, water: 0, greenhouse: 0, sideGreenhouse: 0, antiGreenhouse: 0, sideAnti: 0, neutral, sideNeutral: 0, pressure: breathable + neutral + neutralSide.reduce((sum, row) => sum + row.GasAtm, 0), hydroExt: 0, hydrosphere: habitability.HYDROSPHERE.NONE, albedo: 1, temperature: 288 },
+    gases: { greenhouse: { id: 20, name: 'Aestusium' }, anti: { id: 22, name: 'Frigusium' }, neutral: { id: 7, name: 'Nitrogen' }, greenhouseSide: [], antiSide: [], neutralSide, breathable: undefined, waterVapour: undefined },
+  })
+  const targetOf = (plan) => terraforming.terraformedBody(body, species, plan, gasInfo)
+  const rowOf = (target, id) => target.Atmosphere.find((row) => row.AtmosGasID === id)
+  const sharesOf = (target) => Object.fromEntries(target.Atmosphere.map((row) => [row.AtmosGasID, row.AtmosGasPercentage]))
+
+  const breathable = targetOf(planOf(0.2, 0.8))
+
+  assert.deepEqual(sharesOf(breathable), { [OXYGEN_ID]: 20, 7: 80 }, '0.2 atm of oxygen and 0.8 atm of nitrogen are shares of 20 % and 80 %')
+  assert.equal(habitability.colonyCost(breathable, species, 1, true).factors.breathable, 0, '20 % of the air is a share the breathing gas may hold')
+
+  // The same 0.2 atm of oxygen in less air is 40 % of it: the priced breathing penalty follows the share, not the pressure.
+  const concentrated = targetOf(planOf(0.2, 0.3))
+
+  assert.deepEqual(sharesOf(concentrated), { [OXYGEN_ID]: 40, 7: 60 }, 'the same oxygen pressure in less air is a larger share')
+  assert.equal(rowOf(concentrated, OXYGEN_ID).GasAtm, 0.2, 'the oxygen pressure itself is unchanged')
+  assert.equal(habitability.colonyCost(concentrated, species, 1, true).factors.breathable, habitability.BREATHING_PENALTY, '40 % of the air is too much of it')
+
+  // Methane at a pressure under the 500 ppm limit is 5 % of this air: the danger verdict follows the share too.
+  const tainted = targetOf(planOf(0.2, 0.75, [gas(METHANE_ID, 'Methane', 0.05, 5, METHANE)]))
+
+  assert.equal(rowOf(tainted, METHANE_ID).GasAtm, 0.05, 'the methane pressure is under the 500 ppm limit')
+  assert.equal(habitability.colonyCost(tainted, species, 1, true).factors.danger, 2, '5 % methane is over the danger limit for an oxygen breather')
+})
+
 // ---- The planted faults ----------------------------------------------------------------------------------------------
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const FAULTS = [
+  ['a methane breather is rated by the oxygen pair', 'habitability', 'const { dangerous, ppm } = gasDanger(gas, species.BreatheID)', 'const { dangerous, ppm } = gasDanger(gas)', ['breathers']],
+  ['the plan sorts the toxic gases by the oxygen pair', 'terraforming', '} else if (gasDanger(gas, species.BreatheID).dangerous) {', '} else if (gasDanger(gas).dangerous) {', ['breathers']],
   ['a tie is cut to its first factor', 'habitability', 'filter((_factor, index) => rounded[index] === top)', 'filter((_factor, index) => rounded[index] === top).slice(0, 1)', ['ties', 'bars']],
   ['a tie is judged without the game\'s rounding', 'habitability', 'const rounded = FACTORS.map((factor) => round4(factors[factor.key]))', 'const rounded = FACTORS.map((factor) => factors[factor.key])', ['ties']],
   ['the cost at periapsis is read at apoapsis', 'habitability', 'distance * (1 - eccentricity)', 'distance * (1 + eccentricity)', ['start']],
   ['gravity is treated as a factor a gas operation can remove', 'limits', 'const FIXED_FACTORS = new Set([\'gravity\'])', 'const FIXED_FACTORS = new Set([])', ['fixed', 'ties']],
   ['every stage carries every operation', 'limits', 'plan.steps.slice(0, applied)', 'plan.steps', ['operations']],
   ['the next limits are cut to the first factor', 'limits', 'merged(others.filter((factor) => round4(factor.value) === top))', 'merged(others.filter((factor) => round4(factor.value) === top).slice(0, 1))', ['ties', 'stages', 'component']],
-  ['the gas shares are not recomputed after an operation', 'limits', 'AtmosGasAmount: total > 0 ? Math.round((gas.GasAtm / total) * 100 * SHARE_DECIMALS) / SHARE_DECIMALS : 0', 'AtmosGasAmount: gas.AtmosGasAmount', ['operations']],
+  ['the gas shares are not recomputed after an operation', 'habitability', 'AtmosGasPercentage: total > 0 ? Math.round((gas.GasAtm / total) * 100 * SHARE_DECIMALS) / SHARE_DECIMALS : 0', 'AtmosGasPercentage: gas.AtmosGasPercentage', ['operations']],
+  ['a planned gas row carries its pressure as its share', 'terraforming', 'const rows = withAtmosphereShares(atmosphere)', 'const rows = atmosphere.map((gas) => ({ ...gas, AtmosGasPercentage: gas.GasAtm }))', ['plannedShares']],
   ['the settling stage is never made', 'limits', 'const settles = plan.settling.process !== \'Stable\' && plan.settling.years > 0', 'const settles = false', ['operations', 'settle']],
   ['the first stage is priced as a planned body', 'limits', 'planned: false, previous: null', 'planned: true, previous: null', ['start']],
   ['the limit is read at now only', 'limits', 'distinct.filter((name) => costs[name] === raw)', 'distinct.filter((name) => name === \'current\')', ['stages', 'operations']],

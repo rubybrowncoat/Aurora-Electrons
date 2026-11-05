@@ -2,7 +2,7 @@
 //
 // The plan itself is the page's long-standing heuristic (a target atmosphere found by iterating the greenhouse balance). It first aims at the species' ideal temperature, then searches the species' range for a mean whose complete, phase-aware orbital swing fits. It is checked against the game's formulas, not against a played-out terraform.
 
-import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, hydrosphereAtTemperature, infrastructurePerMillion, surfaceTemperature, temperaturePoints } from './habitability'
+import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, dangerColumnsOf, gasDanger, hydrosphereAtTemperature, infrastructurePerMillion, surfaceTemperature, temperaturePoints, withAtmosphereShares } from './habitability'
 
 export const EARTH_SURFACE_AREA = 511187128
 // Water vapour condenses at this many atm a year and evaporates at this many; a hydro extent of 1 % is 1/40 atm of vapour.
@@ -56,7 +56,7 @@ const summariseAtmosphere = (body, species) => {
     if (gas.AtmosGasID === species.BreatheID) {
       summary.breathable += pressure
       summary.breathableGas = gas
-    } else if (gas.Dangerous) {
+    } else if (gasDanger(gas, species.BreatheID).dangerous) {
       summary.toxic += pressure
       summary.toxics.push(gas)
     } else if (gas.AtmosGasID === GAS.WATER_VAPOUR) {
@@ -454,9 +454,9 @@ const planAdditions = (species, plan) => {
 
 const addedGas = (id, amount) => Number.isFinite(amount) && amount > 0 && id
 
-const GAS_FIELDS = ['BoilingPoint', 'GHGas', 'AntiGHGas', 'Dangerous', 'DangerousLevel']
+const GAS_FIELDS = ['BoilingPoint', 'GHGas', 'AntiGHGas']
 
-// The DIM_Gases rows (`gasInfo(id)`) a plan needs to price its end state that the save lacks, or holds no figure of, by name: only gases the plan adds (an amount above 0) that the body has no row of itself.
+// The DIM_Gases rows (`gasInfo(id)`) a plan needs to price its end state that the save lacks, or holds no figure of, by name: only gases the plan adds (an amount above 0) that the body has no row of itself. The danger it needs is the pair of the species' breathing gas.
 export const planGasGaps = (species, plan, gasInfo) => {
   const ids = planAdditions(species, plan).filter(([id, amount, existing]) => {
     if (!addedGas(id, amount) || existing) {
@@ -465,7 +465,7 @@ export const planGasGaps = (species, plan, gasInfo) => {
 
     const info = gasInfo(id)
 
-    return !info || !GAS_FIELDS.every((field) => Number.isFinite(info[field]))
+    return !info || !GAS_FIELDS.every((field) => Number.isFinite(info[field])) || !Object.values(gasDanger(info, species.BreatheID)).every(Number.isFinite)
   }).map(([id]) => id)
 
   return [...new Set(ids)].map((id) => `the properties of gas ${id}`)
@@ -483,20 +483,21 @@ export const terraformedBody = (body, species, plan, gasInfo) => {
 
     const info = existing || gasInfo(id) || {}
 
-    atmosphere.push({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, AtmosGasAmount: amount, BoilingPoint: info.BoilingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, Dangerous: info.Dangerous || 0, DangerousLevel: info.DangerousLevel || 0, FrozenOut: false })
+    atmosphere.push({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, BoilingPoint: info.BoilingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, ...dangerColumnsOf(info), FrozenOut: false })
   })
 
+  const rows = withAtmosphereShares(atmosphere)
   let greenhouse = 0
   let anti = 0
 
-  atmosphere.forEach((gas) => {
+  rows.forEach((gas) => {
     greenhouse += gas.GHGas ? gas.GasAtm : 0
     anti += !gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0
   })
 
   const surface = surfaceTemperature({ ...body, AtmosPress: target.pressure, HydroExt: target.hydroExt }, Math.min(3, 1 + target.pressure / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti), target.albedo)
 
-  return { ...body, SurfaceTemp: surface, Albedo: target.albedo, AtmosPress: target.pressure, HydroExt: target.hydroExt, HydroID: target.hydrosphere, Atmosphere: atmosphere }
+  return { ...body, SurfaceTemp: surface, Albedo: target.albedo, AtmosPress: target.pressure, HydroExt: target.hydroExt, HydroID: target.hydrosphere, Atmosphere: rows }
 }
 
 // Whether the body suits the species as it is: gravity, the temperature at each point the colony cost prices, the breathing gas, the pressure and no toxic gas. The temperatures are `temperaturePoints`, the same phase-aware prediction the stage costs read, so an ice-albedo or gas-phase change at an extreme counts against liveability.

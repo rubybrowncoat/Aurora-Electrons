@@ -65,6 +65,73 @@ check('inputs', 'eccentric wet bodies require an orbital year, and moons require
   assert.ok(!h.missingBodyInputs(bodyOf({ AtmosPress: 0, HydroExt: 0, Year: undefined })).includes('body orbital year'))
 })
 
+// The gases of DIM_Gases the checks below price, each with its four breathers' danger pairs as the 3.1 export holds them (DatabaseExport/DIM_Gases.csv): a gas is dangerous to a breather by the rating of the pair of the breathing gas, above the parts per million of the atmosphere the pair gives.
+const gasOf = (AtmosGasID, AtmosGasPercentage, GasAtm, danger) => ({ AtmosGasID, AtmosGasPercentage, GasAtm, FrozenOut: 0, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, DangerousOxygen: danger[0], DangerousPPMOxygen: danger[1], DangerousMethane: danger[2], DangerousPPMMethane: danger[3], DangerousSulphur: danger[4], DangerousPPMSulphur: danger[5], DangerousAmmonia: danger[6], DangerousPPMAmmonia: danger[7] })
+const METHANE = (share) => gasOf(3, share, share / 100, [2, 500, 0, 0, 0, 0, 2, 10000])
+const AMMONIA = (share) => gasOf(4, share, share / 100, [2, 50, 2, 500, 2, 1000, 0, 0])
+const NITROGEN = (share) => gasOf(7, share, share / 100, [0, 0, 0, 0, 0, 0, 0, 0])
+const OXYGEN = (share) => gasOf(10, share, share / 100, [0, 0, 3, 50, 2, 2000, 3, 200])
+const SULPHUR_DIOXIDE = (share) => gasOf(15, share, share / 100, [2, 5, 2, 200, 0, 0, 2, 200])
+const BREATHERS = { oxygen: 10, methane: 3, ammonia: 4, sulphur: 15 }
+const breatherOf = (h, BreatheID) => h.speciesLimits({ IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID, PopulationDensityModifier: 1 })
+const airOf = (Atmosphere) => ({ BodyClass: 1, TidalLock: 0, AtmosPress: 1, HydroExt: 50, Gravity: 1, Atmosphere })
+
+check('accessor', 'the danger of a gas is the pair of the breathing gas: oxygen without a species, none for a gas the game has no pair for', (h) => {
+  const read = (gas, breathing) => {
+    const { dangerous, ppm } = h.gasDanger(gas, breathing)
+
+    return [dangerous, ppm]
+  }
+
+  assert.deepEqual(read(METHANE(1)), [2, 500], 'no breathing gas reads the oxygen pair')
+  assert.deepEqual(read(OXYGEN(1), BREATHERS.oxygen), [0, 0], 'oxygen is no danger to an oxygen breather')
+  assert.deepEqual(read(OXYGEN(1), BREATHERS.methane), [3, 50], 'the methane pair')
+  assert.deepEqual(read(OXYGEN(1), BREATHERS.sulphur), [2, 2000], 'the sulphur dioxide pair')
+  assert.deepEqual(read(OXYGEN(1), BREATHERS.ammonia), [3, 200], 'the ammonia pair')
+  assert.deepEqual(read(OXYGEN(1), 7), [0, 0], 'a breathing gas the game has no pair for reads as no danger')
+})
+
+check('danger', 'the worst dangerous gas and its rating are those of the species\' breathing gas, never the oxygen pair', (h) => {
+  const air = airOf([OXYGEN(10), METHANE(10), AMMONIA(10), SULPHUR_DIOXIDE(10), NITROGEN(60)])
+  // The gas and the rating each breather meets: the first gas of the highest rating among those other than its own breathing gas.
+  const expected = { oxygen: [3, 2], methane: [10, 3], ammonia: [10, 3], sulphur: [10, 2] }
+
+  Object.entries(BREATHERS).forEach(([name, id]) => {
+    const { dangerousGas, factors } = h.costFactors(air, breatherOf(h, id), 288)
+
+    assert.deepEqual([dangerousGas ? dangerousGas.AtmosGasID : null, factors.danger], expected[name], `${name} breather: the worst gas and its rating`)
+  })
+})
+
+check('limit', 'a gas is dangerous above the parts per million of the breather\'s pair, counted on its share of the atmosphere', (h) => {
+  const worst = (breathing, atmosphere) => {
+    const { dangerousGas } = h.costFactors(airOf(atmosphere), breatherOf(h, breathing), 288)
+
+    return dangerousGas ? dangerousGas.AtmosGasID : null
+  }
+
+  // Methane is dangerous to an oxygen breather above 500 ppm (0.05 % of the atmosphere), oxygen to a methane breather above 50 ppm (0.005 %); the pressure of the gas plays no part.
+  assert.equal(worst(BREATHERS.oxygen, [METHANE(0.049), NITROGEN(99.9)]), null, 'methane under its limit')
+  assert.equal(worst(BREATHERS.oxygen, [METHANE(0.051), NITROGEN(99.9)]), 3, 'methane over its limit')
+  assert.equal(worst(BREATHERS.methane, [OXYGEN(0.0049), NITROGEN(99.9)]), null, 'oxygen under its limit')
+  assert.equal(worst(BREATHERS.methane, [OXYGEN(0.0051), NITROGEN(99.9)]), 10, 'oxygen over its limit')
+})
+
+check('share', 'the breathing gas fails above 30 % of the air by its share of the atmosphere, not by its pressure', (h) => {
+  const species = breatherOf(h, BREATHERS.oxygen)
+
+  assert.equal(h.breathingFails(airOf([{ ...OXYGEN(35), GasAtm: 0.25 }, NITROGEN(65)]), species), true, 'a share over 30 % at a pressure inside the range')
+  assert.equal(h.breathingFails(airOf([{ ...OXYGEN(25), GasAtm: 0.25 }, NITROGEN(75)]), species), false, 'a share under 30 % at the same pressure')
+})
+
+check('gas inputs', 'a gas row without its share or the danger pair of any breather leaves the body unpriced, naming the figure', (h) => {
+  const missing = (gas) => h.missingBodyInputs(bodyOf({ Atmosphere: [gas] })).filter((name) => name.startsWith('atmosphere'))
+  const figures = [['AtmosGasPercentage', 'gas share'], ['DangerousOxygen', 'danger to oxygen breathers'], ['DangerousPPMOxygen', 'danger level for oxygen breathers'], ['DangerousMethane', 'danger to methane breathers'], ['DangerousPPMMethane', 'danger level for methane breathers'], ['DangerousSulphur', 'danger to sulphur dioxide breathers'], ['DangerousPPMSulphur', 'danger level for sulphur dioxide breathers'], ['DangerousAmmonia', 'danger to ammonia breathers'], ['DangerousPPMAmmonia', 'danger level for ammonia breathers']]
+
+  assert.deepEqual(missing(OXYGEN(20)), [], 'a whole row lacks nothing')
+  figures.forEach(([column, name]) => assert.deepEqual(missing({ ...OXYGEN(20), [column]: null }), [`atmosphere ${name}`], column))
+})
+
 // The oracle's own arithmetic: a finite comparison is a match, and a missing input that leaves the prediction non-finite is a
 // failed comparison, never a match. The mutant below makes a planet read its missing parent distance, so this check goes red.
 check('oracle', 'the oracle counts only a finite prediction and a finite delta as a match', (h) => {
@@ -93,6 +160,14 @@ const faults = [
   { name: 'stored temperature floored at 1 K', from: 'Math.max(4, dampenedTemperature(body, body.BaseTemp * greenhouse * albedo / antiGreenhouse, greenhouse, antiGreenhouse, albedo))', to: 'Math.max(1, dampenedTemperature(body, body.BaseTemp * greenhouse * albedo / antiGreenhouse, greenhouse, antiGreenhouse, albedo))', fails: ['floors'] },
   { name: 'planet year treated as optional', from: "lacking(body, [['Year', 'orbital year']], 'body')", to: 'NOTHING', fails: ['inputs'] },
   { name: 'a planet reads its missing parent distance', from: 'equilibriumTemperature(body.BodyClass === BODY_CLASS.MOON && body.ParentDistanceToParent > 0 ? body.ParentDistanceToParent : body.DistanceToParent, body.StarLuminosity)', to: 'equilibriumTemperature(body.ParentDistanceToParent, body.StarLuminosity)', fails: ['oracle'] },
+  { name: 'a non-oxygen breather reads the oxygen pair', from: 'const pair = BREATHER_DANGER[breathingGas]', to: 'const pair = BREATHER_DANGER[GAS.OXYGEN]', fails: ['accessor', 'danger', 'limit'] },
+  { name: 'no breathing gas reads the methane pair', from: 'export const gasDanger = (gas, breathingGas = GAS.OXYGEN) => {', to: 'export const gasDanger = (gas, breathingGas = GAS.METHANE) => {', fails: ['accessor'] },
+  { name: 'the worst gas is chosen by the oxygen pair', from: 'const { dangerous, ppm } = gasDanger(gas, species.BreatheID)', to: 'const { dangerous, ppm } = gasDanger(gas)', fails: ['danger', 'limit'] },
+  { name: 'the danger cost reads the oxygen pair of the worst gas', from: 'const dangerCost = gas ? gasDanger(gas, species.BreatheID).dangerous : 0', to: 'const dangerCost = gas ? gasDanger(gas).dangerous : 0', fails: ['danger'] },
+  { name: 'the danger limit is read on the pressure of the gas', from: 'gas.AtmosGasPercentage > ppm / 10000', to: 'gas.GasAtm > ppm / 10000', fails: ['limit'] },
+  { name: 'the breathing share is read on the pressure of the gas', from: 'total + candidate.AtmosGasPercentage, 0)', to: 'total + candidate.GasAtm, 0)', fails: ['share'] },
+  { name: 'the danger pairs are not required of a gas', from: ', ...DANGER_INPUTS]', to: ']', fails: ['gas inputs'] },
+  { name: 'the share of a gas is not required', from: '[\'AtmosGasPercentage\', \'gas share\'], ', to: '', fails: ['gas inputs'] },
 ]
 
 // A finite number, so that a missing figure never reads as agreement: a non-finite stored or predicted temperature, or a
@@ -179,19 +254,21 @@ const main = async () => {
   }
 
   const modules = await loadUtilities(['colonization-data'], { stubs: { 'lodash/groupBy': GROUP_BY } })
-  // The existing loader still names columns awaiting AE-308-02/AE-308-03 on 3.1. This legacy-schema fixture checks that the new year inputs reach the rule; it is not a temperature oracle.
-  const fixture = path.join(root, 'saves/AuroraDB.db')
+  // The planner's loader on the migrated 3.1 save: the year inputs reach the rule and every gas row of an atmosphere carries the figures the rule reads (the share and the danger pairs in their 3.1 columns). It is not a temperature oracle.
+  const fixture = path.join(root, 'saves/AuroraDB-310-spookyerol-migrated.db')
 
   if (fs.existsSync(fixture)) {
     total += 1
     const database = new Database(fixture, { readonly: true })
 
     try {
-      const bodies = await modules['colonization-data'].loadBodies({ query: async (sql) => [database.query(sql).all()] }, { GameID: 138, RaceID: 785 })
+      const bodies = await modules['colonization-data'].loadBodies({ query: async (sql) => [database.query(sql).all()] }, { GameID: 141, RaceID: 784 })
+      const atmospheres = bodies.flatMap((body) => body.Atmosphere)
 
       assert.ok(bodies.length > 0 && bodies.every((body) => Number.isFinite(body.Year)), 'the planner loads every body year')
       assert.ok(bodies.some((body) => body.BodyClass === 2) && bodies.filter((body) => body.BodyClass === 2).every((body) => Number.isFinite(body.ParentYear)), 'the planner loads every moon parent year')
-      console.log(`LOADER ${bodies.length} bodies carry orbital years`)
+      assert.ok(atmospheres.length > 0 && bodies.every((body) => h.missingBodyInputs(body).every((name) => !name.startsWith('atmosphere'))), 'every gas row of an atmosphere carries its share and the danger pairs of the four breathers')
+      console.log(`LOADER ${bodies.length} bodies carry orbital years and ${atmospheres.length} gas rows carry their 3.1 gas columns`)
       passed += 1
     } finally {
       database.close()

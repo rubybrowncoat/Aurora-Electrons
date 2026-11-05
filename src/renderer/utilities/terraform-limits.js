@@ -4,7 +4,7 @@
 //
 // The first stage is the body as saved, priced by the same function as the body detail's factor bars. Every later stage is the plan carried one more gas operation, in the plan's order, each taken in full, on the water extent as saved. The plan's own end state (`terraformedBody`, the atmosphere and water the body detail prices after terraforming) is the stage that settles the surface when the water condenses or evaporates over years after the water step, else the stage of the last operation, so the plan's end agrees with the cost the Planner shows after terraforming.
 
-import { BODY_CLASS, BREATHING_PENALTY, FACTORS, breathingFails, costPoints, limitingFactors, surfaceTemperature } from './habitability'
+import { BODY_CLASS, BREATHING_PENALTY, FACTORS, breathingFails, costPoints, dangerColumnsOf, limitingFactors, surfaceTemperature, withAtmosphereShares } from './habitability'
 import { albedoForHydrosphere, hydrosphereState, terraformedBody } from './terraforming'
 import { ofRule, registerRule } from './provenance'
 
@@ -12,8 +12,6 @@ const POINTS = ['current', 'periapsis', 'apoapsis']
 
 // The factors no gas operation changes: the body's gravity against the species' range.
 const FIXED_FACTORS = new Set(['gravity'])
-
-const SHARE_DECIMALS = 1e9
 
 export const STAGE_ASSUMPTIONS = Object.freeze([
   'each gas operation is carried out in full, in the plan\'s order, before the next one',
@@ -33,14 +31,7 @@ registerRule({
   assumptions: STAGE_ASSUMPTIONS,
 })
 
-const gasRow = (id, amount, info) => ({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, AtmosGasAmount: amount, BoilingPoint: info.BoilingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, Dangerous: info.Dangerous || 0, DangerousLevel: info.DangerousLevel || 0, FrozenOut: false })
-
-// The share of each gas in the atmosphere, as the atmosphere refresh of the game computes it from the pressures.
-const withShares = (rows) => {
-  const total = rows.reduce((sum, gas) => sum + gas.GasAtm, 0)
-
-  return rows.map((gas) => ({ ...gas, AtmosGasAmount: total > 0 ? Math.round((gas.GasAtm / total) * 100 * SHARE_DECIMALS) / SHARE_DECIMALS : 0 }))
-}
+const gasRow = (id, amount, info) => ({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, BoilingPoint: info.BoilingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, ...dangerColumnsOf(info), FrozenOut: false })
 
 // The body once the first `applied` steps of the plan are done: each step sets its gas to the figure the plan types into the game (`set`), a gas set to nothing leaves. The climate is the plan's: the greenhouse and anti-greenhouse gases and the pressure set the temperature, the temperature sets the water phase, and a change of phase moves the albedo.
 const bodyAfter = (body, plan, gasInfo, applied) => {
@@ -56,7 +47,7 @@ const bodyAfter = (body, plan, gasInfo, applied) => {
     }
   })
 
-  const rows = withShares([...atmosphere.values()])
+  const rows = withAtmosphereShares([...atmosphere.values()])
   const pressure = rows.reduce((sum, gas) => sum + gas.GasAtm, 0)
   const greenhouse = rows.reduce((sum, gas) => sum + (gas.GHGas ? gas.GasAtm : 0), 0)
   const anti = rows.reduce((sum, gas) => sum + (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0), 0)

@@ -461,19 +461,20 @@ const defineCases = (modules) => {
   })
 
   // ---- Terraforming boundaries ---------------------------------------------------------------------------------
-  const species = habitability.speciesLimits({ IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: 2, BreatheName: 'Oxygen', PopulationDensityModifier: 1 })
-  const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, FrozenOut: 0 })
-  const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 288, BaseTemp: 255, Albedo: 0.3, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
+  const species = habitability.speciesLimits({ IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: 10, BreatheName: 'Oxygen', PopulationDensityModifier: 1 })
+  const DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
+  const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, FrozenOut: 0 })
+  const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 288, BaseTemp: 255, Albedo: 0.3, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(10, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
   const airless = (extra = {}) => earthlike({ SurfaceTemp: 255, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
   // The DIM_Gases rows the plan needs: Aestusium warms, Frigusium cools, the rest are neutral. Every row holds all the figures a plan prices a gas with; a row without them makes the plan unknown (see the cases below).
-  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, ...extra })
-  const GASES = { 2: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
+  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, ...extra })
+  const GASES = { 10: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
   const assess = (body) => terraforming.assessTerraforming(deepFreeze(body), species, 1, (id) => GASES[id])
   const BOUNDARY_BODIES = {
     'an airless body': airless(),
     'a body with a zero-pressure atmosphere entry': airless({ Atmosphere: [gas(7, 'Nitrogen', 0, 0)] }),
-    'a body at the species\' maximum pressure': earthlike({ AtmosPress: 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] }),
-    'a body just over the species\' maximum pressure': earthlike({ AtmosPress: 4.001, Atmosphere: [gas(2, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.801, 95)] }),
+    'a body at the species\' maximum pressure': earthlike({ AtmosPress: 4, Atmosphere: [gas(10, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] }),
+    'a body just over the species\' maximum pressure': earthlike({ AtmosPress: 4.001, Atmosphere: [gas(10, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.801, 95)] }),
     'a body with a very thin atmosphere': airless({ AtmosPress: 0.01, Atmosphere: [gas(7, 'Nitrogen', 0.01, 100)] }),
     'a liveable body that is too warm for a plan to help': earthlike({ SurfaceTemp: 400 }),
     'a body at the minimum gravity terraforming can hold an atmosphere at': airless({ Gravity: 0.1 }),
@@ -570,6 +571,13 @@ const defineCases = (modules) => {
     const assessment = assessWith(airless(), (id) => (id === 20 ? { AtmosGasName: 'Aestusium', GHGas: 1 } : GASES[id]))
 
     assert.deepEqual(assessment.missing, ['the properties of gas 20'])
+  })
+
+  invariant('terraforming', 'a plan needs the danger pair of the species\' breathing gas for a gas it adds, and no other breather\'s', () => {
+    const dropped = (column) => (id) => (id === 20 ? { ...GASES[20], [column]: undefined } : GASES[id])
+
+    assert.deepEqual(assessWith(airless(), dropped('DangerousPPMOxygen')).missing, ['the properties of gas 20'], 'the pair of an oxygen breather')
+    assert.equal(assessWith(airless(), dropped('DangerousPPMMethane')).missing, undefined, 'the pair of a methane breather is not asked of an oxygen breather')
   })
 
   invariant('terraforming', 'a plan the full table rejects as making things worse is unknown, not worse, when it adds a gas the table lacks', () => {

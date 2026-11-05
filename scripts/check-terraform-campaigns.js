@@ -53,6 +53,19 @@ const firstOf = async (file, sql, ...parameters) => (await rowsOf(file, sql, ...
 const databaseOf = (file) => ({ query: async (sql) => [await rowsOf(file, sql)] })
 const present = (...files) => files.every((file) => fs.existsSync(path.join(root, file)))
 
+// The saves hold their gas figures under the names the loaders of the planner read (the share of a gas as AtmosGasPercentage), as the saves of the line do and the campaign saves recorded before it do not.
+const lineGases = async (...files) => {
+  for (const file of files) {
+    if (!present(file) || (await firstOf(file, "select count(*) n from pragma_table_info('FCT_AtmosphericGas') where name = 'AtmosGasPercentage'")).n !== 1) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const BEFORE_LINE = 'the saves hold their gas figures under the names used before the line, which the loaders of the planner do not read'
+
 const clockOf = (file, game) => firstOf(file, 'select GameTime, LastGrowthTime, TerraformingSpeed from FCT_Game where GameID = ?', game)
 
 // The capacity of one colony in atmospheres of earth equivalent a year, as the game spends it: undamaged modules on the ships assigned to the colony (racial rate, captain bonus, crew share), the installations, and the colony's modifiers.
@@ -680,7 +693,7 @@ const planOf = async (modules, file, game, race, populationId) => {
   const population = await firstOf(file, 'select SystemBodyID, SpeciesID from FCT_Population where GameID = ? and PopulationID = ?', game, populationId)
   const limits = habitability.speciesLimits(species.find((row) => row.SpeciesID === population.SpeciesID))
   const body = bodies.find((row) => row.SystemBodyID === population.SystemBodyID)
-  const gases = Object.fromEntries((await rowsOf(file, 'select GasID, Name, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel from DIM_Gases')).map((row) => [row.GasID, { AtmosGasID: row.GasID, AtmosGasName: row.Name, Name: row.Name, BoilingPoint: row.BoilingPoint, GHGas: row.GHGas, AntiGHGas: row.AntiGHGas, Dangerous: row.Dangerous, DangerousLevel: row.DangerousLevel }]))
+  const gases = Object.fromEntries((await modules['colonization-data'].loadGases(database)).map((row) => [row.GasID, { AtmosGasID: row.GasID, AtmosGasName: row.Name, ...row }]))
   const skill = (Array.isArray(rules) ? rules[0] : rules).ColonizationSkill
   const assessment = terraforming.assessTerraforming(body, limits, skill, (id) => gases[id])
 
@@ -706,9 +719,12 @@ const main = async () => {
     }
   }
 
-  const skip = (group, files) => {
+  const skip = (group, files, reason = '') => {
     skipped += 1
-    console.log(`SKIP ${group}: missing ${files.filter((file) => !present(file)).join(', ')}`)
+
+    const missing = files.filter((file) => !present(file))
+
+    console.log(`SKIP ${group}: ${missing.length ? `missing ${missing.join(', ')}` : reason}`)
   }
 
   const modules = await loadUtilities(['habitability', 'terraforming', 'colonization-data', 'colonization', 'terraform-capacity', 'naval-admins', 'minerals'], { stubs: { 'lodash/groupBy': GROUP_BY } })
@@ -792,8 +808,8 @@ const main = async () => {
   }
 
   for (const [label, file, game, race, within, outside] of (mutating() ? climateCases : climateCases.filter(([label]) => label === 'Falryx'))) {
-    if (!present(file)) {
-      skip(`climate ${label}`, [file])
+    if (!present(file) || !(await lineGases(file))) {
+      skip(`climate ${label}`, [file], BEFORE_LINE)
       continue
     }
 
@@ -819,7 +835,7 @@ const main = async () => {
     })
   }
 
-  if (present(falryx(2398452450), falryx(2930673230))) {
+  if (await lineGases(falryx(2398452450), falryx(2930673230))) {
     const first = falryx(2398452450)
     const last = falryx(2930673230)
 
@@ -855,14 +871,14 @@ const main = async () => {
       assert.equal(cost(later).apoapsis, 0)
     })
   } else {
-    skip('plan', [falryx(2398452450), falryx(2930673230)])
+    skip('plan', [falryx(2398452450), falryx(2930673230)], BEFORE_LINE)
   }
 
-  const plans = present(falryx(2398452450)) ? [[falryx(2398452450), 141, 791, 49195], [falryx(2398452450), 141, 791, 49202], [falryx(2398452450), 141, 791, 49227]] : []
+  const plans = await lineGases(falryx(2398452450)) ? [[falryx(2398452450), 141, 791, 49195], [falryx(2398452450), 141, 791, 49202], [falryx(2398452450), 141, 791, 49227]] : []
   const appFixtures = [...ARITHMETIC, ...fixtures]
 
   if (!plans.length) {
-    skip('app plan work', [falryx(2398452450)])
+    skip('app plan work', [falryx(2398452450)], BEFORE_LINE)
   }
 
   await check('app capacity, plan years and plan work agree with the rules', async () => appOutputs(modules, appFixtures, plans))
