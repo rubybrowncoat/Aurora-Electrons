@@ -79,7 +79,7 @@ const fixtures = (m) => {
   const B3 = { colony: { PopulationID: 4, PopName: 'Idle', SystemID: 10, Xcor: 1e6, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' }, rate: cap(0), stock: { 10: 5000 } }
   const FREIGHTER = { ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }
   const options = (requirement = req()) => m['mine-bootstrap'].builderOptions({ requirement, target: T, builders: [B3, B2, B1], jumpPoints: [] })
-  const importing = (over = {}) => ({ builder: options()[0], freighters: [FREIGHTER], shuttleTechnology: 1, version: '3.1.x', workers: { now: split(249.9), later: split(249.9), cost: 0 }, ...over })
+  const importing = (over = {}) => ({ builder: options()[0], freighters: [FREIGHTER], shuttleTechnology: 1, version: '3.2.x', workers: { now: split(249.9), later: split(249.9), cost: 0 }, ...over })
   const runImport = (over = {}, requirement = req()) => m['mine-bootstrap'].importRoute({ requirement, target: T, ...importing(over) })
   const form = (id, over = {}) => ({ FormationID: id, Name: `F${id}`, PopulationID: 1, ShipID: 0, ParentFormationID: 0, ownSize: 5000, hq: 6000, rating: 0, commander: null, ...over })
   const power = (formations, population = 1) => m['mine-bootstrap'].engineerPower(formations, population)
@@ -483,9 +483,9 @@ const pure = (ctx) => {
   })
   add('haul: a haul of installations counts one cargo point to the tonne and a haul of minerals two, and the default is minerals', () => {
     const haul = { tonnes: 100000, km: 1e6, from: B1.colony, to: T }
-    const installations = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.1.x', 'installations')
-    const minerals = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.1.x', 'minerals')
-    const byDefault = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.1.x')
+    const installations = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.2.x', 'installations')
+    const minerals = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.2.x', 'minerals')
+    const byDefault = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.2.x')
 
     assert.equal(installations.holds, 1)
     assert.equal(minerals.holds, 2)
@@ -1526,7 +1526,7 @@ const pageStatements = (ctx) => {
   const { provenance } = m
   const f = fixtures(m)
   const { cap, split, MINE, AUTO, T, B1, FREIGHTER } = f
-  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: { RaceNPR: false }, dispatch: async () => {} } }
+  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} } }
   const statements = []
   const add = (name, test) => statements.push([name, test])
   const MODIFIERS = { ConstructionProduction: 10, OverallProductionModifier: 50, ConstructionPower: 4, EngineerProductionModifier: 1, GroundConstructionPower: 0 }
@@ -1830,17 +1830,17 @@ const pageStatements = (ctx) => {
     return true
   })
   add('page: a freighter class with a fuel input the save leaves null leaves the import unavailable, naming it, and the local route as it was', () => {
-    const routes = routesOf(mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.1.x' }))
+    const routes = routesOf(mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.2.x' }))
 
     assert.equal(routes.import.status, 'unavailable')
     assert.ok(routes.import.missing.includes('the engine power of Hauler'))
     assert.equal(routes.local.status, 'limited')
-    assert.equal(routes.ground.status, 'unavailable', 'the ground assistance rule lists the 2.7 line only, so the engineers\' route is unavailable at the 3.1 version and the fuel gap of the import does not touch it')
+    assert.equal(routes.ground.status, 'unavailable', 'the ground assistance rule lists the 2.7 line only, so the engineers\' route is unavailable at the 3.2 version and the fuel gap of the import does not touch it')
 
     return true
   })
   add('page: an import that stops before the haul is timed marks its hauling and total time rows with a result naming what is missing', () => {
-    const vm = mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.1.x' })
+    const vm = mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.2.x' })
     const rows = Object.fromEntries(vm.routeFigures(routesOf(vm).import).map((figure) => [figure.label, figure]))
 
     ;['Hauling time', 'Hauling and build time'].forEach((label) => {
@@ -1964,7 +1964,7 @@ const saveStatements = async (ctx, save) => {
   const statements = []
   const tierB = []
   const add = (name, test) => statements.push([label(name), test])
-  const store = (blocked = new Set()) => ({ $store: { getters: { 'capabilities/blockedBonuses': blocked }, state: { RaceNPR: false }, dispatch: async () => {} } })
+  const store = (blocked = new Set()) => ({ $store: { getters: { 'capabilities/blockedBonuses': blocked, 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} } })
   const pageOf = async (db = database, blocked = new Set()) => {
     const vm = instantiate(pageOptions, { ...store(blocked), database: db, GameID: save.game, RaceID: save.race })
 
