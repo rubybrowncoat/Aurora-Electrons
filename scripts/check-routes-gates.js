@@ -250,7 +250,7 @@ const CREW_GATE = 'case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Li
 const NAME_UNGATED = 'FCT_Lifepods.ShipName as OwnShipName'
 const CREW_UNGATED = 'FCT_Lifepods.Crew as OwnCrew'
 const NAME_CELL = '`Life pods: ${own ? row.OwnShipName : `${row.AlienClassName'
-const CREW_CELL = '${own ? (Number.isFinite(row.OwnCrew)'
+const CREW_CELL = '${own ? survivorsOf(row)'
 const textCell = (to) => swap('text: textOf(name, row.SystemName),\n  }\n})\n\nconst loadAetherGates', `${to},\n  }\n})\n\nconst loadAetherGates`)
 const CLASS_CELL = "`${row.AlienClassName || 'unknown class'} #${row.LifepodID}`"
 
@@ -262,7 +262,7 @@ const FAULTS = [
   { name: 'the read brings the crew of a pod of another race', file: 'places', change: swap(CREW_GATE, CREW_UNGATED), fails: ['pods'] },
   { name: 'the pods of another race are ordered by their hidden ship names', file: 'places', change: swap('order by OwnShipName, FCT_Lifepods.LifepodID', 'order by FCT_Lifepods.ShipName, FCT_Lifepods.LifepodID'), fails: ['pods'] },
   { name: 'a pod of another race is named by its ship name', file: 'places', change: then(swap(NAME_GATE, NAME_UNGATED), swap(NAME_CELL, '`Life pods: ${true ? row.OwnShipName : `${row.AlienClassName')), fails: ['pods'] },
-  { name: 'a pod of another race shows its crew', file: 'places', change: then(swap(CREW_GATE, CREW_UNGATED), swap(CREW_CELL, '${true ? (Number.isFinite(row.OwnCrew)')), fails: ['pods'] },
+  { name: 'a pod of another race shows its crew', file: 'places', change: then(swap(CREW_GATE, CREW_UNGATED), swap(CREW_CELL, '${true ? survivorsOf(row)')), fails: ['pods'] },
   { name: 'the search text of a pod of another race holds its ship name', file: 'places', change: then(swap(NAME_GATE, NAME_UNGATED), textCell('text: textOf(name, row.OwnShipName, row.SystemName)')), fails: ['pods'] },
   { name: 'the search text of a pod of another race lacks its id', file: 'places', change: textCell("text: textOf('life pods', own ? row.OwnShipName : row.AlienClassName, row.SystemName)"), fails: ['pods'] },
   { name: 'a pod of another race loses the alias of its class', file: 'places', change: swap(CLASS_CELL, "`${'unknown class'} #${row.LifepodID}`"), fails: ['pods'] },

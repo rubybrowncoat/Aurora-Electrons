@@ -1,5 +1,6 @@
 import { isKnownNumber, UNKNOWN_TEXT } from './math'
 import { MINERALS } from './minerals'
+import { ORDNANCE_FACTORY_MODULE } from './ordnance-modules'
 import { STATUS, envelope, getRule, isAvailable, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
 
 // The Designed page's component tables: which columns each research category shows, the figures derived from a component's stored values, and the tags a name carries. Columns are { text, value, numeric, format(item, f), note?(item, f), title?(item, f), none?(item), hint?, perHS?, compareOnly?, better?, skipZero?, showZero?, needs?, rule? }: `value` is the item key the table sorts by, `format` the cell's text and `note` a second line under it, `title` a tooltip, `none` marks a cell that reads "—" because the design has no such figure, `perHS` a column the table shows only when the page's per-hull-space toggle is on (Compare always has it), `compareOnly` a figure only Compare shows, `better` the side of the figure that is the better one (`'high'` or `'low'`, left out when neither is), `skipZero` that a zero is no value, so it takes no part in best and worst, `showZero` that a zero is a figure and reads 0, `needs` the other item keys the cell's text reads (a missing one makes the cell unknown), and `rule` the registered rule of a conversion the whole column makes, which its header marks. A cell whose figure or input is not stored reads "—" with an unavailable mark, which tells it from a design that has none. `f` is `{ count }`, the page's number formatter.
@@ -460,7 +461,6 @@ export const categoryColumnsMap = {
     ...reloadColumns,
     ...sizeCostCrewHTK,
   ],
-  49: [plain('Pod size', 'ComponentValue'), ...reloadColumns, ...sizeCostCrewHTK],
   34: [...passiveSensorColumns, ...sizeCostCrewHTK],
   14: [...passiveSensorColumns, ...sizeCostCrewHTK],
   7: [
@@ -642,7 +642,7 @@ export const augmentComponent = (component) => {
     derive(item, 'ShieldPerSecondPerHS', () => item.ShieldPerSecond / item.Size)
   }
 
-  if (categoryId === 51 || categoryId === 49 || categoryId === 3) {
+  if (categoryId === 51 || categoryId === 3) {
     derive(item, 'HangarReload', () => item.RateOfFire / 60)
     derive(item, 'MFReload', () => item.RateOfFire / 360)
   }
@@ -805,6 +805,7 @@ export const sortRows = (items, sortBy, sortDesc) => {
 export const classUsageByComponent = (rows) => {
   const byComponent = new Map()
   let unattributed = 0
+  const ordnanceByClass = new Map()
 
   rows.forEach((row) => {
     if (row.ComponentID == null || row.ClassID == null) {
@@ -820,6 +821,11 @@ export const classUsageByComponent = (rows) => {
       byComponent.set(row.ComponentID, classes)
     }
 
+    const ordnance = ordnanceByClass.get(row.ClassID) || { stored: isKnownNumber(row.OrdnanceModules) ? row.OrdnanceModules : null, mounted: 0, rate: isKnownNumber(row.OrdnanceProduction) ? row.OrdnanceProduction : null }
+
+    ordnance.mounted = ordnance.mounted === null || !isKnownNumber(row.NumComponent) || !isKnownNumber(row.ComponentTypeID) ? null : ordnance.mounted + (row.ComponentTypeID === ORDNANCE_FACTORY_MODULE ? row.NumComponent : 0)
+    ordnanceByClass.set(row.ClassID, ordnance)
+
     const perShip = isKnownNumber(row.NumComponent) ? row.NumComponent : null
     const existing = classes.get(row.ClassID)
 
@@ -830,7 +836,11 @@ export const classUsageByComponent = (rows) => {
     }
   })
 
-  return { byComponent, unattributed }
+  byComponent.forEach((classes) => classes.forEach((entry) => {
+    entry.ordnance = ordnanceByClass.get(entry.id)
+  }))
+
+  return { byComponent, unattributed, ordnanceByClass }
 }
 
 // A design with its usage: the classes that mount it, most ships first with a class whose ships are unknown last, and the class and ship counts. A design a class cannot mount has none; counts are null, never 0, where a class mount could not be attributed or a class has no ship count, and `usageGaps` names what is missing.

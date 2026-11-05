@@ -25,8 +25,8 @@ export const readObservationRecord = (campaignId, branchId, RaceID, kind) => {
   }
 }
 
-// What the record says of each object of the open save: a Map from id to { state, span }. `objects` is [[id, digest]] as the reader of the kind gives it and `open` { t, n } the game time and increments of the open save (readOpenSave), or null when the open save or the record could not be read, which leaves the map empty and every object `unread` (the record is not compared with a save that was not read).
-export const observationRows = (record, objects, open) => new Map((objects && open ? objects : []).map(([id, digest]) => [id, observationOf(record, id, digest, open)]))
+// What the record says of each object of the open save: a Map from id to { state, span }. `objects` is [[id, digest]] as the reader of the kind gives it (`[id, digest, earlierDigest]` for an object a run was kept for under the digest the reader gave before) and `open` { t, n } the game time and increments of the open save (readOpenSave), or null when the open save or the record could not be read, which leaves the map empty and every object `unread` (the record is not compared with a save that was not read).
+export const observationRows = (record, objects, open) => new Map((objects && open ? objects : []).map(([id, digest, earlier]) => [id, observationOf(record, id, digest, open, earlier)]))
 
 // What the switch on the page says it does, and the rule the figures follow.
 export const OBSERVATION_PURPOSE = 'Records the formations of the race on this branch at each capture, so a row can say since when it has been seen in its place with its elements. Switching it off keeps what was recorded.'

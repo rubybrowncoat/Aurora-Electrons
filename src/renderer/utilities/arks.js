@@ -133,12 +133,15 @@ const aboardResult = (cargoRows) => {
 
 const berthsResult = (ship) => (finite(ship.Berths) ? ofRule({ rule: BERTHS, value: ship.Berths / MILLION, inputs: { present: ['standard berths of the class'] } }) : unavailable({ rule: BERTHS, missing: ['the class\'s standard berths'] }))
 
+// The species aboard: a colonist cargo row of 0 people holds no species, so it is not listed (the game no longer keeps such a row, and a copy that holds one reads as one that does not). A row of an amount not known stays, and makes the figure unavailable when its species is missing.
 const speciesResult = (cargoRows) => {
-  if (cargoRows.some((row) => !row.SpeciesName)) {
+  const held = cargoRows.filter((row) => row.Amount !== 0)
+
+  if (held.some((row) => !row.SpeciesName)) {
     return unavailable({ rule: SPECIES, missing: ['species of the colonists aboard'] })
   }
 
-  return ofRule({ rule: SPECIES, value: cargoRows.map((row) => ({ SpeciesID: row.SpeciesID, name: row.SpeciesName, amount: row.Amount / MILLION })), inputs: { present: ['species of the colonists aboard'] } })
+  return ofRule({ rule: SPECIES, value: held.map((row) => ({ SpeciesID: row.SpeciesID, name: row.SpeciesName, amount: row.Amount / MILLION })), inputs: { present: ['species of the colonists aboard'] } })
 }
 
 const notCounted = (reason, present) => ofRule({ rule: ORBIT, value: { counted: false, reason }, inputs: { present } })

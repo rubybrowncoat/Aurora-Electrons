@@ -1283,7 +1283,7 @@ const pageCases = async (pageOptions) => {
   const zeros = Object.fromEntries(MINERAL_NAMES.flatMap((name) => [[name, 0], [`Stock${name}`, 0]]))
   const row = (extra = {}) => ({ ID: 1, Name: `Project ${extra.ID || 1}`, ProductionType: 0, PopulationID: 7, Percentage: 100, Amount: 4, PartialCompletion: 0, ProdPerUnit: 2, Queue: 0, Paused: 0, FuelRequired: 0, StockFuel: 0, ConversionFrom: null, ConversionSource: null, ...zeros, ...extra })
   const arrival = (resource, day, quantity, populationId = 7) => ({ id: 1, PopulationID: populationId, resource, day, quantity, source: '' })
-  const page = (rows, arrivals = [], extra = {}) => instantiate(pageOptions, { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }, data: { industry: rows, arrivals, populationProductionModifiers: { 7: modifiers, 8: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }), ...extra } })
+  const page = (rows, arrivals = [], extra = {}) => instantiate(pageOptions, { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: {}, dispatch: async () => {} }, data: { industry: rows, arrivals, populationProductionModifiers: { 7: modifiers, 8: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }), ...extra } })
 
   const forecasted = async (rows, arrivals = [], extra = {}) => {
     const vm = page(rows, arrivals, extra)
@@ -1794,7 +1794,7 @@ const structureChecks = async (database) => {
   check('the project table is keyed by its own integer ProjectID (a row id), so no save keeps the order the game visits projects in', key.length === 1 && key[0].name === 'ProjectID' && /^INTEGER$/i.test(key[0].type), `key ${key.map((column) => `${column.name} ${column.type}`).join(', ') || 'none'}`)
 }
 
-const instantiatePage = (options, database, game, race) => instantiate(options, { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }, database, GameID: game, RaceID: race })
+const instantiatePage = (options, database, game, race) => instantiate(options, { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: {}, dispatch: async () => {} }, database, GameID: game, RaceID: race })
 
 // The mutants that run the engine's, the wrapper's and the page's cases again, each with one change; each must fail the case named with it.
 const mutantLists = () => {

@@ -6,7 +6,8 @@
   The expected values are written here, in SQL over the saves and in a constructed save, never read from the module under test:
   - saves: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784: 1 own and 10 foreign wrecks in known systems, 6 of a class the race names, no pod) and Falryx (artifacts/falryx-sequential-and-rollback, game 141: the own pods, own wrecks and foreign wrecks of race 791 and the foreign pod race 785 sees in another save). The objects read are the ones the SQL gives, with the labels the game words them with, `Unknown` for a class the race has no alias for, and no field the viewing race may not see in a row, a statement, a record or an observation;
   - a constructed save holds the cases the saves do not: twins that only the observer's projection can tell apart, an object in a system the race does not know, a pod with no creation time, an alias the race has and one it has not, and a hidden field that changes while nothing the race may see does;
-  - the kind by state matrix: each of the four kinds of object (own pod, foreign pod, own wreck, foreign wreck) against held, gone, returned, id reused, unverified, unread and kept at a later time, each cell with the state, the list and the words it must have; a vanished object reads `No longer observed` with its status kept, never as an outcome, and the same id with the same details seen again is held again.
+  - the kind by state matrix: each of the four kinds of object (own pod, foreign pod, own wreck, foreign wreck) against held, gone, returned, id reused, unverified, unread and kept at a later time, each cell with the state, the list and the words it must have; a vanished object reads `No longer observed` with its status kept, never as an outcome, and the same id with the same details seen again is held again;
+  - the rewind: a status kept at a later game time than the open save is `ahead` — listed apart, applied to nothing, its old name mapped against no object of that save and nothing written for it — and the save at its base time carries it to the new name once, so a status kept for a pod tied to a point is never rebound to a pod an earlier save shows under the same id at the position the old name holds;
   Statuses are kept in an in-memory scenario repository: they are the race's and the branch's own (another race, branch or campaign does not see them), pending is no record, a duplicate id is refused and a stale revision is refused.
   Every planted fault must fail the checks it names by a wrong value, never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -24,15 +25,17 @@ const { observe, failedObservation, report, HarnessError, installScreen, readFig
 const { assert, subjectModule, runChecks, judged, caughtBy, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
-const { FIXTURE } = require('./lib/fixtures')
+const { FIXTURE, convertedSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
 const UTILITIES = inRenderer('utilities')
 
 const SHOGUNATE = { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, game: FIXTURE.gameName, race: FIXTURE.raceName }
-const FALRYX_NOW = { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2904201340.db', GameID: 141, RaceID: 791 }
-const FALRYX_POD = { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2810693885.db', GameID: 141 }
+// The two Falryx saves are recorded 2.x saves: the ledger reads the anchors the line gave a pod and a wreck (AE-309-04), so each is opened as a converted copy with the three columns under the type and default the shipped 3.1 database gives them, which hold no anchor, as the 2.x game knew none.
+const ANCHOR_COLUMNS = [['FCT_Lifepods', 'OrbitBodyID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0']]
+const FALRYX_NOW = { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2904201340.db', GameID: 141, RaceID: 791, converted: true }
+const FALRYX_POD = { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2810693885.db', GameID: 141, converted: true }
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -70,7 +73,7 @@ const saves = new Map()
 
 const saveOf = (spec) => {
   if (!saves.has(spec.file)) {
-    saves.set(spec.file, new Database(path.join(root, spec.file), { readonly: true }))
+    saves.set(spec.file, new Database(spec.converted ? convertedSave(spec.file, { columns: ANCHOR_COLUMNS }) : path.join(root, spec.file), { readonly: true }))
   }
 
   return saves.get(spec.file)
@@ -98,6 +101,12 @@ const constructed = () => {
   db.run(`insert into FCT_Lifepods values (1, 1, 1, 10, 100, 200, 'Alpha One', 5, 1000, 100, 1, 1.5), (2, 1, 1, 12, 5, 5, 'Gone Far', 2, 1000, 100, 1, 1.5), (3, 1, 1, 10, 100, 200, 'Undated', 3, null, 101, 1, 1.5), (4, 1, 2, 10, 1000.4, 2000.6, '${HIDDEN.podName}', ${HIDDEN.podCrew}, 5000, ${HIDDEN.classA}, 9, 9.5), (5, 1, 2, 11, 40, 50, '${HIDDEN.podName}', ${HIDDEN.podCrew}, 5000, ${HIDDEN.classB}, 9, 9.5), (6, 1, 2, 12, 40, 50, '${HIDDEN.podName}', ${HIDDEN.podCrew}, 5000, ${HIDDEN.classA}, 9, 9.5)`)
   // wrecks: 1 own, 2 and 3 foreign twins (same orbit, size and alias), 4 foreign with no alias, 5 foreign free in space, 6 foreign in an unknown system
   db.run(`insert into FCT_Wrecks values (1, 1, 1, 10, 0, 7, 8, 2.5, 100, 55), (2, 1, 2, 10, 77, 1, 1, 1.2, ${HIDDEN.classA}, ${HIDDEN.wreckShip}), (3, 1, 2, 10, 77, 9, 9, 1.2, ${HIDDEN.classA}, ${HIDDEN.wreckShip + 1}), (4, 1, 2, 11, 0, 3, 3, 3, ${HIDDEN.classB}, ${HIDDEN.wreckShip + 2}), (5, 1, 2, 11, 0, 30, 40, 0.5, ${HIDDEN.classA}, ${HIDDEN.wreckShip + 3}), (6, 1, 2, 12, 0, 3, 3, 1, ${HIDDEN.classA}, ${HIDDEN.wreckShip + 4})`)
+
+  // The columns the ledger reads past the ones above: the body and the Lagrange point a pod is tied to (0, none), the Lagrange point of a wreck, and the commanders whose stored pod is a pod (none here).
+  db.run('alter table FCT_Lifepods add column OrbitBodyID integer default 0')
+  db.run('alter table FCT_Lifepods add column OrbitLagrangeID integer default 0')
+  db.run('alter table FCT_Wrecks add column OrbitLagrangeID integer default 0')
+  db.run('create table FCT_Commander (GameID integer, RaceID integer, LifepodID integer, RetireStatus integer)')
 
   return db
 }
@@ -341,6 +350,86 @@ const matrixChecks = {
   },
 }
 
+// A status kept at a later game time than the open save (the save was rewound, or the branch was forked before the record's save) is `ahead`: the ledger lists it apart and applies it to nothing, so its old name is not mapped against this save's objects and the migration writes nothing for it. The old name of a pod held its position, so a pod the earlier save shows under the same id at the same place would be taken for the one the status was kept for, and the future record's name rewritten to that pod's point.
+const rewindChecks = {
+  id: 'rewind',
+  name: 'a status kept under an old name is neither mapped nor migrated on a save older than its base time, which writes nothing and keeps the name it holds, and the save at its base time carries it to the new name once, where the point then moves the pod',
+  run: async ({ mod }) => {
+    const db = constructed()
+    const repository = repositoryOf(mod)
+    const later = { ...SCOPE, gameTime: 200000 }
+    const NEW = 'lifepod|10|lagrange4242|7'
+    const OLD = 'lifepod|10|1000|2001|7'
+
+    // the pod is tied to a Lagrange point, so its name is the point, and the name a status kept before the change holds is its position
+    db.run('update FCT_Lifepods set OrbitLagrangeID = 4242 where LifepodID = 4')
+
+    const keptAt = await loadObjects(mod, db)
+    const kept = await mod.ledger.setStatus(repository, later, { row: keptAt.objects.lifepod.get(4), status: 'acknowledged', context: contextOf(keptAt, later) })
+
+    assert.equal(kept.ok, true, kept.message)
+    assert.equal(kept.record.base.gameTime, 200000, 'the status is kept at a later game time than the save below')
+    repository.update(later, kept.record.uuid, kept.record.revision, { links: [{ type: 'lifepod', id: 4, fingerprint: OLD }] })
+
+    const storedIn = (context) => repository.list(later, { kind: mod.ledger.RECOVERY_KIND, context }).find((item) => item.record.uuid === kept.record.uuid)
+    const before = storedIn(contextOf(keptAt, later))
+
+    assert.equal(before.links[0].fingerprint, OLD, 'the store holds the name the old rule gave the pod')
+
+    // the earlier save: another pod under the same id, tied to another point, at the position the old name holds
+    db.run('update FCT_Lifepods set OrbitLagrangeID = 77 where LifepodID = 4')
+
+    const rewound = await loadObjects(mod, db)
+    const rewoundContext = contextOf(rewound)
+    const ahead = repository.list(SCOPE, { kind: mod.ledger.RECOVERY_KIND, context: rewoundContext }).find((item) => item.record.uuid === kept.record.uuid)
+
+    assert.equal(ahead.status, 'ahead', 'the repository reads the status as kept at a later game time than the open save')
+
+    const read = mod.ledger.readRecovery(repository, SCOPE, rewoundContext)
+    const entry = entryFor(read, 'lifepod', 4)
+    const rows = mod.ledger.recoveryRows({ objects: rewound.objects, entries: read.entries })
+
+    assert.equal(entry.ahead, true, 'the ledger lists it apart, not as the object\'s status')
+    assert.equal(entry.state, 'reused', 'its name is not mapped against the objects of the rewound save')
+    assert.equal(rows.find((row) => row.key === 'lifepod:4').status, 'pending', 'no status is applied to the pod of the rewound save')
+    assert.ok(rows.some((row) => row.group === 'ahead' && row.entry && row.entry.uuid === kept.record.uuid), 'it is listed among the statuses kept at a later time')
+
+    const nothing = await mod.ledger.migrateRecoveryRecords(repository, SCOPE, rewoundContext)
+    const unchanged = storedIn(rewoundContext)
+
+    assert.deepEqual([nothing.ok, nothing.carried, nothing.ambiguous, nothing.conflicts, nothing.changed], [true, [], [], [], false], 'the migration has nothing to do on a save the status is ahead of')
+    assert.equal(unchanged.record.revision, before.record.revision, 'the record is not written')
+    assert.equal(unchanged.links[0].fingerprint, OLD, 'it keeps the name it was kept under')
+    assert.deepEqual(unchanged.record.assumptions, before.record.assumptions, 'and its assumptions')
+
+    // the save the status was kept at: the pod tied to the point the new name holds
+    db.run('update FCT_Lifepods set OrbitLagrangeID = 4242 where LifepodID = 4')
+
+    const current = await loadObjects(mod, db)
+    const currentContext = contextOf(current)
+    const reread = entryFor(mod.ledger.readRecovery(repository, later, currentContext), 'lifepod', 4)
+
+    assert.equal(reread.ahead, false, 'the save at the status\'s base time reads it as its own')
+    assert.equal(reread.state, 'held', 'and as held, not as another object under the id')
+
+    const migrated = await mod.ledger.migrateRecoveryRecords(repository, later, currentContext)
+    const renamed = storedIn(currentContext)
+
+    assert.deepEqual([migrated.ok, migrated.carried, migrated.ambiguous, migrated.changed], [true, [kept.record.uuid], [], true], 'the status is carried to its new name')
+    assert.equal(renamed.links[0].fingerprint, NEW, 'the new name is the point the pod is tied to')
+
+    const second = await mod.ledger.migrateRecoveryRecords(repository, later, currentContext)
+
+    assert.deepEqual([second.ok, second.carried, second.ambiguous, second.changed], [true, [], [], false], 'a second run writes nothing')
+    assert.equal(storedIn(currentContext).record.revision, renamed.record.revision, 'and the record is not written again')
+
+    // the point moves the pod's coordinates: the status stays held
+    db.run('update FCT_Lifepods set Xcor = Xcor + 500, Ycor = Ycor + 500 where LifepodID = 4')
+
+    assert.equal(entryFor(mod.ledger.readRecovery(repository, later, contextOf(await loadObjects(mod, db))), 'lifepod', 4).state, 'held', 'the status stays held when the point moves the pod')
+  },
+}
+
 const identityChecks = {
   id: 'identity',
   name: 'a foreign wreck is keyed on the observer\'s projection with a copies count and an ambiguous mark, an own wreck on its full tuple, and a returning object keeps its trail only where the identity holds',
@@ -398,7 +487,7 @@ const identityChecks = {
 
 const HIDDEN_COLUMNS = ['ShipName', 'Crew', 'SpeciesID', 'GradePoints', 'CreationTime', 'RaceID', 'ClassID', 'ShipID']
 
-const FOREIGN_KEYS = ['type', 'place', 'id', 'own', 'systemId', 'systemName', 'x', 'y', 'aliasId', 'className', 'hullAbbr', 'orbitBodyId', 'size', 'tons', 'raceTag', 'copies']
+const FOREIGN_KEYS = ['type', 'place', 'id', 'own', 'systemId', 'systemName', 'x', 'y', 'aliasId', 'className', 'hullAbbr', 'orbitBodyId', 'orbitLagrangeId', 'size', 'tons', 'raceTag', 'copies']
 
 const hiddenChecks = {
   id: 'hidden',
@@ -651,7 +740,7 @@ const savesChecks = {
     assert.deepEqual([...now.objects.ownLifepod.values()].map((row) => mod.ledger.labelOf(row)), pods.map((pod) => `${pod.name} life pods: ${pod.crew} crew`), 'Falryx: an own pod by its ship\'s name and crew')
 
     // the other Falryx save, race 785 sees one foreign pod
-    const earlier = saveOf({ file: FALRYX_POD.file })
+    const earlier = saveOf(FALRYX_POD)
     const seen = await loadObjects(mod, earlier, { GameID: 141, RaceID: 785 })
     const pod = earlier.query('select p.LifepodID as id, ac.ClassName as cls, hd.HullAbbr as hull from FCT_Lifepods p left join FCT_AlienClass ac on ac.GameID = p.GameID and ac.ViewRaceID = 785 and ac.ActualClassID = p.ClassID left join FCT_HullDescription hd on hd.HullDescriptionID = ac.HullID where p.GameID = 141 and p.RaceID != 785 and p.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = 141 and RaceID = 785)').all()
 
@@ -722,7 +811,7 @@ const judgeChecks = {
   },
 }
 
-const CHECKS = [unitChecks, matrixChecks, identityChecks, hiddenChecks, readerChecks, observationChecks, viewChecks, wordChecks, savesChecks, judgeChecks]
+const CHECKS = [unitChecks, matrixChecks, rewindChecks, identityChecks, hiddenChecks, readerChecks, observationChecks, viewChecks, wordChecks, savesChecks, judgeChecks]
 
 // ---------- the faults and the rewrites of the utilities ----------
 
@@ -733,6 +822,8 @@ const FAULTS = [
   { name: 'an own pod with no creation time is certified', file: 'recovery-ledger', find: "return link.status === 'unknown' ? STATES.UNVERIFIED : STATES.HELD", to: 'return STATES.HELD', fails: ['matrix'] },
   { name: 'a kind that was not read reads as gone', file: 'recovery-ledger', find: "if (!link || (link.status === 'unknown' && !link.unverified)) {\n    return STATES.UNREAD", to: "if (!link || (link.status === 'unknown' && !link.unverified)) {\n    return STATES.GONE", fails: ['matrix'] },
   { name: 'a status kept at a later time is applied', file: 'recovery-ledger', find: 'const applied = entries.filter((entry) => !entry.ahead)', to: 'const applied = entries', fails: ['matrix'] },
+  { name: 'a status kept at a later time is migrated on the save it is ahead of', file: 'recovery-ledger', find: 'listed.filter((item) => currentInSave(item) && !item.flags.some((flag) => NOT_SHOWN.includes(flag)) && item.links.length === 1', to: 'listed.filter((item) => !item.flags.some((flag) => NOT_SHOWN.includes(flag)) && item.links.length === 1', fails: ['rewind'] },
+  { name: 'an old name is mapped on the save its status is ahead of', file: 'recovery-ledger', find: 'const link = linkOf(stored, ref, context, !ahead)', to: 'const link = linkOf(stored, ref, context)', fails: ['rewind'] },
   { name: 'a vanished object is left out of the ledger', file: 'recovery-ledger', find: 'if (entry.state === STATES.GONE) {\n      rest.push(listed(entry, GROUPS.GONE))', to: 'if (entry.state === STATES.GONE) {\n      return', fails: ['matrix', 'view'] },
   { name: 'a status belongs to the campaign, not the branch', file: 'recovery-ledger', find: "policy: 'branch', links", to: "policy: 'campaign', links", fails: ['units'] },
   { name: 'pending keeps the status', file: 'recovery-ledger', find: 'return entry ? await removeStatus(repository, scope, entry) : { ok: true, record: null }', to: 'return { ok: true, record: null }', fails: ['units'] },
@@ -740,19 +831,19 @@ const FAULTS = [
   { name: 'a status is kept for an object picked in another race, branch or save', file: 'recovery-ledger', find: "const checked = checkLink(context, scope, { type: row.type, row }, RECOVERY_TARGETS, 'status')", to: 'const checked = { ok: true, row }', fails: ['units'] },
   { name: 'the twins of a foreign wreck are counted as one', file: 'recovery-ledger', find: 'return rows.map((row) => ({ ...row, copies: counts.get(RECOVERY_TARGETS[type].fingerprint(row)) }))', to: 'return rows.map((row) => ({ ...row, copies: 1 }))', fails: ['identity', 'objects'] },
   { name: 'the foreign wreck statement selects the ship', file: 'recovery-ledger', find: 'FCT_Wrecks.Size, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr, FCT_AlienRace.Abbrev as RaceTag', to: 'FCT_Wrecks.Size, FCT_Wrecks.ShipID, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr, FCT_AlienRace.Abbrev as RaceTag', fails: ['hidden'] },
-  { name: 'the foreign pod statement selects the name and the crew', file: 'recovery-ledger', find: 'select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_AlienClass.AlienClassID', to: 'select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_AlienClass.AlienClassID', fails: ['hidden'] },
+  { name: 'the foreign pod statement selects the name and the crew', file: 'recovery-ledger', find: 'select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.OrbitBodyID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_AlienClass.AlienClassID', to: 'select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.OrbitBodyID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_AlienClass.AlienClassID', fails: ['hidden'] },
   { name: 'the objects of a system the race does not know are read', file: 'recovery-ledger', find: 'const KNOWN = (table, { GameID, RaceID }) => `inner join', to: 'const KNOWN = (table, { GameID, RaceID }) => `left join', fails: ['objects', 'observations'] },
   { name: 'the foreign wrecks hold the own ones too', file: 'recovery-ledger', find: 'and FCT_Wrecks.RaceID != ${RaceID} order by FCT_Wrecks.WreckID', to: 'order by FCT_Wrecks.WreckID', fails: ['objects', 'saves'] },
   { name: 'a class the race has no alias for is named by its real name', file: 'recovery-ledger', find: "return `Wreck of ${row.className || 'Unknown'} class", to: "return `Wreck of ${row.className || 'Mystery'} class", fails: ['objects', 'saves'] },
   { name: 'a pod has an age before it was made', file: 'recovery-ledger', find: ' && gameTime >= row.created ? gameTime - row.created : null', to: ' ? gameTime - row.created : null', fails: ['objects'] },
-  { name: 'the position of a wreck tied to a body is part of its observation', file: 'recovery-ledger', find: '...(row.orbitBodyId ? [] : [spot(row.x), spot(row.y)])', to: '...[spot(row.x), spot(row.y)]', fails: ['observations'] },
+  { name: 'the position of a wreck tied to a body is part of its observation', file: 'recovery-ledger', find: '...(row.orbitBodyId ? [] : anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)])', to: '...[spot(row.x), spot(row.y)]', fails: ['observations'] },
   { name: 'a vanished object is worded as an outcome', file: 'recovery-ledger', find: "gone: 'The open save holds no object under this id, and nothing says why it is gone, so the status stays as it was kept.'", to: "gone: 'The object was rescued.'", fails: ['words'] },
   { name: 'the lists name a yield', file: 'recovery-ledger', find: "GROUP_TEXT = Object.freeze({\n  present: 'In the save',", to: "GROUP_TEXT = Object.freeze({\n  present: 'In the save, with a yield',", fails: ['words'] },
   { name: 'the own wrecks are counted as foreign on the map', file: 'map-features', find: 'sum(FCT_Wrecks.RaceID = ${RaceID}) as Own', to: 'sum(FCT_Wrecks.RaceID != ${RaceID}) as Own', fails: ['saves'] },
   { name: 'the observation of the wrecks reads the pods', file: 'observations', find: 'read: readWreckObservations', to: 'read: readLifepodObservations', fails: ['observations'] },
-  { name: 'the observation of an own pod leaves out when it was made and its name', file: 'recovery-ledger', find: '...(row.own ? [present(row.created), present(row.shipName)] : [])', to: '...[]', fails: ['observations'] },
-  { name: 'the observation of an own wreck leaves out its ship', file: 'recovery-ledger', find: '...(row.own ? [present(row.shipId)] : [])', to: '...[]', fails: ['observations'] },
-  { name: 'an unknown crew is shown as none', file: 'recovery-ledger', find: "row.crew === null ? 'crew unknown' : `${count(row.crew)} crew`", to: '`${count(row.crew === null ? 0 : row.crew)} crew`', fails: ['objects'] },
+  { name: 'the observation of an own pod leaves out when it was made and its name', file: 'recovery-ledger', find: '[spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.created), present(row.shipName)] : [])', to: '[spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...[]', fails: ['observations'] },
+  { name: 'the observation of an own wreck leaves out its ship', file: 'recovery-ledger', find: 'anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.shipId)] : [])', to: 'anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...[]', fails: ['observations'] },
+  { name: 'an unknown crew is shown as none', file: 'recovery-ledger', find: "row.crew === null ? 'crew unknown' : row.crew === 0 && row.officers > 0 ? 'no crew' : `${count(row.crew)} crew`", to: '`${count(row.crew === null ? 0 : row.crew)} crew`', fails: ['objects'] },
 ]
 
 // Rewrites that say the same thing: a condition parenthesised, operands of a test turned about, a key built another way, a clause with a default order and a word of prose changed.
@@ -762,6 +853,7 @@ const BENIGN = [
   { name: 'the size key written through a number', file: 'recovery-ledger', find: 'finite(size) ? size.toFixed(6) : \'\'', to: 'finite(size) ? Number(size.toFixed(6)).toFixed(6) : \'\'' },
   { name: 'an order clause spelled out', file: 'recovery-ledger', find: 'and FCT_Wrecks.RaceID = ${RaceID} order by FCT_Wrecks.WreckID`', to: 'and FCT_Wrecks.RaceID = ${RaceID} order by FCT_Wrecks.WreckID asc`' },
   { name: 'the hint of a status in other words', file: 'recovery-ledger', find: "acknowledged: 'Seen and noted, with no recovery planned.'", to: "acknowledged: 'Seen and noted; no recovery is planned.'" },
+  { name: 'the test of a status kept at a later time written the other way', file: 'recovery-ledger', find: "const currentInSave = (item) => item.status !== 'ahead'", to: "const currentInSave = (item) => !(item.status === 'ahead')" },
 ]
 /* eslint-enable no-template-curly-in-string */
 

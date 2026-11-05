@@ -257,18 +257,30 @@ export const CMC_BLOCKING_INSTALLATIONS = Object.freeze([12, 24, 39, 52])
 
 const withinOneUnit = (a, b) => Math.abs(a - b) < 1
 
+// Whether the fleet and the colony's body both have a saved position.
+const bothPositioned = (fleet, colony) => [fleet.Xcor, fleet.Ycor, colony.Xcor, colony.Ycor].every(Number.isFinite)
+
 // Whether the game counts the fleet at the colony (`Game.AreCoordinatesWithinOneUnit` of the fleet and the colony's body): within one unit on both axes. Where the fleet or the body has no saved position, the body the fleet orbits stands in.
 const fleetAt = (fleet, colony) => {
-  if ([fleet.Xcor, fleet.Ycor, colony.Xcor, colony.Ycor].every(Number.isFinite)) {
+  if (bothPositioned(fleet, colony)) {
     return withinOneUnit(fleet.Xcor, colony.Xcor) && withinOneUnit(fleet.Ycor, colony.Ycor)
   }
 
   return fleet.OrbitBodyID === colony.SystemBodyID
 }
 
+// Whether the save settles where the fleet is against the colony: both have a saved position, or the fleet orbits a body to stand in. A fleet with neither is not at the colony here, but a read that must not guess its place asks first.
+export const fleetPlaced = (fleet, colony) => bothPositioned(fleet, colony) || fleet.OrbitBodyID > 0
+
+// Whether the colony may count the fleet (`Population.method_211`, Population.cs:9935-9939): the fleet is assigned to the colony or to none, and a colony that no longer exists is none. The game gives a fleet with no colony to the first colony that asks, which a save never records.
+export const fleetClaimable = (fleet, colony) => !(fleet.AssignedPopulationID > 0) || !fleet.AssignedExists || fleet.AssignedPopulationID === colony.PopulationID
+
+// Whether the game counts the fleet for the colony (`Population.method_211`, Population.cs:9933-9939): a fleet of the colony's race at the colony that the colony may count. `colony` is { PopulationID, RaceID, SystemBodyID, Xcor, Ycor }, `fleet` { RaceID, OrbitBodyID, AssignedPopulationID, AssignedExists, Xcor, Ycor }. The one rule the colony exclusion of a civilian mining complex and the orbital term of a colony's ordnance capacity share.
+export const fleetCountsForColony = (fleet, colony) => fleet.RaceID === colony.RaceID && fleetAt(fleet, colony) && fleetClaimable(fleet, colony)
+
 // The colonies the game's exclusion reads (the race's own and the alien colonies it knows), each with whether it keeps a civilian mining complex off its body (`BlocksCmc`), the one rule the Minerals page and the Colonization Planner share. `colonies` are { PopulationID, RaceID, SystemBodyID, Population, Installations, Xcor, Ycor }, `Installations` the stored rows of the installations in CMC_BLOCKING_INSTALLATIONS; `fleets` the fleets with orbital mining modules, { FleetID, RaceID, OrbitBodyID, AssignedPopulationID, AssignedExists, Xcor, Ycor, Modules }, `Modules` the undamaged modules.
 export const cmcBlocks = (colonies, fleets) => colonies.map((colony) => {
-  const working = fleets.filter((fleet) => fleet.RaceID === colony.RaceID && fleetAt(fleet, colony) && (!(fleet.AssignedPopulationID > 0) || !fleet.AssignedExists || fleet.AssignedPopulationID === colony.PopulationID))
+  const working = fleets.filter((fleet) => fleetCountsForColony(fleet, colony))
   const modules = working.reduce((total, fleet) => total + fleet.Modules, 0)
 
   return { ...colony, Modules: modules, BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }

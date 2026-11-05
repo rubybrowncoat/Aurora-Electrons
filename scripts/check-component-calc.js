@@ -805,7 +805,7 @@ const MUTANTS = [
 const sharedOf = async () => {
   const apps = await loadUtilities(UTILITIES, { stubs: STUBS })
   const pageOptions = await loadPage('pages/production', { stubs: STUBS })
-  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} } }
+  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: {}, dispatch: async () => {} } }
   const synthetic = instantiate(pageOptions, { ...store, data: { populationProductionModifiers: { 7: MODIFIERS } } })
   const capacities = Object.fromEntries(['construction', 'ordnance', 'fighter'].map((kind) => [kind, synthetic.populationCapacityResult(7, kind)]))
 

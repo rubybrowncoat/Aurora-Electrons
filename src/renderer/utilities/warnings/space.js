@@ -22,17 +22,19 @@ const CONTACT_TYPES = {
 
 const HOSTILE = 0
 
-// `13d 4h 2m 9s`, or `Expired` once the pod's two weeks are up; null while the pod's creation time or the game time is missing.
+// `13d 4h 2m 9s`, or `Expired` once the pod's two weeks are up; null while the pod's creation time or the game time is missing. The game takes a pod when the game time is past its creation time plus the two weeks (`Game.ProcessExpiredLifepods`, Game.cs:28238: a strictly later time, whatever the pod holds), so a pod at exactly two weeks still has 0s left.
 const podExpiration = (lifepod, gameTime) => {
   if (!isKnownNumber(lifepod.CreationTime) || !isKnownNumber(gameTime)) {
     return null
   }
 
-  let remaining = Math.floor(SECONDS_PER_TWO_WEEKS - (gameTime - lifepod.CreationTime))
+  const left = SECONDS_PER_TWO_WEEKS - (gameTime - lifepod.CreationTime)
 
-  if (remaining <= 0) {
+  if (left < 0) {
     return 'Expired'
   }
+
+  let remaining = Math.floor(left)
 
   const days = Math.floor(remaining / 86400)
   remaining -= days * 86400
@@ -43,7 +45,15 @@ const podExpiration = (lifepod, gameTime) => {
   const minutes = Math.floor(remaining / 60)
   remaining -= minutes * 60
 
-  return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`, remaining && `${remaining}s`].filter(Boolean).join(' ')
+  return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`, remaining && `${remaining}s`].filter(Boolean).join(' ') || '0s'
+}
+
+// A pod's survivors as a cell reads them: its crew, with the officers aboard after it, and for a pod with no crew only the officers, which an evacuation can leave alone in a pod. An officer count that is not known leaves the crew as it is.
+const survivorsText = (ctx, crew, officers) => {
+  const aboard = isKnownNumber(officers) ? Number(officers) : 0
+  const word = aboard === 1 ? 'officer' : 'officers'
+
+  return crew === 0 && aboard > 0 ? `officers only (${ctx.count(aboard)})` : aboard > 0 ? `${ctx.count(crew)} + ${ctx.count(aboard)} ${word}` : ctx.count(crew)
 }
 
 // The inputs a contact can lack, keyed by the kind it is counted apart under, in that order: the standing of its empire, then whether it is held now (the time it was last detected, or the game time).
@@ -289,22 +299,22 @@ export const checks = checksOf([
     captured: [tokenWords({ adrift: 'adrift', expired: 'expired' })],
     clock: true,
     title: (count) => amount(count, 'active lifepod'),
-    rule: 'Detected lifepods are still adrift; their crews last two weeks from the ship\'s loss.',
+    rule: 'Lifepods of the race are still adrift; the life support of every pod lasts two weeks from the ship\'s loss, and the survivors in a pod, its crew or only its officers, are lost with it.',
     evidence: {
       verification: 'estimated',
-      structure: ['FCT_Lifepods.CreationTime, Crew, SystemID', 'the game time'],
-      note: 'The lifepods, their crews and creation times are stored rows; the two weeks a crew lasts is a figure this page uses, not one read from stored data, so the time remaining is an estimate. A missing creation time or game time shows a dash.',
-      assumptions: ['A lifepod crew lasts two weeks (1,209,600 seconds) from the pod\'s creation.'],
+      structure: ['FCT_Lifepods.CreationTime, Crew, SystemID', 'FCT_Commander.LifepodID, RetireStatus', 'the game time'],
+      note: 'The lifepods, their crews and creation times are stored rows, and the officers aboard are the active commanders whose stored pod is the lifepod. A ship\'s evacuation can make a pod with no crew and only officers, and the game takes every pod, whatever it holds, once its two weeks are past, so the officers in a pod expire with it. The two weeks are read from the game\'s rules, not from stored data, so the time remaining is an estimate. A missing creation time or game time shows a dash.',
+      assumptions: ['A lifepod lasts two weeks (1,209,600 seconds) from the pod\'s creation, with or without a crew.'],
     },
     columns: [
       { key: 'ship', text: 'Lifepod of' },
-      { key: 'crew', text: 'Crew', align: 'end' },
+      { key: 'crew', text: 'Survivors', align: 'end' },
       { key: 'remaining', text: 'Time remaining', align: 'end' },
     ],
     async read(ctx) {
       const { GameID, RaceID, GameTime } = ctx
 
-      const lifepods = await rowsOf(ctx, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_RaceSysSurvey.Name as SystemName from FCT_Lifepods left join FCT_RaceSysSurvey on FCT_Lifepods.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Lifepods.RaceID = FCT_RaceSysSurvey.RaceID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.CreationTime asc, FCT_Lifepods.Crew desc`)
+      const lifepods = await rowsOf(ctx, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_RaceSysSurvey.Name as SystemName, (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) as Officers from FCT_Lifepods left join FCT_RaceSysSurvey on FCT_Lifepods.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Lifepods.RaceID = FCT_RaceSysSurvey.RaceID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.CreationTime asc, FCT_Lifepods.Crew desc`)
 
       return lifepods.map((lifepod) => {
         const remaining = podExpiration(lifepod, GameTime)
@@ -313,7 +323,7 @@ export const checks = checksOf([
           id: `lifepod:${lifepod.LifepodID}`,
           cells: {
             ship: lifepod.ShipName || unknownCell(ctx, ['the name of the ship the lifepod came from']),
-            crew: figure(ctx, lifepod.Crew, 'the crew of the lifepod'),
+            crew: figure(ctx, lifepod.Crew, 'the crew of the lifepod', (known) => survivorsText(ctx, known, lifepod.Officers)),
             remaining: remaining === null ? unknownCell(ctx, [...lacking(lifepod, { CreationTime: 'the creation time of the lifepod' }), ...(isKnownNumber(GameTime) ? [] : ['the game time'])]) : { text: remaining, tone: remaining === 'Expired' ? 'error' : undefined },
           },
           caption: lifepod.SystemName || undefined,

@@ -62,7 +62,7 @@ const STUBS = {
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "", inkMuted: "", primary: "" }); export const withAlpha = (color) => color; export const patternImage = () => null; export const seriesIdentity = () => null'
 const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
-const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), config: { get: () => 'Tick' } }, state: { RaceNPR: false }, dispatch: async () => {} }
+const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null, config: { get: () => 'Tick' } }, state: { RaceNPR: false }, dispatch: async () => {} }
 const READY = { loading: false, failed: '', error: '' }
 const PRONOUNS = /\b(?:me|my|myself|we|our|ours|ourselves|you|your|yours|yourself)\b|\bI\b/
 

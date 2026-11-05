@@ -65,7 +65,7 @@ const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "",
 const RECORDER = 'export const oneOf = (values) => (value) => values.includes(value); export const tableView = (key, defaults) => ({ key, default: defaults, table: true }); export default (fields) => { globalThis.__persistedFields = fields; return { data: () => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field.default])) } }'
 const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
 const CAMPAIGN = { campaignId: 'c1', branchId: 'b1' }
-const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), 'history/campaign': CAMPAIGN, GameTime: 100000 }, state: { RaceNPR: false, history: { revision: 0 } }, dispatch: async () => {} }
+const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null, 'history/campaign': CAMPAIGN, GameTime: 100000 }, state: { RaceNPR: false, history: { revision: 0 } }, dispatch: async () => {} }
 
 let failures = 0
 let checks = 0

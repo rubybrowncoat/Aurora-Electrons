@@ -56,11 +56,12 @@ const LINE_COLUMNS = Object.freeze([
   ['FCT_Population', 'AlienArtifacts', 'Double default 0'],
 ])
 
-// The path of a copy of a recorded 2.x save (a path relative to the repository root, or absolute) with the star's component number under its 3.1 name, applied by `STAR_STATEMENT`, and with `line` also the columns of `LINE_COLUMNS` that the save lacks (`alter table <table> add column <column> <definition>`), and nothing else. The copy is made once, in the temp folder, under a name taken from the source's path, size and time, and read only by every later run and every child process of a run, so a campaign of large saves is copied once; a save that already has the 3.1 names is copied as it is. Needs bun (`bun:sqlite`).
-const convertedSave = (file, { line = false } = {}) => {
+// The path of a copy of a recorded 2.x save (a path relative to the repository root, or absolute) with the star's component number under its 3.1 name, applied by `STAR_STATEMENT`, with `line` also the columns of `LINE_COLUMNS` that the save lacks (`alter table <table> add column <column> <definition>`), with `columns` the further columns of the line the check names in the same form, as a module it reads needs them with their defaults (the anchors of the recovery ledger, AE-309-04), and nothing else. The copy is made once, in the temp folder, under a name taken from the source's path, size, time and statements, and read only by every later run and every child process of a run, so a campaign of large saves is copied once; a save that already has the 3.1 names is copied as it is. Needs bun (`bun:sqlite`).
+const convertedSave = (file, { line = false, columns = [] } = {}) => {
   const source = path.resolve(root, file)
   const { size, mtimeMs } = fs.statSync(source)
-  const statements = [STAR_STATEMENT, ...(line ? LINE_COLUMNS.map((column) => column.join(' ')) : [])]
+  const added = [...(line ? LINE_COLUMNS : []), ...columns]
+  const statements = [STAR_STATEMENT, ...added.map((column) => column.join(' '))]
   const key = crypto.createHash('sha1').update(`${source}|${size}|${mtimeMs}|${statements.join(';')}`).digest('hex').slice(0, 16)
   const folder = path.join(os.tmpdir(), 'aurora-electrons-converted-saves')
   const target = path.join(folder, `${path.basename(source, '.db')}-${key}.db`)
@@ -82,7 +83,7 @@ const convertedSave = (file, { line = false } = {}) => {
       db.exec(STAR_STATEMENT)
     }
 
-    for (const [table, column, definition] of line ? LINE_COLUMNS : []) {
+    for (const [table, column, definition] of added) {
       if (!db.query(`pragma table_info(${table})`).all().some((existing) => existing.name === column)) {
         db.exec(`alter table ${table} add column ${column} ${definition}`)
       }

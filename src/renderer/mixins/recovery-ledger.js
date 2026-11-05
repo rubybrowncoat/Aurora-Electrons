@@ -7,7 +7,7 @@ import { joinLabels, tracked } from '../utilities/load-tracking'
 import { observedKinds, readOpenSave, saveObservationChoice } from '../utilities/observations'
 import { observationRows, readObservationRecord } from '../utilities/observation-view'
 import { fieldWords } from '../utilities/provenance'
-import { loadRecoveryObjects, observationSignature, PLACES, readRecovery, recoveryRows, recoveryTotals, registerRecoveryLedger, scopeOf, TYPE_KEYS } from '../utilities/recovery-ledger'
+import { legacyObservationSignature, loadRecoveryObjects, migrateRecoveryRecords, observationSignature, PLACES, readRecovery, recoveryRows, recoveryTotals, registerRecoveryLedger, scopeOf, TYPE_KEYS } from '../utilities/recovery-ledger'
 
 // The read behind the recovery ledger alone, and the words that name it when it fails. The tracked key, the async-computed name and the label key of a read are one string. A page that mounts the ledger spreads `RECOVERY_LABELS` into its own labels and leaves `RECOVERY_INPUTS` out of the reads it waits on, so the page is ready, and its other panels show, whether the read is in flight or failed.
 export const RECOVERY_LABELS = {
@@ -21,8 +21,15 @@ const messageOf = (error) => (error && error.message ? error.message : String(er
 // The kinds of the generic observation (utilities/observations.js) the ledger observes, one for each place, and the kinds of object each holds.
 const OBSERVED = Object.freeze({ lifepod: ['ownLifepod', 'lifepod'], wreck: ['ownWreck', 'wreck'] })
 
-// The digests an observation compares for the objects of a place, `[[id, digest]]`, or null when a kind of the place was not read (the objects are then not compared with the record).
-const digestsOf = (objects, types) => (types.some((type) => !(objects[type] instanceof Map)) ? null : types.flatMap((type) => [...objects[type].values()].map((row) => [row.id, hashValue(observationSignature(row))])))
+// The digests an observation compares for the objects of a place, `[[id, digest]]` (`[id, digest, earlierDigest]` for a pod or a wreck tied to a body or a Lagrange point, which was compared by its coordinates before, so a span observed then is the same object's), or null when a kind of the place was not read (the objects are then not compared with the record).
+const digestOf = (row) => {
+  const signature = observationSignature(row)
+  const earlier = legacyObservationSignature(row)
+
+  return earlier === signature ? [row.id, hashValue(signature)] : [row.id, hashValue(signature), hashValue(earlier)]
+}
+
+const digestsOf = (objects, types) => (types.some((type) => !(objects[type] instanceof Map)) ? null : types.flatMap((type) => [...objects[type].values()].map(digestOf)))
 
 // The read state of the recovery ledger and what it shows, for a page that has a `loadErrors` record and wraps its reads in `tracked` (mixins/load-state.js). Nothing here writes the save: the statuses live in the scenario repository (utilities/recovery-ledger.js) and the observation choice in the settings (utilities/observations.js).
 export default {
@@ -212,6 +219,20 @@ export default {
       handler(prefix) {
         this.recoveryObserveMessage = ''
         this.recoveryObserveChoice = prefix && this.recoveryCampaignId ? PLACES.every((place) => observedKinds(this.config.store, this.recoveryCampaignId, this.RaceID).includes(place)) : false
+      },
+    },
+    // The statuses kept before a pod or a wreck was named by the point it is tied to take their new name once the objects of the save are read: the list reads them as held without it (`readRecovery`), the write makes it last when the object moves. A status kept at a later game time than this save is left for the save it was kept at, as it is not this save's to map. It writes the repository, never the save, and a window that cannot write leaves it for the next read.
+    recoveryContext: {
+      handler(context) {
+        if (!context || !this.recoveryRepository || !this.recoveryScope) {
+          return
+        }
+
+        migrateRecoveryRecords(this.recoveryRepository, this.recoveryScope, context).then((result) => {
+          if (result.changed) {
+            this.recoveryChanged()
+          }
+        })
       },
     },
   },

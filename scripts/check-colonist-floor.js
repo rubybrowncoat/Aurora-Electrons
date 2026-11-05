@@ -44,7 +44,7 @@ const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "",
 // The persisted view stood in by a module that records the fields a component declares, the table's among them, for a check of how the panel keeps its view.
 const RECORDER = 'export const oneOf = (values) => (value) => values.includes(value); export const tableView = (key, defaults) => ({ key, default: defaults, table: true }); export default (fields) => { globalThis.__persistedFields = fields; return { data: () => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field.default])) } }'
 const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
-const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set() }, state: { RaceNPR: false }, dispatch: async () => {} }
+const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} }
 
 let failures = 0
 let checks = 0

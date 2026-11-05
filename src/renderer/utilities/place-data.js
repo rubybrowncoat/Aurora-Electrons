@@ -163,8 +163,19 @@ order by FCT_ShipClass.Size desc`)).map((row) => {
   }
 })
 
+// The survivors of the race's own pod: its crew, and only its officers when an evacuation left no crew in it (`OwnCrew` 0 with `OwnOfficers` above 0); a crew count that is not stored leaves them not recorded.
+const survivorsOf = (row) => {
+  if (!Number.isFinite(row.OwnCrew)) {
+    return 'Survivors not recorded'
+  }
+
+  const officers = Number.isFinite(row.OwnOfficers) ? row.OwnOfficers : 0
+
+  return row.OwnCrew === 0 && officers > 0 ? `${officers} ${officers === 1 ? 'officer' : 'officers'} only` : `${row.OwnCrew} ${row.OwnCrew === 1 ? 'survivor' : 'survivors'}`
+}
+
 // The game lists every life pod of a system, whoever's it was: the race's own by ship name and survivors, another's by the class name its intelligence holds and the pod's id. The name and the crew of a foreign pod are never read.
-const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, (FCT_Lifepods.RaceID = ${context.RaceID}) as Own, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
+const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, (FCT_Lifepods.RaceID = ${context.RaceID}) as Own, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew, case when FCT_Lifepods.RaceID = ${context.RaceID} then (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) end as OwnOfficers, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Lifepods
 ${known('FCT_Lifepods', context)}
 left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID and FCT_AlienClass.ViewRaceID = ${context.RaceID} and FCT_AlienClass.GameID = FCT_Lifepods.GameID
@@ -179,7 +190,7 @@ order by OwnShipName, FCT_Lifepods.LifepodID`)).map((row) => {
     kind: 'lifepod',
     group: 'lifepod',
     name,
-    subtitle: `${own ? (Number.isFinite(row.OwnCrew) ? `${row.OwnCrew} ${row.OwnCrew === 1 ? 'survivor' : 'survivors'}` : 'Survivors not recorded') : 'Alien life pods'} in ${row.SystemName}`,
+    subtitle: `${own ? survivorsOf(row) : 'Alien life pods'} in ${row.SystemName}`,
     icon: groupIcon('lifepod'),
     SystemID: row.SystemID,
     Xcor: row.Xcor,

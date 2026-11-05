@@ -799,7 +799,8 @@ const alteredChecks = async (capabilities, source) => {
     const coreReport = core.reports['/commanders']
 
     check('altered: FCT_Commander.RetireStatus dropped makes /commanders unsupported, naming the field', coreReport.status === 'unsupported' && coreReport.missing.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus')), JSON.stringify(coreReport.missing))
-    check('altered: FCT_Commander.RetireStatus dropped does not make an unrelated report unsupported', ['/finances', '/routes', '/log', '/propulsion', '/map', '/survey-progress', '/lagrange'].every((route) => core.reports[route].status === 'supported'), notSupported(core).map((report) => report.route).join(', '))
+    check('altered: FCT_Commander.RetireStatus dropped does not make an unrelated report unsupported', ['/finances', '/log', '/propulsion', '/lagrange'].every((route) => core.reports[route].status === 'supported'), notSupported(core).map((report) => report.route).join(', '))
+    check('altered: FCT_Commander.RetireStatus dropped degrades the Galaxy Map and Survey Progress by their recovery reads (the officers aboard a pod) and leaves them in service, and makes Route Finder unsupported by its small places read, which counts the officers aboard a life pod', ['/map', '/survey-progress'].every((route) => core.reports[route].status === 'degraded' && core.reports[route].missing.length === 0 && core.reports[route].degraded.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus'))) && core.reports['/routes'].status === 'unsupported' && core.reports['/routes'].missing.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus')), ['/map', '/survey-progress', '/routes'].map((route) => `${route} ${core.reports[route].status} ${JSON.stringify(core.reports[route].missing.concat(core.reports[route].degraded).map((entry) => entry.key))}`).join('; '))
 
     // The ground formations read the race's ranks for a formation's echelon (AE-309-05), so the map, which lists them, leaves service with the commanders' rank group; the other separate reports stay supported.
     check('altered: FCT_Ranks dropped degrades /commanders by the rank group, naming the table', table.reports['/commanders'].status === 'degraded' && table.reports['/commanders'].degraded.some((entry) => entry.key === 'rank' && entry.fields.includes('FCT_Ranks (table)')) && SEPARATE.filter((route) => route !== '/map').every((route) => table.reports[route].status === 'supported'), JSON.stringify([table.reports['/commanders'].degraded, notSupported(table).map((report) => report.route)]))
@@ -880,9 +881,10 @@ const alteredChecks = async (capabilities, source) => {
       }
     }
 
-    const xcorNamed = (result) => result.reports['/mineral-outlook'].status === 'unsupported' && result.reports['/mineral-outlook'].missing.some((entry) => entry.fields.includes('FCT_SystemBody.Xcor'))
+    // The deficit sites are named by their own input (`DeficitSites`): the production modifiers of the page read the position too since the fleet-at-colony rule tests it (AE-309-01), so the column alone does not tell the inputs apart.
+    const xcorNamed = (result) => result.reports['/mineral-outlook'].status === 'unsupported' && result.reports['/mineral-outlook'].missing.some((entry) => entry.key === 'DeficitSites' && entry.fields.includes('FCT_SystemBody.Xcor'))
 
-    check('altered: FCT_SystemBody.Xcor dropped (the position the deficit sites are placed by) makes /mineral-outlook unsupported, naming the column, as its deficit sites are a required input', xcorNamed(noPosition), `${noPosition.reports['/mineral-outlook'].status}`)
+    check('altered: FCT_SystemBody.Xcor dropped (the position the deficit sites are placed by) makes /mineral-outlook unsupported, naming the column under the deficit sites, as they are a required input', xcorNamed(noPosition), JSON.stringify([noPosition.reports['/mineral-outlook'].status, noPosition.reports['/mineral-outlook'].missing]))
 
     if (mutating()) {
       const directory = mutatedCopy('utilities/capabilities.js', "BodyDetail: 'the body detail', DeficitSites: 'the deficit sites'", "BodyDetail: 'the body detail'")
@@ -890,7 +892,7 @@ const alteredChecks = async (capabilities, source) => {
       try {
         const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
 
-        check('altered: a copy of the code in which the deficit sites input is not kept leaves /mineral-outlook ' + (await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].status + ' on a save without the position, as the check above must notice', !xcorNamed((await preflightOf(mutant, noXcor)).result))
+        check('altered: a copy of the code in which the deficit sites input is not kept leaves /mineral-outlook ' + (await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].status + ' on a save without the position with no deficit sites entry, as the check above must notice', !xcorNamed((await preflightOf(mutant, noXcor)).result), JSON.stringify((await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].missing))
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
@@ -1208,6 +1210,8 @@ const SHARE_SOURCES = {
   '/mineral-outlook': 'pages/mineral-outlook.vue',
   '/habitability': 'utilities/colonization-data.js',
   '/logistics': 'pages/logistics.vue',
+  '/colony-outlook': 'mixins/production-modifiers.js',
+  '/shipyards': 'mixins/production-modifiers.js',
   '/survey-progress': 'pages/survey-progress.vue',
   '/hauling': 'utilities/handling-support.js',
   '/information': 'utilities/handling-support.js',
@@ -1722,7 +1726,7 @@ const dependencyChecks = async (capabilities, source, scan) => {
     const results = await dependencyResults(capabilities, cases)
 
     results.forEach(([statement, held, detail]) => check(`dependencies: ${statement}`, held, detail))
-    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/habitability', '/logistics', '/mineral-outlook', '/production'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
+    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/colony-outlook', '/habitability', '/logistics', '/mineral-outlook', '/production', '/shipyards'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
 
     if (mutating()) {
       const [label, file, from, to] = UNION
