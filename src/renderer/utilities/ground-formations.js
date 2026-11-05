@@ -10,6 +10,7 @@
 //
 // The game keeps a formation's parent link when it embarks or moves, so a formation may sit at another place than its parent. The game counts a formation's size as the sum of its classes' size times units; the model reports that sum as `mass` without rounding.
 
+import { classTraits, organise, settingsOf } from './ground-organisation'
 import { HOLDER_COLUMNS, holderIndex, holderSql, postCounts, postOf, postProblems, strayHolders } from './post-holders'
 
 // The post type of a commander who serves in a ground formation (FCT_Commander.CommandType).
@@ -29,6 +30,17 @@ export const GROUND_FORMATION_COLUMNS = {
   FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'GameID', 'Name'],
 }
 
+// The columns the game's organisation of a formation (its role, symbol, echelon and the naming of its template) starts from, read as one optional group: a save that lacks any of them still gives the rest of the model, and the organisation then reads as unknown and names what is missing.
+export const GROUND_ORGANISATION_COLUMNS = {
+  FCT_GroundUnitFormation: ['RequiredRank', 'FormationSymbol'],
+  FCT_GroundUnitFormationTemplate: ['NameThemeID', 'RandomFormationNameFromTheme', 'SymbolType', 'EchelonLevel'],
+  FCT_GroundUnitClass: ['BaseType', 'HQCapacity'],
+  DIM_GroundComponentType: ['LogisticsPoints', 'BombardmentWeapon', 'AAWeapon', 'Construction', 'Decontamination'],
+  FCT_Ranks: ['RankID', 'GameID', 'RaceID', 'Priority', 'RankType'],
+  DIM_NamingThemeTypes: ['ThemeID', 'Description'],
+  DIM_NamingTheme: ['NameThemeID'],
+}
+
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 const isCount = (value) => isNumber(value) && value >= 0
 const isId = (value) => Number.isInteger(value) && value > 0
@@ -45,24 +57,27 @@ const OWN_TEMPLATES = (g, r) => `select FCT_GroundUnitFormation.OriginalTemplate
 const OWN_SHIPS = (g, r) => `select FCT_GroundUnitFormation.ShipID from FCT_GroundUnitFormation where FCT_GroundUnitFormation.GameID = ${g} and FCT_GroundUnitFormation.RaceID = ${r} and FCT_GroundUnitFormation.ShipID > 0`
 const CARRIERS = (g, r) => `select FCT_Ship.ShipID from FCT_Ship where FCT_Ship.ShipID in (${OWN_SHIPS(g, r)}) union select FCT_Ship.MothershipID from FCT_Ship where FCT_Ship.ShipID in (${OWN_SHIPS(g, r)}) and FCT_Ship.MothershipID > 0`
 
-// The statements that read the model for a game and a race, each a SELECT, by name. Rows are found by their ids, which no two games share, except the templates, which are read for the game. Nothing is filtered by an element's own game, so no stored element is lost. `obsolete` is whether the save has the template's Obsolete column, `stoWeapon` whether it has the class's STOWeapon column and `stoComponent` whether it has the component type's STO column; an earlier save may lack any of them, and the figure then reads null (not known).
-export const groundFormationSql = ({ GameID, RaceID, obsolete = true, stoWeapon = true, stoComponent = true }) => {
+// The statements that read the model for a game and a race, each a SELECT, by name. Rows are found by their ids, which no two games share, except the templates, which are read for the game. Nothing is filtered by an element's own game, so no stored element is lost. `obsolete` is whether the save has the template's Obsolete column, `stoWeapon` whether it has the class's STOWeapon column and `stoComponent` whether it has the component type's STO column; an earlier save may lack any of them, and the figure then reads null (not known). `organisation` is whether the save has every column of GROUND_ORGANISATION_COLUMNS: when it has not, those columns read null and the ranks, themes and theme names read nothing.
+export const groundFormationSql = ({ GameID, RaceID, obsolete = true, stoWeapon = true, stoComponent = true, organisation = true }) => {
   requireIds({ GameID, RaceID })
 
   const g = GameID
   const r = RaceID
 
   return {
-    formations: `select FCT_GroundUnitFormation.FormationID, FCT_GroundUnitFormation.Name, FCT_GroundUnitFormation.Abbreviation, FCT_GroundUnitFormation.RaceID, FCT_GroundUnitFormation.GameID, FCT_GroundUnitFormation.OriginalTemplateID, FCT_GroundUnitFormation.ReplacementTemplateID, FCT_GroundUnitFormation.PopulationID, FCT_GroundUnitFormation.ShipID, FCT_GroundUnitFormation.ParentFormationID from FCT_GroundUnitFormation where FCT_GroundUnitFormation.GameID = ${g} and FCT_GroundUnitFormation.RaceID = ${r} order by FCT_GroundUnitFormation.FormationID`,
+    formations: `select FCT_GroundUnitFormation.FormationID, FCT_GroundUnitFormation.Name, FCT_GroundUnitFormation.Abbreviation, FCT_GroundUnitFormation.RaceID, FCT_GroundUnitFormation.GameID, FCT_GroundUnitFormation.OriginalTemplateID, FCT_GroundUnitFormation.ReplacementTemplateID, FCT_GroundUnitFormation.PopulationID, FCT_GroundUnitFormation.ShipID, FCT_GroundUnitFormation.ParentFormationID, ${organisation ? 'FCT_GroundUnitFormation.RequiredRank' : 'null as RequiredRank'}, ${organisation ? 'FCT_GroundUnitFormation.FormationSymbol' : 'null as FormationSymbol'} from FCT_GroundUnitFormation where FCT_GroundUnitFormation.GameID = ${g} and FCT_GroundUnitFormation.RaceID = ${r} order by FCT_GroundUnitFormation.FormationID`,
     outsideParents: `select FCT_GroundUnitFormation.FormationID, FCT_GroundUnitFormation.RaceID, FCT_GroundUnitFormation.GameID from FCT_GroundUnitFormation where FCT_GroundUnitFormation.FormationID in (select FCT_GroundUnitFormation.ParentFormationID from FCT_GroundUnitFormation where FCT_GroundUnitFormation.GameID = ${g} and FCT_GroundUnitFormation.RaceID = ${r} and FCT_GroundUnitFormation.ParentFormationID > 0) and not (FCT_GroundUnitFormation.GameID = ${g} and FCT_GroundUnitFormation.RaceID = ${r})`,
     elements: `select FCT_GroundUnitFormationElement.rowid as RowID, FCT_GroundUnitFormationElement.ElementID, FCT_GroundUnitFormationElement.FormationID, FCT_GroundUnitFormationElement.ClassID, FCT_GroundUnitFormationElement.SpeciesID, FCT_GroundUnitFormationElement.Units from FCT_GroundUnitFormationElement where FCT_GroundUnitFormationElement.FormationID in (${OWN(g, r)}) order by FCT_GroundUnitFormationElement.FormationID, FCT_GroundUnitFormationElement.ElementID, FCT_GroundUnitFormationElement.rowid`,
-    classes: `select FCT_GroundUnitClass.GroundUnitClassID, FCT_GroundUnitClass.ClassName, FCT_GroundUnitClass.Size, FCT_GroundUnitClass.ComponentA, FCT_GroundUnitClass.ComponentB, FCT_GroundUnitClass.ComponentC, FCT_GroundUnitClass.ComponentD, ${stoWeapon ? 'FCT_GroundUnitClass.STOWeapon' : 'null as STOWeapon'} from FCT_GroundUnitClass where FCT_GroundUnitClass.GroundUnitClassID in (select FCT_GroundUnitFormationElement.ClassID from FCT_GroundUnitFormationElement where FCT_GroundUnitFormationElement.FormationID in (${OWN(g, r)})) or FCT_GroundUnitClass.GroundUnitClassID in (select FCT_GroundUnitFormationElementTemplates.ClassID from FCT_GroundUnitFormationElementTemplates where FCT_GroundUnitFormationElementTemplates.GameID = ${g} and FCT_GroundUnitFormationElementTemplates.FormationTemplateID in (${OWN_TEMPLATES(g, r)}))`,
-    components: `select DIM_GroundComponentType.ComponentTypeID, DIM_GroundComponentType.ComponentName, DIM_GroundComponentType.Geosurvey, DIM_GroundComponentType.Xenoarchaeology, ${stoComponent ? 'DIM_GroundComponentType.STO' : 'null as STO'} from DIM_GroundComponentType`,
-    templates: `select FCT_GroundUnitFormationTemplate.TemplateID, FCT_GroundUnitFormationTemplate.RaceID, FCT_GroundUnitFormationTemplate.Name, FCT_GroundUnitFormationTemplate.Abbreviation, ${obsolete ? 'FCT_GroundUnitFormationTemplate.Obsolete' : 'null as Obsolete'} from FCT_GroundUnitFormationTemplate where FCT_GroundUnitFormationTemplate.GameID = ${g} and FCT_GroundUnitFormationTemplate.TemplateID in (${OWN_TEMPLATES(g, r)})`,
+    classes: `select FCT_GroundUnitClass.GroundUnitClassID, FCT_GroundUnitClass.ClassName, FCT_GroundUnitClass.Size, FCT_GroundUnitClass.ComponentA, FCT_GroundUnitClass.ComponentB, FCT_GroundUnitClass.ComponentC, FCT_GroundUnitClass.ComponentD, ${stoWeapon ? 'FCT_GroundUnitClass.STOWeapon' : 'null as STOWeapon'}, ${organisation ? 'FCT_GroundUnitClass.BaseType' : 'null as BaseType'}, ${organisation ? 'FCT_GroundUnitClass.HQCapacity' : 'null as HQCapacity'} from FCT_GroundUnitClass where FCT_GroundUnitClass.GroundUnitClassID in (select FCT_GroundUnitFormationElement.ClassID from FCT_GroundUnitFormationElement where FCT_GroundUnitFormationElement.FormationID in (${OWN(g, r)})) or FCT_GroundUnitClass.GroundUnitClassID in (select FCT_GroundUnitFormationElementTemplates.ClassID from FCT_GroundUnitFormationElementTemplates where FCT_GroundUnitFormationElementTemplates.GameID = ${g} and FCT_GroundUnitFormationElementTemplates.FormationTemplateID in (${OWN_TEMPLATES(g, r)}))`,
+    components: `select DIM_GroundComponentType.ComponentTypeID, DIM_GroundComponentType.ComponentName, DIM_GroundComponentType.Geosurvey, DIM_GroundComponentType.Xenoarchaeology, ${stoComponent ? 'DIM_GroundComponentType.STO' : 'null as STO'}, ${organisation ? 'DIM_GroundComponentType.LogisticsPoints' : 'null as LogisticsPoints'}, ${organisation ? 'DIM_GroundComponentType.BombardmentWeapon' : 'null as BombardmentWeapon'}, ${organisation ? 'DIM_GroundComponentType.AAWeapon' : 'null as AAWeapon'}, ${organisation ? 'DIM_GroundComponentType.Construction' : 'null as Construction'}, ${organisation ? 'DIM_GroundComponentType.Decontamination' : 'null as Decontamination'} from DIM_GroundComponentType`,
+    templates: `select FCT_GroundUnitFormationTemplate.TemplateID, FCT_GroundUnitFormationTemplate.RaceID, FCT_GroundUnitFormationTemplate.Name, FCT_GroundUnitFormationTemplate.Abbreviation, ${obsolete ? 'FCT_GroundUnitFormationTemplate.Obsolete' : 'null as Obsolete'}, ${organisation ? 'FCT_GroundUnitFormationTemplate.NameThemeID' : 'null as NameThemeID'}, ${organisation ? 'FCT_GroundUnitFormationTemplate.RandomFormationNameFromTheme' : 'null as RandomFormationNameFromTheme'}, ${organisation ? 'FCT_GroundUnitFormationTemplate.SymbolType' : 'null as SymbolType'}, ${organisation ? 'FCT_GroundUnitFormationTemplate.EchelonLevel' : 'null as EchelonLevel'} from FCT_GroundUnitFormationTemplate where FCT_GroundUnitFormationTemplate.GameID = ${g} and FCT_GroundUnitFormationTemplate.TemplateID in (${OWN_TEMPLATES(g, r)})`,
     templateElements: `select FCT_GroundUnitFormationElementTemplates.FormationTemplateID, FCT_GroundUnitFormationElementTemplates.ClassID, FCT_GroundUnitFormationElementTemplates.Units from FCT_GroundUnitFormationElementTemplates where FCT_GroundUnitFormationElementTemplates.GameID = ${g} and FCT_GroundUnitFormationElementTemplates.FormationTemplateID in (${OWN_TEMPLATES(g, r)})`,
     ships: `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.MothershipID from FCT_Ship where FCT_Ship.ShipID in (${CARRIERS(g, r)})`,
     fleets: `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.RaceID, FCT_Fleet.SystemID, FCT_Fleet.OrbitBodyID, FCT_RaceSysSurvey.Name as SystemName from FCT_Fleet left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = ${r} and FCT_RaceSysSurvey.GameID = ${g} where FCT_Fleet.FleetID in (select FCT_Ship.FleetID from FCT_Ship where FCT_Ship.ShipID in (${CARRIERS(g, r)}))`,
     populations: `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.RaceID, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_RaceSysSurvey.Name as SystemName from FCT_Population left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = ${r} and FCT_RaceSysSurvey.GameID = ${g} where FCT_Population.PopulationID in (select FCT_GroundUnitFormation.PopulationID from FCT_GroundUnitFormation where FCT_GroundUnitFormation.GameID = ${g} and FCT_GroundUnitFormation.RaceID = ${r} and FCT_GroundUnitFormation.PopulationID > 0)`,
+    ranks: organisation ? `select FCT_Ranks.RankID, FCT_Ranks.Priority, FCT_Ranks.RankType from FCT_Ranks where FCT_Ranks.GameID = ${g} and FCT_Ranks.RaceID = ${r}` : 'select 1 as RankID where 0',
+    themes: organisation ? 'select DIM_NamingThemeTypes.ThemeID, DIM_NamingThemeTypes.Description from DIM_NamingThemeTypes' : 'select 1 as ThemeID where 0',
+    themeNames: organisation ? `select DIM_NamingTheme.NameThemeID, count(*) as Names from DIM_NamingTheme where DIM_NamingTheme.NameThemeID in (select FCT_GroundUnitFormationTemplate.NameThemeID from FCT_GroundUnitFormationTemplate where FCT_GroundUnitFormationTemplate.TemplateID in (${OWN_TEMPLATES(g, r)}) and FCT_GroundUnitFormationTemplate.GameID = ${g}) group by DIM_NamingTheme.NameThemeID` : 'select 1 as NameThemeID where 0',
   }
 }
 
@@ -139,7 +154,7 @@ const classFigures = (row, components) => {
     return found ? true : known ? false : null
   }
 
-  return { size: isNumber(row.Size) && row.Size >= 0 ? row.Size : null, geo: sum('Geosurvey'), xeno: sum('Xenoarchaeology'), sto: stoOf(), unknown }
+  return { size: isNumber(row.Size) && row.Size >= 0 ? row.Size : null, geo: sum('Geosurvey'), xeno: sum('Xenoarchaeology'), sto: stoOf(), traits: classTraits(row, components), unknown }
 }
 
 // An element of a formation: its class, the class's size per unit and STO flag (null where the class or the figure is not stored) and its units (null where not stored).
@@ -178,8 +193,8 @@ const figure = (elements, classes, figures, pick) => {
   return { value: unknown.length ? null : value, from, unknown }
 }
 
-// The template a formation names, by its id: `none` (the id 0), `unknown` (the id is not stored as one), `missing`, `foreign` (of another race) or `found`. A found template lists its elements, each { classId, className, units, size, mass, sto } with the class's size per unit, the mass (units times size) and the STO flag of the class, each null where the save does not give it, and `mass`, the figure of the whole template (the same size and unknown rules as the mass of a formation's actual elements, so a class with no stored size, units that are not stored or a class that is not stored leaves it unknown). A template that lists no elements has no known mass. The other states have no element list and no mass.
-const templateRef = (id, templates, templateElements, classes, figures, { RaceID }) => {
+// The template a formation names, by its id: `none` (the id 0), `unknown` (the id is not stored as one), `missing`, `foreign` (of another race) or `found`. A found template lists its elements, each { classId, className, units, size, mass, sto } with the class's size per unit, the mass (units times size) and the STO flag of the class, each null where the save does not give it, and `mass`, the figure of the whole template (the same size and unknown rules as the mass of a formation's actual elements, so a class with no stored size, units that are not stored or a class that is not stored leaves it unknown). A template that lists no elements has no known mass. The other states have no element list and no mass. A found or foreign template also carries `settings`, its naming, symbol type and echelon as the save stores them (see settingsOf in ground-organisation.js): the game reads them from a template whatever race it belongs to.
+const templateRef = (id, templates, templateElements, classes, figures, { RaceID, themes, counts }) => {
   if (id === 0) {
     return { id: 0, state: 'none', name: null, abbreviation: null, obsolete: null, elements: null, mass: null }
   }
@@ -194,7 +209,7 @@ const templateRef = (id, templates, templateElements, classes, figures, { RaceID
     return { id, state: 'missing', name: null, abbreviation: null, obsolete: null, elements: null, mass: null }
   }
 
-  const base = { id, name: row.Name ?? null, abbreviation: row.Abbreviation ?? null, obsolete: row.Obsolete === undefined || row.Obsolete === null ? null : Boolean(row.Obsolete) }
+  const base = { id, name: row.Name ?? null, abbreviation: row.Abbreviation ?? null, obsolete: row.Obsolete === undefined || row.Obsolete === null ? null : Boolean(row.Obsolete), settings: settingsOf(row, themes, counts) }
 
   if (row.RaceID !== RaceID) {
     return { ...base, state: 'foreign', raceId: row.RaceID ?? null, elements: null, mass: null }
@@ -320,13 +335,14 @@ const emptyTree = () => ({ formations: 0, mass: { value: 0, unknownFormations: 0
 
 const noElements = () => ({ value: null, from: [], unknown: [{ elementId: null, classId: null, reason: 'the formation has no element rows' }] })
 
-// The model of a race's ground formations from the rows of `groundFormationSql` (the arrays `formations`, `outsideParents`, `elements`, `classes`, `components`, `templates`, `templateElements`, `ships`, `fleets` and `populations`; one that is left out is empty) and, optionally, the `commanders` of `holderSql` for the ground formation post (left out, the posts are unread). Gives { GameID, RaceID, formations, byId, roots, cycles, problems, summary, holders }:
+// The model of a race's ground formations from the rows of `groundFormationSql` (the arrays `formations`, `outsideParents`, `elements`, `classes`, `components`, `templates`, `templateElements`, `ships`, `fleets` and `populations`; one that is left out is empty) with, for the organisation of each formation, the arrays `ranks`, `themes` and `themeNames` and the object `organisation` ({ read, gaps }) of `readRows`, and, optionally, the `commanders` of `holderSql` for the ground formation post (left out, the posts are unread). Gives { GameID, RaceID, formations, byId, roots, cycles, problems, summary, holders, organisation }, where `organisation` is { read, gaps } as the loader read it and each formation entry has `organisation`, { role, symbol, echelon, template, storedSymbol } of ground-organisation.js (each of the first three a result of its rule, unavailable when the save lacks what it starts from):
 // - `formations` is one entry per row of the race, by id: { id, name, abbreviation, parent: { id, state, ... }, children (ids), anchor: { kind, id } (the top-level entry it hangs from: 'root', 'orphan', 'foreign', 'unknown' or 'cycle'), resolved (whether that top is a formation with no parent), depth, location, post (the commander who serves in the formation: { state: 'held' | 'shared' | 'vacant' | 'unknown' | 'unread', holders: [{ id, name }], unsettled }, from the rows `commanders` of `holderSql`; without them every post is `unread`), elements, mass, geo, xeno (each { value, from, unknown }), tree (the formation with everything below it: { formations, mass, geo, xeno }, each figure { value, unknownFormations } where value adds the known formations and unknownFormations counts those whose figure is unknown), templates: { original, replacement } (each { id, state: 'none' | 'found' | 'missing' | 'foreign' | 'unknown', name, abbreviation, obsolete, elements, mass }: a found template's elements are { classId, className, units, size, mass, sto } and its `mass` a figure { value, from, unknown } summed as the mass of actual elements is), problems }.
 // - `roots` are the ids of the top-level entries: formations with no parent, then orphans, then the rest by id, each once. Every formation is under exactly one of them.
 // - `cycles` are { id, members, cutAt }. `problems` is every problem of every formation, each { formationId, kind, message, ... }.
 // - `summary` reconciles with the rows: `formations` is the number of rows kept, `excluded` the rows given that are not the race's, and the totals of the race only. `summary.posts` counts the formations by the state of their post and `summary.strayHolders` the serving commanders whose formation is not one of the race's.
 export const buildGroundFormations = (rows, { GameID, RaceID }) => {
-  const { formations: formationRows = [], outsideParents = [], elements: elementRows = [], classes: classRows = [], components: componentRows = [], templates: templateRows = [], templateElements: templateElementRows = [], ships: shipRows = [], fleets: fleetRows = [], populations: populationRows = [], commanders: commanderRows } = rows
+  const { formations: formationRows = [], outsideParents = [], elements: elementRows = [], classes: classRows = [], components: componentRows = [], templates: templateRows = [], templateElements: templateElementRows = [], ships: shipRows = [], fleets: fleetRows = [], populations: populationRows = [], commanders: commanderRows, ranks: rankRows, themes: themeRows, themeNames: themeNameRows } = rows
+  const organisationGaps = rows.organisation ? rows.organisation.gaps : []
   const owned = []
   const duplicates = []
   const seenIds = new Set()
@@ -349,6 +365,7 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
   const classes = firstBy(classRows, 'GroundUnitClassID')
   const figures = new Map(Array.from(classes.entries()).map(([id, row]) => [id, classFigures(row, components)]))
   const templates = firstBy(templateRows, 'TemplateID', (row) => row.RaceID === RaceID)
+  const naming = { RaceID, themes: themeRows ? firstBy(themeRows, 'ThemeID') : null, counts: themeNameRows ? new Map(themeNameRows.map((row) => [row.NameThemeID, row.Names])) : null }
   const templateElements = new Map()
 
   templateElementRows.forEach((row) => {
@@ -427,7 +444,7 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
 
     const sized = items.length ? { mass: figure(items, classes, figures, 'size'), geo: figure(items, classes, figures, 'geo'), xeno: figure(items, classes, figures, 'xeno') } : { mass: noElements(), geo: noElements(), xeno: noElements() }
 
-    const refs = { original: templateRef(row.OriginalTemplateID, templates, templateElements, classes, figures, { RaceID }), replacement: templateRef(row.ReplacementTemplateID, templates, templateElements, classes, figures, { RaceID }) }
+    const refs = { original: templateRef(row.OriginalTemplateID, templates, templateElements, classes, figures, naming), replacement: templateRef(row.ReplacementTemplateID, templates, templateElements, classes, figures, naming) }
 
     ;['original', 'replacement'].forEach((which) => {
       if (refs[which].state === 'missing') {
@@ -489,6 +506,10 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
     })
   }
 
+  const ownedRows = new Map(owned.map((row) => [row.FormationID, row]))
+
+  organise({ order, rowOf: (id) => ownedRows.get(id), classes, figures, ranks: rankRows || [], ranksRead: Array.isArray(rankRows), gaps: organisationGaps })
+
   for (let index = order.length - 1; index >= 0; index--) {
     const node = order[index]
 
@@ -544,7 +565,7 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
     xeno: total('xeno'),
   }
 
-  return { GameID, RaceID, formations: list, byId: nodes, roots: topLevel.map((node) => node.id), cycles, problems, summary, holders: { read: holders !== null, missing: [] } }
+  return { GameID, RaceID, formations: list, byId: nodes, roots: topLevel.map((node) => node.id), cycles, problems, summary, holders: { read: holders !== null, missing: [] }, organisation: { read: organisationGaps.length === 0, gaps: organisationGaps } }
 }
 
 // The roles a formation is told apart by, from the model's own ratings: `geo` and `xeno` when the rating of that kind is above 0, `other` when both are 0. A formation with both ratings is in both roles. A role is null where an unknown rating leaves it undecided (a formation with no proven role and an unknown rating is `undetermined`, with no role to count under).
@@ -666,7 +687,7 @@ export const missingColumns = async (database, wanted = GROUND_FORMATION_COLUMNS
   return missing
 }
 
-// The rows of the formations of a game and a race, with SELECT statements only: { rows } or, for a save that lacks a table or column of GROUND_FORMATION_COLUMNS, { missing }. The template's Obsolete column is read when the save has it and is null otherwise.
+// The rows of the formations of a game and a race, with SELECT statements only: { rows } or, for a save that lacks a table or column of GROUND_FORMATION_COLUMNS, { missing }. The template's Obsolete column is read when the save has it and is null otherwise. `rows.organisation` is { read, gaps }: whether the save has every column of GROUND_ORGANISATION_COLUMNS and, when it has not, which it lacks.
 const readRows = async (database, { GameID, RaceID }) => {
   requireIds({ GameID, RaceID })
 
@@ -679,12 +700,15 @@ const readRows = async (database, { GameID, RaceID }) => {
   const obsolete = (await columnsOf(database, 'FCT_GroundUnitFormationTemplate')).has('Obsolete')
   const stoWeapon = (await columnsOf(database, 'FCT_GroundUnitClass')).has('STOWeapon')
   const stoComponent = (await columnsOf(database, 'DIM_GroundComponentType')).has('STO')
-  const statements = groundFormationSql({ GameID, RaceID, obsolete, stoWeapon, stoComponent })
+  const gaps = await missingColumns(database, GROUND_ORGANISATION_COLUMNS)
+  const statements = groundFormationSql({ GameID, RaceID, obsolete, stoWeapon, stoComponent, organisation: !gaps.length })
   const rows = {}
 
   for (const [name, sql] of Object.entries(statements)) {
     ;[rows[name]] = await database.query(sql)
   }
+
+  rows.organisation = { read: !gaps.length, gaps }
 
   return { rows }
 }

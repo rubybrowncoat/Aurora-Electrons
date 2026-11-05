@@ -49,12 +49,12 @@ const heldBy = (node) => {
   return 'Nothing stored'
 }
 
-// One row per formation of the model, once, for the table: the formation, its place (`formationPlace`: remote true, false or null; the system when known; the reasons when not), its roles and the ratings behind them (null where unknown).
+// One row per formation of the model, once, for the table: the formation, its place (`formationPlace`: remote true, false or null; the system when known; the reasons when not), its roles and the ratings behind them (null where unknown), and its `organisation` (the game's role, symbol and echelon and the naming of its template, from utilities/ground-organisation.js).
 export const formationRows = (model) => model.formations.map((node) => {
   const place = formationPlace(node, model)
   const roles = formationRoles(node)
 
-  return { id: node.id, name: node.name || `Formation ${node.id}`, abbreviation: node.abbreviation, remote: place.remote, where: WHERE_TEXT[place.remote], kind: place.kind, heldBy: heldBy(node), system: place.system, systemName: place.system ? place.system.name : '', reasons: place.reasons, roles, roleLabel: roleLabel(roles), geo: node.geo.value, xeno: node.xeno.value, mass: node.mass.value }
+  return { id: node.id, name: node.name || `Formation ${node.id}`, abbreviation: node.abbreviation, remote: place.remote, where: WHERE_TEXT[place.remote], kind: place.kind, heldBy: heldBy(node), system: place.system, systemName: place.system ? place.system.name : '', reasons: place.reasons, roles, roleLabel: roleLabel(roles), geo: node.geo.value, xeno: node.xeno.value, mass: node.mass.value, organisation: node.organisation }
 })
 
 // The rows the table shows: the selected roles, and with `remoteOnly` the formations that are remote or not known not to be (a formation whose colony the save does not hold stays visible, with its reason).

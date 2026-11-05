@@ -801,7 +801,9 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_Commander.RetireStatus dropped makes /commanders unsupported, naming the field', coreReport.status === 'unsupported' && coreReport.missing.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus')), JSON.stringify(coreReport.missing))
     check('altered: FCT_Commander.RetireStatus dropped does not make an unrelated report unsupported', ['/finances', '/routes', '/log', '/propulsion', '/map', '/survey-progress', '/lagrange'].every((route) => core.reports[route].status === 'supported'), notSupported(core).map((report) => report.route).join(', '))
 
-    check('altered: FCT_Ranks dropped degrades /commanders by the rank group, naming the table', table.reports['/commanders'].status === 'degraded' && table.reports['/commanders'].degraded.some((entry) => entry.key === 'rank' && entry.fields.includes('FCT_Ranks (table)')) && SEPARATE.every((route) => table.reports[route].status === 'supported'), JSON.stringify(table.reports['/commanders'].degraded))
+    // The ground formations read the race's ranks for a formation's echelon (AE-309-05), so the map, which lists them, leaves service with the commanders' rank group; the other separate reports stay supported.
+    check('altered: FCT_Ranks dropped degrades /commanders by the rank group, naming the table', table.reports['/commanders'].status === 'degraded' && table.reports['/commanders'].degraded.some((entry) => entry.key === 'rank' && entry.fields.includes('FCT_Ranks (table)')) && SEPARATE.filter((route) => route !== '/map').every((route) => table.reports[route].status === 'supported'), JSON.stringify([table.reports['/commanders'].degraded, notSupported(table).map((report) => report.route)]))
+    check('altered: FCT_Ranks dropped leaves /map out of service by the ground formations\' rank read, naming the table', table.reports['/map'].status !== 'supported' && [...table.reports['/map'].missing, ...table.reports['/map'].degraded].some((entry) => entry.fields.includes('FCT_Ranks (table)')), JSON.stringify([table.reports['/map'].status, table.reports['/map'].missing, table.reports['/map'].degraded]))
     check('altered: FCT_Species.GraduationAge dropped degrades /commanders by the age group only', age.reports['/commanders'].status === 'degraded' && age.reports['/commanders'].groups.age === false && age.reports['/commanders'].groups.rank === true && unrelated(age, '/commanders'), JSON.stringify(age.reports['/commanders']))
 
     check('altered: a renamed bonus (6) fails its lookup instead of mapping silently', failedGates(rename).join() === 'bonus 6' && /Mineral Extraction/.test(rename.gates.bonuses[6].inputs.missing.join()), failedGates(rename).join())
@@ -967,21 +969,21 @@ const alteredChecks = async (capabilities, source) => {
       check('altered: a registry that requires the observation read of /survey-progress fails the check that leaves /survey-progress in service', surveyRequired.text !== registryText && !observationOnly((await preflightOf(surveyRequired.registry, noUnits)).result, 'FCT_GroundUnitFormationElement.Units'))
     }
 
-    // The optional reads of Survey Progress (the ruins, the ancient constructs, the troop ships): a save without what one reads leaves the page in service with that input degraded, and the page then marks the work it cannot tell as unknown. Each case drops what only that input reads.
+    // The optional reads of Survey Progress (the ruins, the ancient constructs, the troop ships): a save without what one reads leaves the page in service with that input degraded, and the page then marks the work it cannot tell as unknown. Each case drops what only that input reads, but the headquarters capacity, which the formations read too for the headquarters symbol (AE-309-05): that case names the inputs it degrades besides.
     const SURVEY_OPTIONAL = [
       ['FCT_AncientConstruct.Active dropped', noConstructColumn, 'constructSites', 'FCT_AncientConstruct.Active'],
       ['FCT_AncientConstruct dropped', noConstructTable, 'constructSites', 'FCT_AncientConstruct (table)'],
       ['FCT_KnownRuinRace dropped', noRuinTable, 'ruinSites', 'FCT_KnownRuinRace (table)'],
       ['FCT_ShipClass.TroopCapacity dropped', noTroopColumn, 'troopBays', 'FCT_ShipClass.TroopCapacity'],
-      ['FCT_GroundUnitClass.HQCapacity dropped', noHeadquarters, 'groundCommanders', 'FCT_GroundUnitClass.HQCapacity'],
+      ['FCT_GroundUnitClass.HQCapacity dropped', noHeadquarters, 'groundCommanders', 'FCT_GroundUnitClass.HQCapacity', ['formations']],
     ]
     const surveyReport = async (capabilitiesModule, file) => (await preflightOf(capabilitiesModule, file)).result.reports['/survey-progress']
-    const surveyKept = (report, key, field) => report.status === 'degraded' && report.missing.length === 0 && report.degraded.length === 1 && report.degraded[0].key === key && report.degraded[0].fields.includes(field)
+    const surveyKept = (report, key, field, also = []) => report.status === 'degraded' && report.missing.length === 0 && report.degraded.map((entry) => entry.key).sort().join() === [key, ...also].sort().join() && report.degraded.every((entry) => entry.fields.includes(field))
 
-    for (const [label, file, key, field] of SURVEY_OPTIONAL) {
+    for (const [label, file, key, field, also = []] of SURVEY_OPTIONAL) {
       const report = await surveyReport(capabilities, file)
 
-      check(`altered: ${label} degrades /survey-progress by its ${key} input only and leaves the page in service`, surveyKept(report, key, field), JSON.stringify([report.status, report.missing, report.degraded]))
+      check(`altered: ${label} degrades /survey-progress by its ${[key, ...also].join(' and ')} input${also.length ? 's' : ''} only and leaves the page in service`, surveyKept(report, key, field, also), JSON.stringify([report.status, report.missing, report.degraded]))
     }
 
     // The planted faults: an input of the page that is not optional makes the save without it unsupported, and the layout then withholds the whole page.
@@ -991,10 +993,10 @@ const alteredChecks = async (capabilities, source) => {
 
         try {
           const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
-          const [, file, , field] = SURVEY_OPTIONAL.find((entry) => entry[2] === key)
+          const [, file, , field, also = []] = SURVEY_OPTIONAL.find((entry) => entry[2] === key)
           const report = await surveyReport(broken, file)
 
-          check(`altered: a /survey-progress that required ${key} would be unsupported on a save without it (the planted fault the checks above must fail)`, !surveyKept(report, key, field) && report.status === 'unsupported', report.status)
+          check(`altered: a /survey-progress that required ${key} would be unsupported on a save without it (the planted fault the checks above must fail)`, !surveyKept(report, key, field, also) && report.status === 'unsupported', report.status)
         } finally {
           fs.rmSync(faulty, { recursive: true, force: true })
         }
@@ -1749,10 +1751,9 @@ const dependencyChecks = async (capabilities, source, scan) => {
 
 // The columns a built-by-name read stands for (`MARKER_COLUMNS`) are the lists the pages build them from: the minerals of utilities/minerals.js, the command-type shares of utilities/naval-admins.js.
 const markerChecks = async (capabilities) => {
-  const { minerals } = await loadUtilities(['minerals'], { stubs: STUBS })
+  const { minerals, 'naval-admins': navalAdmins } = await loadUtilities(['minerals', 'naval-admins'], { stubs: STUBS })
   const names = minerals.MINERALS.map((mineral) => mineral.name)
-  const shares = /const SHARES = \[([^\]]*)\]/.exec(fs.readFileSync(path.join(rendererDirectory, 'utilities', 'naval-admins.js'), 'utf8'))
-  const listed = shares ? shares[1].split(',').map((name) => name.trim().replace(/'/g, '')) : []
+  const listed = [...new Set(Object.values(navalAdmins.NAVAL_ADMIN_SHARES).flat())].sort()
 
   ;['FCT_Population', 'FCT_IndustrialProjects', 'FCT_ShipyardTask', 'FCT_MassDriverPackets', 'FCT_ShipDesignComponents'].forEach((table) => check(`registry: the built-by-name columns of ${table} are the minerals`, capabilities.MARKER_COLUMNS[table].join() === names.join()))
 
@@ -1760,7 +1761,7 @@ const markerChecks = async (capabilities) => {
 
   check('registry: a `Reserve*` marker stands for the reserve of each mineral, and the bare marker beside it for the minerals only', Boolean(reserves) && reserves['Reserve*'].join() === names.map((name) => `Reserve${name}`).join() && reserves['*'].join() === names.join(), JSON.stringify(reserves))
   check('registry: the colony stockpiles are no built-by-name column, an input that reads them names them', !capabilities.MARKER_COLUMNS.FCT_Population.includes('FuelStockpile') && !capabilities.MARKER_COLUMNS.FCT_Population.includes('MaintenanceStockpile'))
-  check('registry: the built-by-name columns of DIM_NavalAdminCommandType are the command-type shares', listed.length > 0 && capabilities.MARKER_COLUMNS.DIM_NavalAdminCommandType.join() === listed.join() && capabilities.SHARE_NAMES.join() === listed.join(), listed.join())
+  check('registry: the built-by-name columns of DIM_NavalAdminCommandType are the command-type shares', listed.length > 0 && [...capabilities.MARKER_COLUMNS.DIM_NavalAdminCommandType].sort().join() === listed.join() && [...capabilities.SHARE_NAMES].sort().join() === listed.join(), listed.join())
 }
 
 // The Aurora line and the formula version of a save of the line and of its altered copies, on a save of the line itself: a save of a 3.1 shape is of the 3.1 line with none of the signature missing and states 3.1.x; a copy without the seven columns Aurora 3.0 added is refused as a save from before 3.0 and states no formula version, naming all seven; a copy without some of them is still of the line, naming those it lacks, and states no formula version either, naming the same; a file without FCT_Game is no Aurora save and states none; a copy whose surviving signature columns are all outside FCT_Game still states the version, so the direct loader is shown to read every table of the signature. The real saves of the line are checked by `realSaveChecks`; these are the copies, made from the shipped 3.1.0 database, which is a save of the line.

@@ -353,8 +353,6 @@ export const DECLARED = Object.freeze([
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-07', table: 'FCT_ShipyardTask', columns: Object.freeze(['NumShips']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-13', table: 'FCT_MissileType', columns: Object.freeze(['Lurker']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-304-01', table: 'FCT_AlienClass', columns: Object.freeze(['AlienClassType']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-05', table: 'FCT_GroundUnitFormation', columns: Object.freeze(['FormationSymbol']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-05', table: 'FCT_GroundUnitFormationTemplate', columns: Object.freeze(['NameThemeID', 'RandomFormationNameFromTheme', 'SymbolType', 'EchelonLevel']) }),
 ])
 
 // The Aurora line the app is for, as its major and minor ('3.1'): the stated formula version without its patch.

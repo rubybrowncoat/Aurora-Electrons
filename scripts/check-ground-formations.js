@@ -473,7 +473,7 @@ const nullInputData = () => {
 }
 
 const WRITES = /\b(insert|update|delete|drop|alter|create|attach|detach|vacuum|reindex|replace)\b|;/i
-const STATEMENT_NAMES = ['classes', 'components', 'elements', 'fleets', 'formations', 'outsideParents', 'populations', 'ships', 'templateElements', 'templates']
+const STATEMENT_NAMES = ['classes', 'components', 'elements', 'fleets', 'formations', 'outsideParents', 'populations', 'ranks', 'ships', 'templateElements', 'templates', 'themeNames', 'themes']
 
 // The results of the statement and loader checks on a module.
 const databaseResults = async (mod) => {
