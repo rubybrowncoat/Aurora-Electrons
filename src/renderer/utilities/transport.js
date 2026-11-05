@@ -23,7 +23,7 @@ const LOAD_CARGO = 62
 const LOAD_COLONISTS = 4
 const UNLOAD_CARGO = 63
 const UNLOAD_COLONISTS = 6
-// A class of this size (in hull spaces, 500 t) or less lands on a colony: its own loading strength is 1 whatever bays it has. The limit is inclusive.
+// A class of this size (in hull spaces, 500 t) or less lands on a colony: its own loading strength is 1 whatever bays it has. The limit is inclusive. The game source keeps it at 10 (the shuttle branch of `Ship.GetCargoShuttleTransferMultiplier`); the light naval limit of 20 hull spaces is a separate rule and does not move it.
 const SMALL_CRAFT_SIZE = 10
 const TONNES_PER_HULL_SPACE = 50
 // DIM_ComponentType: Cargo Shuttle Bay.
@@ -52,7 +52,7 @@ registerRule({
   units: 'HS',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size'],
-  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the rule and by the creator\'s public clarification of 500 t. A later release is said to raise the limit to 1000 t, which is not modelled.',
+  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the rule and by the creator\'s public clarification of 500 t. The source of the later game keeps the 10 hull space branch of the shuttle rule (a class of 10 hull spaces or less takes the race\'s loading modifier as its own strength, a larger one its undamaged bays\' strength times it), but its helper that adds up a ship\'s bays returns 1 for a ship with none, so a bayless ship has a base of one there, not 0. Whether a bayless ship over 10 hull spaces may still load at a colony without a spaceport or cargo shuttle station is not settled, and this rule is registered for the earlier line only. The 1000 t limit of the later patch notes is not what the source does: its shuttle limit is 10 hull spaces, and 20 hull spaces is the light naval classification limit.',
 })
 
 registerRule({
@@ -175,7 +175,7 @@ export const UNVERIFIED_VERSION = 'the landing and shuttle rules, though the sav
 // The sentence a note states when the save does not state its game rules, or an empty text when it does.
 export const describeFormulaVersion = (version) => (version ? '' : 'The save does not state which game rules it was played under, so the landing rule is not verified against the save.')
 
-// The largest craft, in hull spaces, that lands at a colony and loads with a strength of 1: the rule's own limit when it holds for the version, null when the version is not known or the rule is not verified for it (3.0 is said publicly to land 1000 t; that is not modelled).
+// The largest craft, in hull spaces, that lands at a colony and loads with a strength of 1: the rule's own limit when it holds for the version, null when the version is not known or the rule is not verified for it (the patch notes' 1000 t is not the game source's shuttle limit, which stays at 10 hull spaces, and whether a bayless ship over it may load in the later game is not settled).
 export const landingThreshold = (version) => (ruleSupports('transport.landingThreshold', version) ? SMALL_CRAFT_SIZE : null)
 
 // What kind of transfer an order is: 'cargo' (minerals, installations and colonists, which the shuttle rules govern), 'troops' (ground units, which they don't), 'ship-to-ship' (fuel, supplies or cargo handed to another fleet, which need bays on the ship or the receiving fleet and give a small craft no landing exemption), or null (not a transfer).

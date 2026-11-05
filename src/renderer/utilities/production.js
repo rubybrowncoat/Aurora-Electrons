@@ -1,4 +1,4 @@
-// The calculations behind the Production page: what each colony can build, research and train, what is idle, and when each job finishes. Every figure is a provenance result (utilities/provenance.js): a missing input gives an unavailable result naming it, never 0, and a job that is not making progress gives an unavailable finish that says so. The colony's production modifiers and its construction, ordnance and fighter capacity come from the production-modifiers mixin (rule `production.populationCapacity`).
+// The calculations behind the Production page: what each colony can build, research and train, what is idle, and when each job finishes. Every figure is a provenance result (utilities/provenance.js): a missing input gives an unavailable result naming it, never 0, and a job that is not making progress gives an unavailable finish that says so. The colony's production modifiers and its construction, ordnance and light naval capacity come from the production-modifiers mixin (rule `production.populationCapacity`).
 
 import { admitQueued, forecastColonySteps, FUEL, HORIZON_DAYS } from './industry-cycle'
 import { TERMINATION, UNPACED } from './search-run'
@@ -34,7 +34,7 @@ registerRule({
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.populationCapacity', 'production.trainingCapacity', 'FCT_IndustrialProjects.Percentage, Queue, Pause, ProductionType', 'FCT_GroundUnitTraining.TaskPercentage'],
-  note: 'A colony\'s capacity for construction, ordnance, fighters or ground training times the share no running project or task uses. A queued project holds no share and a paused one keeps its share without building, so it counts as idle. The capacity is estimated; the shares are stored percentages.',
+  note: 'A colony\'s capacity for construction, ordnance, light naval units or ground training times the share no running project or task uses. A queued project holds no share and a paused one keeps its share without building, so it counts as idle. The capacity is estimated; the shares are stored percentages.',
 })
 
 registerRule({
@@ -80,7 +80,7 @@ registerRule({
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.populationCapacity', 'FCT_IndustrialProjects.Percentage'],
-  note: `The colony's capacity for the project's kind (construction, ordnance or fighters) times the project's share. The share is stored; the capacity is estimated. ${ESTIMATE}`,
+  note: `The colony's capacity for the project's kind (construction, ordnance or light naval units) times the project's share. The share is stored; the capacity is estimated. ${ESTIMATE}`,
 })
 
 registerRule({
@@ -174,7 +174,7 @@ const MODIFIER_TEXT = {
 // What the colony's modifiers row lacks of `keys`: its own text when the row is not there at all.
 const modifierGaps = (modifiers, keys) => (modifiers ? keys.filter((key) => !isNumber(modifiers[key])).map((key) => MODIFIER_TEXT[key]) : [MODIFIER_TEXT.row])
 
-// The capacity a project draws on: ordnance and fighters have their own, and everything else, components and space stations included, uses construction capacity. A project with no production type in the save draws on a capacity not known: 'unknown', never construction.
+// The capacity a project draws on: ordnance and light naval units have their own, and everything else, components and space stations included, uses construction capacity. A project with no production type in the save draws on a capacity not known: 'unknown', never construction.
 export const categoryOf = (productionType) => (!isNumber(productionType) ? 'unknown' : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
 // The capacity of a project whose production type is not in the save: unavailable, naming the type, so the project's rate and finish are unavailable with it.

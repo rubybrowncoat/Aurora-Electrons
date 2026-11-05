@@ -7,8 +7,8 @@ registerRule({
   versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
-  structure: ['FCT_Race.ConstructionProduction, OrdnanceProduction, FighterProduction, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PlanetaryInstallation.ConstructionValue, OrdnanceProductionValue, FighterProductionValue', 'FCT_PopulationInstallations.Amount', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_GroundUnitClass.ConstructionRating'],
-  note: 'A colony\'s yearly capacity for construction, ordnance or fighters: the race\'s production rate times the installations\' rating times the colony\'s overall modifier (governor and sector bonus, species rate, economy, efficiency, radiation, stability and political status); construction adds the engineer formations\' share. The ordnance figure matched the saved build rate of ordnance projects to within 0.15%; the construction and fighter figures are the same product on other columns and have no saved case. A colony the modifier read does not cover has no figure.',
+  structure: ['FCT_Race.ConstructionProduction, OrdnanceProduction, FighterProduction, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PlanetaryInstallation.ConstructionValue, OrdnanceProductionValue, FighterProductionValue (the Light Naval Factory, installation 35)', 'FCT_PopulationInstallations.Amount', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_GroundUnitClass.ConstructionRating'],
+  note: 'A colony\'s yearly capacity for construction, ordnance or light naval units: the race\'s production rate times the installations\' rating times the colony\'s overall modifier (governor and sector bonus, species rate, economy, efficiency, radiation, stability and political status); construction adds the engineer formations\' share. The light naval rate and rating are stored in the columns FighterProduction and FighterProductionValue, which the schema keeps under their old names; the Light Naval Factory (installation 35) carries the rating. The ordnance figure matched the saved build rate of ordnance projects to within 0.15%; the construction and light naval figures are the same product on other columns and have no saved case. A colony the modifier read does not cover has no figure.',
 })
 
 // The columns each capacity multiplies together; a null one leaves the capacity unknown.
@@ -19,7 +19,7 @@ const CAPACITY_TERMS = {
 }
 
 // The words for the terms a capacity lacks, by the column of the modifier row that holds them.
-const TERM_WORDS = { ConstructionProduction: 'the race\'s construction production', OrdnanceProduction: 'the race\'s ordnance production', FighterProduction: 'the race\'s fighter production', OverallProductionModifier: 'the colony\'s overall production modifier', ConstructionPower: 'the construction rating of the installations', EngineerProductionModifier: 'the engineers\' production modifier', GroundConstructionPower: 'the ground construction rating of the installations', OrdnanceProductionPower: 'the ordnance rating of the installations', FighterProductionPower: 'the fighter rating of the installations' }
+const TERM_WORDS = { ConstructionProduction: 'the race\'s construction production', OrdnanceProduction: 'the race\'s ordnance production', FighterProduction: 'the race\'s light naval production', OverallProductionModifier: 'the colony\'s overall production modifier', ConstructionPower: 'the construction rating of the installations', EngineerProductionModifier: 'the engineers\' production modifier', GroundConstructionPower: 'the ground construction rating of the installations', OrdnanceProductionPower: 'the ordnance rating of the installations', FighterProductionPower: 'the light naval rating of the installations' }
 
 const CAPACITY = {
   construction: (modifiers) => (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower),
@@ -51,7 +51,7 @@ export const capacityResult = (modifiers, kind, blocked) => {
 }
 
 // Per-population production modifiers and the capacity helpers built on them, shared by the Production, Mineral Outlook, Colony Outlook and Logistics pages. The host component provides `database`, `GameID` and `RaceID` (mapGetters), and can list `populationProductionModifiers` among its tracked reads (`loadErrors`).
-// `populationCapacityResult(populationId, kind)` ('construction', 'ordnance' or 'fighter') is a provenance result of 'production.populationCapacity': unavailable, naming what is missing, for a colony without a modifier row or with a null column. A caller that sums or shows the figure reads the result, never a 0 for a colony without one.
+// `populationCapacityResult(populationId, kind)` ('construction', 'ordnance' or 'fighter', the last being the light naval capacity under the name of its columns) is a provenance result of 'production.populationCapacity': unavailable, naming what is missing, for a colony without a modifier row or with a null column. A caller that sums or shows the figure reads the result, never a 0 for a colony without one.
 export default {
   mixins: [capabilityGates],
   methods: {

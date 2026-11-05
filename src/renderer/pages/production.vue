@@ -121,7 +121,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or fighter capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
           </div>
         </v-card>
 
@@ -171,7 +171,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="7">
-            <v-card class="panel" data-summary="Find unused construction, ordnance, fighter, training, research and slipway capacity at each colony." elevation="1">
+            <v-card class="panel" data-summary="Find unused construction, ordnance, light naval, training, research and slipway capacity at each colony." elevation="1">
               <div class="panel-head">
                 <span class="d-flex align-center">
                   <span>Idle capacity by colony<provenance-mark rule="production.capacityFree" /></span>
@@ -205,7 +205,7 @@
                 </template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">
-                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, fighters and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
+                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, light naval units and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
               </div>
             </v-card>
           </v-col>
@@ -304,6 +304,8 @@ const JOB_PAGE_SIZES = [15, 30, -1]
 const CAPACITY_PAGE_SIZES = [10, 25, -1]
 
 const CAPACITY_KINDS = ['construction', 'ordnance', 'fighter']
+// The capacity kinds in the words of the page's text; the internal id of the light naval kind is the 'fighter' of its stored columns.
+const CAPACITY_WORDS = { construction: 'construction', ordnance: 'ordnance', fighter: 'light naval' }
 const ARRIVAL_RESOURCES = [...MINERALS.map((mineral) => mineral.name), 'fuel']
 
 const ARRIVAL_HEADERS = [
@@ -318,7 +320,7 @@ const ARRIVAL_HEADERS = [
 const PRODUCTION_TYPES = {
   0: 'Construction',
   1: 'Ordnance',
-  2: 'Fighter',
+  2: 'Light Naval',
   3: 'Component',
   4: 'Space station',
 }
@@ -327,7 +329,7 @@ const PRODUCTION_TYPES = {
 const CAPACITY_COLUMNS = [
   { key: 'construction', text: 'Construction', bp: true },
   { key: 'ordnance', text: 'Ordnance', bp: true },
-  { key: 'fighter', text: 'Fighters', bp: true },
+  { key: 'fighter', text: 'Light Naval', bp: true },
   { key: 'training', text: 'Ground training', bp: true },
   { key: 'research', text: 'Research labs', bp: false },
   { key: 'slipways', text: 'Slipways', bp: false },
@@ -564,7 +566,7 @@ export default {
           } else if (!isAvailable(rate)) {
             status = { id: 'unknown', label: 'Not known', note: `Missing ${rate.inputs.missing.join(', ')}` }
           } else if (!(rate.value > 0)) {
-            status = { id: 'stalled', label: 'No capacity', note: `The colony has no ${category} capacity` }
+            status = { id: 'stalled', label: 'No capacity', note: `The colony has no ${CAPACITY_WORDS[category]} capacity` }
           } else if (shortage) {
             const supplied = planned ? null : valueOrNull(finish.result)
 
@@ -590,7 +592,7 @@ export default {
             rate,
             finish,
             rateText: this.rateText(rate, this.bp, 'BP/yr'),
-            rateNote: category === 'unknown' ? 'Production type not known' : isKnownNumber(project.Percentage) ? `${this.count(project.Percentage, 1)}% of ${category}` : `Share of ${category} not known`,
+            rateNote: category === 'unknown' ? 'Production type not known' : isKnownNumber(project.Percentage) ? `${this.count(project.Percentage, 1)}% of ${CAPACITY_WORDS[category]}` : `Share of ${CAPACITY_WORDS[category]} not known`,
             amount: project.Amount,
             queued,
             shortage,

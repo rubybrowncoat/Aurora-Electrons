@@ -45,6 +45,8 @@ export const RESEARCH = 3
 export const SURVEY = 2
 export const MINING = 6
 export const TERRAFORMING = 9
+// A ship class this small (FCT_ShipClass.Size, in hull spaces, 1,000 t) or smaller is a light naval unit, and its captain's bonus counts in full where a larger ship's counts halved. The limit is inclusive.
+const LIGHT_NAVAL_SIZE = 20
 
 // `FCT_Commander.RetireStatus` values. `kind` sorts them for the Former panel.
 export const RETIRE_STATUSES = {
@@ -155,11 +157,11 @@ registerRule({
 
 registerRule({
   id: POST,
-  versions: VERSIONS,
+  versions: ['3.1.x'],
   units: 'post',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)'],
-  note: 'The post and bonus that matter on a specialist ship, from its class: terraformers and miners use the captain\'s bonus, survey ships the science officer\'s Survey bonus when the class has a Science Department and otherwise half the captain\'s. A secondary officer ranks one below the captain. The post-to-bonus match was observed on a sample of saved assignments; the half share is a planner rule that is not checked. A class whose module counts or required rank are not stored has no post.',
+  structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired, Size', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)'],
+  note: 'The post and bonus that matter on a specialist ship, from its class: terraformers and miners use the captain\'s bonus, survey ships the science officer\'s Survey bonus when the class has a Science Department and otherwise the captain\'s, in full for a class of 20 hull spaces or less (the limit included) and halved for a larger one. A secondary officer ranks one below the captain. The post-to-bonus match was observed on a sample of saved assignments; the captain\'s share is the game source\'s rule and is not checked against a save. A class whose module counts, size or required rank are not stored has no post.',
 })
 
 registerRule({
@@ -504,9 +506,9 @@ export const captainlessShips = (ships) => {
   return { value, unknown, result: countOf({ rule: CAPTAINLESS, value, unknown, missing: `the class modules of ${unknown} ships without a captain`, units: 'ships' }) }
 }
 
-const SHIP_INPUTS = { RankRequired: 'the rank the class requires', Terraformers: 'the number of terraformers', MiningModules: 'the number of mining modules', Harvesters: 'the number of harvesters', SciencePosts: 'the number of science posts', GeoSurvey: 'the geological survey strength', GravSurvey: 'the gravitational survey strength' }
+const SHIP_INPUTS = { RankRequired: 'the rank the class requires', ClassSize: 'the size of the class', Terraformers: 'the number of terraformers', MiningModules: 'the number of mining modules', Harvesters: 'the number of harvesters', SciencePosts: 'the number of science posts', GeoSurvey: 'the geological survey strength', GravSurvey: 'the gravitational survey strength' }
 
-// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else half their captain's. Secondary officers rank one below the captain. A class whose module counts or required rank are not stored has no post. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
+// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else their captain's: in full for a class of `LIGHT_NAVAL_SIZE` hull spaces or less (`ship.ClassSize`), half for a larger one. Secondary officers rank one below the captain. A class whose module counts, size or required rank are not stored has no post. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
 export const specialistPost = (ship, blocked = NONE) => {
   const where = ship.ClassName || `class of ship ${ship.ShipID}`
   const lacking = (columns) => columns.filter((column) => !isKnownNumber(ship[column])).map((column) => `${SHIP_INPUTS[column] || column} of ${where}`)
@@ -532,9 +534,11 @@ export const specialistPost = (ship, blocked = NONE) => {
     return post({ post: 'science', bonusId: SURVEY, label: 'Survey', share: 1 })
   } else if (!(ship.GeoSurvey > 0 || ship.GravSurvey > 0) && lacking(['GeoSurvey', 'GravSurvey']).length) {
     return unavailable({ rule: POST, missing: lacking(['GeoSurvey', 'GravSurvey', 'RankRequired']) })
+  } else if (!isKnownNumber(ship.ClassSize)) {
+    return unavailable({ rule: POST, missing: lacking(['ClassSize', 'RankRequired']) })
   }
 
-  return post({ post: 'captain', bonusId: SURVEY, label: 'Survey (half for a captain)', share: 0.5 })
+  return ship.ClassSize <= LIGHT_NAVAL_SIZE ? post({ post: 'captain', bonusId: SURVEY, label: 'Survey', share: 1 }) : post({ post: 'captain', bonusId: SURVEY, label: 'Survey (half for a captain)', share: 0.5 })
 }
 
 // Specialist ships where an unassigned naval officer of the post's rank has a better bonus than the officer in it (or the post is empty). `officers`: naval officers with `bonuses` and `RankLevel`. Returns { rows, unrated }: `rows` are the posts to improve or vacant, each with a result of 'commanders.shipBonus' that names a candidate left out for a missing bonus or rank (`unknownCandidates` counts them), and `unrated` the ships that cannot be rated, each { ship, result } with the result unavailable. A vacant post stays a row whether or not an officer is better. A post holder not among the officers, or whose bonus has no value, cannot be rated. `blocked` as for `specialistPost`.

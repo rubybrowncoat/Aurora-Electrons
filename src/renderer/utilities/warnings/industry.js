@@ -5,7 +5,7 @@ import { QUARTER, amount, bandOf, bandWords, categoriesOf, checksOf, colonyText,
 
 export const group = { key: 'industry', title: 'Industry', summary: 'Review idle factory capacity, stalled projects and unused shipyards.' }
 
-const PRODUCTION_KINDS = { 1: 'Ordnance', 2: 'Fighters' }
+const PRODUCTION_KINDS = { 1: 'Ordnance', 2: 'Light Naval' }
 
 // `FCT_Shipyard.TaskType`: what a yard is busy modifying; 0 is nothing.
 const SHIPYARD_ACTIVITIES = {
@@ -140,12 +140,12 @@ export const checks = checksOf([
     severity: 'attention',
     material: 'the free share crossing 25% of the capacity',
     captured: [bandWords('free share under 25% of the capacity', 'free share at 25% or more of the capacity')],
-    title: (count) => `${amount(count, 'population')} with free fighter production capacity`,
-    rule: 'A colony has fighter factories while the fighter projects it is building (not queued) take under 100% of its fighter capacity.',
+    title: (count) => `${amount(count, 'population')} with free light naval production capacity`,
+    rule: 'A colony has light naval factories while the light naval projects it is building (not queued) take under 100% of its light naval capacity.',
     evidence: {
       verification: 'estimated',
       structure: FREE_CAPACITY_STRUCTURE,
-      note: freeCapacityNote('fighter'),
+      note: freeCapacityNote('light naval'),
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {

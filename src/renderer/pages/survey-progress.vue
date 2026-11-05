@@ -112,7 +112,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Check whether the survey ships are used well. Points a day are the undamaged sensors' rating × 24 h × the officer factor × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), then × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The officer factor is the science officer's Survey bonus while the ship's Science Department is undamaged, times half the captain's bonus, and 1 for a ship without a captain. The mark beside a rate shows how far it can be trusted. Hover it for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
+            Check whether the survey ships are used well. Points a day are the undamaged sensors' rating × 24 h × the officer factor × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), then × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The officer factor is the science officer's Survey bonus while the ship's Science Department is undamaged, times the captain's bonus (half of it for a ship over 20 hull spaces), and 1 for a ship without a captain. The mark beside a rate shows how far it can be trusted. Hover it for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
           </div>
         </v-card>
 

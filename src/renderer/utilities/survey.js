@@ -11,22 +11,26 @@ const GEO_SENSOR = 7
 const CONTROL = 10
 // The baseline Science Department design (FCT_ShipDesignComponents.SDComponentID).
 const SCIENCE_DEPARTMENT = 65739
-// A class this small (FCT_ShipClass.Size) counts as having a control component when it has none.
+// A class this small (FCT_ShipClass.Size, in hull spaces) counts as having a control component when it has none.
 const SMALL_CLASS_SIZE = 20
+// A class this small (FCT_ShipClass.Size, in hull spaces, 1,000 t) or smaller is a light naval unit: its captain's bonus counts in full, a larger ship's counts halved. The limit is inclusive.
+const LIGHT_NAVAL_SIZE = 20
 // FCT_CommanderBonuses.BonusID of the Survey bonus.
 const SURVEY_BONUS = 2
 // FCT_Commander.CommandType of a commander who serves in a ground formation.
 const GROUND_POST = 5
+// The game versions the rules hold for: the sensor and ground rates were checked on saves of the earlier line, the officer factor follows the light naval limit of the stated formula version.
 const SURVEY_VERSIONS = ['2.7.x']
+const OFFICER_VERSIONS = ['3.1.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 registerRule({
   id: 'survey.officerFactor',
-  versions: SURVEY_VERSIONS,
+  versions: OFFICER_VERSIONS,
   units: '×',
   verification: 'confirmed',
   structure: ['FCT_Commander.CommandType, CommandID', 'FCT_CommanderBonuses.BonusValue', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID, ComponentValue', 'FCT_DamagedComponent', 'FCT_ShipClass.Size'],
-  note: 'A ship with a captain has the science officer\'s Survey bonus (only while its Science Department is undamaged) times the captain\'s half bonus, 1 + (bonus - 1) / 2 (only while it has an undamaged control component, a class of 20 hull spaces or less counting as having one). A ship without a captain has a factor of 1, whatever other officers it has. The product matched the saved progress of 15 fleets with both officers (median error 0.01%); the maximum of the two bonuses did not (median error 10%). A science officer alone, a damaged Science Department and a damaged control component are by the game\'s rule only: no save has a saved case.',
+  note: 'A ship with a captain has the science officer\'s Survey bonus (only while its Science Department is undamaged) times the captain\'s bonus (only while it has an undamaged control component, a class of 20 hull spaces or less counting as having one): the full bonus for a ship of 20 hull spaces or less, the limit included, and half of it, 1 + (bonus - 1) / 2, for a larger ship. A ship without a captain has a factor of 1, whatever other officers it has. The product with the halved bonus matched the saved progress of 15 fleets with both officers (median error 0.01%) in saves of the earlier line, whose game halved every captain\'s bonus; the maximum of the two bonuses did not (median error 10%). The full bonus of a ship of 20 hull spaces or less is the game source\'s rule alone: no save holds a survey craft that small played under it. A science officer alone, a damaged Science Department and a damaged control component are by the game\'s rule only: no save has a saved case.',
 })
 
 registerRule({
@@ -88,15 +92,25 @@ export const loadSurveyShips = async (database, { GameID, RaceID }) => {
   return rows
 }
 
-// The officer factor of a ship's survey rate. A ship with no captain has 1, whatever else it has. With one, the factor is the science officer's Survey bonus (only with an undamaged Science Department) times half the captain's (only with an undamaged control component; a bonus an officer lacks is 1). `ship`: { HasCaptain, CaptainBonus, HasScienceOfficer, ScienceBonus, ScienceDepartments, ControlValue, ClassSize }.
+// The officer factor of a ship's survey rate. A ship with no captain has 1, whatever else it has, and needs no class size. With one, the factor is the science officer's Survey bonus (only with an undamaged Science Department) times the captain's (only with an undamaged control component; a bonus an officer lacks is 1): in full for a class of `LIGHT_NAVAL_SIZE` hull spaces or less, halved for a larger one. A captain whose Survey bonus is 1 adds that at every size, the halved bonus being 1 too and no control component leaving 1, so the factor is known without a class size; any other bonus needs the size the limit and the control default rest on, and null when that size is not a number, since null is never a full bonus. `ship`: { HasCaptain, CaptainBonus, HasScienceOfficer, ScienceBonus, ScienceDepartments, ControlValue, ClassSize }.
 export const officerFactor = (ship) => {
   if (!ship.HasCaptain) {
     return 1
   }
 
   const science = ship.HasScienceOfficer && ship.ScienceDepartments > 0 ? ship.ScienceBonus ?? 1 : 1
+  const bonus = ship.CaptainBonus ?? 1
+
+  if (bonus === 1) {
+    return science
+  }
+
+  if (!Number.isFinite(ship.ClassSize)) {
+    return null
+  }
+
   const controls = Math.trunc(ship.ControlValue) || (ship.ClassSize <= SMALL_CLASS_SIZE ? 1 : 0)
-  const captain = controls > 0 ? 1 + ((ship.CaptainBonus ?? 1) - 1) / 2 : 1
+  const captain = controls > 0 ? (ship.ClassSize <= LIGHT_NAVAL_SIZE ? bonus : 1 + (bonus - 1) / 2) : 1
 
   return science * captain
 }
@@ -145,6 +159,10 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null
     missing.push('a ship\'s crew or morale')
   }
 
+  if (sensors.some((ship) => officerFactor(ship) === null)) {
+    missing.push('a ship\'s class size')
+  }
+
   if (adminGap || !Number.isFinite(admin)) {
     missing.push(adminGap || 'the naval admin command chain\'s Survey bonus')
   }
@@ -172,6 +190,10 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null
 
   if (sensors.some((ship) => ship.HasScienceOfficer && !ship.HasCaptain)) {
     assumptions.push('No captain: the science officer adds nothing.')
+  }
+
+  if (sensors.some((ship) => ship.HasCaptain && ship.ClassSize <= LIGHT_NAVAL_SIZE && (ship.CaptainBonus ?? 1) !== 1)) {
+    assumptions.push('Includes the full Survey bonus of the captain of a ship of 20 hull spaces or less, by the game\'s rule; not yet checked against a save.')
   }
 
   if (ships.some((ship) => ship[designed] > 0 && (ship.DamagedLines > 0 || ship[value] < ship[designed]))) {

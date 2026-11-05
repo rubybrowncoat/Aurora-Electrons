@@ -1776,6 +1776,11 @@ const main = async () => {
 
   const { capabilities, provenance } = await loadUtilities(['capabilities', 'provenance'])
 
+  const warningsLabel = (scan['/warnings']['check:free-fighter-capacity'] || {}).label
+  const reportedLabel = ((capabilities.INPUTS['/warnings'] || []).find((input) => input.key === 'check:free-fighter-capacity') || {}).label
+
+  check('reads: the check of free light naval capacity keeps its stored key and carries the light naval words, in the scan and in the report that names it when the check cannot be read', warningsLabel === 'the free light naval production capacity' && reportedLabel === warningsLabel, JSON.stringify([warningsLabel, reportedLabel]))
+
   registryChecks(capabilities, scan, navigation)
   scannerChecks(scan)
   await markerChecks(capabilities)

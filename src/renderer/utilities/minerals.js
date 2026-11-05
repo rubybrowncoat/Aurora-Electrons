@@ -411,7 +411,7 @@ export const FLOW_GROUPS = [
   { key: 'salvage', label: 'Salvage', income: true, types: [10, 15, 17, 18, 19] },
   { key: 'construction', label: 'Construction', income: false, types: [4, 40, 45] },
   { key: 'shipbuilding', label: 'Shipbuilding', income: false, types: [5, 9] },
-  { key: 'ordnance', label: 'Ordnance & fighters', income: false, types: [2, 3] },
+  { key: 'ordnance', label: 'Ordnance & light naval', income: false, types: [2, 3] },
   { key: 'ground', label: 'Ground units', income: false, types: [6] },
   { key: 'fuel', label: 'Fuel refining', income: false, types: [14] },
   { key: 'maintenance', label: 'Maintenance', income: false, types: [16] },
@@ -493,7 +493,7 @@ const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left
 
 const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
 
-// The capacity a project draws on: ordnance and fighters have their own and everything else uses construction; null for a production type the save lacks, which is never taken as construction.
+// The capacity a project draws on: ordnance and light naval units have their own and everything else uses construction; null for a production type the save lacks, which is never taken as construction.
 const facilityOf = (productionType) => (!recorded(productionType) ? null : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
 export const annualQueueDemand = (projects, capacityOf) => {
