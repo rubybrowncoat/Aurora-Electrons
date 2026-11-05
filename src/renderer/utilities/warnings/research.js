@@ -1,6 +1,7 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber } from '../math'
-import { QUARTER, amount, bandOf, bandWords, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
+import { loadNoResearchProjects } from '../research-data'
+import { QUARTER, allOf, amount, bandOf, bandWords, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'research', title: 'Research', summary: 'Review idle labs, dead or forgotten projects and scientists working outside their field.' }
 
@@ -27,6 +28,11 @@ const projectRow = (project, cells, signature = undefined) => ({
   ...(signature === undefined ? {} : { signature }),
 })
 
+// Whether the race starts no research projects (`FCT_Race.NoResearchProjects`): true, false, or null while the save does not store the setting. The game leaves the idle facilities event out for such a race (Population.cs:822) and starts no research project for it, so its idle labs and dead projects are not faults; the page says so (`NO_RESEARCH_WORDS` of utilities/research-data.js) where the Research page and the Commanders suggestions show it.
+const NO_RESEARCH_SETTING = 'the race\'s No Research Projects setting'
+
+const noResearchOf = async (ctx) => (await loadNoResearchProjects(ctx.database, ctx)).value
+
 // The labs of the colony: a dash while an installation's type or amount is not stored.
 const labsCell = (ctx, project) => figure(ctx, project.LabGaps > 0 ? null : project.Labs, LAB_INSTALLATIONS)
 
@@ -38,11 +44,11 @@ export const checks = checksOf([
     material: 'the idle share crossing 25% of the labs',
     captured: [bandWords('idle share under 25% of the labs', 'idle share at 25% or more of the labs')],
     title: (count) => amount(count, 'colony with idle research labs', 'colonies with idle research labs'),
-    rule: 'A colony has more research facilities than its projects use, so some labs sit idle.',
+    rule: 'A colony has more research facilities than its projects use, so some labs sit idle. A race that starts no research projects is not checked.',
     evidence: {
       verification: 'confirmed',
       structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.ResearchValue', 'FCT_ResearchProject.Facilities'],
-      note: 'A count comparison on stored rows: the colony\'s research facilities against the labs its projects are assigned. A colony with an installation\'s type or amount, or a project\'s assigned labs, not stored is listed apart, as not evaluated.',
+      note: 'A count comparison on stored rows: the colony\'s research facilities against the labs its projects are assigned. A colony with an installation\'s type or amount, or a project\'s assigned labs, not stored is listed apart, as not evaluated. A race whose No Research Projects setting is on is not checked (the game leaves its idle labs out of its events), and a colony of a race whose setting is not stored is listed apart, as not evaluated.',
     },
     columns: [
       { key: 'colony', text: 'Colony' },
@@ -50,15 +56,23 @@ export const checks = checksOf([
       { key: 'used', text: 'In use', align: 'end' },
     ],
     async read(ctx) {
+      const exempt = await noResearchOf(ctx)
+
+      if (exempt === true) {
+        return []
+      }
+
       const { GameID, RaceID } = ctx
 
       const populations = await rowsOf(ctx, `select VIR_Facilities.*, ((case when VIR_Facilities.Known > 0 then 1 when VIR_Facilities.TypeGaps > 0 then null else 0 end) and VIR_Facilities.AvailableFacilities > VIR_Facilities.OccupiedFacilities) as Verdict from (select FCT_Population.PopulationID, FCT_Population.PopName, case when sum(case when DIM_PlanetaryInstallation.ResearchValue > 0 and FCT_PopulationInstallations.Amount is null then 1 else 0 end) > 0 then null else SUM(case when DIM_PlanetaryInstallation.ResearchValue > 0 then FCT_PopulationInstallations.Amount else 0 end) end as AvailableFacilities, sum(case when DIM_PlanetaryInstallation.ResearchValue > 0 then 1 else 0 end) as Known, sum(case when DIM_PlanetaryInstallation.ResearchValue is null then 1 else 0 end) as TypeGaps, case when VIR_PopulationResearch.Gaps > 0 then null else coalesce(VIR_PopulationResearch.Facilities, 0) end as OccupiedFacilities, ${COLONY_COLUMNS} from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID ${COLONY_JOINS} left join (select FCT_ResearchProject.PopulationID, SUM(FCT_ResearchProject.Facilities) as Facilities, sum(case when FCT_ResearchProject.Facilities is null then 1 else 0 end) as Gaps from FCT_ResearchProject where FCT_ResearchProject.GameID = ${GameID} and FCT_ResearchProject.RaceID = ${RaceID} group by FCT_ResearchProject.PopulationID) as VIR_PopulationResearch on FCT_Population.PopulationID = VIR_PopulationResearch.PopulationID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (DIM_PlanetaryInstallation.ResearchValue > 0 or DIM_PlanetaryInstallation.ResearchValue is null) GROUP BY FCT_Population.PopulationID) as VIR_Facilities where Verdict is not 0 order by VIR_Facilities.PopulationID`)
 
       return verdictRows(ctx, populations, {
+        verdict: (population) => allOf(population.Verdict, exempt === null ? null : 1),
         missing: (population) => [
           ...(population.Known > 0 || !(population.TypeGaps > 0) ? [] : ['the type of an installation of the colony']),
           ...(isKnownNumber(population.AvailableFacilities) ? [] : ['the amount of a research facility of the colony']),
           ...(isKnownNumber(population.OccupiedFacilities) ? [] : ['the labs assigned to a research project of the colony']),
+          ...(exempt === null ? [NO_RESEARCH_SETTING] : []),
         ],
         build: (population) => ({
           id: `colony:${population.PopulationID}`,
@@ -78,11 +92,11 @@ export const checks = checksOf([
     group: group.key,
     severity: 'needs-action',
     title: (count) => amount(count, 'dead research project'),
-    rule: 'A research project that is not paused sits at a colony with no research facilities installed (none at all, or only other installations, or labs of zero amount), so it never advances. Paused projects and projects with no labs assigned are listed apart.',
+    rule: 'A research project that is not paused sits at a colony with no research facilities installed (none at all, or only other installations, or labs of zero amount), so it never advances. Paused projects and projects with no labs assigned are listed apart. A race that starts no research projects is not checked.',
     evidence: {
       verification: 'confirmed',
       structure: ['FCT_ResearchProject.Pause, Facilities', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.ResearchValue'],
-      note: 'A count comparison on stored rows: a project not paused at a colony with no research facilities. A project whose paused flag is not stored, or whose colony has an installation\'s type or amount not stored and no lab known, is listed apart, as not evaluated; labs assigned that are not stored show a dash.',
+      note: 'A count comparison on stored rows: a project not paused at a colony with no research facilities. A project whose paused flag is not stored, or whose colony has an installation\'s type or amount not stored and no lab known, is listed apart, as not evaluated; labs assigned that are not stored show a dash. A race whose No Research Projects setting is on is not checked, and a project of a race whose setting is not stored is listed apart, as not evaluated.',
     },
     columns: [
       { key: 'colony', text: 'Colony' },
@@ -91,10 +105,17 @@ export const checks = checksOf([
       { key: 'assigned', text: 'Labs assigned', align: 'end' },
     ],
     async read(ctx) {
+      const exempt = await noResearchOf(ctx)
+
+      if (exempt === true) {
+        return []
+      }
+
       const projects = await rowsOf(ctx, researchProjectQuery(ctx, DEAD))
 
       return verdictRows(ctx, projects, {
-        missing: (project) => [...lacking(project, { Pause: PAUSED }), ...(project.Labs > 0 || !(project.LabGaps > 0) ? [] : [LAB_INSTALLATIONS])],
+        verdict: (project) => allOf(project.Verdict, exempt === null ? null : 1),
+        missing: (project) => [...lacking(project, { Pause: PAUSED }), ...(project.Labs > 0 || !(project.LabGaps > 0) ? [] : [LAB_INSTALLATIONS]), ...(exempt === null ? [NO_RESEARCH_SETTING] : [])],
         build: (project) => projectRow(project, { labs: labsCell(ctx, project), assigned: figure(ctx, project.Facilities, ASSIGNED_LABS) }),
       })
     },

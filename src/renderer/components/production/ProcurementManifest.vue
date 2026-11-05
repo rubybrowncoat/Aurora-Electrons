@@ -29,6 +29,7 @@
         <div class="px-4 pb-2">
           <div v-for="text in manifest.problems" :key="text" class="caption warning--text">{{ text }}</div>
           <div v-if="manifest.unknown.length" class="caption warning--text" data-manifest-unknown>Not known, and so not counted as supply: {{ manifest.unknown.join('; ') }}.</div>
+          <div v-if="developmentText" class="caption text--secondary" data-manifest-projects>{{ developmentText }}.</div>
         </div>
         <v-data-table :headers="headers" :items="manifest.rows" item-key="componentId" dense hide-default-footer :items-per-page="-1" no-data-text="The classes mount no component." data-manifest-rows>
           <template #[`item.name`]="{ item }">
@@ -85,7 +86,7 @@
       <div v-if="message" class="px-4 pb-2 caption" data-manifest-message>{{ message }}</div>
     </template>
     <div class="panel-foot caption text--secondary">
-      Find which components a batch still lacks, where the stock sits and what has to be moved to the build colony, and export the plan as CSV. The classes are served in the order listed. A unit of stock or of a queued project goes to one class only. Each class takes the stock at its own colony first, then stock elsewhere, then queued projects. What is short is the need left after that. Components built with the hull (armour, missile engines, prototypes, civilian-line and obsolete parts) have no project, so their shortage is built with the hull. A component the race has not researched is taken from stock, and only the shortage left after that is listed as not available (stock required). A row the save leaves without an amount is not known, never none held. A shortage that rests on supply not known or not counted reads "at most". A paused project is listed apart and is not supply, and cargo already on its way is not counted. An automatic refit with Use Components on, and a task or claim that cannot be read, hold back the whole stock of the component at the colony until it is known. The CSV has one record for each plan, component, transport and claim. An empty cell is not known, never 0.
+      Find which components a batch still lacks, where the stock sits and what has to be moved to the build colony, and export the plan as CSV. The classes are served in the order listed. A unit of stock or of a queued project goes to one class only. Each class takes the stock at its own colony first, then stock elsewhere, then queued projects. What is short is the need left after that. Components built with the hull (armour, missile engines, prototypes, civilian-line and obsolete parts) have no project, so their shortage is built with the hull. A component the race has not researched is taken from stock, and only the shortage left after that is listed as not available (stock required). A row the save leaves without an amount is not known, never none held. A shortage that rests on supply not known or not counted reads "at most". A paused project is listed apart and is not supply, and cargo already on its way is not counted. A queued Engineering Project counts as a component project, because each unit it completes goes into the colony's stock; an Ordnance Project and a Ground Unit Project are counted by kind above the table and are not supply. An automatic refit with Use Components on, and a task or claim that cannot be read, hold back the whole stock of the component at the colony until it is known. The CSV has one record for each plan, component, transport and claim. An empty cell is not known, never 0.
     </div>
   </v-card>
 </template>
@@ -94,7 +95,7 @@
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import StatTiles from '../page/StatTiles.vue'
 import countFormat from '../../mixins/count-format'
-import { TASK_TYPE, defaultTarget, manifestCsv, manifestText, reconcile } from '../../utilities/procurement-manifest'
+import { TASK_TYPE, defaultTarget, developmentNote, manifestCsv, manifestText, reconcile } from '../../utilities/procurement-manifest'
 
 const HEADERS = [
   { text: 'Component', value: 'name' },
@@ -232,6 +233,10 @@ export default {
         entered: this.entered.map((entry) => ({ populationId: entry.populationId, componentId: entry.componentId, units: numberOf(entry.units) })),
         components: this.procurement.components,
       })
+    },
+
+    developmentText() {
+      return developmentNote(this.manifest.projectKinds)
     },
 
     moveRows() {

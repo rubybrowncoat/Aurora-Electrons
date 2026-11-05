@@ -3,6 +3,7 @@
 import { admitQueued, forecastColonySteps, FUEL, HORIZON_DAYS } from './industry-cycle'
 import { TERMINATION, UNPACED } from './search-run'
 import { MINERALS, projectShortages } from './minerals'
+import { capacityKind } from './production-types'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
 
 const PRODUCTION_VERSIONS = ['2.7.x']
@@ -121,7 +122,7 @@ registerRule({
 })
 
 ;[
-  { key: 'research', note: 'The remaining research points over the project\'s rate, in days. A queued tech starts when the one ahead finishes, with the same labs.' },
+  { key: 'research', note: 'The remaining research points over the project\'s rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs.' },
   { key: 'industry', note: 'The project\'s remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony\'s production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony\'s one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes.' },
   { key: 'ship', note: 'The task\'s remaining build points over the yard\'s rate, in days. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
@@ -174,8 +175,8 @@ const MODIFIER_TEXT = {
 // What the colony's modifiers row lacks of `keys`: its own text when the row is not there at all.
 const modifierGaps = (modifiers, keys) => (modifiers ? keys.filter((key) => !isNumber(modifiers[key])).map((key) => MODIFIER_TEXT[key]) : [MODIFIER_TEXT.row])
 
-// The capacity a project draws on: ordnance and light naval units have their own, and everything else, components and space stations included, uses construction capacity. A project with no production type in the save draws on a capacity not known: 'unknown', never construction.
-export const categoryOf = (productionType) => (!isNumber(productionType) ? 'unknown' : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
+// The capacity a project draws on (`capacityKind` of utilities/production-types.js): ordnance and light naval units have their own, and everything else, components, space stations and the Engineering, Ordnance and Ground Unit Projects included, uses construction capacity apart from the Ordnance Projects, which draw on ordnance capacity. A project with no production type in the save draws on a capacity not known: 'unknown', never construction.
+export const categoryOf = (productionType) => (!isNumber(productionType) ? 'unknown' : capacityKind(productionType))
 
 // The capacity of a project whose production type is not in the save: unavailable, naming the type, so the project's rate and finish are unavailable with it.
 export const unknownKindCapacity = () => unavailable({ rule: 'production.industryRate', missing: ['the project\'s production type'] })
@@ -388,6 +389,9 @@ export const queuedResearch = (project, queue) => {
 
   return { ...project, ActualCommanderResearchBonus: inField ? project.ActualCommanderResearchBonus : project.CommanderBonus, ActualAnomalyBonus: inField ? project.ActualAnomalyBonus : 1 }
 }
+
+// The RP a queued tech still costs: its stored development cost less the points saved from cancelled research on it (none saved is 0), never below 0; null when the cost, or the points of a saved row, are not stored. The stored cost is used as the game set it: `Game.CalculateDevelopmentCost` (Game.cs:30919-30933) floors a computed development cost at the build cost before it is stored, so the figure is never recomputed here.
+export const queuedRemaining = (queue) => (!isNumber(queue.DevelopCost) || !isNumber(queue.Saved) ? null : Math.max(0, queue.DevelopCost - queue.Saved))
 
 // When each industrial project of one colony and category starts and finishes, in days from now, as the game runs them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running and paused ones leave, skipping any that don't, until none is left. Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where that never happens.
 export const industrySchedule = (projects, capacity) => {

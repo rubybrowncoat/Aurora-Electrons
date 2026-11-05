@@ -70,6 +70,7 @@
               <div class="py-2">
                 <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree({ tech: item.TechSystemID })" :name="item.name" /><page-link v-if="item.ShipyardID" class="ml-1" :to="linkTo.shipyards({ yard: item.ShipyardID })" :name="item.yardName" /></div>
                 <div class="caption text--secondary">{{ typeLabels[item.type] }}<span v-if="item.detail"> · {{ item.detail }}</span></div>
+                <div v-if="item.terms" class="caption text--secondary" data-industry-terms>{{ item.terms }}</div>
                 <div v-if="item.note" class="caption warning--text">{{ item.note }}</div>
               </div>
             </template>
@@ -121,7 +122,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. An Engineering, Ordnance or Ground Unit Project develops a component, missile or ground unit class the race designed, for twice its stored development cost, and draws on construction capacity (ordnance capacity for an Ordnance Project); the line under the job gives the item, its cost and its minerals. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
           </div>
         </v-card>
 
@@ -241,11 +242,13 @@ import { gameTime, populationName } from '../utilities/aurora'
 import { sourcesOf } from '../utilities/component-calc'
 import { fitsDouble } from '../utilities/decimal'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
+import { NO_DEVELOPMENT_ITEMS, developmentTerms, loadDevelopmentItems } from '../utilities/development-projects'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES } from '../utilities/shipyard-growth'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
@@ -264,6 +267,7 @@ const INPUT_LABELS = {
   navalAdmins: 'the naval admin commands',
   componentSources: 'the ship classes\' components and the colonies\' component stock',
   procurementSources: 'the shipyard tasks, the queued component projects and the colonies',
+  developments: 'the items of the Engineering, Ordnance and Ground Unit Projects',
 }
 
 const SECONDS_PER_DAY = 86400
@@ -316,14 +320,6 @@ const ARRIVAL_HEADERS = [
   { text: 'Source', value: 'source' },
   { text: '', value: 'actions', align: 'end', sortable: false },
 ]
-
-const PRODUCTION_TYPES = {
-  0: 'Construction',
-  1: 'Ordnance',
-  2: 'Light Naval',
-  3: 'Component',
-  4: 'Space station',
-}
 
 // Idle capacity columns; `bp` ones are build points a year, the others counts.
 const CAPACITY_COLUMNS = [
@@ -478,7 +474,7 @@ export default {
 
         queues.filter((queue) => queue.CurrentProjectID === project.ID).sort((a, b) => a.ResearchOrder - b.ResearchOrder).forEach((queue, index) => {
           const queueRate = researchRate(modifiers, queuedResearch(project, queue))
-          const queueFinish = finishDays({ rule: 'production.researchFinish', rate: queueRate, remaining: queue.DevelopCost, remainingName: 'the tech\'s development cost', ahead })
+          const queueFinish = finishDays({ rule: 'production.researchFinish', rate: queueRate, remaining: queuedRemaining(queue), remainingName: 'the tech\'s development cost and the points saved on it', ahead })
           const start = isAvailable(ahead.result) ? this.duration(ahead.result.value) : null
           const startNote = start !== null ? `Starts in ${start}` : ahead.idle ? (paused ? 'Never starts: the project ahead is paused' : 'Never starts: the project ahead makes no progress') : `Start not known: missing ${ahead.result.inputs.missing.join(', ')}`
 
@@ -588,7 +584,8 @@ export default {
             type: 'industry',
             PopulationID,
             name: `${this.units(project.Amount)} × ${project.Name}`,
-            detail: PRODUCTION_TYPES[project.ProductionType],
+            detail: PRODUCTION_TYPE_NAMES[project.ProductionType],
+            terms: isDevelopmentType(project.ProductionType) ? this.developmentLine(project) : '',
             rate,
             finish,
             rateText: this.rateText(rate, this.bp, 'BP/yr'),
@@ -925,6 +922,7 @@ export default {
       return {
         detail: '',
         note: '',
+        terms: '',
         approx: false,
         queued: false,
         shortage: null,
@@ -943,6 +941,15 @@ export default {
         finishSort: days,
         searchText: `${fields.name} ${fields.detail || ''} ${colony.colonyName} ${colony.place}`.toLowerCase(),
       }
+    },
+
+    // The line under a development project: its item, cost and minerals, or that the save's tables for the item were not read.
+    developmentLine(project) {
+      if (this.developments.unread.includes(project.ProductionType)) {
+        return `Develops a ${DEVELOPMENT_ITEMS[project.ProductionType]}: the item and its development cost are not in the save's tables`
+      }
+
+      return developmentTerms(project, this.developments.items[project.ID], this.count)
     },
 
     colony(populationId, fallbackName) {
@@ -1104,7 +1111,7 @@ export default {
           return { projects: [], queues: [] }
         }
 
-        const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
+        const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, case when exists (select 1 from FCT_PausedResearch where FCT_PausedResearch.TechSystemID = FCT_ResearchQueue.TechSystemID and FCT_PausedResearch.GameID = ${this.GameID} and FCT_PausedResearch.RaceID = ${this.RaceID}) then (select FCT_PausedResearch.PointsAccumulated from FCT_PausedResearch where FCT_PausedResearch.TechSystemID = FCT_ResearchQueue.TechSystemID and FCT_PausedResearch.GameID = ${this.GameID} and FCT_PausedResearch.RaceID = ${this.RaceID}) else 0 end as Saved, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
 
         const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, VIR_ResearchBonus.CommandID as ScientistCommandID, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
 
@@ -1123,7 +1130,7 @@ export default {
         const needs = MINERALS.map((mineral) => `FCT_IndustrialProjects.${mineral.name}`).join(', ')
         const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name} as Stock${mineral.name}`).join(', ')
 
-        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and ${loadedProject()}`)
 
         return rows
       }),
@@ -1232,6 +1239,17 @@ export default {
         return await loadProcurementSources(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: NO_PROCUREMENT_SOURCES,
+    },
+    // The items the race's Engineering, Ordnance and Ground Unit Projects develop and the development cost of each, for the line under those jobs. The jobs do not rest on it: a save without the tables leaves the line saying so.
+    developments: {
+      get: tracked('developments', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_DEVELOPMENT_ITEMS
+        }
+
+        return await loadDevelopmentItems(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_DEVELOPMENT_ITEMS,
     },
   },
 }

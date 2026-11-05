@@ -45,6 +45,7 @@ const FILES = {
   commanders: path.join(root, 'src', 'renderer', 'utilities', 'commanders.js'),
   transport: path.join(root, 'src', 'renderer', 'utilities', 'transport.js'),
   industry: path.join(root, 'src', 'renderer', 'utilities', 'warnings', 'industry.js'),
+  productionTypes: path.join(root, 'src', 'renderer', 'utilities', 'production-types.js'),
   modifiers: path.join(root, 'src', 'renderer', 'mixins', 'production-modifiers.js'),
   commandersPage: path.join(root, 'src', 'renderer', 'pages', 'commanders.vue'),
   productionPage: path.join(root, 'src', 'renderer', 'pages', 'production.vue'),
@@ -70,9 +71,9 @@ const textWith = (edits = []) => edits.reduce((text, edit) => ({ ...text, [edit.
 
 const worldOf = (texts = { ...ORIGINALS }) => ({
   texts,
-  modules: memo(() => loadUtilities(['survey', 'commanders', 'transport', 'warnings/industry', 'provenance', '../mixins/production-modifiers', '../utilities/provenance'], {
+  modules: memo(() => loadUtilities(['survey', 'commanders', 'transport', 'warnings/industry', 'production-types', 'provenance', '../mixins/production-modifiers', '../utilities/provenance'], {
     stubs: STUBS,
-    sources: { survey: texts.survey, commanders: texts.commanders, transport: texts.transport, 'warnings/industry': texts.industry, '../mixins/production-modifiers': texts.modifiers },
+    sources: { survey: texts.survey, commanders: texts.commanders, transport: texts.transport, 'warnings/industry': texts.industry, 'production-types': texts.productionTypes, '../mixins/production-modifiers': texts.modifiers },
   })),
 })
 
@@ -388,7 +389,7 @@ check('names', 'the production type 2 and the idle capacity column read Light Na
   const industry = modules['warnings/industry']
   const mixin = modules['../mixins/production-modifiers']
   const provenance = modules['../utilities/provenance']
-  const types = declared(w.texts.productionPage, 'PRODUCTION_TYPES', '\n}')
+  const types = modules['production-types'].PRODUCTION_TYPE_NAMES
   const columns = declared(w.texts.productionPage, 'CAPACITY_COLUMNS', '\n]')
   const kinds = declared(w.texts.industry, 'PRODUCTION_KINDS', '}')
   const found = industry.checks.find((one) => one.key === 'free-fighter-capacity')
@@ -396,10 +397,10 @@ check('names', 'the production type 2 and the idle capacity column read Light Na
   const terms = mixin.capacityResult({ FighterProduction: null, OverallProductionModifier: 1, FighterProductionPower: null }, 'fighter', new Set())
 
   assert.equal(types[2], 'Light Naval', `the production type 2 reads Light Naval on the Production page, not ${types[2]}`)
-  assert.deepEqual(types, { 0: 'Construction', 1: 'Ordnance', 2: 'Light Naval', 3: 'Component', 4: 'Space station' }, 'the other production types are as they were')
+  assert.deepEqual({ 0: types[0], 1: types[1], 2: types[2], 3: types[3], 4: types[4] }, { 0: 'Construction', 1: 'Ordnance', 2: 'Light Naval', 3: 'Component', 4: 'Space station' }, 'the other production types are as they were')
   assert.deepEqual(columns.map((column) => column.text), ['Construction', 'Ordnance', 'Light Naval', 'Ground training', 'Research labs', 'Slipways'], 'the idle capacity columns name Light Naval')
   assert.equal(columns.find((column) => column.key === 'fighter').bp, true, 'the Light Naval column is in build points a year')
-  assert.equal(kinds[2], 'Light Naval', `the Industry tab names the type-2 project kind Light Naval, not ${kinds[2]}`)
+  assert.equal(kinds.fighter, 'Light Naval', `the Industry tab names the light naval project kind Light Naval, not ${kinds.fighter}`)
   assert.equal(industry.group.title, 'Industry', 'the group is the Industry tab')
   assert.ok(found, 'the Industry tab keeps the check of free light naval capacity under its stored key')
   assert.ok(/light naval/.test(found.title(2)) && !/fighter/i.test(found.title(2)), `the Industry check's title names light naval capacity: ${found.title(2)}`)
@@ -461,10 +462,10 @@ const FAULTS = [
   { name: 'the Commanders page\'s ships read leaves the class size out', target: 'commandersPage', from: 'FCT_ShipClass.Size as ClassSize, ', to: '', fails: ['page'] },
   { name: 'the landing size follows the light naval limit, 20 hull spaces', target: 'transport', from: 'const SMALL_CRAFT_SIZE = 10', to: 'const SMALL_CRAFT_SIZE = 20', fails: ['landing'] },
   { name: 'a bayless craft over 10 hull spaces is refused at a colony with no spaceport on the 3.1 line as on the 2.7 line', target: 'transport', from: '} else if (zeroBayBase(version)) {', to: '} else if (false) {', fails: ['landing'] },
-  { name: 'the Production page names the production type 2 Fighter again', target: 'productionPage', from: '  2: \'Light Naval\',', to: '  2: \'Fighter\',', fails: ['names'] },
+  { name: 'the Production page names the production type 2 Fighter again', target: 'productionTypes', from: '[PRODUCTION_TYPE.LIGHT_NAVAL]: \'Light Naval\',', to: '[PRODUCTION_TYPE.LIGHT_NAVAL]: \'Fighter\',', fails: ['names'] },
   { name: 'the idle capacity column reads Fighters again', target: 'productionPage', from: '{ key: \'fighter\', text: \'Light Naval\', bp: true }', to: '{ key: \'fighter\', text: \'Fighters\', bp: true }', fails: ['names'] },
   { name: 'the Industry check is titled free fighter production capacity again', target: 'industry', from: 'with free light naval production capacity', to: 'with free fighter production capacity', fails: ['names'] },
-  { name: 'the Industry tab names the type-2 project kind Fighters again', target: 'industry', from: 'const PRODUCTION_KINDS = { 1: \'Ordnance\', 2: \'Light Naval\' }', to: 'const PRODUCTION_KINDS = { 1: \'Ordnance\', 2: \'Fighters\' }', fails: ['names'] },
+  { name: 'the Industry tab names the type-2 project kind Fighters again', target: 'industry', from: 'const PRODUCTION_KINDS = { ordnance: \'Ordnance\', fighter: \'Light Naval\', construction: \'Construction\' }', to: 'const PRODUCTION_KINDS = { ordnance: \'Ordnance\', fighter: \'Fighters\', construction: \'Construction\' }', fails: ['names'] },
   { name: 'the capacity rule leaves installation 35 out', target: 'modifiers', from: ' (the Light Naval Factory, installation 35)', to: '', fails: ['names'] },
   { name: 'a missing light naval rating is named a fighter rating again', target: 'modifiers', from: 'FighterProductionPower: \'the light naval rating of the installations\'', to: 'FighterProductionPower: \'the fighter rating of the installations\'', fails: ['names'] },
   { name: 'a colony with no light naval capacity is told it has no fighter capacity', target: 'productionPage', from: `The colony has no ${interpolated('CAPACITY_WORDS[category]')} capacity`, to: `The colony has no ${interpolated('category')} capacity`, fails: ['names'] },

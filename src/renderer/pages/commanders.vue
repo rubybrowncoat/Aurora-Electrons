@@ -117,7 +117,7 @@
                 <div class="caption text--secondary">× {{ fixed(item.candidateMultiplier, 2) }}, runs up to {{ item.candidateLabs }} labs<provenance-mark :result="item.result" /></div>
               </template>
             </v-data-table>
-            <div v-else class="panel-body caption text--secondary">{{ projects.length ? (researchAssessment.unrated.length ? 'No unassigned scientist of the right field, able to run the labs, would research faster on a project that can be rated.' : 'No unassigned scientist of the right field, able to run the labs, would research faster.') : 'No research projects are running.' }}</div>
+            <div v-else class="panel-body caption text--secondary" :data-research-skipped="researchAssessment.skipped ? 'true' : null">{{ researchAssessment.skipped ? researchAssessment.skipped : projects.length ? (researchAssessment.unrated.length ? 'No unassigned scientist of the right field, able to run the labs, would research faster on a project that can be rated.' : 'No unassigned scientist of the right field, able to run the labs, would research faster.') : 'No research projects are running.' }}</div>
             <div v-if="researchAssessment.unrated.length" class="panel-body caption text--secondary">
               <div>Cannot be rated, so left out of the table ({{ count(researchAssessment.unrated.length) }}):</div>
               <div v-for="item in unratedShown(researchAssessment.unrated)" :key="item.project.ProjectID">{{ item.project.ProjectName || `Project ${item.project.ProjectID}` }}: {{ missingText(item.result) }}<provenance-mark :result="item.result" /></div>
@@ -337,6 +337,7 @@ import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { loadNavalHierarchy } from '../utilities/naval-hierarchy'
 import { describeResult, isAvailable, valueOrNull } from '../utilities/provenance'
+import { NO_RESEARCH_UNREAD, loadNoResearchProjects } from '../utilities/research-data'
 
 const INPUT_LABELS = {
   commanders: 'the commanders',
@@ -351,6 +352,7 @@ const INPUT_LABELS = {
   unsettled: 'the commanders with no stored status',
   navalTree: 'the naval command structure',
   groundTree: 'the ground command structure',
+  noResearch: 'the race\'s No Research Projects setting',
 }
 // The reads of the command structure panel alone: the roster and the rest of the page never wait for them, and a failure of one is shown on that panel.
 const OPTIONAL_INPUTS = ['navalTree', 'groundTree']
@@ -529,7 +531,7 @@ export default {
     },
 
     researchAssessment() {
-      return researchSuggestions(this.projects, this.byType[3], this.blockedBonuses)
+      return researchSuggestions(this.projects, this.byType[3], this.blockedBonuses, { noResearch: this.noResearch.value === true })
     },
 
     researchRows() {
@@ -1288,6 +1290,18 @@ export default {
         return Object.freeze(await loadGroundFormationPosts(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: null,
+    },
+
+    // Whether the race starts no research projects (`FCT_Race.NoResearchProjects`), for the research suggestions: no scientist is suggested for a project of a race that starts none. The read guards its own column, so a save without it leaves the setting unknown and the suggestions as they are.
+    noResearch: {
+      get: tracked('noResearch', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_RESEARCH_UNREAD
+        }
+
+        return await loadNoResearchProjects(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_RESEARCH_UNREAD,
     },
   },
 }

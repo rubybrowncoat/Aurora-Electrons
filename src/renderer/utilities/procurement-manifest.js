@@ -2,15 +2,16 @@
 
 import { csvCell } from './csv-cell'
 import { buildableOf } from './component-calc'
+import { PRODUCTION_TYPE } from './production-types'
 import { registerRule } from './provenance'
 
 registerRule({
   id: 'production.procurementManifest',
-  versions: ['2.7.x'],
+  versions: ['2.7.x', '3.1.x'],
   units: 'component units',
   verification: 'estimated',
-  structure: ['FCT_ClassComponent.NumComponent', 'FCT_PopComponent.Amount', 'FCT_IndustrialProjects.ProductionID, ProductionType 3, Amount, PartialCompletion, Pause, Queue', 'FCT_ShipyardTask.TaskTypeID, UseComponents, ClassID, RefitID', 'FCT_ShipDesignComponents.Size, Cost', 'FCT_Population.SystemID'],
-  note: 'What a batch of hulls needs of each component, less what is free to use: the stock at the build colony, the stock at other colonies (which has to be moved) and the units that component projects already queued will deliver, each unit given to one plan only. A shortage is what is left. Stock whose amount is not known, stock held back by a claim that is not known and a queue that was not read are never counted as supply, so the shortage is then an upper bound and says so. Units already queued by the game are the stored remaining amount plus the part-built unit, rounded to whole units; a paused project is listed apart and does not count as supply. The tons to move come from the design data\'s size of the component.',
+  structure: ['FCT_ClassComponent.NumComponent', 'FCT_PopComponent.Amount', 'FCT_IndustrialProjects.ProductionID, ProductionType (3 and 5 are component supply; 6 and 7 are counted by kind), Amount, PartialCompletion, Pause, Queue', 'FCT_ShipyardTask.TaskTypeID, UseComponents, ClassID, RefitID', 'FCT_ShipDesignComponents.Size, Cost', 'FCT_Population.SystemID'],
+  note: 'What a batch of hulls needs of each component, less what is free to use: the stock at the build colony, the stock at other colonies (which has to be moved) and the units that component projects already queued will deliver, each unit given to one plan only. A shortage is what is left. Stock whose amount is not known, stock held back by a claim that is not known and a queue that was not read are never counted as supply, so the shortage is then an upper bound and says so. Units already queued by the game are the stored remaining amount plus the part-built unit, rounded to whole units; a paused project is listed apart and does not count as supply. A component project and an Engineering Project both put the component into the colony\'s stock as each unit completes, so both are supply; an Ordnance Project adds ordnance and a Ground Unit Project adds no unit, so those two are counted by kind and are not supply. The tons to move come from the design data\'s size of the component.',
   assumptions: ['The components are needed at the build colony', 'A queued project finishes its units and nothing else uses them', 'A unit at another colony is moved to the build colony; cargo already on the way is not counted'],
 })
 
@@ -40,11 +41,32 @@ const colonyOf = (colonies, id) => (colonies && colonies[id]) || { id: Number(id
 // The units a component project will deliver: the remaining amount the game stores plus the part-built unit, which is a whole number of units (a project of 47 units with 0.0498 of one done stores 46.9502). Null when either figure is not known.
 export const projectUnits = (project) => (isNumber(project.amount) && isNumber(project.partial) ? Math.max(0, Math.floor(project.amount + project.partial + 1e-6)) : null)
 
+// The production types whose completed units go into a colony's component stock: a component project (`method_71` in the Components case of Population.cs:2288-2292) and an Engineering Project, which adds the component it develops and researches its tech (Population.cs:2293-2300). An Ordnance Project adds ordnance (`method_153`) and researches the missile, a Ground Unit Project only researches the class (Population.cs:2264-2271 and 2301-2308): neither adds a component, so neither is supply. A project with no production type stated (rows made before the type was read) is a component project.
+const SUPPLY_TYPES = Object.freeze([PRODUCTION_TYPE.COMPONENTS, PRODUCTION_TYPE.ENGINEERING_PROJECTS])
+
+export const suppliesComponents = (project) => project.productionType === undefined || SUPPLY_TYPES.includes(project.productionType)
+
+// How many of the race's queued projects of each kind the read holds, whether they are running, queued or paused: { components, engineering, ordnance, groundUnit }. The Engineering Projects supply components; the Ordnance and Ground Unit Projects are listed so that they are seen to be read and left out of the supply.
+export const projectKinds = (projects) => ({
+  components: projects.filter((project) => project.productionType === undefined || project.productionType === PRODUCTION_TYPE.COMPONENTS).length,
+  engineering: projects.filter((project) => project.productionType === PRODUCTION_TYPE.ENGINEERING_PROJECTS).length,
+  ordnance: projects.filter((project) => project.productionType === PRODUCTION_TYPE.ORDNANCE_PROJECTS).length,
+  groundUnit: projects.filter((project) => project.productionType === PRODUCTION_TYPE.GROUND_UNIT_PROJECTS).length,
+})
+
+// The line that says which development projects the read holds and how each is treated, null when there is none: the Engineering Projects are counted as component supply, the Ordnance and Ground Unit Projects are not.
+export const developmentNote = (kinds) => {
+  const named = (count, name, treatment) => (count ? `${count} ${name} ${count === 1 ? 'Project' : 'Projects'} (${treatment})` : null)
+  const parts = [named(kinds && kinds.engineering, 'Engineering', 'counted as component supply'), named(kinds && kinds.ordnance, 'Ordnance', 'adds ordnance, not component supply'), named(kinds && kinds.groundUnit, 'Ground Unit', 'adds no unit, not component supply')].filter(Boolean)
+
+  return parts.length ? `Development projects queued: ${parts.join(', ')}` : null
+}
+
 // The queued component projects (shipyard-less manufacture by a colony) of each component: { [componentId]: { active: { [populationId]: units }, paused: { [populationId]: units }, uncertain: [{ populationId, state, units }], unknown: [reason] } }. A project counts toward `active` when it is not paused (running or waiting in the queue); one whose pause flag or units are not known is counted in neither, is listed in `unknown` with the reason, and is kept in `uncertain` with its colony, its state ('queued', 'paused' or 'not known' for a pause flag that is not stored) and its units (null when not known), so that its location is not lost.
 export const queuedOf = (projects) => {
   const byComponent = {}
 
-  projects.forEach((project) => {
+  projects.filter(suppliesComponents).forEach((project) => {
     const entry = (byComponent[project.componentId] = byComponent[project.componentId] || { active: {}, paused: {}, uncertain: [], unknown: [] })
     const units = projectUnits(project)
     const name = project.name || `project ${project.id}`
@@ -420,6 +442,7 @@ export const reconcile = ({ plans, parts, stock, colonies, targetId, projects = 
     moves,
     manufacture: rows.flatMap((row) => row.manufacture.map((entry) => ({ ...entry, componentId: row.componentId, componentName: row.name, colonyName: entry.name }))),
     claims: reservations.claims,
+    projectKinds: projectKinds(projects),
     tasks: reservations.tasks,
     totals: {
       needed: unknownNeed ? null : sumOf(rows, (row) => row.needed),
@@ -482,6 +505,12 @@ export const manifestCsv = (manifest) => {
   manifest.unknown.forEach((text) => lines.push(record({ Record: 'context', Note: `Not known: ${text}`, Rule: RULE })))
   manifest.problems.forEach((text) => lines.push(record({ Record: 'context', Note: text, Rule: RULE })))
 
+  const development = developmentNote(manifest.projectKinds)
+
+  if (development) {
+    lines.push(record({ Record: 'context', Note: development, Rule: RULE }))
+  }
+
   manifest.rows.forEach((row) => {
     lines.push(record({ Record: 'component', 'Component ID': row.componentId, Component: row.name, Route: ROUTE_TEXT[row.route] || 'not known', 'Colony ID': manifest.target.populationId, Colony: manifest.target.name, Needed: row.needed, 'Stock here': row.stock.local, 'Stock elsewhere': row.stock.remote, 'Reserved (proven)': row.reserved.proven, 'Held back (claim not known)': row.reserved.unknown, 'Available here': row.available.local, 'Available elsewhere': row.available.remote, 'Used here': row.used.stockLocal, 'Used elsewhere': row.used.stockRemote, 'Queued here': row.queued.local, 'Queued elsewhere': row.queued.remote, 'Queued paused': row.queued.paused, 'Used from queue here': row.used.queuedLocal, 'Used from queue elsewhere': row.used.queuedRemote, 'Spare stock': row.spare, 'Net shortage': row.net, 'Net shortage basis': row.netBasis, 'Shortage BP': row.shortBP, 'Units to move': row.needed === null ? null : row.moves.reduce((sum, move) => sum + move.units, 0), 'Tons to move': row.needed === null ? null : row.moves.every((move) => move.tons !== null) ? row.moves.reduce((sum, move) => sum + move.tons, 0) : null, Note: [row.why, BASIS_NOTE[row.netBasis], ...row.unknown].filter(Boolean).join('; '), Rule: RULE }))
 
@@ -510,6 +539,12 @@ export const manifestText = (manifest, { count = (value) => String(rounded(value
   manifest.manufacture.forEach((entry) => lines.push(`Manufacture ${stockText(entry.incomplete ? null : entry.units, entry.units === null ? 0 : entry.units)} ${entry.componentName} at ${entry.colonyName} (${entry.state === 'paused' ? 'paused, not counted as supply' : entry.state === 'not known' ? 'whether it is paused is not known, not counted as supply' : entry.used === null ? 'queued; the use by the plans is not known' : `queued; ${figure(entry.used)} used by the plans, ${entry.unused === null ? 'the rest not known' : `${figure(entry.unused)} not used`}`})`))
 
   manifest.moves.forEach((move) => lines.push(`Move ${figure(move.units)} ${move.componentName} from ${move.colonyName}${move.stage === 'queued' ? ' (queued for manufacture there)' : ''}${move.tons === null ? '' : `, ${figure(move.tons)} t`}`))
+
+  const development = developmentNote(manifest.projectKinds)
+
+  if (development) {
+    lines.push(development)
+  }
 
   if (manifest.unknown.length) {
     lines.push(`Not known: ${manifest.unknown.join('; ')}`)

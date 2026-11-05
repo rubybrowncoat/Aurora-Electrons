@@ -14,6 +14,8 @@ export const LOCKED = 'locked'
 export const BLOCKED = 'blocked'
 
 const RESEARCH_VERSIONS = ['2.7.x']
+// The rules that state the saved points and the carry into a queued tech, checked against the current game's research processing (Population.cs:851-949 and 5107-5142) as well as the older line they were written for.
+const SAVED_VERSIONS = ['2.7.x', '3.1.x']
 const RATE_RULE = 'research.projectRate'
 const LANDING_RULE = 'research.landing'
 // The key a construct row with no research field is kept under, so every field's bonus reads as unknown.
@@ -66,11 +68,11 @@ registerRule({
 
 registerRule({
   id: 'research.remaining',
-  versions: RESEARCH_VERSIONS,
+  versions: SAVED_VERSIONS,
   units: 'RP',
   verification: 'confirmed',
   structure: ['FCT_ResearchProject.ResearchPointsRequired', 'FCT_TechSystem.DevelopCost', 'FCT_PausedResearch.PointsAccumulated'],
-  note: 'RP still to pay for a tech: a running project\'s stored RP left, else its development cost less the points banked in paused research (none banked is 0). Arithmetic on stored values, never below 0.',
+  note: 'RP still to pay for a tech: a running project\'s stored RP left, else its stored development cost less the points saved from cancelled research (none saved is 0). The saved points are read as stored, decimals included, and the cost is the stored one whatever its size. Arithmetic on stored values, never below 0.',
 })
 
 registerRule({
@@ -111,11 +113,11 @@ registerRule({
 
 registerRule({
   id: LANDING_RULE,
-  versions: RESEARCH_VERSIONS,
+  versions: SAVED_VERSIONS,
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_ResearchProject.ResearchPointsRequired', 'FCT_ResearchQueue.ResearchOrder', 'FCT_TechSystem.DevelopCost', 'the research.projectRate figure'],
-  note: 'Years until a project lands: its RP left over its rate. A queued tech starts when the one before it lands and is paid at the project\'s labs and scientist at the queued tech\'s own field. A project that is paused or makes no RP never lands, and nothing behind it does.',
+  note: 'Years until a project lands: its RP left over its rate. A queued tech starts when the one before it lands and is paid at the project\'s labs and scientist at the queued tech\'s own field, for the cost less the points saved on it. The game hands the part of a landing increment the project does not need to the next queued tech at that tech\'s own rate, so this figure is the carry in continuous time: the game lands the tech at the end of the first increment at or after it. A project that is paused or makes no RP never lands, and nothing behind it does.',
 })
 
 registerRule({
@@ -124,7 +126,7 @@ registerRule({
   units: 'years',
   verification: 'estimated',
   structure: ['the research.landing figure of each running project', 'FCT_Game.StartYear, GameTime'],
-  note: 'The soonest landing among the running projects, dated from the game clock.',
+  note: 'The soonest landing among the running projects, dated from the game clock. The date is the calendar day of the continuous landing time of the project, so it is an estimate: the game lands a tech at the end of the first increment at or after that time, and the day it shows can be later.',
 })
 
 // Why a tech can never be researched by the race, as a player reads it.
@@ -133,6 +135,12 @@ export const BLOCK_REASONS = {
   foreign: "Another empire's technology",
   'no-prerequisite': 'Needs a technology the game does not provide',
   prerequisite: 'Needs a technology that cannot be researched',
+}
+
+// Why a tech with saved points that the game lists cannot be started (`notResearchable` of `evaluateResearch`).
+export const NOT_RESEARCHABLE_REASONS = {
+  ruin: 'Found only in ancient ruins',
+  prerequisite: 'A prerequisite is not researched',
 }
 
 export const STATUS_LABELS = {
@@ -144,9 +152,10 @@ export const STATUS_LABELS = {
   [BLOCKED]: 'Out of reach',
 }
 
-// The catalogue as `rows` from FCT_TechSystem (GameID 0, plus the race's eligible alien projects) with DIM_TechType's Description (TypeName) and FieldID: tech by id, with its prerequisites and dependents.
-export const buildTechGraph = (rows) => {
+// The catalogue as `rows` from FCT_TechSystem (GameID 0, the race's own techs of the game, which `Game.LoadTechSystems` loads for the game, and the race's eligible alien projects) with DIM_TechType's Description (TypeName) and FieldID: tech by id, with its prerequisites and dependents. `categories` are the rows of DIM_ResearchCategories (CategoryID, Name), which name each tech's research category (`categoryName`, null when the save has no such row).
+export const buildTechGraph = (rows, categories = []) => {
   const techs = new Map()
+  const categoryNames = new Map(categories.map((row) => [row.CategoryID, row.Name]))
 
   rows.forEach((row) => techs.set(row.TechSystemID, {
     id: row.TechSystemID,
@@ -156,6 +165,8 @@ export const buildTechGraph = (rows) => {
     fieldId: row.FieldID,
     typeId: row.TechTypeID,
     typeName: row.TypeName,
+    categoryId: row.CategoryID === undefined ? null : row.CategoryID,
+    categoryName: categoryNames.has(row.CategoryID) && categoryNames.get(row.CategoryID) ? categoryNames.get(row.CategoryID) : null,
     raceId: row.RaceID,
     ruinOnly: toBoolean(row.RuinOnly),
     automatic: toBoolean(row.AutomaticResearch),
@@ -186,12 +197,16 @@ export const researchState = ({ raceId, researched, eligible = [], projects = []
   paused: new Map(paused.map((row) => [row.TechSystemID, row.PointsAccumulated])),
 })
 
-// Per tech: { status, reason, remaining, missing, pathRp, unlocks, gaps }.
+// Per tech: { status, reason, remaining, missing, pathRp, unlocks, gaps, hasSaved, saved, inList, notResearchable }.
 //   remaining  RP still to pay for this tech (a running project's RP left, else its cost less banked points), null when the cost, the project's RP left or the banked points are not stored
 //   missing    ids of the unresearched techs it needs, deepest prerequisite first, itself not included
 //   pathRp     remaining of the tech plus all of `missing`: the game's "Path RP", less progress already made; null when any of those is not known
 //   unlocks    direct dependents that are not researched yet
 //   gaps       { remaining, pathRp }: the stored values each of those two lacks, by name, for `remainingResult` and `pathRpResult`
+//   hasSaved   whether the race has a row of points saved from cancelled research for it
+//   saved      the points saved, as stored (a decimal as it is), null when there is no row or the points are not stored
+//   inList     whether the game lists it (Population.method_112, Population.cs:5241-5294): not researched, running or queued, belonging to nobody, to the race or to a race that made it eligible, and either with a saved row (whatever else stops it being started) or startable (not ruin-only, every prerequisite researched)
+//   notResearchable  why a listed tech with saved points cannot be started: 'ruin' (found only in ruins) and 'prerequisite' (a prerequisite is not researched), both when both hold, empty when it can be started
 export const evaluateResearch = (graph, state) => {
   const { techs } = graph
   const { raceId, researched, eligible, projects, queued, paused } = state
@@ -283,6 +298,12 @@ export const evaluateResearch = (graph, state) => {
       entry.reason = blockReason(tech)
       entry.status = entry.reason ? BLOCKED : open.length ? LOCKED : AVAILABLE
     }
+
+    // The game keeps a tech with points saved from cancelled research in the race's list whatever stops it being started (Population.method_112, Population.cs:5241-5294): a saved ruin-only tech and a saved tech with a prerequisite not researched are listed, as not researchable, while a tech of another empire is not. A tech with no saved row is listed only while it can be started.
+    entry.hasSaved = paused.has(tech.id)
+    entry.saved = entry.hasSaved && isKnownNumber(paused.get(tech.id)) ? paused.get(tech.id) : null
+    entry.inList = entry.status === AVAILABLE || (entry.hasSaved && ![DONE, ACTIVE, QUEUED].includes(entry.status) && (tech.raceId === 0 || tech.raceId === raceId || eligible.has(tech.id)))
+    entry.notResearchable = entry.inList ? [...(tech.ruinOnly ? ['ruin'] : []), ...(tech.prerequisites.some((id) => !researched.has(id)) ? ['prerequisite'] : [])] : []
 
     entry.unlocks = tech.dependents.filter((id) => !researched.has(id)).length
 

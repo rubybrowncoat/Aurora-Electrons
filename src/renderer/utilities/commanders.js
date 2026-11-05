@@ -3,6 +3,7 @@
 import { gameTime } from './aurora'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
 import { STATUS, combine, envelope, getRule, isAvailable, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
+import { NO_RESEARCH_WORDS } from './research-data'
 
 export const COMMANDER_TYPES = [
   { id: 0, label: 'Naval', plural: 'Naval officers', flag: 'Naval' },
@@ -665,12 +666,16 @@ export const researchMultiplier = (scientist, inField) => {
   return missing.length ? unavailable({ rule: MULTIPLIER, missing }) : ofRule({ rule: MULTIPLIER, value: inField ? 4 * bonus - 3 : bonus, inputs: { present: ['Research bonus', 'research field'] } })
 }
 
-// Research projects where an unassigned scientist of the project's field, able to run its labs (Research Administration >= labs), would research faster than the scientist on it. Returns { rows, unrated }: `rows` carry the multipliers as results, `candidateLabs` and a result of 'commanders.researchSuggestion', and `unrated` the projects that cannot be rated, each { project, result } with the result unavailable. A project with no scientist researches at ×1. A project whose labs or field, a holder who is not among the scientists, or a scientist whose Research bonus, Research Administration or field is not stored cannot be rated unless no unassigned scientist could be its candidate. With a `blocked` Research or Research Administration bonus no project can be rated.
-export const researchSuggestions = (projects, scientists, blocked = NONE) => {
+// Research projects where an unassigned scientist of the project's field, able to run its labs (Research Administration >= labs), would research faster than the scientist on it. Returns { rows, unrated, skipped }: `rows` carry the multipliers as results, `candidateLabs` and a result of 'commanders.researchSuggestion', and `unrated` the projects that cannot be rated, each { project, result } with the result unavailable. A project with no scientist researches at ×1. A project whose labs or field, a holder who is not among the scientists, or a scientist whose Research bonus, Research Administration or field is not stored cannot be rated unless no unassigned scientist could be its candidate. With a `blocked` Research or Research Administration bonus no project can be rated. `noResearch`: the race starts no research projects (`FCT_Race.NoResearchProjects`), so no scientist is suggested for a project and `skipped` gives the reason (`NO_RESEARCH_WORDS`); it is null otherwise.
+export const researchSuggestions = (projects, scientists, blocked = NONE, { noResearch = false } = {}) => {
+  if (noResearch === true) {
+    return { rows: [], unrated: [], skipped: NO_RESEARCH_WORDS }
+  }
+
   const unconfirmed = [RESEARCH, RESEARCH_ADMINISTRATION].filter((bonusId) => blocked.has(bonusId))
 
   if (unconfirmed.length) {
-    return { rows: [], unrated: projects.map((project) => ({ project, result: unavailable({ rule: PROJECT, missing: unconfirmed.map((bonusId) => `the save's row for bonus ${bonusId}`) }) })) }
+    return { rows: [], unrated: projects.map((project) => ({ project, result: unavailable({ rule: PROJECT, missing: unconfirmed.map((bonusId) => `the save's row for bonus ${bonusId}`) }) })), skipped: null }
   }
 
   const idle = idleOf(scientists)
@@ -728,7 +733,7 @@ export const researchSuggestions = (projects, scientists, blocked = NONE) => {
     }
   })
 
-  return { rows, unrated }
+  return { rows, unrated, skipped: null }
 }
 
 // The assignments an unassigned officer would improve, as a result of 'commanders.bonusSuggestion': the governor, ship and research rows added. `unrated` is the number of assignments left out because they cannot be rated.

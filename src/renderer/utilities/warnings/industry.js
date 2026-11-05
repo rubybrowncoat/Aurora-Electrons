@@ -1,11 +1,16 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { MINERALS, projectShortages } from '../minerals'
+import { capacityKind, typesOf } from '../production-types'
 import { QUARTER, amount, bandOf, bandWords, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, listWords, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'industry', title: 'Industry', summary: 'Review idle factory capacity, stalled projects and unused shipyards.' }
 
-const PRODUCTION_KINDS = { 1: 'Ordnance', 2: 'Light Naval' }
+// The capacity kind of a project as the paused projects list names it (`capacityKind` of utilities/production-types.js): the Ordnance Projects draw on ordnance capacity, the Engineering and Ground Unit Projects on construction.
+const PRODUCTION_KINDS = { ordnance: 'Ordnance', fighter: 'Light Naval', construction: 'Construction' }
+
+// The types of one capacity as the list of a SQL `in (...)`, from the one table of types.
+const typesClause = (kind) => `IN (${typesOf(kind).join(',')})`
 
 // `FCT_Shipyard.TaskType`: what a yard is busy modifying; 0 is nothing.
 const SHIPYARD_ACTIVITIES = {
@@ -55,7 +60,7 @@ const FREE_CAPACITY_STRUCTURE = ['FCT_PopulationInstallations.Amount', 'DIM_Plan
 
 const freeCapacityNote = (kind) => `A colony with ${kind} installations whose projects of that kind (not queued) take under 100% of its capacity, by the stored shares. Whether the shares add up to the capacity the game uses is not checked against the game. A colony counts as having ${kind} installations when an amount above 0 is stored for one; a colony with only installations whose amount is 0, or with none, has none. A colony with no stored amount above 0 and an installation's type or amount not stored, or with a project's share, queue state or type not stored, is listed apart, as not evaluated; the installations total shows a dash while a type or amount is missing.`
 
-const projectKind = (project) => (project.ProductionType === null || project.ProductionType === undefined ? null : PRODUCTION_KINDS[project.ProductionType] || 'Construction')
+const projectKind = (project) => (project.ProductionType === null || project.ProductionType === undefined ? null : PRODUCTION_KINDS[capacityKind(project.ProductionType)])
 
 const PROJECT_RUNNING = '(FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.Pause = 0)'
 
@@ -109,7 +114,7 @@ export const checks = checksOf([
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {
-      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'ConstructionValue', alias: 'ConstructionAmount', types: 'IN (0,3,4)', minimum: 0.00006 }))
+      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'ConstructionValue', alias: 'ConstructionAmount', types: typesClause('construction'), minimum: 0.00006 }))
 
       return freeCapacityRows(ctx, populations, 'ConstructionAmount')
     },
@@ -129,7 +134,7 @@ export const checks = checksOf([
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {
-      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'OrdnanceProductionValue', alias: 'OrdnanceProductionAmount', types: '= 1', minimum: 0 }))
+      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'OrdnanceProductionValue', alias: 'OrdnanceProductionAmount', types: typesClause('ordnance'), minimum: 0 }))
 
       return freeCapacityRows(ctx, populations, 'OrdnanceProductionAmount')
     },
@@ -149,7 +154,7 @@ export const checks = checksOf([
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {
-      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'FighterProductionValue', alias: 'FighterProductionAmount', types: '= 2', minimum: 0 }))
+      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'FighterProductionValue', alias: 'FighterProductionAmount', types: typesClause('fighter'), minimum: 0 }))
 
       return freeCapacityRows(ctx, populations, 'FighterProductionAmount')
     },

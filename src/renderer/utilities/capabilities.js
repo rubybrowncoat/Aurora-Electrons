@@ -67,7 +67,10 @@ const OPTIONAL = Object.freeze({
   '/survey-progress': (key) => ['formations', 'groundCommanders', 'ruinSites', 'constructSites', 'troopBays', 'observationRead'].includes(key),
   '/history': (key) => key === 'observationRead',
   // The command structure panel of the Commanders page reads the naval admin commands, fleets and ships and the ground formations with their commanders, each loader checking its own columns; the roster does not rest on them, and the panel names what could not be read.
-  '/commanders': (key) => key === 'navalTree' || key === 'groundTree',
+  '/commanders': (key) => key === 'navalTree' || key === 'groundTree' || key === 'noResearch',
+  // The race's No Research Projects setting is read by a loader that names its column first (`loadNoResearchProjects`): a save without the column leaves the setting unknown, and the Research page and the Commanders suggestions say so and go on as for any race. The items of the Engineering, Ordnance and Ground Unit Projects of the Industry jobs (`developments`) are read the same way: a save without a table of them leaves the line under those jobs saying so, and the jobs stay.
+  '/technologies': (key) => key === 'noResearch',
+  '/production': (key) => key === 'developments',
 })
 
 // The life pods and wrecks read for the observation (`recoveryObservationRead`) are an opt-in of the Galaxy Map's recovery ledger and of the recorder behind History, which any page that switches observation on or reads a record reaches: a save without a column of that read leaves the observation unavailable, in place of its switch, and nothing else of any page.
@@ -344,7 +347,6 @@ export const DECLARED = Object.freeze([
   Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-04', table: 'FCT_Game', columns: Object.freeze(['OrbitalMotionAst']), retained: true, note: 'kept in the 3.1 header although its behaviour is replaced, and in the 2.7 header before it; AE-302-04 measures it' }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-301-06', table: 'FCT_Game', columns: Object.freeze(['LostColonies', 'GenerateNonOxygenRaces', 'NoShieldTechnology']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-04', table: 'FCT_Game', columns: Object.freeze(['OrbitalMovementInSubPulse']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-09', table: 'FCT_Race', columns: Object.freeze(['NoResearchProjects']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-01', table: 'FCT_Race', columns: Object.freeze(['chkShowBodyColours', 'chkCCIncludeLowG', 'chkGasGiantColour']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-04', table: 'FCT_Race', columns: Object.freeze(['chkJumpPointBuoys']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-01', table: 'FCT_Population', columns: Object.freeze(['AlienArtifacts', 'ConstructPriority', 'AccruedArtifactPoints', 'AccruedConstructPoints', 'NoRuinRecovery']) }),

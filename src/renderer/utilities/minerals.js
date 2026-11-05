@@ -3,6 +3,7 @@
 import { crewFraction } from './crew'
 import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+import { capacityKind } from './production-types'
 
 const MINERALS_VERSIONS = ['2.7.x']
 const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
@@ -493,8 +494,8 @@ const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left
 
 const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
 
-// The capacity a project draws on: ordnance and light naval units have their own and everything else uses construction; null for a production type the save lacks, which is never taken as construction.
-const facilityOf = (productionType) => (!recorded(productionType) ? null : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
+// The capacity a project draws on (`capacityKind` of utilities/production-types.js); null for a production type the save lacks, which is never taken as construction.
+const facilityOf = (productionType) => (!recorded(productionType) ? null : capacityKind(productionType))
 
 export const annualQueueDemand = (projects, capacityOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))

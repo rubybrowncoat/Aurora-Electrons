@@ -19,7 +19,7 @@
         <div class="d-flex align-center flex-wrap mb-1">
           <span class="text-h6 mr-3">{{ tech.name }}</span>
           <span class="status-chip mr-3"><v-icon small :color="colors[entry.status]">{{ icons[entry.status] }}</v-icon> {{ labels[entry.status] }}</span>
-          <span class="caption text--secondary">{{ fieldName }} · {{ tech.typeName }}</span><page-link v-if="techViews[tech.typeId]" class="ml-1" :to="linkTo.shipyards({ view: techViews[tech.typeId] })" :name="tech.typeName" />
+          <span class="caption text--secondary">{{ fieldName }} · {{ tech.typeName }}<span v-if="tech.categoryName" data-category> · {{ tech.categoryName }}</span></span><page-link v-if="techViews[tech.typeId]" class="ml-1" :to="linkTo.shipyards({ view: techViews[tech.typeId] })" :name="tech.typeName" />
         </div>
         <div v-if="tech.description" class="description mb-3">{{ tech.description }}</div>
         <div v-if="entry.status === 'blocked'" class="text--secondary mb-3">{{ blockText }}</div>
@@ -89,7 +89,7 @@ import countFormat from '../../mixins/count-format'
 import { activeAppearance } from '../../utilities/appearance'
 import { linkTo } from '../../utilities/deep-links'
 import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
-import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, prerequisiteChain, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, NOT_RESEARCHABLE_REASONS, pathRpResult, prerequisiteChain, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
 import { SHIPYARD_TECH_VIEWS } from '../../utilities/shipyard-growth'
 import { chartTheme, mapFont, withAlpha } from '../charts/theme'
 import PageLink from '../page/PageLink.vue'
@@ -171,10 +171,10 @@ export default {
       if (entry.status === DONE) {
         return [cost, { label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology not yet researched' : 'technologies not yet researched' }]
       } else if (entry.status === BLOCKED) {
-        return [cost]
+        return [cost, ...(entry.inList ? [{ label: 'Saved points', value: isKnownNumber(entry.saved) ? `${this.points(entry.saved)} RP` : UNKNOWN_TEXT, note: entry.notResearchable.length ? `Not researchable: ${entry.notResearchable.map((reason) => NOT_RESEARCHABLE_REASONS[reason]).join('; ')}` : '' }] : [])]
       }
 
-      const facts = [{ label: entry.status === ACTIVE ? 'RP left on this project' : 'RP to research it', value: isKnownNumber(entry.remaining) ? `${this.count(entry.remaining)} RP` : UNKNOWN_TEXT, result: remainingResult(entry), note: banked > 0 ? `${this.count(banked)} banked of ${this.count(tech.cost)}` : entry.status === ACTIVE ? `of ${this.count(tech.cost)}` : '' }]
+      const facts = [{ label: entry.status === ACTIVE ? 'RP left on this project' : 'RP to research it', value: isKnownNumber(entry.remaining) ? `${this.count(entry.remaining)} RP` : UNKNOWN_TEXT, result: remainingResult(entry), note: banked > 0 ? `${this.points(banked)} banked of ${this.count(tech.cost)}` : entry.status === ACTIVE ? `of ${this.count(tech.cost)}` : '' }]
 
       if (entry.missing.length) {
         facts.push({ label: 'RP to get there', value: isKnownNumber(entry.pathRp) ? `${this.count(entry.pathRp)} RP` : UNKNOWN_TEXT, result: pathRpResult(entry), note: `${entry.missing.length + 1} steps, prerequisites included` })
@@ -224,6 +224,11 @@ export default {
     this.destroy()
   },
   methods: {
+    // Points as the save stores them: whole points as a count, a saved fraction with its two decimals (saved progress is decimal).
+    points(value) {
+      return this.count(value, Number.isInteger(value) ? 0 : 2)
+    },
+
     filterOption(item, query) {
       const needle = (query || '').toLowerCase()
 

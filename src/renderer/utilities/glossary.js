@@ -80,6 +80,7 @@ const PAGE_HELP = Object.freeze({
       'Idle capacity by colony shows the construction, ordnance, light naval, training, research and slipway capacity each colony leaves unused, with links to Colony Outlook, the Colonization Planner and Commanders.',
       'Component calculator takes a Ship class, a Colony, the Hulls and a Deadline, days from now, and gives the share of the colony\'s construction capacity that builds the class\'s manufactured components in time; a stock figure typed over a row is an assumption, and Reset stock restores the save\'s.',
       'Procurement manifest takes one or more classes with their hulls and the colony they are Needed at, and lists what is short of each component, where the stock sits and what has to move; CSV downloads the manifest and Copy text copies it.',
+      'Engineering, Ordnance and Ground Unit Projects are listed with the item they develop, their cost (twice its development cost) and their minerals; the procurement manifest counts an Engineering Project as component supply and the other two by kind.',
       'A finish date is a forecast under the rules in each section\'s footer; a dash is a job with no date, and the mark beside it says why.',
     ],
     terms: ['build-points', 'research-points', 'production-capacity', 'mineral-shortage', 'slipway', 'estimated-output'],
@@ -315,7 +316,7 @@ const PAGE_HELP = Object.freeze({
   '/commanders': {
     overview: 'Commanders lists every commander of the race with rank, post, bonuses and health, finds the unassigned officers who would do a post better than its holder, and lays out the naval and ground command structure. It reads the commanders, their careers, the colonies, ships, research projects and admin commands of the save and ranks candidates as the game\'s automatic assignment does. Nothing is assigned here; the save is only read.',
     usage: [
-      'Better assignments switches between Governor improvements, Specialist ships and Research, each a table of posts with the current holder, the better unassigned candidate and the gain; the links open the colony, system or technology.',
+      'Better assignments switches between Governor improvements, Specialist ships and Research, each a table of posts with the current holder, the better unassigned candidate and the gain; the links open the colony, system or technology. A race that starts no research projects has no Research suggestions, and the table says so.',
       'Roster lists the commanders of the type chosen; Unassigned only, Search names and assignments, Sort by bonus, Research field, Post, Rank, Age from and Age to narrow it, and a focused commander keeps the filters off until the chip at the top clears the focus.',
       'Former commanders lists the Prisoners, Retired, Dead and Alien prisoners with their careers; expand a row for the full career.',
       'Command structure shows the naval admin commands with their fleets and ships under Naval, or the ground formations under Ground, with the commander in each post; Shipping lines adds the lines\' fleets to the naval view, and CSV and Markdown download the structure with each entry\'s path.',
@@ -328,10 +329,12 @@ const PAGE_HELP = Object.freeze({
     usage: [
       'The view toggle switches between Fields, Lines and Path, and Search technologies matches names across every field in Fields and Lines.',
       'In Fields, pick a field from the rail (or the select on a narrow window) to see its technologies under In progress, Available now, Waiting on a prerequisite, Researched and, where any are blocked, Out of reach; a search lists the matches of every field instead, and clicking a technology selects it.',
-      'In progress lists the running and queued projects with their colony, scientist and time left, with links to the colony and the commander.',
+      'In progress lists the running and queued projects with their colony, scientist and time left, with links to the colony and the commander. A landing date is marked about: it is the day of the continuous finish time, and the game completes a project at the end of an increment, so the day can be later.',
+      'A technology with points saved from cancelled research stays in the game\'s list when it is found only in ruins or a prerequisite is not researched; it is shown under Waiting on a prerequisite or Out of reach with its saved points, marked not researchable. Saved points and every cost are the stored figures, decimals included.',
       'In Lines, each field\'s upgrade lines run level by level with the next technology of each; Hide finished lines keeps the lines with work left, and a shipyard-type technology links to the Shipyard Planner.',
-      'In Path, Technology chooses a target; Prerequisites draws the chain that leads to it coloured by status (scroll to zoom, drag to move, Fit to refit the graph, click a box to look at that technology), Research in this order lists what is still needed in an order that reaches it, and Opens lists what it unlocks.',
+      'In Path, Technology chooses a target; its field, line and research category are named under its title, Prerequisites draws the chain that leads to it coloured by status (scroll to zoom, drag to move, Fit to refit the graph, click a box to look at that technology), Research in this order lists what is still needed in an order that reaches it, and Opens lists what it unlocks. Searching a research category name lists its technologies.',
       'A notice at the top reports the starting tech points left that the race has not spent, where the save holds them.',
+      'A notice at the top says when the race starts no research projects: idle labs are then not flagged, and the race develops components, missiles and ground unit classes by Engineering, Ordnance and Ground Unit Projects on Production.',
     ],
     terms: ['research-project', 'research-points', 'component-design', 'estimated-output'],
   },

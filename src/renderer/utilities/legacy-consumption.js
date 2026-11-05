@@ -3,6 +3,7 @@
 import { LITRES_PER_TON, MSP_MINERALS, mspProduction, refineryYield } from './logistics'
 import { MINERALS } from './minerals'
 import { shipRate, shipyardUpgradeRate } from './production'
+import { capacityKind } from './production-types'
 import { combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, weakestStatus } from './provenance'
 
 const VERSIONS = ['2.7.x']
@@ -297,5 +298,5 @@ export const legacyModels = ({ colonies, tasks, activities, modifiers }) => {
 export const industryBasis = ({ projects, npr }) => {
   const queue = `${count(projects.length, 'project')} queued or running`
 
-  return npr && projects.some((project) => project.ProductionType === 1) ? `${queue}; an NPR's ordnance is not charged to its minerals in the game, so the queue may overstate its use (no saved case)` : queue
+  return npr && projects.some((project) => capacityKind(project.ProductionType) === 'ordnance') ? `${queue}; an NPR's ordnance is not charged to its minerals in the game, so the queue may overstate its use (no saved case)` : queue
 }

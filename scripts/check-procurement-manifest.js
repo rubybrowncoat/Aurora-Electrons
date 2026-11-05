@@ -829,9 +829,12 @@ const TABLES = {
   FCT_Shipyard: ['ShipyardID', 'GameID', 'PopulationID'],
   FCT_ShipClass: ['ShipClassID', 'Cost'],
   FCT_ShipyardTask: ['TaskID', 'GameID', 'RaceID', 'PopulationID', 'TaskTypeID', 'ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP'],
-  FCT_IndustrialProjects: ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'ProductionType', 'ProductionID', 'Amount', 'PartialCompletion', 'Percentage', 'Queue', 'Description', 'Pause'],
+  FCT_IndustrialProjects: ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'SpeciesID', 'ProductionType', 'ProductionID', 'WealthUse', 'Amount', 'PartialCompletion', 'Percentage', 'Queue', 'Description', 'Pause'],
   FCT_ShipDesignComponents: ['SDComponentID', 'GameID', 'Name', 'ComponentTypeID', 'Size', 'Cost'],
   FCT_RaceTech: ['GameID', 'TechID', 'RaceID'],
+  FCT_Race: ['RaceID', 'GameID'],
+  FCT_Species: ['SpeciesID', 'GameID'],
+  DIM_WealthUse: ['WealthUseID', 'Description'],
 }
 
 const FIXTURE_ROWS = {
@@ -860,10 +863,13 @@ const FIXTURE_ROWS = {
     { TaskID: 3, GameID: 1, RaceID: 1, PopulationID: 2, TaskTypeID: 4, ClassID: 5, RefitID: 6, Paused: null, UseComponents: null, TotalBP: null, CompletedBP: null },
   ],
   FCT_IndustrialProjects: [
-    { ProjectID: 1, GameID: 1, RaceID: 1, PopulationID: 1, ProductionType: 3, ProductionID: 102, Amount: 4.0268, PartialCompletion: 0.9732, Percentage: 2, Queue: 0, Description: 'Sensor', Pause: 0 },
-    { ProjectID: 2, GameID: 1, RaceID: 1, PopulationID: 1, ProductionType: 0, ProductionID: 500, Amount: 7, PartialCompletion: 0, Percentage: 5, Queue: 1, Description: 'A ship', Pause: 0 },
-    { ProjectID: 3, GameID: 1, RaceID: 2, PopulationID: 3, ProductionType: 3, ProductionID: 101, Amount: 2, PartialCompletion: 0, Percentage: 5, Queue: 0, Description: 'Other race engine', Pause: 0 },
-    { ProjectID: 4, GameID: 1, RaceID: 1, PopulationID: 2, ProductionType: 3, ProductionID: 101, Amount: null, PartialCompletion: 0.5, Percentage: 5, Queue: 1, Description: 'Engine', Pause: null },
+    { ProjectID: 1, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 3, ProductionID: 102, WealthUse: 40, Amount: 4.0268, PartialCompletion: 0.9732, Percentage: 2, Queue: 0, Description: 'Sensor', Pause: 0 },
+    { ProjectID: 2, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 0, ProductionID: 500, WealthUse: 4, Amount: 7, PartialCompletion: 0, Percentage: 5, Queue: 1, Description: 'A ship', Pause: 0 },
+    { ProjectID: 3, GameID: 1, RaceID: 2, PopulationID: 3, SpeciesID: 2, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: 2, PartialCompletion: 0, Percentage: 5, Queue: 0, Description: 'Other race engine', Pause: 0 },
+    { ProjectID: 4, GameID: 1, RaceID: 1, PopulationID: 2, SpeciesID: 1, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: null, PartialCompletion: 0.5, Percentage: 5, Queue: 1, Description: 'Engine', Pause: null },
+    { ProjectID: 5, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 0, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: 1, PartialCompletion: 0, Percentage: 5, Queue: 2, Description: 'Species the game lacks', Pause: 0 },
+    { ProjectID: 6, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 3, ProductionID: 101, WealthUse: 999, Amount: 1, PartialCompletion: 0, Percentage: 5, Queue: 2, Description: 'Wealth use the game lacks', Pause: 0 },
+    { ProjectID: 7, GameID: 1, RaceID: 1, PopulationID: 99, SpeciesID: 1, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: 1, PartialCompletion: 0, Percentage: 5, Queue: 2, Description: 'Colony the game lacks', Pause: 0 },
   ],
   FCT_ShipDesignComponents: [
     { SDComponentID: 101, GameID: 0, Name: 'Engine', ComponentTypeID: 1, Size: 2, Cost: 50 },
@@ -874,6 +880,18 @@ const FIXTURE_ROWS = {
     { GameID: 1, TechID: 101, RaceID: 1 },
     { GameID: 1, TechID: 102, RaceID: 1 },
     { GameID: 1, TechID: 103, RaceID: 2 },
+  ],
+  FCT_Race: [
+    { RaceID: 1, GameID: 1 },
+    { RaceID: 2, GameID: 1 },
+  ],
+  FCT_Species: [
+    { SpeciesID: 1, GameID: 1 },
+    { SpeciesID: 2, GameID: 1 },
+  ],
+  DIM_WealthUse: [
+    { WealthUseID: 4, Description: 'Installation Construction' },
+    { WealthUseID: 40, Description: 'Ship Component Production' },
   ],
 }
 
@@ -950,6 +968,18 @@ const loaders = (ctx) => {
     assert.deepEqual(projects.map((entry) => entry.id), [1, 4])
     assert.deepEqual([projects[0].componentId, projects[0].populationId, projects[0].amount, projects[0].partial, projects[0].paused, projects[0].name], [102, 1, 4.0268, 0.9732, 0, 'Sensor'])
     assert.deepEqual([projects[1].amount, projects[1].paused], [null, null])
+
+    return true
+  })
+
+  add('loaders: a project row the game does not load is no project: a species of 0 or one the game does not hold, a wealth use DIM_WealthUse does not hold and a colony the game does not hold are skipped (Game.LoadIndustrialProjects, Game.cs:18652-18679), and a save without the tables that say so is not read', async () => {
+    const { projects } = await read()
+    const noSpecies = await read(['FCT_Species'])
+    const noWealth = await read(['DIM_WealthUse'])
+    const noSpeciesColumn = await read(['FCT_IndustrialProjects.SpeciesID'])
+
+    assert.deepEqual(projects.map((entry) => entry.id), [1, 4], 'rows 5 (species 0), 6 (wealth use 999) and 7 (colony 99) are left out')
+    assert.deepEqual([noSpecies.read.projects, noWealth.read.projects, noSpeciesColumn.read.projects], [false, false, false], 'a save that cannot say which rows the game loads leaves the projects unread')
 
     return true
   })
@@ -1645,8 +1675,9 @@ const MUTATIONS = [
   { name: 'the copied text without the move lines', file: U, find: 'manifest.moves.forEach((move) => lines.push(`Move', replace: ';[].forEach((move) => lines.push(`Move', fails: ['csv'] },
   { name: 'the copied text drops "at most"', file: U, find: '${row.netBasis === \'at most\' ? \'at most \' : \'\'}${figure(row.net)}', replace: '${figure(row.net)}', fails: ['csv'] },
   // the reads
+  { name: 'project rows the game does not load read', file: D, find: ' and ${loadedProject()} order by', replace: ' order by', fails: ['loaders'] },
   { name: 'another race\'s shipyard tasks read', file: D, find: ' and FCT_ShipyardTask.RaceID = ${RaceID}', replace: '', fails: ['loaders'] },
-  { name: 'projects of every production type read', file: D, find: ' and FCT_IndustrialProjects.ProductionType = ${COMPONENT_PROJECT}', replace: '', fails: ['loaders', 'save-counts'] },
+  { name: 'projects of every production type read', file: D, find: ' and FCT_IndustrialProjects.ProductionType in (${PROJECT_TYPES.join(\', \')})', replace: '', fails: ['loaders', 'save-counts'] },
   { name: 'another race\'s projects read', file: D, find: ' and FCT_IndustrialProjects.RaceID = ${RaceID}', replace: '', fails: ['loaders'] },
   { name: 'another race\'s colonies read', file: D, find: ' where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} order by', replace: ' where FCT_Population.GameID = ${GameID} order by', fails: ['loaders'] },
   { name: 'the system named from another race\'s survey', file: D, find: ' and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID\'', replace: '\'', fails: ['loaders'] },
