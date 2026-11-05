@@ -59,7 +59,7 @@ const GASES = { 1: gasRow('Methane', METHANE), 2: gasRow('Oxygen'), 5: gasRow('W
 const GAS_LIST = Object.entries(GASES).map(([id, row]) => ({ GasID: Number(id), Name: row.AtmosGasName, ...row }))
 const gasInfo = (id) => GASES[id]
 
-const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 275, BaseTemp: 250, Albedo: 1, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
+const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 275, BaseTemp: 250, Albedo: 1, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Year: 8760, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
 const airless = (extra = {}) => earthlike({ SurfaceTemp: 250, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
 const withMethane = [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(1, 'Methane', 0.05, 5, METHANE)]
 const thick = [gas(7, 'Nitrogen', 6, 100)]
@@ -85,8 +85,8 @@ const BODIES = {
   thin: earthlike({ AtmosPress: 0.1, SurfaceTemp: 252.5, Atmosphere: [gas(7, 'Nitrogen', 0.1, 100)] }),
   trace: earthlike({ AtmosPress: 1.0005, Atmosphere: [gas(2, 'Oxygen', 0.2, 19.99), gas(7, 'Nitrogen', 0.8, 79.99), gas(1, 'Methane', 0.0005, 0.05, { Dangerous: 2, DangerousLevel: 500 })] }),
   eccentric: airless({ Eccentricity: 0.3 }),
-  moon: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [] }),
-  moonLocked: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [], TidalLock: 1 }),
+  moon: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, ParentYear: 8760, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [] }),
+  moonLocked: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, ParentYear: 8760, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [], TidalLock: 1 }),
   // Temperature and water both stand at exactly 2; with the temperature at 2.00004 they tie at the four decimals only.
   exactTie: earthlike({ HydroExt: 0, HydroID: 1, SurfaceTemp: 198 }),
   roundTie: earthlike({ HydroExt: 0, HydroID: 1, SurfaceTemp: 197.9988 }),
@@ -100,6 +100,8 @@ const BODIES = {
   floorSwing: earthlike({ BaseTemp: 200, SurfaceTemp: 300, Gravity: 0.4, HydroExt: 10, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
   // The same air on an eccentric orbit at normal gravity: water condenses over 2.5 years after the last operation.
   condensing: earthlike({ BaseTemp: 200, SurfaceTemp: 300, StarLuminosity: (200 / 255) ** 4, Eccentricity: 0.4, HydroExt: 10, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
+  // A present-distance base below the circular reference makes the stage's changing dampening observable.
+  seasonal: earthlike({ BaseTemp: 200, SurfaceTemp: 300, StarLuminosity: (220 / 255) ** 4, Eccentricity: 0.4, HydroExt: 10, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
   // The plan only removes the methane, yet its target holds 20 % water.
   removalOnly: earthlike({ BaseTemp: 300, SurfaceTemp: 245.5, Gravity: 0.4, HydroExt: 0, HydroID: 1, AtmosPress: 4.05, Atmosphere: crowded(0.8, 1, 2, 0.05, 0.2) }),
   // Condensation takes 0.05 years, under the 0.1 the plan's wait text needs.
@@ -226,6 +228,197 @@ check('start', 'the first stage prices the body as the body detail does: the sam
   }
 
   assert.ok(compared >= 10, `${compared} bodies with a plan compared`)
+})
+
+check('dampening', 'every planned stage recomputes the stored climate from its own pressure and ocean, the stage cost uses the dampened lunar extreme, and the plan reads its target body\'s swing', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  const body = earthlike({ Eccentricity: 0.6, AtmosPress: 5, HydroExt: 100, BaseTemp: 187, SurfaceTemp: 280.5, StarLuminosity: (187 / 255) ** 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 4), gas(7, 'Nitrogen', 4.8, 96)] })
+
+  // With f = 0.8 the orbit stays between 268.75 and 313.10 K; without it the hot end exceeds 443 K.
+  assert.equal(terraforming.assessTerraforming(body, species, 1, gasInfo).outcome, 'done')
+  const { stages } = await stagesOf(w, 'seasonal')
+
+  for (const stage of stages.slice(1)) {
+    const state = stage.body
+    const gh = Math.min(3, 1 + state.AtmosPress / 10 + state.Atmosphere.reduce((total, gas) => total + (gas.GHGas ? gas.GasAtm : 0), 0))
+    const agh = Math.min(3, 1 + state.DustLevel / 20000 + state.Atmosphere.reduce((total, gas) => total + (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0), 0))
+    const factor = (Math.min(0.5, state.AtmosPress / 10) + Math.min(0.3, state.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(state.Year / 8760))
+    const circular = 255 / Math.sqrt(state.OrbitalDistance / Math.sqrt(state.StarLuminosity))
+    const expected = Math.max(4, (state.BaseTemp * (1 - factor) + circular * factor) * gh * state.Albedo / agh)
+
+    assert.ok(Math.abs(stage.temperature - expected) < 1e-9, `stage ${stage.index}: the stored climate follows the stage's dampening`)
+  }
+
+  const moon = (await stagesOf(w, 'moon')).stages[0]
+  const apoapsis = (255 / Math.sqrt(1.2) * 0.91 + 255 * 0.09)
+
+  assert.ok(Math.abs(moon.points.apoapsis.factors.temperature - (258 - apoapsis) / 30) < 1e-9, 'the stage cost uses the dampened lunar extreme')
+
+  // The plan reports the swing its target body actually has, from the same prediction the stages price; the saved body's ends are not it.
+  const seasonal = await w.staged('seasonal')
+  const ends = habitability.temperaturePoints(terraforming.terraformedBody(seasonal.body, seasonal.species, seasonal.assessment.plan, gasInfo))
+  const cold = Math.min(ends.periapsis, ends.apoapsis)
+  const hot = Math.max(ends.periapsis, ends.apoapsis)
+
+  assert.ok(Math.abs(seasonal.assessment.plan.target.temperatureLow - cold) < 1e-9, `the plan reports its target's cold end: ${seasonal.assessment.plan.target.temperatureLow}`)
+  assert.ok(Math.abs(seasonal.assessment.plan.target.temperatureHigh - hot) < 1e-9, `the plan reports its target's hot end: ${seasonal.assessment.plan.target.temperatureHigh}`)
+  assert.equal(seasonal.assessment.plan.partial, cold < seasonal.species.MinimumTemperature || hot > seasonal.species.MaximumTemperature, 'partial exactly when the target cannot hold the range')
+})
+
+check('position', 'the liveability verdict reads the dampened swing at the semi-major axis, not where the body is now', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  const orbit = { Eccentricity: 0.6, AtmosPress: 5, HydroExt: 100, StarLuminosity: (187 / 255) ** 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 4), gas(7, 'Nitrogen', 4.8, 96)] }
+  const readings = [0.4, 1, 1.6].map((present) => {
+    const climate = earthlike({ ...orbit, BaseTemp: 187 / Math.sqrt(present), DistanceToParent: present })
+    const body = { ...climate, SurfaceTemp: habitability.surfaceTemperature(climate, 1.5, 1) }
+    const points = habitability.temperaturePoints(body)
+
+    return { present, temperature: body.SurfaceTemp, periapsis: points.periapsis, apoapsis: points.apoapsis, outcome: terraforming.assessTerraforming(body, species, 1, gasInfo).outcome }
+  })
+
+  // f = 0.8 makes the priced swing 268.750944–313.101888 K at every position, inside the species' 258–318 K range.
+  assert.deepEqual(readings.map(({ outcome }) => outcome), ['done', 'done', 'done'], 'one body and orbit read the same at periapsis, the semi-major axis and apoapsis')
+  assert.equal(new Set(readings.map(({ temperature }) => temperature.toFixed(6))).size, 3, 'the three positions carry three different present temperatures')
+  assert.equal(new Set(readings.map(({ periapsis }) => periapsis.toFixed(6))).size, 1, 'the priced periapsis does not depend on where the body is now')
+  assert.equal(new Set(readings.map(({ apoapsis }) => apoapsis.toFixed(6))).size, 1, 'the priced apoapsis does not depend on where the body is now')
+  assert.deepEqual(readings.map(({ present }) => present), [0.4, 1, 1.6])
+})
+
+// Terra's phase probe (AE-302-02 r2): an eccentric wet body whose apoapsis crosses the ice transition. The dampened ratio alone keeps that end above the species' minimum and would call the body liveable; the phase-aware prediction, which the colony cost prices, does not.
+check('phase', 'the liveability verdict reads the phase-aware extremes the colony cost prices, an ice-albedo step included', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, IdealTemperature: 310, TemperatureDeviation: 75 })
+  const body = earthlike({ BaseTemp: 255, SurfaceTemp: 280.5, Albedo: 1, StarLuminosity: 1, Eccentricity: 0.5, OrbitalDistance: 1, Year: 8760, HydroExt: 50, HydroID: 3, AtmosPress: 1, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)] })
+  const { distance, eccentricity } = habitability.orbitOf(body)
+  const periapsis = habitability.temperatureAtDistance(body, distance * (1 - eccentricity))
+  const apoapsis = habitability.temperatureAtDistance(body, distance * (1 + eccentricity))
+  const points = habitability.temperaturePoints(body)
+  const cost = habitability.colonyCost(body, species, 1)
+  const factor = habitability.orbitalTemperatureDampening(body)
+  const ratio = (swing) => body.SurfaceTemp * (swing * (1 - factor) + factor)
+  const ratioApoapsis = ratio(Math.sqrt(distance / (distance * (1 + eccentricity))))
+  const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
+
+  assert.ok(Math.abs(periapsis - 367.64017818423986) < 1e-9, `periapsis ${periapsis}`)
+  assert.ok(Math.abs(apoapsis - 223.7533080967201) < 1e-9, `apoapsis ${apoapsis}`)
+  assert.deepEqual({ current: points.current, periapsis: points.periapsis, apoapsis: points.apoapsis }, { current: body.SurfaceTemp, periapsis, apoapsis }, 'the verdict reads the priced extremes')
+  assert.deepEqual(cost.raws, { current: 0, periapsis: 0, apoapsis: 0.15 }, 'the priced extremes')
+  assert.ok(ratioApoapsis > species.MinimumTemperature && ratioApoapsis > apoapsis, `the ratio form keeps the frozen end liveable: ${ratioApoapsis} K`)
+  assert.notEqual(assessment.outcome, 'done', 'a body whose priced apoapsis is outside the species range is not liveable')
+  assert.equal(assessment.outcome, 'yes', 'a cooler aim repairs the phase-aware swing rather than calling the saved body done')
+  assert.ok(assessment.plan && !assessment.plan.partial, 'the re-aimed full plan is returned')
+  const target = terraforming.terraformedBody(body, species, assessment.plan, gasInfo)
+  const targetPoints = habitability.temperaturePoints(target)
+
+  Object.values(targetPoints).forEach((temperature) => assert.ok(temperature >= species.MinimumTemperature && temperature <= species.MaximumTemperature, `the phase-aware target fits: ${temperature}`))
+  assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 })
+})
+
+// Terra's r2 counterexample: ideal-centred warming overshoots periapsis, but a cooler target fits the complete phase-aware swing.
+check('targetSearch', 'the atmosphere search re-aims within the species range to find a free whole-orbit target', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  const body = earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.25, DistanceToParent: 1, HydroID: 4 })
+  const witness = terraforming.planTerraforming(body, { ...species, IdealTemperature: 280 }, gasInfo)
+  const witnessBody = terraforming.terraformedBody(body, species, witness, gasInfo)
+  const witnessPoints = habitability.temperaturePoints(witnessBody)
+
+  assert.ok(Math.abs(witnessPoints.apoapsis - 258.794239) < 1e-6, `280 K witness cold end: ${witnessPoints.apoapsis}`)
+  assert.ok(Math.abs(witnessPoints.periapsis - 311.111062) < 1e-6, `280 K witness hot end: ${witnessPoints.periapsis}`)
+  assert.deepEqual(habitability.colonyCost(witnessBody, species, 1, true).raws, { current: 0, periapsis: 0, apoapsis: 0 }, 'a feasible alternative exists without changing the species range')
+  const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
+
+  assert.equal(assessment.outcome, 'yes', 'the planner finds a free whole-orbit plan instead of stopping at the ideal-centred partial plan')
+  assert.ok(assessment.plan && !assessment.plan.partial, 'the complete plan is returned')
+  const nearest = terraforming.planTerraforming(body, { ...species, IdealTemperature: 286.25 }, gasInfo)
+
+  assert.ok(nearest && !nearest.partial, 'the nearest feasible lattice aim is 286.25 K')
+  assert.deepEqual(assessment.plan.target, nearest.target, 'nearest-first selection returns the 286.25 K target, not a farther feasible aim')
+  const target = terraforming.terraformedBody(body, species, assessment.plan, gasInfo)
+  const points = habitability.temperaturePoints(target)
+
+  Object.values(points).forEach((temperature) => assert.ok(temperature >= species.MinimumTemperature && temperature <= species.MaximumTemperature, `every priced point fits: ${temperature}`))
+  assert.ok(target.AtmosPress <= species.MaximumPressure, 'the re-aimed atmosphere respects the pressure limit')
+  assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 })
+  const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo }).stages
+
+  const last = stages[stages.length - 1].cost
+
+  assert.deepEqual({ current: last.current, periapsis: last.periapsis, apoapsis: last.apoapsis }, assessment.after.raws, 'the final stage prices the selected target')
+})
+
+// Sol's r3 counterexample: the atmosphere/ice-albedo response is not ordered, so side pruning discards the feasible 238–244 K branch inside the original 205–265 K limits.
+check('targetSearchNonMonotone', 'the bounded search selects a full priced target across a non-monotone atmosphere and ice-albedo response', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, IdealTemperature: 235, TemperatureDeviation: 30, MaximumPressure: 10 })
+  const body = earthlike({ BaseTemp: 300, SurfaceTemp: 294, Albedo: 0.7, StarLuminosity: (300 / 255) ** 4, Eccentricity: 0.1, DistanceToParent: 1, Year: 2000, HydroExt: 70, HydroID: 3, AtmosPress: 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] })
+  const plan = terraforming.planTerraforming(body, species, gasInfo)
+
+  assert.ok(plan && !plan.partial, 'the public planner finds a full plan without changing the 205–265 K bounds')
+  const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
+
+  assert.equal(assessment.outcome, 'yes', 'the public assessment selects the full plan rather than rejecting the worsening ideal fallback')
+  assert.deepEqual(assessment.plan, plan, 'the assessment selects the public planner\'s full plan')
+  const target = terraforming.terraformedBody(body, species, plan, gasInfo)
+  const points = habitability.temperaturePoints(target)
+
+  Object.values(points).forEach((temperature) => assert.ok(temperature >= species.MinimumTemperature && temperature <= species.MaximumTemperature, `the selected priced temperature fits 205–265 K: ${temperature}`))
+  assert.ok(target.AtmosPress <= species.MaximumPressure, 'the selected atmosphere obeys the pressure cap')
+  assert.equal(plan.target.temperatureLow, Math.min(...Object.values(points)))
+  assert.equal(plan.target.temperatureHigh, Math.max(...Object.values(points)))
+  assert.deepEqual(habitability.colonyCost(target, species, 1, true).raws, { current: 0, periapsis: 0, apoapsis: 0 }, 'the raw target costs are zero at every priced point')
+  assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 })
+  const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo }).stages
+  const last = stages[stages.length - 1].cost
+
+  assert.deepEqual({ current: last.current, periapsis: last.periapsis, apoapsis: last.apoapsis }, { current: 0, periapsis: 0, apoapsis: 0 }, 'the ending stage costs are zero at every priced point')
+})
+
+check('targetPressureBracket', 'an ideal blocked by the pressure limit still searches for a reachable cooler whole-orbit target', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 1.25 })
+  const body = earthlike({ BaseTemp: 120, SurfaceTemp: 132, StarLuminosity: (120 / 255) ** 4, Eccentricity: 0.01, DistanceToParent: 1, HydroID: 4 })
+  const witness = terraforming.planTerraforming(body, { ...species, IdealTemperature: 260 }, gasInfo)
+
+  assert.ok(witness && !witness.partial, 'a cooler full plan is attainable under the pressure cap')
+  const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
+
+  assert.equal(assessment.outcome, 'yes', 'null pressure-limited trials do not terminate the search for a reachable target')
+  assert.ok(assessment.plan && !assessment.plan.partial)
+  assert.ok(assessment.plan.target.pressure <= species.MaximumPressure)
+  assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 })
+})
+
+check('targetSearchImpossible', 'a bounded search with no full target retains a temperature-limited plan instead of accepting only its hot end', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  const body = earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.35, DistanceToParent: 1, HydroID: 4 })
+  const plan = terraforming.planTerraforming(body, species, gasInfo)
+  const target = terraforming.terraformedBody(body, species, plan, gasInfo)
+  const points = habitability.temperaturePoints(target)
+
+  assert.ok(plan.partial, 'no whole-orbit target was found in the bounded search')
+  assert.ok(Math.min(...Object.values(points)) < species.MinimumTemperature || Math.max(...Object.values(points)) > species.MaximumTemperature, 'the retained partial plan has a genuinely priced temperature blocker')
+  assert.notEqual(terraforming.assessTerraforming(body, species, 1, gasInfo).outcome, 'yes', 'a one-extreme success never becomes an all-orbit-free result')
+})
+
+check('targetGasPhase', 'the target search prices a greenhouse gas freezing at apoapsis instead of accepting a phase-insensitive full plan', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  const body = earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.25, DistanceToParent: 1, HydroID: 4 })
+  const phasedGasInfo = (id) => id === 20 ? { ...gasInfo(id), BoilingPoint: 290 } : gasInfo(id)
+  const assessment = terraforming.assessTerraforming(body, species, 1, phasedGasInfo)
+
+  assert.ok(assessment.plan && assessment.plan.partial, 'no target keeps the cold end warm when the added greenhouse gas freezes')
+  assert.ok(assessment.after.raws.apoapsis > 0, 'the frozen greenhouse gas has a priced cold-end penalty')
+  const target = terraforming.terraformedBody(body, species, assessment.plan, phasedGasInfo)
+
+  assert.ok(habitability.temperaturePoints(target).apoapsis < species.MinimumTemperature, 'the cold-end temperature is the one the cost prices')
+  const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: phasedGasInfo }).stages
+
+  assert.equal(stages[stages.length - 1].cost.apoapsis, assessment.after.raws.apoapsis, 'the ending stage prices the same gas phase')
 })
 
 check('bars', 'the factor bars of the body detail flag the factors the first stage names, every one of a tie', async (w) => {
@@ -778,6 +971,73 @@ const FAULTS = [
   ['the stage table shows no rows', 'vue', 'v-for="row in stageRows"', 'v-for="row in stageRows.slice(0, 0)"', ['template']],
   ['the limit chips show no entries', 'vue', 'v-for="entry in row.limiting"', 'v-for="entry in row.limiting.slice(0, 0)"', ['template']],
   ['the page does not hand the gases over', 'page', ' :gases="gases"', '', ['wiring']],
+  ['the plan reads its swing off the saved body', 'terraforming', 'const ends = temperaturePoints(terraformedBody(body, species, plan, gasInfo))', 'const ends = temperaturePoints(body)', ['dampening']],
+  ['a stage dampens on the saved pressure', 'limits', 'surfaceTemperature({ ...body, AtmosPress: pressure },', 'surfaceTemperature(body,', ['dampening']],
+  ['the target search returns only the ideal trial', 'terraforming', 'if (initial && !initial.partial) {', 'if (true) {', ['targetSearch', 'phase']],
+  ['the target search ignores the hot extreme', 'terraforming', 'const high = Math.max(ends.current, ends.periapsis, ends.apoapsis)', 'const high = Math.max(ends.current, ends.apoapsis)', ['targetSearch', 'phase']],
+  ['the target search ignores the cold extreme', 'terraforming', 'const low = Math.min(ends.current, ends.periapsis, ends.apoapsis)', 'const low = Math.min(ends.current, ends.periapsis)', ['targetSearchImpossible']],
+  ['the target search ignores gas freezing at an extreme', 'habitability', 'if (threshold >= gas.BoilingPoint) {', 'if (true) {', ['targetGasPhase']],
+  ['a null trial terminates the target search', 'terraforming', 'fallback = fallback || trial', 'if (!trial) { return fallback }\n\n    fallback = fallback || trial', ['targetPressureBracket']],
+  ['the target search restores r3 side pruning', 'terraforming', ORIGINALS.terraforming.slice(ORIGINALS.terraforming.indexOf('  // Integer indices'), ORIGINALS.terraforming.indexOf('\n}\n', ORIGINALS.terraforming.indexOf('export const planTerraforming'))), `  const search = (minimum, maximum, cooling) => {
+    const edgeAim = cooling ? minimum : maximum
+    const edge = planAtTemperature(body, species, gasInfo, edgeAim)
+    let reachable = initial ? ideal : edge ? edgeAim : null
+
+    if (edge && !edge.partial) {
+      return edge
+    }
+
+    fallback = fallback || edge
+
+    for (let iteration = 0; iteration < 32 && maximum - minimum >= TOLERANCE; iteration += 1) {
+      const aim = (minimum + maximum) / 2
+      const trial = planAtTemperature(body, species, gasInfo, aim)
+
+      if (trial && !trial.partial) {
+        return trial
+      }
+
+      fallback = fallback || trial
+      reachable = trial ? aim : reachable
+
+      if (trial ? trial.target.temperatureLow < species.MinimumTemperature : reachable === null ? cooling : aim < reachable) {
+        minimum = aim
+      } else {
+        maximum = aim
+      }
+    }
+
+    return null
+  }
+
+  const cooling = !fallback || fallback.target.temperatureHigh > species.MaximumTemperature
+  const cooler = () => search(species.MinimumTemperature, ideal, true)
+  const warmer = () => search(ideal, species.MaximumTemperature, false)
+
+  return (cooling ? cooler() || warmer() : warmer() || cooler()) || fallback`, ['targetSearchNonMonotone']],
+  ['the liveability verdict scales the swing from the saved surface temperature', 'terraforming', 'const { current, periapsis, apoapsis } = temperaturePoints(body)', `const { current, periapsis, apoapsis } = (() => {
+    const moon = body.BodyClass === 2
+    const distance = moon ? body.ParentOrbitalDistance : body.OrbitalDistance
+    const eccentricity = moon ? body.ParentEccentricity : body.Eccentricity
+    const year = moon ? body.ParentYear : body.Year
+    const factor = !distance || !eccentricity || (body.AtmosPress <= 0 && body.HydroExt <= 0) ? 0 : (Math.min(0.5, body.AtmosPress / 10) + Math.min(0.3, body.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760))
+    const blend = (ratio) => ratio * (1 - factor) + factor
+
+    return { current: body.SurfaceTemp, periapsis: body.SurfaceTemp * blend(Math.max(1, Math.sqrt(distance / (distance * (1 - eccentricity))))), apoapsis: body.SurfaceTemp * blend(Math.min(1, Math.sqrt(distance / (distance * (1 + eccentricity))))) }
+  })()`, ['position']],
+  ['the liveability verdict extrapolates the swing as a dampened ratio', 'terraforming', 'const { current, periapsis, apoapsis } = temperaturePoints(body)', `const { current, periapsis, apoapsis } = (() => {
+    const moon = body.BodyClass === 2
+    const distance = moon ? body.ParentOrbitalDistance : body.OrbitalDistance
+    const eccentricity = moon ? body.ParentEccentricity : body.Eccentricity
+    const year = moon ? body.ParentYear : body.Year
+    const present = moon ? body.ParentDistanceToParent : body.DistanceToParent
+    const factor = !distance || !eccentricity || (body.AtmosPress <= 0 && body.HydroExt <= 0) ? 0 : (Math.min(0.5, body.AtmosPress / 10) + Math.min(0.3, body.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760))
+    const blend = (ratio) => ratio * (1 - factor) + factor
+    const reach = Number.isFinite(distance) && distance > 0 && Number.isFinite(present) && present > 0 ? Math.sqrt(distance / present) : 1
+    const circular = body.SurfaceTemp / (reach * (1 - factor) + factor)
+
+    return { current: body.SurfaceTemp, periapsis: circular * blend(Math.max(1, Math.sqrt(distance / (distance * (1 - eccentricity))))), apoapsis: circular * blend(Math.min(1, Math.sqrt(distance / (distance * (1 + eccentricity))))) }
+  })()`, ['phase']],
 ]
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------

@@ -843,12 +843,13 @@ const main = async () => {
       assert.equal(cost(later).periapsis, 0)
       assert.equal(cost(later).apoapsis, 0)
     })
-    await check('plan Aoede: the played colony cost is 0 where the plan stays partial', async () => {
+    await check('plan Aoede: the bounded search finds a full target and the played colony cost is 0', async () => {
       const { assessment, cost } = await planOf(modules, first, 141, 791, 49227)
       const later = (await planOf(modules, last, 141, 791, 49227)).body
 
-      assert.equal(assessment.outcome, 'partial')
-      assert.ok(assessment.after.periapsis > 0)
+      assert.equal(assessment.outcome, 'yes')
+      assert.ok(assessment.plan && !assessment.plan.partial)
+      assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 }, 'the selected target costs zero at every priced point')
       assert.equal(cost(later).current, 0)
       assert.equal(cost(later).periapsis, 0)
       assert.equal(cost(later).apoapsis, 0)

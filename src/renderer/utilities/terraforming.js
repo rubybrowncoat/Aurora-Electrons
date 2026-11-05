@@ -1,8 +1,8 @@
 // Terraforming plans: which gases to add or remove to make a body liveable for a species, how much work that is, and what the body costs afterwards. The game terraforms one gas at a time per colony, adding or removing atm at the colony's capacity scaled by the body's surface area, so a plan's work is the sum over its gases. See docs/DATABASE.md § Terraforming.
 //
-// The plan itself is the page's long-standing heuristic (a target atmosphere that centres the species' temperature and breathing ranges, found by iterating the greenhouse balance). It is checked against the game's formulas, not against a played-out terraform.
+// The plan itself is the page's long-standing heuristic (a target atmosphere found by iterating the greenhouse balance). It first aims at the species' ideal temperature, then searches the species' range for a mean whose complete, phase-aware orbital swing fits. It is checked against the game's formulas, not against a played-out terraform.
 
-import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, hydrosphereAtTemperature, infrastructurePerMillion, orbitOf } from './habitability'
+import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, hydrosphereAtTemperature, infrastructurePerMillion, surfaceTemperature, temperaturePoints } from './habitability'
 
 export const EARTH_SURFACE_AREA = 511187128
 // Water vapour condenses at this many atm a year and evaporates at this many; a hydro extent of 1 % is 1/40 atm of vapour.
@@ -12,6 +12,7 @@ export const HYDRO_PER_ATM = 40
 const HUMIDITY = 0.01
 
 const TOLERANCE = 1e-4
+const TARGET_TEMPERATURE_STEP = 0.25
 const GAS_AESTUSIUM = 20
 const GAS_FRIGUSIUM = 22
 const GAS_NITROGEN = 7
@@ -39,26 +40,6 @@ const outcomeFromCosts = ({ current, periapsis, apoapsis }, lowGravity) => {
   const worst = Math.max(current, periapsis, apoapsis)
 
   return worst < 2 ? 'near' : worst < 4 ? 'limited' : 'insufficient'
-}
-
-const swingRatios = (body) => {
-  const { distance, eccentricity } = orbitOf(body)
-  let low = 1
-  let high = 1
-
-  if (Number.isFinite(distance) && distance > 0 && Number.isFinite(eccentricity) && eccentricity > 0) {
-    low = Math.min(1, Math.sqrt(distance / (distance * (1 + eccentricity))))
-
-    const periapsis = distance * (1 - eccentricity)
-
-    if (periapsis > 0) {
-      high = Math.max(1, Math.sqrt(distance / periapsis))
-    } else if (eccentricity < 1) {
-      high = Math.sqrt(distance / (distance * 0.0001))
-    }
-  }
-
-  return { low, high }
 }
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
@@ -309,8 +290,8 @@ const hydrosphereSettling = (body, solution) => {
   return evaporating > TOLERANCE ? { process: 'Evaporate', years: evaporating / EVAPORATION_RATE } : { process: 'Stable', years: 0 }
 }
 
-// The plan for one body and species, or null when there is no atmosphere that suits the species. Work is in Earth-equivalent atm: the atm to add or remove times the body's surface area over the Earth's. Divide by a colony's yearly capacity (atm of an Earth-sized body) for the years.
-export const planTerraforming = (body, species) => {
+// One target mean, with the existing pressure, gas-multiplier and breathing limits. Each trial solves its own atmosphere and albedo before pricing its swing; no ratio extrapolates an extreme from another trial.
+const planAtTemperature = (body, species, gasInfo, targetMean) => {
   const area = 4 * Math.PI * body.Radius ** 2
   const areaRatio = area / EARTH_SURFACE_AREA
 
@@ -319,7 +300,6 @@ export const planTerraforming = (body, species) => {
   }
 
   const summary = summariseAtmosphere(body, species)
-  const { low, high } = swingRatios(body)
   const sideGreenhouse = summary.greenhouses.slice(1).reduce((total, gas) => total + (gas.GasAtm || 0), 0)
   const sideAnti = summary.antiGreenhouses.slice(1).reduce((total, gas) => total + (gas.GasAtm || 0), 0)
   const sideNeutral = summary.neutrals.slice(1).reduce((total, gas) => total + (gas.GasAtm || 0), 0)
@@ -329,19 +309,6 @@ export const planTerraforming = (body, species) => {
   const breatheMax = species.MaximumBreathablePressure
   const nearer = Math.abs(summary.breathable - breatheMin) <= Math.abs(summary.breathable - breatheMax) ? breatheMin : breatheMax
   const targetBreathable = clamp(summary.breathable >= breatheMin - TOLERANCE && summary.breathable <= breatheMax + TOLERANCE ? clamp(summary.breathable, breatheMin, breatheMax) : nearer, breatheMin, breatheMax)
-
-  // Temperature: the mean that keeps both ends of an eccentric orbit inside the range, else the best compromise.
-  const minAllowed = species.MinimumTemperature / (low || 1)
-  const maxAllowed = species.MaximumTemperature / (high || 1)
-  let partial = false
-  let targetMean
-
-  if (minAllowed > maxAllowed) {
-    targetMean = (minAllowed + maxAllowed) / 2
-    partial = true
-  } else {
-    targetMean = clamp(species.IdealTemperature, minAllowed, maxAllowed)
-  }
 
   const goal = { summary, targetBreathable, targetMean, sideNeutral, sideGreenhouse, sideAnti, dust: Math.max(Number.isFinite(body.DustLevel) ? body.DustLevel : 0, 0) / 20000 }
   let albedo = body.Albedo
@@ -376,13 +343,6 @@ export const planTerraforming = (body, species) => {
     solution = again
   }
 
-  const temperatureLow = solution.temperature * low
-  const temperatureHigh = solution.temperature * high
-
-  if (temperatureLow < species.MinimumTemperature - 0.5 || temperatureHigh > species.MaximumTemperature + 0.5) {
-    partial = true
-  }
-
   // The gas each role is added as: a gas already there, else the game's usual one.
   const role = (list, id, name) => (list.length ? { id: list[0].AtmosGasID, name: list[0].AtmosGasName } : { id, name })
   const greenhouseGas = role(summary.greenhouses, GAS_AESTUSIUM, 'Aestusium')
@@ -400,7 +360,7 @@ export const planTerraforming = (body, species) => {
     step('neutral', neutralGas.name, neutralGas.id, summary.neutral, solution.neutral, solution.neutral - sideNeutral),
   ].filter((candidate) => candidate.work >= TOLERANCE * areaRatio)
 
-  return {
+  const plan = {
     steps,
     work: steps.reduce((total, candidate) => total + candidate.work, 0),
     settling,
@@ -416,16 +376,64 @@ export const planTerraforming = (body, species) => {
       sideNeutral,
       pressure: solution.total,
       temperature: solution.temperature,
-      temperatureLow,
-      temperatureHigh,
       hydrosphere: solution.hydrosphere,
       hydroExt: solution.extent,
       albedo: solution.albedo,
     },
     from: { pressure: summary.total, breathable: summary.breathable, albedo: body.OriginalAlbedo ?? body.Albedo },
     gases: { greenhouse: greenhouseGas, anti: antiGas, neutral: neutralGas, greenhouseSide: summary.greenhouses.slice(1), antiSide: summary.antiGreenhouses.slice(1), neutralSide: summary.neutrals.slice(1), breathable: summary.breathableGas, waterVapour: summary.waterVapourGas },
-    partial,
+    partial: false,
   }
+
+  // The same three temperatures the ending stage prices, including phase changes. No temperature tolerance can turn a nonzero priced temperature cost into a complete plan.
+  const ends = temperaturePoints(terraformedBody(body, species, plan, gasInfo))
+  const low = Math.min(ends.current, ends.periapsis, ends.apoapsis)
+  const high = Math.max(ends.current, ends.periapsis, ends.apoapsis)
+
+  plan.target.temperatureLow = low
+  plan.target.temperatureHigh = high
+  plan.partial = low < species.MinimumTemperature || high > species.MaximumTemperature
+
+  return plan
+}
+
+// The plan for one body and species, or null only when no candidate solves an atmosphere. Try the clamped ideal, then the 0.25 K lattice from the minimum plus the exact maximum, nearest to the ideal first (lower on ties), without duplicates or response-based pruning. At most ceil((maximum - minimum) / 0.25) + 2 trials, with the existing bounded inner solver.
+// Every sampled feasible witness and every feasible aim interval strictly wider than 0.25 K inside the species' range is found. Narrower islands can be missed; this is neither a continuum nor an alternative-atmosphere guarantee. Each trial prices its own three temperatures without slack; the first full plan wins, otherwise the solved ideal or first solved candidate is retained as partial.
+export const planTerraforming = (body, species, gasInfo) => {
+  const minimum = species.MinimumTemperature
+  const maximum = species.MaximumTemperature
+  const ideal = clamp(species.IdealTemperature, minimum, maximum)
+  const initial = planAtTemperature(body, species, gasInfo, ideal)
+  let fallback = initial
+
+  if (initial && !initial.partial) {
+    return initial
+  }
+
+  // Integer indices generate L + k*h for k*h < W, followed by exact U. The two pointers merge the lower and upper candidates by distance without allocating or sorting a candidate list.
+  const latticeCount = Math.ceil((maximum - minimum) / TARGET_TEMPERATURE_STEP)
+  const aimAt = (index) => index === latticeCount ? maximum : minimum + index * TARGET_TEMPERATURE_STEP
+  let lower = Math.min(Math.floor((ideal - minimum) / TARGET_TEMPERATURE_STEP), latticeCount)
+  let upper = lower + 1
+
+  while (lower >= 0 || upper <= latticeCount) {
+    const takeLower = lower >= 0 && (upper > latticeCount || ideal - aimAt(lower) <= aimAt(upper) - ideal)
+    const aim = aimAt(takeLower ? lower-- : upper++)
+
+    if (aim === ideal) {
+      continue
+    }
+
+    const trial = planAtTemperature(body, species, gasInfo, aim)
+
+    if (trial && !trial.partial) {
+      return trial
+    }
+
+    fallback = fallback || trial
+  }
+
+  return fallback
 }
 
 // The gases a plan ends the atmosphere with, as [id, atm, the body's own row of the gas or undefined]; the gases it removes are not in it.
@@ -486,18 +494,19 @@ export const terraformedBody = (body, species, plan, gasInfo) => {
     anti += !gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0
   })
 
-  const surface = Math.max(1, (body.BaseTemp * Math.min(3, 1 + target.pressure / 10 + greenhouse) * target.albedo) / Math.min(3, 1 + body.DustLevel / 20000 + anti))
+  const surface = surfaceTemperature({ ...body, AtmosPress: target.pressure, HydroExt: target.hydroExt }, Math.min(3, 1 + target.pressure / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti), target.albedo)
 
   return { ...body, SurfaceTemp: surface, Albedo: target.albedo, AtmosPress: target.pressure, HydroExt: target.hydroExt, HydroID: target.hydrosphere, Atmosphere: atmosphere }
 }
 
-// Whether the body suits the species as it is: gravity, both ends of the temperature swing, the breathing gas, the pressure and no toxic gas.
+// Whether the body suits the species as it is: gravity, the temperature at each point the colony cost prices, the breathing gas, the pressure and no toxic gas. The temperatures are `temperaturePoints`, the same phase-aware prediction the stage costs read, so an ice-albedo or gas-phase change at an extreme counts against liveability.
 const isLiveable = (body, species) => {
-  const { low, high } = swingRatios(body)
+  const { current, periapsis, apoapsis } = temperaturePoints(body)
   const summary = summariseAtmosphere(body, species)
   const breatheMin = Math.max(0, species.MinimumBreathablePressure)
+  const within = (temperature) => temperature >= species.MinimumTemperature && temperature <= species.MaximumTemperature
 
-  return body.Gravity >= species.MinimumGravity && body.Gravity <= species.MaximumGravity && body.SurfaceTemp * low >= species.MinimumTemperature && body.SurfaceTemp * high <= species.MaximumTemperature && summary.breathable >= breatheMin - TOLERANCE && summary.breathable <= species.MaximumBreathablePressure + TOLERANCE && summary.total <= species.MaximumPressure + TOLERANCE && summary.toxic <= TOLERANCE
+  return body.Gravity >= species.MinimumGravity && body.Gravity <= species.MaximumGravity && within(current) && within(periapsis) && within(apoapsis) && summary.breathable >= breatheMin - TOLERANCE && summary.breathable <= species.MaximumBreathablePressure + TOLERANCE && summary.total <= species.MaximumPressure + TOLERANCE && summary.toxic <= TOLERANCE
 }
 
 const equalCosts = (a, b) => Math.abs(a.current - b.current) < 0.01 && Math.abs(a.periapsis - b.periapsis) < 0.01 && Math.abs(a.apoapsis - b.apoapsis) < 0.01
@@ -520,10 +529,10 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
     return { ...base, reason: 'Too light to keep an atmosphere' }
   }
 
-  const plan = planTerraforming(body, species)
+  const plan = planTerraforming(body, species, gasInfo)
 
   if (!plan) {
-    return { ...base, reason: 'No atmosphere suits the species' }
+    return { ...base, reason: 'No atmosphere was found in the bounded search' }
   }
 
   const missing = planGasGaps(species, plan, gasInfo)
@@ -541,7 +550,7 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
 
   // A plan that makes things worse is no plan: the body stays as it is.
   if (worse) {
-    return { ...base, reason: 'Terraforming would make it worse', outcome: outcomeFromCosts(cost, lowGravity) }
+    return { ...base, reason: 'The found plan would make it worse', outcome: outcomeFromCosts(cost, lowGravity) }
   }
 
   // A plan that doesn't improve the cost is only worth its toxic-gas removal.
@@ -549,7 +558,7 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
     const toxic = plan.steps.filter((candidate) => candidate.key === 'toxic')
 
     if (!toxic.length) {
-      return { ...base, outcome: outcomeFromCosts(cost, lowGravity), reason: 'Nothing to gain' }
+      return { ...base, outcome: outcomeFromCosts(cost, lowGravity), reason: 'The found plan offers no cost improvement' }
     }
 
     return { ...base, plan: { ...plan, steps: toxic, work: toxic.reduce((total, candidate) => total + candidate.work, 0) }, after: planned, outcome: outcomeFromCosts(planned, lowGravity) }

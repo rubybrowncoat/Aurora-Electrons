@@ -1,6 +1,6 @@
 // What a body costs a species to live on, from the game's own rules: the colony cost now and at the extremes of its orbit, checked against the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony cost).
 //
-// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, ParentOrbitalDistance, ParentEccentricity, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasAmount (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel }`. A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
+// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, Year, ParentOrbitalDistance, ParentEccentricity, ParentYear, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasAmount (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel }`. A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
 
 import { ofRule, registerRule, unavailable } from './provenance'
 
@@ -20,7 +20,7 @@ const ICE_SHEET_ALBEDO_STEP = 0.0015
 const WATER_BOILING_KELVIN = 369
 const WATER_FREEZING_KELVIN = 245
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.1.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 registerRule({
@@ -28,8 +28,8 @@ registerRule({
   versions: VERSIONS,
   units: 'colony cost',
   verification: 'estimated',
-  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, TidalLock, Eccentricity', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species', 'FCT_Race.ColonizationSkill'],
-  note: 'The largest of six environment factors, worst of now, periapsis and apoapsis, times the race\'s colonisation skill. Checked against the stored infrastructure requirement of the race\'s own colonies: the requirement per million people equals the cost now times the skill, times 100 (200 on low gravity), over the species\' density modifier, within 0.1% on 23 of 27 colonies of two saves and within 3.4% on the other four, all low gravity (the stored requirement may predate a change of population; not checked). Periapsis, apoapsis and the worst case have no stored value, and no unsettled body is checked.',
+  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity, Year, StarLuminosity', 'FCT_SystemBody.ParentOrbitalDistance, ParentEccentricity, ParentYear', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species', 'FCT_Race.ColonizationSkill'],
+  note: 'The largest of six environment factors, worst of now, periapsis and apoapsis, times the race\'s colonisation skill. The temperature swing follows the dampened orbital rule: the stored climate is blended toward the circular-orbit temperature, less on a long orbit, and a moon takes its parent\'s orbit and year. Checked against the stored infrastructure requirement of the race\'s own colonies: the requirement per million people equals the cost now times the skill, times 100 (200 on low gravity), over the species\' density modifier, within 0.1% on 23 of 27 colonies of two saves and within 3.4% on the other four, all low gravity (the stored requirement may predate a change of population; not checked). Periapsis, apoapsis and the worst case have no stored value, and no unsettled body is checked.',
 })
 
 registerRule({
@@ -63,7 +63,8 @@ const lacking = (source, inputs, owner) => (inputs.every((input) => usable(sourc
 export const missingBodyInputs = (body) => {
   const isMoon = body.BodyClass === BODY_CLASS.MOON
   const atmosphere = body.Atmosphere || NOTHING
-  const missing = [...lacking(body, BODY_INPUTS, 'body'), ...(isMoon ? NOTHING : lacking(body, TIDAL_INPUTS, 'body')), ...(isMoon ? lacking(body, MOON_INPUTS, 'body') : body.Eccentricity > 0 ? lacking(body, ECCENTRIC_INPUTS, 'body') : NOTHING), ...(atmosphere.length ? lacking(body, DUST_INPUTS, 'body') : NOTHING)]
+  const dampens = (body.AtmosPress > 0 || body.HydroExt > 0) && (isMoon ? body.ParentEccentricity : body.Eccentricity) > 0
+  const missing = [...lacking(body, BODY_INPUTS, 'body'), ...(isMoon ? NOTHING : lacking(body, TIDAL_INPUTS, 'body')), ...(isMoon ? lacking(body, MOON_INPUTS, 'body') : body.Eccentricity > 0 ? lacking(body, ECCENTRIC_INPUTS, 'body') : NOTHING), ...(dampens ? isMoon ? lacking(body, [['ParentYear', 'planet orbital year']], 'body') : lacking(body, [['Year', 'orbital year']], 'body') : NOTHING), ...(atmosphere.length ? lacking(body, DUST_INPUTS, 'body') : NOTHING)]
 
   for (let index = 0; index < atmosphere.length; index += 1) {
     missing.push(...lacking(atmosphere[index], GAS_INPUTS, 'atmosphere'))
@@ -108,7 +109,34 @@ export const hydrosphereAtTemperature = (temperature) => (temperature > WATER_BO
 // A gas is frozen out below its boiling point. A saved body carries the game's flag; a body that doesn't exist yet (a terraforming target) gets the rule the game applies after every change.
 const frozenOut = (gas, temperature, planned) => (planned ? temperature < gas.BoilingPoint : !!gas.FrozenOut)
 
-// The surface temperature the body would settle at `distance` AU from its star, with its present atmosphere. It reads the stored BaseTemp: the game never recomputes it from the moving orbit, so the ratio of surface to base temperature is the atmosphere's alone.
+// SystemBody.method_1: an eccentric body's atmosphere and ocean smooth its seasons, less on a long orbit. A moon uses the planet's orbit and year, never the planet's atmosphere.
+export const orbitalTemperatureDampening = (body) => {
+  const { distance, eccentricity, year } = orbitOf(body)
+
+  if (!distance || !eccentricity || (body.AtmosPress <= 0 && body.HydroExt <= 0)) {
+    return 0
+  }
+
+  return (Math.min(0.5, body.AtmosPress / 10) + Math.min(0.3, body.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760))
+}
+
+const dampenedTemperature = (body, temperature, greenhouse, antiGreenhouse, albedo) => {
+  const factor = orbitalTemperatureDampening(body)
+
+  if (factor <= 0) {
+    return Math.max(1, temperature)
+  }
+
+  const { distance } = orbitOf(body)
+  const circular = 255 / Math.sqrt(distance / Math.sqrt(body.StarLuminosity)) * greenhouse * albedo / antiGreenhouse
+
+  return temperature * (1 - factor) + circular * factor
+}
+
+// SystemBody.method_2: the saved/current climate uses its base temperature and the same blend, with a final 4 K floor. The prediction at a distance below has different floors.
+export const surfaceTemperature = (body, greenhouse, antiGreenhouse, albedo = body.Albedo) => Math.max(4, dampenedTemperature(body, body.BaseTemp * greenhouse * albedo / antiGreenhouse, greenhouse, antiGreenhouse, albedo))
+
+// SystemBody.method_65/method_3: predict gas phases from the surface/base ratio, then blend the Kelvin climate toward the circular-orbit temperature before predicting a water phase change. The base has a 4 K floor; only an undampened result has a 1 K floor.
 export const temperatureAtDistance = (body, distance) => {
   const equilibrium = equilibriumTemperature(distance, body.StarLuminosity)
   const ratio = body.SurfaceTemp / (body.BaseTemp * body.Albedo)
@@ -132,7 +160,7 @@ export const temperatureAtDistance = (body, distance) => {
   }
 
   let albedo = body.Albedo
-  let temperature = Math.max(1, (equilibrium * greenhouse * albedo) / antiGreenhouse)
+  let temperature = dampenedTemperature(body, (equilibrium * greenhouse * albedo) / antiGreenhouse, greenhouse, antiGreenhouse, albedo)
 
   if (body.HydroExt > 0) {
     const was = body.HydroID
@@ -145,7 +173,7 @@ export const temperatureAtDistance = (body, distance) => {
         albedo -= ICE_SHEET_ALBEDO_STEP * body.HydroExt
       }
 
-      temperature = Math.max(1, (equilibrium * greenhouse * albedo) / antiGreenhouse)
+      temperature = dampenedTemperature(body, (equilibrium * greenhouse * albedo) / antiGreenhouse, greenhouse, antiGreenhouse, albedo)
     }
   }
 
@@ -237,16 +265,34 @@ export const uncolonisableReason = (body, species) => {
 }
 
 // The orbit that sets the temperature swing: a moon follows its parent planet.
-export const orbitOf = (body) => (body.BodyClass === BODY_CLASS.MOON ? { distance: body.ParentOrbitalDistance, eccentricity: body.ParentEccentricity } : { distance: body.OrbitalDistance, eccentricity: body.Eccentricity })
+export const orbitOf = (body) => (body.BodyClass === BODY_CLASS.MOON ? { distance: body.ParentOrbitalDistance, eccentricity: body.ParentEccentricity, year: body.ParentYear } : { distance: body.OrbitalDistance, eccentricity: body.Eccentricity, year: body.Year })
+
+// The orbital extremes of a body: the temperature at periapsis and at apoapsis as `temperatureAtDistance` predicts them, with the seasonal blend, the gas-phase threshold and the ice-albedo step; null for a body that is neither eccentric nor a moon, which has only the present climate.
+const orbitalExtremes = (body) => {
+  if (!(body.Eccentricity > 0 || body.BodyClass === BODY_CLASS.MOON)) {
+    return null
+  }
+
+  const { distance, eccentricity } = orbitOf(body)
+
+  return [temperatureAtDistance(body, distance * (1 - eccentricity)), temperatureAtDistance(body, distance * (1 + eccentricity))]
+}
+
+// The temperature a body is priced at: now, at periapsis and at apoapsis. A body that is neither eccentric nor a moon reads its present climate at all three. The liveability verdict reads the same three, so it judges the temperatures the colony cost prices.
+export const temperaturePoints = (body) => {
+  const extremes = orbitalExtremes(body)
+  const current = body.SurfaceTemp
+
+  return extremes ? { current, periapsis: extremes[0], apoapsis: extremes[1] } : { current, periapsis: current, apoapsis: current }
+}
 
 // The cost factors of a body at the three points of its orbit: now, at periapsis and at apoapsis. A body that is neither eccentric nor a moon has only the one, now. `planned` is for a body that doesn't exist yet.
 export const costPoints = (body, species, planned = false) => {
   const current = costFactors(body, species, body.SurfaceTemp, planned)
+  const extremes = orbitalExtremes(body)
 
-  if (body.Eccentricity > 0 || body.BodyClass === BODY_CLASS.MOON) {
-    const { distance, eccentricity } = orbitOf(body)
-
-    return { current, periapsis: costFactors(body, species, temperatureAtDistance(body, distance * (1 - eccentricity)), planned), apoapsis: costFactors(body, species, temperatureAtDistance(body, distance * (1 + eccentricity)), planned) }
+  if (extremes) {
+    return { current, periapsis: costFactors(body, species, extremes[0], planned), apoapsis: costFactors(body, species, extremes[1], planned) }
   }
 
   return { current, periapsis: current, apoapsis: current }

@@ -4,7 +4,7 @@
 //
 // The first stage is the body as saved, priced by the same function as the body detail's factor bars. Every later stage is the plan carried one more gas operation, in the plan's order, each taken in full, on the water extent as saved. The plan's own end state (`terraformedBody`, the atmosphere and water the body detail prices after terraforming) is the stage that settles the surface when the water condenses or evaporates over years after the water step, else the stage of the last operation, so the plan's end agrees with the cost the Planner shows after terraforming.
 
-import { BODY_CLASS, BREATHING_PENALTY, FACTORS, breathingFails, costPoints, limitingFactors } from './habitability'
+import { BODY_CLASS, BREATHING_PENALTY, FACTORS, breathingFails, costPoints, limitingFactors, surfaceTemperature } from './habitability'
 import { albedoForHydrosphere, hydrosphereState, terraformedBody } from './terraforming'
 import { ofRule, registerRule } from './provenance'
 
@@ -20,15 +20,16 @@ export const STAGE_ASSUMPTIONS = Object.freeze([
   'the water extent changes only in the final settling',
   'the shares of the gases are recomputed from their pressures after each operation',
   'the climate counts every gas as the plan does, frozen out or not',
+  'each stage recomputes its own dampening, and the plan reads its target\'s swing, from that body\'s pressure and water extent, using the parent orbit and year for a moon',
 ])
 
 registerRule({
   id: 'habitability.terraformLimits',
-  versions: ['2.7.x'],
+  versions: ['3.1.x'],
   units: 'colony cost',
   verification: 'estimated',
-  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species'],
-  note: 'The colony cost factors of the colony cost rule, priced on the atmosphere the Planner\'s terraforming plan leaves after each gas operation. The first stage is the body as saved; every later one is the plan\'s own estimate and was not observed on a played-out terraform. A factor is fixed when no gas operation changes it, so it is never promised away.',
+  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity, Year, StarLuminosity', 'FCT_SystemBody.ParentOrbitalDistance, ParentEccentricity, ParentYear', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species'],
+  note: 'The colony cost factors of the colony cost rule, priced on the atmosphere the Planner\'s terraforming plan leaves after each gas operation. Every stage recomputes the dampened swing from its own pressure and water extent, on the orbital year, the parent\'s for a moon. The first stage is the body as saved; every later one is the plan\'s own estimate and was not observed on a played-out terraform. A factor is fixed when no gas operation changes it, so it is never promised away.',
   assumptions: STAGE_ASSUMPTIONS,
 })
 
@@ -59,7 +60,7 @@ const bodyAfter = (body, plan, gasInfo, applied) => {
   const pressure = rows.reduce((sum, gas) => sum + gas.GasAtm, 0)
   const greenhouse = rows.reduce((sum, gas) => sum + (gas.GHGas ? gas.GasAtm : 0), 0)
   const anti = rows.reduce((sum, gas) => sum + (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0), 0)
-  const temperatureAt = (albedo) => Math.max(1, (body.BaseTemp * Math.min(3, 1 + pressure / 10 + greenhouse) * albedo) / Math.min(3, 1 + body.DustLevel / 20000 + anti))
+  const temperatureAt = (albedo) => surfaceTemperature({ ...body, AtmosPress: pressure }, Math.min(3, 1 + pressure / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti), albedo)
   let albedo = body.Albedo
   let temperature = temperatureAt(albedo)
   let hydrosphere = hydrosphereState(temperature, pressure)

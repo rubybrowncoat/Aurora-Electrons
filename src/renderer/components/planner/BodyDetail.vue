@@ -98,7 +98,7 @@
               </v-list-item-content>
             </v-list-item>
           </v-list>
-          <div v-if="plan.partial" class="caption text--secondary mt-1">The temperature range can't fit this orbit completely, so the plan aims for the best compromise.</div>
+          <div v-if="plan.partial" class="caption text--secondary mt-1">No whole-orbit target was found in the bounded search; the displayed plan retains a temperature limitation.</div>
 
           <div class="overline mt-3">What limits the colony cost at each stage</div>
           <v-simple-table dense class="limit-table" data-limits="table">
