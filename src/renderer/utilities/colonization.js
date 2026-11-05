@@ -240,8 +240,41 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
 // Before the race's rules load, no body is a ready site.
 export const NO_CMC_RULES = { allowed: false, shipyard: false, settledColonies: 0, largestColony: {} }
 
-// What the game also wants for a civilian mining complex, beyond the deposit. Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it.
-// A colony of the race that has no people, no automated mines or complexes and orbital miners at work doesn't count (`BlocksCmc`); the game counts every race's colonies, and the race knows the alien ones it has intelligence on.
+const CMC_VERSIONS = ['3.1.x']
+
+registerRule({
+  id: 'cmcSite.excluded',
+  versions: CMC_VERSIONS,
+  units: 'colonies',
+  verification: 'estimated',
+  structure: ['FCT_Population.Population, SystemBodyID', 'FCT_PopulationInstallations.PlanetaryInstallationID', 'FCT_Fleet.Xcor, Ycor, OrbitBodyID, AssignedPopulationID', 'FCT_SystemBody.Xcor, Ycor', 'FCT_ClassComponent and FCT_DamagedComponent (the undamaged orbital mining modules)', 'FCT_AlienPopulation'],
+  note: 'Whether a colony keeps the game from founding a civilian mining complex on its body: its record holds people, an automated mine, a civilian or ex-civilian mining complex or a mass driver (the installation counts whatever its amount), or the orbital mining modules at work there output something. An otherwise empty colony does not keep it off. The output is the undamaged orbital mining modules of the fleets that count for the colony: a fleet of the colony\'s race within one unit of the colony\'s body on both axes, assigned to the colony or to none (a fleet with no saved position, or a body with none, is matched by the body the fleet orbits instead). A fleet whose modules are all damaged has no output; a ship whose damage or module count the save does not record is counted at the full modules of its class. The race\'s own colonies and the alien colonies it knows are read: an alien colony it has no record of cannot be read, so its installations and orbital miners are not seen and its body can show as free.',
+  assumptions: ['the race\'s mine production and the commanders\' mining bonuses are above 0, so an undamaged module has output', 'a fleet assigned to a colony that no longer exists counts as assigned to none'],
+})
+
+// The installations whose presence on a colony's record keeps a civilian mining complex off its body: Automated Mine (12), Mass Driver (24), Civilian Mining Complex (39) and Ex-Civilian Mining Complex (52). The game tests the key, not the amount: a record loaded from the save holds one for every stored row.
+export const CMC_BLOCKING_INSTALLATIONS = Object.freeze([12, 24, 39, 52])
+
+const withinOneUnit = (a, b) => Math.abs(a - b) < 1
+
+// Whether the game counts the fleet at the colony (`Game.AreCoordinatesWithinOneUnit` of the fleet and the colony's body): within one unit on both axes. Where the fleet or the body has no saved position, the body the fleet orbits stands in.
+const fleetAt = (fleet, colony) => {
+  if ([fleet.Xcor, fleet.Ycor, colony.Xcor, colony.Ycor].every(Number.isFinite)) {
+    return withinOneUnit(fleet.Xcor, colony.Xcor) && withinOneUnit(fleet.Ycor, colony.Ycor)
+  }
+
+  return fleet.OrbitBodyID === colony.SystemBodyID
+}
+
+// The colonies the game's exclusion reads (the race's own and the alien colonies it knows), each with whether it keeps a civilian mining complex off its body (`BlocksCmc`), the one rule the Minerals page and the Colonization Planner share. `colonies` are { PopulationID, RaceID, SystemBodyID, Population, Installations, Xcor, Ycor }, `Installations` the stored rows of the installations in CMC_BLOCKING_INSTALLATIONS; `fleets` the fleets with orbital mining modules, { FleetID, RaceID, OrbitBodyID, AssignedPopulationID, AssignedExists, Xcor, Ycor, Modules }, `Modules` the undamaged modules.
+export const cmcBlocks = (colonies, fleets) => colonies.map((colony) => {
+  const working = fleets.filter((fleet) => fleet.RaceID === colony.RaceID && fleetAt(fleet, colony) && (!(fleet.AssignedPopulationID > 0) || !fleet.AssignedExists || fleet.AssignedPopulationID === colony.PopulationID))
+  const modules = working.reduce((total, fleet) => total + fleet.Modules, 0)
+
+  return { ...colony, Modules: modules, BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }
+})
+
+// What the game also wants for a civilian mining complex, beyond the deposit. Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it that `cmcBlocks` says keeps the complex off (`body.CmcBlockers`, set by colonization-data.js `loadBodies`).
 export const cmcSite = (body, rules) => ({
   allowed: rules.allowed,
   shipyard: rules.shipyard,
@@ -250,7 +283,7 @@ export const cmcSite = (body, rules) => ({
   nearStar: cmcBodyInReach(body),
   starInReach: !!body.CmcStarInReach,
   notBanned: !body.Banned,
-  uncolonised: !body.AlienPopulations.length && body.OwnPopulations.every((population) => !population.BlocksCmc),
+  uncolonised: body.CmcBlockers.length === 0,
 })
 
 const CMC_NEEDS = {
@@ -261,7 +294,7 @@ const CMC_NEEDS = {
   nearStar: 'a body under 80 AU from its star at its farthest (a moon: its planet\'s orbit), and not a gas giant',
   starInReach: 'a star the game counts as in reach (a companion within 80 AU of what it orbits, or linked by Lagrange points within 80 AU)',
   notBanned: 'a body that is not banned',
-  uncolonised: 'a body with no colony on it (a colony with only orbital miners is fine)',
+  uncolonised: 'a body with no colony on it that has people, an automated mine, a civilian or ex-civilian mining complex, a mass driver or orbital miners at work',
 }
 
 // The site's unmet conditions as one sentence.

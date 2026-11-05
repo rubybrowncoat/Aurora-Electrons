@@ -7,11 +7,14 @@
 
   The page runs over scripts/lib/page-loader.js: its template is read as text and its script runs the candidates computed over deposit rows shaped like the page's query.
 
-  The saves (saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only) give the real bodies: the page's reads run over each save and the candidates are compared with raw reads of the deposits, installations, radiation and race, the rate and lifetime with the formulas worked from those raw values, and the ranks with the order of their scores. A save that is not there is skipped.
+  The saves (the migrated 3.1 fixture, game 141, race 784, and the shipped 3.1 save, game 160, race 903, read-only) give the real bodies: the page's reads run over each save and the candidates are compared with raw reads of the deposits, installations, radiation and race, the rate and lifetime with the formulas worked from those raw values, and the ranks with the order of their scores. A save that is not there is skipped.
+
+  The exclusion of a body by the colonies on it (src/renderer/utilities/colonization.js `cmcBlocks`, read by `loadCmcBlocks` in colonization-data.js for the Minerals page and the Colonization Planner alike): a colony with people, an automated mine, a mass driver, a civilian or ex-civilian complex, or orbital mining modules at work (the undamaged modules of the fleets that count for it: within one unit of its body or, where a position is not saved, orbiting it, and assigned to it or to none) blocks its body; an otherwise empty colony blocks nothing; a known alien colony counts by its stored record and an unknown one is not read. The rule is run over an in-memory database for each case (`data`), through the page's own reads (`read`), over each save against an independent reading of its raw tables (`save-blocks`, `save-planner`), and, end to end, over a copy of the migrated fixture with complexes switched on and the cases planted on bodies that meet every other founding condition (`save-fixture`): the page's chip and candidate row and the Planner's site must agree on every one.
 
   Each mutation of the utility or the page must fail the checks it names. Exit code 1 when a check fails.
 */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const nodeVm = require('vm')
 const sqlite3 = require('sqlite3')
@@ -28,20 +31,36 @@ const FILES = {
   minerals: path.join(root, 'src', 'renderer', 'utilities', 'minerals.js'),
   policy: path.join(root, 'src', 'renderer', 'utilities', 'cmc-policy.js'),
   page: path.join(root, 'src', 'renderer', 'pages', 'minerals.vue'),
+  colonization: path.join(root, 'src', 'renderer', 'utilities', 'colonization.js'),
+  'colonization-data': path.join(root, 'src', 'renderer', 'utilities', 'colonization-data.js'),
 }
 const PERSISTED_VIEW = fs.readFileSync(path.join(root, 'src', 'renderer', 'mixins', 'persisted-view.js'), 'utf8')
 const U = 'utility'
 const M = 'minerals'
 const P = 'page'
+const C = 'colonization'
+const D = 'colonization-data'
 const NAMES = ['cmc-candidates', 'minerals', 'cmc-policy', 'provenance']
+const PLANNER_NAMES = ['colonization', 'colonization-data', 'provenance']
 const SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
+  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 784 },
+  { file: 'saves/AuroraDB_310_shipped.db', game: 160, race: 903 },
 ]
+
+// The save the planted cases are copied from (the first save above): its colonies, fleets and bodies are the real ones the cases are planted on.
+const PLANTED_FROM = SAVES[0]
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
+  'lodash/groupBy': 'export default (items, key) => items.reduce((groups, item) => { const name = typeof key === \'function\' ? key(item) : item[key]; (groups[name] = groups[name] || []).push(item); return groups }, {})',
+}
+
+// The Colonization Planner's utilities reach aurora.js (through the warnings' shared module), which imports dayjs, its UTC plugin and romanum; the cases here read no date or numeral.
+const PLANNER_STUBS = {
+  ...STUBS,
+  dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
+  'dayjs/plugin/utc.js': 'export default {}',
+  romanum: 'export default { toNumeral: String }',
 }
 const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
 
@@ -649,17 +668,29 @@ const MEMORY_SCHEMA = {
   FCT_Game: ['GameID', 'AllowCMC'],
   FCT_Race: ['RaceID', 'GameID', 'NPR', 'MineProduction', 'MaximumOrbitalMiningDiameter'],
   DIM_PlanetaryInstallation: ['PlanetaryInstallationID', 'CivilianInstallation', 'Workers', 'MiningProductionValue', 'MassDriverValue'],
-  FCT_SystemBody: ['SystemBodyID', 'SystemID', 'StarID', 'ParentBodyID', 'ParentBodyType', 'PlanetNumber', 'OrbitNumber', 'BodyClass', 'BodyTypeID', 'Radius', 'Xcor', 'Ycor', 'GroundMineralSurvey', 'OrbitalDistance', 'Eccentricity', 'RadiationLevel'],
+  FCT_SystemBody: ['SystemBodyID', 'GameID', 'SystemID', 'StarID', 'ParentBodyID', 'ParentBodyType', 'PlanetNumber', 'OrbitNumber', 'BodyClass', 'BodyTypeID', 'Radius', 'Xcor', 'Ycor', 'GroundMineralSurvey', 'OrbitalDistance', 'Eccentricity', 'RadiationLevel', 'Gravity', 'BaseTemp', 'SurfaceTemp', 'HydroID', 'HydroExt', 'Albedo', 'AtmosPress', 'TidalLock', 'DustLevel', 'DistanceToParent', 'Year', 'FixedBody'],
   FCT_MineralDeposit: ['GameID', 'SystemBodyID', 'MaterialID', 'Amount', 'Accessibility', 'HalfOriginalAmount', 'OriginalAcc'],
-  FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'GameID', 'Name'],
+  FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'GameID', 'Name', 'ControlRaceID', 'MilitaryRestrictedSystem'],
   FCT_SystemBodyName: ['SystemBodyID', 'RaceID', 'Name'],
-  FCT_Star: ['StarID', 'ComponentNumber'],
+  FCT_Star: ['StarID', 'SystemID', 'GameID', 'ComponentNumber', 'OrbitingComponent', 'OrbitalDistance', 'Eccentricity', 'Luminosity'],
   FCT_SystemBodySurveys: ['GameID', 'RaceID', 'SystemBodyID'],
-  FCT_Population: ['PopulationID', 'GameID', 'RaceID', 'PopName', 'SystemID', 'SystemBodyID', 'Population', 'Capital', 'MassDriverDest', 'PurchaseCivilianMinerals', ...MINERAL_NAMES.flatMap((name) => [name, `Reserve${name}`])],
+  FCT_Population: ['PopulationID', 'GameID', 'RaceID', 'SpeciesID', 'PopName', 'SystemID', 'SystemBodyID', 'Population', 'Capital', 'MassDriverDest', 'PurchaseCivilianMinerals', ...MINERAL_NAMES.flatMap((name) => [name, `Reserve${name}`])],
   FCT_PopulationInstallations: ['PopID', 'GameID', 'PlanetaryInstallationID', 'Amount'],
+  FCT_Fleet: ['FleetID', 'GameID', 'RaceID', 'OrbitBodyID', 'AssignedPopulationID', 'Xcor', 'Ycor'],
+  FCT_Ship: ['ShipID', 'FleetID', 'GameID', 'RaceID', 'ShipClassID'],
+  FCT_ShipClass: ['ShipClassID', 'MiningModules'],
+  FCT_ClassComponent: ['ClassID', 'ComponentID', 'NumComponent'],
+  FCT_ShipDesignComponents: ['SDComponentID', 'ComponentTypeID'],
+  FCT_DamagedComponent: ['ShipID', 'GameID', 'ComponentID', 'Number'],
+  FCT_AlienPopulation: ['GameID', 'ViewingRaceID', 'PopulationID', 'AlienRaceID', 'PopulationAmount'],
+  FCT_Shipyard: ['GameID', 'RaceID'],
+  FCT_BannedBodies: ['SystemBodyID', 'RaceID'],
+  FCT_LagrangePoint: ['GameID', 'SystemID', 'StarID', 'PlanetID'],
+  FCT_AtmosphericGas: ['GameID', 'SystemBodyID', 'AtmosGasID', 'AtmosGasPercentage', 'GasAtm', 'FrozenOut'],
+  DIM_Gases: ['GasID', 'Name', 'BoilingPoint', 'GHGas', 'AntiGHGas', 'DangerousOxygen', 'DangerousPPMOxygen', 'DangerousMethane', 'DangerousPPMMethane', 'DangerousSulphur', 'DangerousPPMSulphur', 'DangerousAmmonia', 'DangerousPPMAmmonia'],
 }
 
-const body = (id, system, over = {}) => ({ SystemBodyID: id, SystemID: system, StarID: 1, ParentBodyID: null, ParentBodyType: null, PlanetNumber: 1, OrbitNumber: 1, BodyClass: 3, BodyTypeID: 1, Radius: 100, Xcor: null, Ycor: null, GroundMineralSurvey: 0, OrbitalDistance: 2, Eccentricity: 0, RadiationLevel: 0, ...over })
+const body = (id, system, over = {}) => ({ SystemBodyID: id, GameID: 1, SystemID: system, StarID: 1, ParentBodyID: null, ParentBodyType: null, PlanetNumber: 1, OrbitNumber: 1, BodyClass: 3, BodyTypeID: 1, Radius: 100, Xcor: null, Ycor: null, GroundMineralSurvey: 0, OrbitalDistance: 2, Eccentricity: 0, RadiationLevel: 0, ...over })
 const stored = (body, material, amount, accessibility, over = {}) => ({ GameID: 1, SystemBodyID: body, MaterialID: material, Amount: amount, Accessibility: accessibility, HalfOriginalAmount: amount, OriginalAcc: accessibility, ...over })
 
 // Game 1, race 2: body 1 (radiation 12.5) and body 2 (radiation not recorded, a moon of body 5) are surveyed by the race in a system it knows; body 3 is surveyed by another race, body 4 lies in a system the race does not know, game 9 has a deposit on body 1, and the largest mining value of an installation (25) is not a civilian one.
@@ -671,10 +702,22 @@ const MEMORY_ROWS = {
   FCT_MineralDeposit: [stored(1, 1, 80000, 0.7), stored(2, 1, 5000, 1, { HalfOriginalAmount: null }), stored(3, 1, 90000, 0.9), stored(4, 1, 90000, 0.9), stored(1, 1, 90000, 0.9, { GameID: 9 })],
   FCT_RaceSysSurvey: [{ SystemID: 1, RaceID: 2, GameID: 1, Name: 'Sol' }, { SystemID: 2, RaceID: 3, GameID: 1, Name: 'Elsewhere' }],
   FCT_SystemBodyName: [{ SystemBodyID: 1, RaceID: 2, Name: 'Deep' }, { SystemBodyID: 1, RaceID: 3, Name: 'Other' }],
-  FCT_Star: [{ StarID: 1, ComponentNumber: 1 }],
+  FCT_Star: [{ StarID: 1, SystemID: 1, GameID: 1, ComponentNumber: 1, OrbitingComponent: 0, OrbitalDistance: 0, Eccentricity: 0, Luminosity: 1 }],
   FCT_SystemBodySurveys: [{ GameID: 1, RaceID: 2, SystemBodyID: 1 }, { GameID: 1, RaceID: 2, SystemBodyID: 2 }, { GameID: 1, RaceID: 2, SystemBodyID: 4 }, { GameID: 1, RaceID: 3, SystemBodyID: 3 }],
   FCT_Population: [],
   FCT_PopulationInstallations: [],
+  FCT_Fleet: [],
+  FCT_Ship: [],
+  FCT_ShipClass: [],
+  FCT_ClassComponent: [],
+  FCT_ShipDesignComponents: [],
+  FCT_DamagedComponent: [],
+  FCT_AlienPopulation: [],
+  FCT_Shipyard: [{ GameID: 1, RaceID: 2 }],
+  FCT_BannedBodies: [],
+  FCT_LagrangePoint: [],
+  FCT_AtmosphericGas: [],
+  DIM_Gases: [],
 }
 
 // `without` lists tables ('FCT_Star') and columns ('FCT_SystemBody.RadiationLevel') the database lacks, `rows` replaces the rows of a table.
@@ -698,6 +741,114 @@ const memoryDatabase = async (without = [], rows = {}) => {
   }
 
   return { query: (sql) => allRows(raw, sql), close: () => closeRaw(raw) }
+}
+
+// ---------- a world of colonies, fleets and alien records for the exclusion of a body by what is on it ----------
+
+// One case per body, named for what it tests, with the verdict of the game's rule (`blocked`). The colony on it (none with `colony: false`) is the race's own (race 2) or an alien race's (race 3), the alien one known to the race (`alien: 'known'`, a FCT_AlienPopulation row) or not; `people` is its population and `installs` its stored [installation, amount] rows. `fleet` is the fleet at the body: `at` its place from the body's (null: none saved), `orbit` the body it is saved as orbiting ('body', 'none' or 'other'), `assigned` the colony it is assigned to ('none', 'self', 'other' the first colony, or 'gone' one that no longer exists), `ships` its ships' classes (1: 10 modules in one component line of the orbital mining type, 2: no orbital mining modules, 3: 5 modules and no component lines) and the modules damaged on each (a number, or 'unknown' for a damage row with no count). `placed: false` is a body with no saved place.
+const BLOCK_CASES = [
+  { name: 'capital', people: 50, blocked: true },
+  { name: 'people', people: 3, blocked: true },
+  { name: 'driver', installs: [[24, 1]], blocked: true },
+  { name: 'driverNoAmount', installs: [[24, null]], blocked: true },
+  { name: 'driverZero', installs: [[24, 0]], blocked: true },
+  { name: 'automine', installs: [[12, 1]], blocked: true },
+  { name: 'civilian', installs: [[39, 1]], blocked: true },
+  { name: 'exCivilian', installs: [[52, 1]], blocked: true },
+  { name: 'otherInstallation', installs: [[9, 5]], blocked: false },
+  { name: 'empty', blocked: false },
+  { name: 'miners', fleet: {}, blocked: true },
+  { name: 'minersSelf', fleet: { assigned: 'self' }, blocked: true },
+  { name: 'damagedAll', fleet: { ships: [{ klass: 1, damaged: 10 }] }, blocked: false },
+  { name: 'damagedBeyond', fleet: { ships: [{ klass: 1, damaged: 12 }] }, blocked: false },
+  { name: 'damagedSome', fleet: { ships: [{ klass: 1, damaged: 4 }] }, blocked: true },
+  { name: 'damagedOneOfTwo', fleet: { ships: [{ klass: 1, damaged: 10 }, { klass: 1 }] }, blocked: true },
+  { name: 'damagedUnknown', fleet: { ships: [{ klass: 1, damaged: 'unknown' }] }, blocked: true },
+  { name: 'noLines', fleet: { ships: [{ klass: 3 }] }, blocked: true },
+  { name: 'noMiningClass', fleet: { ships: [{ klass: 2 }] }, blocked: false },
+  { name: 'assignedElsewhere', fleet: { assigned: 'other' }, blocked: false },
+  { name: 'assignedGone', fleet: { assigned: 'gone' }, blocked: true },
+  { name: 'inRange', fleet: { at: [0.5, -0.5] }, blocked: true },
+  { name: 'rangeEdge', fleet: { at: [1, 0] }, blocked: false },
+  { name: 'outOfRange', fleet: { at: [3, 0] }, blocked: false },
+  { name: 'noOrbit', fleet: { orbit: 'none' }, blocked: true },
+  { name: 'orbitOnlyBody', placed: false, fleet: {}, blocked: true },
+  { name: 'orbitOnlyBodyElsewhere', placed: false, fleet: { orbit: 'other' }, blocked: false },
+  { name: 'orbitOnlyFleet', fleet: { at: null }, blocked: true },
+  { name: 'orbitOnlyElsewhere', fleet: { at: null, orbit: 'other' }, blocked: false },
+  { name: 'otherRaceFleet', fleet: { race: 3 }, blocked: false },
+  { name: 'noColony', colony: false, fleet: {}, blocked: false },
+  { name: 'alienDriver', race: 3, alien: 'known', installs: [[24, 1]], blocked: true },
+  { name: 'alienPeople', race: 3, alien: 'known', people: 2, blocked: true },
+  { name: 'alienEmpty', race: 3, alien: 'known', blocked: false },
+  { name: 'alienMiners', race: 3, alien: 'known', fleet: {}, blocked: true },
+  { name: 'alienFleetOfTheRace', race: 3, alien: 'known', fleet: { race: 2 }, blocked: false },
+  { name: 'alienDriverUnknown', race: 3, alien: 'unknown', installs: [[24, 1]], blocked: false },
+]
+
+// The memory rows of the world and its cases, { name, blocked, bodyId, popId, race, read }: `read` is whether the race can read the colony (its own, or an alien one it knows).
+const blockWorld = () => {
+  const rows = {
+    FCT_SystemBody: [...MEMORY_ROWS.FCT_SystemBody],
+    FCT_MineralDeposit: [...MEMORY_ROWS.FCT_MineralDeposit],
+    FCT_SystemBodySurveys: [...MEMORY_ROWS.FCT_SystemBodySurveys],
+    FCT_SystemBodyName: [...MEMORY_ROWS.FCT_SystemBodyName],
+    FCT_Population: [],
+    FCT_PopulationInstallations: [],
+    FCT_Fleet: [],
+    FCT_Ship: [],
+    FCT_DamagedComponent: [],
+    FCT_AlienPopulation: [],
+    FCT_ShipClass: [{ ShipClassID: 1, MiningModules: 10 }, { ShipClassID: 2, MiningModules: 0 }, { ShipClassID: 3, MiningModules: 5 }],
+    FCT_ClassComponent: [{ ClassID: 1, ComponentID: 100, NumComponent: 10 }, { ClassID: 2, ComponentID: 200, NumComponent: 4 }],
+    FCT_ShipDesignComponents: [{ SDComponentID: 100, ComponentTypeID: 38 }, { SDComponentID: 200, ComponentTypeID: 7 }],
+  }
+  const FIRST_POPULATION = 201
+  const orbits = { body: (bodyId) => bodyId, none: () => 0, other: () => 999 }
+  let shipId = 1000
+  const cases = BLOCK_CASES.map((spec, index) => {
+    const bodyId = 100 + index
+    const popId = FIRST_POPULATION + index
+    const race = spec.race || 2
+    const placed = spec.placed !== false
+    const at = placed ? [100000 * index, 70000 * index] : [null, null]
+
+    rows.FCT_SystemBody.push(body(bodyId, 1, { PlanetNumber: index, Xcor: at[0], Ycor: at[1] }))
+    rows.FCT_MineralDeposit.push(stored(bodyId, 1, 50000, 0.9))
+    rows.FCT_SystemBodySurveys.push({ GameID: 1, RaceID: 2, SystemBodyID: bodyId })
+    rows.FCT_SystemBodyName.push({ SystemBodyID: bodyId, RaceID: 2, Name: spec.name })
+
+    if (spec.colony !== false) {
+      rows.FCT_Population.push({ PopulationID: popId, GameID: 1, RaceID: race, PopName: spec.name, SystemID: 1, SystemBodyID: bodyId, Population: spec.people || 0, Capital: index === 0 ? 1 : 0 })
+      rows.FCT_PopulationInstallations.push(...(spec.installs || []).map(([installation, amount]) => ({ PopID: popId, GameID: 1, PlanetaryInstallationID: installation, Amount: amount })))
+
+      if (spec.alien === 'known') {
+        rows.FCT_AlienPopulation.push({ GameID: 1, ViewingRaceID: 2, PopulationID: popId, AlienRaceID: race, PopulationAmount: 0 })
+      }
+    }
+
+    if (spec.fleet) {
+      const fleet = { at: [0, 0], orbit: 'body', assigned: 'none', ships: [{ klass: 1 }], ...spec.fleet }
+      const assigned = { none: 0, self: popId, other: FIRST_POPULATION, gone: 9999 }[fleet.assigned]
+      const place = fleet.at === null ? [null, null] : placed ? [at[0] + fleet.at[0], at[1] + fleet.at[1]] : [5, 5]
+      const fleetId = 500 + index
+
+      rows.FCT_Fleet.push({ FleetID: fleetId, GameID: 1, RaceID: fleet.race || race, OrbitBodyID: orbits[fleet.orbit](bodyId), AssignedPopulationID: assigned, Xcor: place[0], Ycor: place[1] })
+
+      for (const ship of fleet.ships) {
+        shipId += 1
+        rows.FCT_Ship.push({ ShipID: shipId, FleetID: fleetId, GameID: 1, RaceID: fleet.race || race, ShipClassID: ship.klass })
+
+        if (ship.damaged !== undefined) {
+          rows.FCT_DamagedComponent.push({ ShipID: shipId, GameID: 1, ComponentID: 100, Number: ship.damaged === 'unknown' ? null : ship.damaged })
+        }
+      }
+    }
+
+    return { name: spec.name, blocked: spec.blocked, bodyId, popId, race, read: spec.colony !== false && (race === 2 || spec.alien === 'known') }
+  })
+
+  return { rows, cases }
 }
 
 const page = (ctx) => {
@@ -811,6 +962,19 @@ const page = (ctx) => {
 
     return same([vm.cmcRanking, vm.cmcPreference], ['headline', candidates.DEFAULT_SETTINGS])
   })
+  add('page: a body the blocks read marks blocked leaves the chip and the candidates and one it does not mark stays, whatever the page\'s own reads of the colonies, miners and alien colonies hold', () => {
+    const mixed = [...deposits, row(6, 'Mined', 1, 50000, 0.9), row(7, 'Alien', 1, 50000, 0.9), row(8, 'Free', 1, 50000, 0.9)]
+    const cmcBlocks = [{ PopulationID: 11, SystemBodyID: 1, BlocksCmc: true }, { PopulationID: 12, SystemBodyID: 2, BlocksCmc: true }, { PopulationID: 13, SystemBodyID: 7, BlocksCmc: false }]
+    const colonies = [{ PopulationID: 14, SystemBodyID: 8, Population: 4, Mines: 0, Automines: 0, Complexes: 0, ComplexGaps: 0, MassDrivers: 0, InstallationGaps: 0, PopName: 'People' }]
+    const miners = [{ SystemBodyID: 6, Ships: 1, Modules: 150 }]
+    const aliens = [{ PopulationID: 13, SystemBodyID: 7, PopulationName: 'Them', AlienRaceName: 'Them' }]
+    const vm = mount({ race, deposits: mixed, cmcBlocks, colonies, miners, aliens })
+    const blocked = vm.bodies.filter((body) => body.cmcBlocked).map((body) => body.name).sort()
+    const chips = vm.bodies.filter((body) => body.cmcCandidate).map((body) => body.name).sort()
+    const rows = vm.candidates.rows.map((item) => item.name).sort()
+
+    return same([blocked, chips, rows], [['Deep', 'Marginal'], ['Alien', 'Free', 'Mined'], ['Alien', 'Free', 'Mined']])
+  })
 
   // ----- the page's reads over a database of the tables they touch -----
   const over = async (without, rows, test) => {
@@ -860,7 +1024,7 @@ const page = (ctx) => {
     return keys.length > 0 && same([settled, loaded, [...vm.failedInputs].sort()], [keys, true, keys]) === true && failed(vm.failedInputsText) ? true : short([keys, settled, loaded, vm.failedInputs])
   })
   add('read: a civilian installation whose count or kind the save does not record leaves the complexes on its body unknown, so the body is a possible candidate with no rank, while an absent installation is no complex and an installation of another kind does not matter', async () => {
-    const colony = { PopulationID: 10, GameID: 1, RaceID: 2, PopName: 'Colony', SystemID: 1, SystemBodyID: 1, Population: 1, Capital: 0, MassDriverDest: 0, PurchaseCivilianMinerals: 1 }
+    const colony = { PopulationID: 10, GameID: 1, RaceID: 2, PopName: 'Colony', SystemID: 1, SystemBodyID: 1, Population: 0, Capital: 0, MassDriverDest: 0, PurchaseCivilianMinerals: 1 }
     const installed = (planetary, amount) => ({ PopID: 10, GameID: 1, PlanetaryInstallationID: planetary, Amount: amount })
     const definitions = [...MEMORY_ROWS.DIM_PlanetaryInstallation, { PlanetaryInstallationID: 6, CivilianInstallation: null, Workers: 0, MiningProductionValue: 10, MassDriverValue: 0 }, { PlanetaryInstallationID: 7, CivilianInstallation: 1, Workers: 0, MiningProductionValue: null, MassDriverValue: 0 }]
     const candidateOf = (installations) => over([], { FCT_Population: [colony], FCT_PopulationInstallations: installations, DIM_PlanetaryInstallation: definitions }, async (vm) => {
@@ -879,6 +1043,79 @@ const page = (ctx) => {
     const got = [await candidateOf([]), await candidateOf([installed(2, null)]), await candidateOf([installed(2, 2)]), await candidateOf([installed(3, null)]), await candidateOf([installed(6, 1)]), await candidateOf([installed(7, 1)])]
 
     return same(got, [free, unsure, null, free, unsure, unsure])
+  })
+
+  // ----- the exclusion of a body by the colonies on it, over the planted world (`blockWorld`) -----
+  const planted = async (test) => {
+    const world = blockWorld()
+    const database = await memoryDatabase([], world.rows)
+
+    try {
+      return await test({ ...world, database, planner: await plannerOf(ctx) })
+    } finally {
+      await database.close()
+    }
+  }
+  const blocksOf = async ({ database, planner }) => Object.fromEntries((await planner['colonization-data'].loadCmcBlocks(database, { GameID: 1, RaceID: 2 })).map((item) => [item.PopName, item]))
+  const caseNamed = (cases, name) => {
+    const found = cases.find((item) => item.name === name)
+
+    if (!found) {
+      throw new Error(`the world has no case ${name}`)
+    }
+
+    return found
+  }
+  // What the rule says of each named colony against what the game's rule says of its case.
+  const verdictsOf = (cases, blocks, names) => same(names.map((name) => [name, name in blocks ? blocks[name].BlocksCmc : 'no record']), names.map((name) => [name, caseNamed(cases, name).blocked]))
+
+  add('data: a colony blocks its body on its people or on an automated mine, a mass driver or a civilian or ex-civilian complex on its record, whatever the amount, and an empty colony or another installation blocks nothing', () => planted(async (world) => verdictsOf(world.cases, await blocksOf(world), ['capital', 'people', 'driver', 'driverNoAmount', 'driverZero', 'automine', 'civilian', 'exCivilian', 'otherInstallation', 'empty'])))
+  add('data: orbital miners block with the undamaged modules of their fleet: a ship with all its modules damaged (or more damaged than mounted) gives none, a partly damaged one the rest, a damage row with no count or a class with no component lines the stored modules of the class, and a class with no orbital mining modules none', () => planted(async (world) => {
+    const blocks = await blocksOf(world)
+    const names = ['miners', 'minersSelf', 'damagedAll', 'damagedBeyond', 'damagedSome', 'damagedOneOfTwo', 'damagedUnknown', 'noLines', 'noMiningClass']
+    const verdicts = verdictsOf(world.cases, blocks, names)
+
+    return verdicts === true ? same(names.map((name) => blocks[name].Modules), [10, 10, 0, 0, 6, 10, 10, 5, 0]) : verdicts
+  }))
+  add('data: a fleet counts for a colony by position, not by the orbit it is saved with: within one unit of the body on both axes (not at one unit) where both carry a position, the orbited body only where one does not, and only a fleet of the colony\'s race, assigned to the colony, to none or to a colony that is gone', () => planted(async (world) => verdictsOf(world.cases, await blocksOf(world), ['inRange', 'rangeEdge', 'outOfRange', 'noOrbit', 'orbitOnlyBody', 'orbitOnlyFleet', 'orbitOnlyElsewhere', 'otherRaceFleet', 'minersSelf', 'assignedElsewhere', 'assignedGone'])))
+  add('data: a known alien colony blocks under the conditions of the race\'s own colonies (people, a mass driver, orbital miners of its race at work) and an empty one blocks nothing, a colony the race has no record of is not read, and a body with no colony has no record to block it', () => planted(async (world) => {
+    const blocks = await blocksOf(world)
+    const read = world.cases.filter((item) => item.read).map((item) => item.name).sort()
+
+    return verdictsOf(world.cases, blocks, ['alienDriver', 'alienPeople', 'alienEmpty', 'alienMiners', 'alienFleetOfTheRace']) === true && !('alienDriverUnknown' in blocks) && !('noColony' in blocks) ? same(Object.keys(blocks).sort(), read) : short(Object.keys(blocks))
+  }))
+  add('data: the Minerals page and the Colonization Planner agree on every planted body: it is a chip, a candidate row and a site exactly when no colony keeps a complex off it', () => planted(async (world) => {
+    const { cases, database, planner } = world
+    const vm = instantiate(readOptions, { $store: STORE, database, GameID: 1, RaceID: 2, data: {} })
+
+    for (const key of ['race', 'deposits', 'cmcBlocks']) {
+      await vm.runAsync(key)
+    }
+
+    const bodies = await planner['colonization-data'].loadBodies(database, { GameID: 1, RaceID: 2 })
+    const rules = await planner['colonization-data'].loadCmcRules(database, { GameID: 1, RaceID: 2 })
+    const shown = new Map(vm.bodies.map((item) => [item.name, item]))
+    const disagree = cases.map((item) => {
+      const site = planner.colonization.cmcSite(bodies.find((candidate) => candidate.SystemBodyID === item.bodyId), rules)
+      const mark = shown.get(item.name)
+      const got = { blocked: mark ? mark.cmcBlocked : null, chip: Boolean(mark && mark.cmcCandidate), listed: vm.candidates.rows.some((entry) => entry.name === item.name), open: site.uncolonised, site: Object.values(site).every(Boolean) }
+
+      return same(got, { blocked: item.blocked, chip: !item.blocked, listed: !item.blocked, open: !item.blocked, site: !item.blocked }) === true ? null : [item.name, got]
+    }).filter(Boolean)
+
+    return cases.length >= 30 && !disagree.length ? true : short(disagree.slice(0, 3))
+  }))
+  add('rules: every cmcCandidate rule holds for the 3.1 line', () => {
+    const ids = ['cmcCandidate.input', 'cmcCandidate.deposit', 'cmcCandidate.reserve', 'cmcCandidate.accessibility', 'cmcCandidate.rate', 'cmcCandidate.lifetime', 'cmcCandidate.term', 'cmcCandidate.score']
+    const versions = ids.map((id) => provenance.getRule(id).versions)
+
+    return versions.every((list) => same(list, ['3.1.x']) === true) ? true : short(versions)
+  })
+  add('rules: the exclusion rule holds for the 3.1 line and its note says how a fleet is matched to a colony (position within one unit, the orbited body where a position is not saved), that the output is the undamaged modules, that an empty colony does not exclude, and that an alien colony the race has no record of cannot be read', async () => {
+    const planner = await plannerOf(ctx)
+    const rule = planner.provenance.getRule('cmcSite.excluded')
+
+    return rule && same(rule.versions, ['3.1.x']) === true && /within one unit/.test(rule.note) && /orbits instead/.test(rule.note) && /undamaged/.test(rule.note) && /empty colony does not/.test(rule.note) && /cannot be read/.test(rule.note) ? true : short(rule)
   })
 
   // ----- the panel, as Vue renders it over the page -----
@@ -1158,11 +1395,11 @@ const rowsOf = async (database, sql) => (await database.query(sql))[0]
 
 const permutation = (ranks, count) => same([...ranks].sort((a, b) => a - b), Array.from({ length: count }, (_value, index) => index + 1))
 
-const saveStatements = async (ctx, save) => {
+const saveStatements = async (ctx, save, opened = null) => {
   const { m, pageOptions } = ctx
   const { candidates, minerals, provenance } = m
   const value = provenance.valueOrNull
-  const database = await openSave(save.file)
+  const database = opened || (await openSave(save.file))
   const label = save.file
 
   if (!database) {
@@ -1190,6 +1427,39 @@ const saveStatements = async (ctx, save) => {
   const qualifiers = new Set((await rowsOf(database, `select distinct SystemBodyID from FCT_MineralDeposit where GameID = ${g} and MaterialID in (1, 11) and Amount > 10000 and Accessibility >= 0.7 and SystemBodyID in ${surveyed}`)).map((row) => row.SystemBodyID))
   const gapBodies = new Set((await rowsOf(database, `select distinct FCT_Population.SystemBodyID from FCT_Population inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_Population.GameID = ${g} and FCT_Population.RaceID = ${r} and FCT_PopulationInstallations.GameID = ${g} and (DIM_PlanetaryInstallation.CivilianInstallation is null or (DIM_PlanetaryInstallation.CivilianInstallation = 1 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MiningProductionValue is null)))`)).map((row) => row.SystemBodyID))
   const complexBodies = new Set((await rowsOf(database, `select distinct FCT_Population.SystemBodyID from FCT_Population inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_Population.GameID = ${g} and FCT_Population.RaceID = ${r} and FCT_PopulationInstallations.GameID = ${g} and DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 and FCT_PopulationInstallations.Amount > 0`)).map((row) => row.SystemBodyID))
+  // The exclusion read straight from the raw tables, as the game's rule says it, apart from the loader under test: the colonies the race can read (its own, and the alien colonies it has a record of), each blocked by its people, a stored row of an automated mine, a mass driver or a civilian or ex-civilian complex, or the undamaged orbital mining modules of the fleets of its race at its body (within one unit where both have a place, the orbited body where not) that are assigned to the colony, to none or to a colony that is gone. A ship whose class has no component line of the type, a line or a damage count with no value, or a line with no stored type is counted at the modules of its class.
+  const rawColonies = await rowsOf(database, `select FCT_Population.PopulationID, FCT_Population.RaceID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${g} and (FCT_Population.RaceID = ${r} or FCT_Population.PopulationID in (select PopulationID from FCT_AlienPopulation where GameID = ${g} and ViewingRaceID = ${r}))`)
+  const keyed = new Set((await rowsOf(database, `select distinct PopID from FCT_PopulationInstallations where GameID = ${g} and PlanetaryInstallationID in (12, 24, 39, 52)`)).map((row) => row.PopID))
+  const everyPopulation = new Set((await rowsOf(database, `select PopulationID from FCT_Population where GameID = ${g}`)).map((row) => row.PopulationID))
+  const rawFleets = await rowsOf(database, `select FleetID, RaceID, OrbitBodyID, AssignedPopulationID, Xcor, Ycor from FCT_Fleet where FCT_Fleet.GameID = ${g}`)
+  const rawShips = await rowsOf(database, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_ShipClass.MiningModules from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${g} and FCT_ShipClass.MiningModules > 0`)
+  const rawLines = await rowsOf(database, 'select FCT_ClassComponent.ClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent, FCT_ShipDesignComponents.ComponentTypeID from FCT_ClassComponent left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID in (select ShipClassID from FCT_ShipClass where MiningModules > 0)')
+  const rawDamage = await rowsOf(database, `select ShipID, ComponentID, Number from FCT_DamagedComponent where GameID = ${g}`)
+  const grouped = (items, key) => items.reduce((groups, item) => groups.set(item[key], [...(groups.get(item[key]) || []), item]), new Map())
+  const linesOf = grouped(rawLines, 'ClassID')
+  const damageOf = grouped(rawDamage, 'ShipID')
+  const shipsOf = grouped(rawShips, 'FleetID')
+  const modulesOf = (ship) => {
+    const lines = linesOf.get(ship.ShipClassID) || []
+    const mining = lines.filter((line) => line.ComponentTypeID === 38)
+    const damage = damageOf.get(ship.ShipID) || []
+    const damaged = (line) => damage.filter((item) => item.ComponentID === line.ComponentID)
+
+    if (lines.some((line) => line.ComponentTypeID === null) || !mining.length || mining.some((line) => line.NumComponent === null || damaged(line).some((item) => item.Number === null))) {
+      return ship.MiningModules
+    }
+
+    return mining.reduce((total, line) => total + Math.max(line.NumComponent - damaged(line).reduce((sum, item) => sum + item.Number, 0), 0), 0)
+  }
+  const within = (a, b) => Math.abs(a - b) < 1
+  const atColony = (fleet, colony) => ([fleet.Xcor, fleet.Ycor, colony.Xcor, colony.Ycor].every(Number.isFinite) ? within(fleet.Xcor, colony.Xcor) && within(fleet.Ycor, colony.Ycor) : fleet.OrbitBodyID === colony.SystemBodyID)
+  const rawBlocks = new Map(rawColonies.map((colony) => {
+    const working = rawFleets.filter((fleet) => fleet.RaceID === colony.RaceID && atColony(fleet, colony) && (!(fleet.AssignedPopulationID > 0) || !everyPopulation.has(fleet.AssignedPopulationID) || fleet.AssignedPopulationID === colony.PopulationID))
+    const modules = working.reduce((total, fleet) => total + (shipsOf.get(fleet.FleetID) || []).reduce((sum, ship) => sum + modulesOf(ship), 0), 0)
+
+    return [colony.PopulationID, { body: colony.SystemBodyID, modules, blocked: colony.Population > 0 || keyed.has(colony.PopulationID) || modules > 0 }]
+  }))
+  const blockedBodies = new Set([...rawBlocks.values()].filter((entry) => entry.blocked).map((entry) => entry.body))
   const [raw] = await rowsOf(database, `select FCT_Race.MineProduction, (select max(MiningProductionValue) from DIM_PlanetaryInstallation where CivilianInstallation = 1) as ComplexMining, FCT_Game.AllowCMC from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${g} and FCT_Race.RaceID = ${r}`)
   const rawDeposits = await rowsOf(database, `select FCT_MineralDeposit.SystemBodyID, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.RadiationLevel from FCT_MineralDeposit inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID where FCT_MineralDeposit.GameID = ${g} and FCT_MineralDeposit.MaterialID in (1, 11) and FCT_MineralDeposit.SystemBodyID in ${surveyed}`)
   const depositOf = (bodyId, materialId) => rawDeposits.find((deposit) => deposit.SystemBodyID === bodyId && deposit.MaterialID === materialId)
@@ -1203,14 +1473,14 @@ const saveStatements = async (ctx, save) => {
   const addSave = (name, test) => statements.push([`${name.slice(0, name.indexOf(':'))}: ${label}:${name.slice(name.indexOf(':') + 1)}`, test])
 
   addSave('save-candidates: the race and the game switch are the raw ones, and a game that founds no complexes has no candidates', () => (vm.race.MineProduction === raw.MineProduction && vm.race.ComplexMining === raw.ComplexMining && vm.raceRules.AllowCMC === allowed && (allowed || headline.rows.length === 0) ? true : short([vm.race, raw])), `${headline.rows.length} candidates`)
-  addSave('save-candidates: every candidate holds a raw Duranium or Gallicite deposit that qualifies, and has no complex of the race on it', () => {
-    const bad = headline.rows.filter((row) => row.status === 'known' && (!qualifiers.has(row.SystemBodyID) || complexBodies.has(row.SystemBodyID))).map((row) => row.name)
+  addSave('save-candidates: every candidate holds a raw Duranium or Gallicite deposit that qualifies, and no colony on the body blocks it', () => {
+    const bad = headline.rows.filter((row) => row.status === 'known' && (!qualifiers.has(row.SystemBodyID) || complexBodies.has(row.SystemBodyID) || blockedBodies.has(row.SystemBodyID))).map((row) => row.name)
 
     return bad.length ? short(bad) : true
   })
-  addSave('save-candidates: every raw qualifying body with no complex of the race and in reach is a candidate, and the candidates are the bodies the Minerals chip marks', () => {
+  addSave('save-candidates: every raw qualifying body in reach that no colony blocks is a candidate, and the candidates are the bodies the Minerals chip marks', () => {
     const inReach = new Set(vm.bodies.filter((body) => body.cmcInReach).map((body) => body.SystemBodyID))
-    const free = allowed ? [...qualifiers].filter((id) => !complexBodies.has(id) && inReach.has(id)) : []
+    const free = allowed ? [...qualifiers].filter((id) => !complexBodies.has(id) && !blockedBodies.has(id) && inReach.has(id)) : []
     const byId = (a, b) => a - b
     const expected = free.filter((id) => !gapBodies.has(id)).sort(byId)
     const unsure = free.filter((id) => gapBodies.has(id)).sort(byId)
@@ -1219,6 +1489,36 @@ const saveStatements = async (ctx, save) => {
     const unranked = headline.rows.filter((row) => unsure.includes(row.SystemBodyID)).every((row) => row.rank === null && row.longevityRank === null)
 
     return same(known.map((row) => row.SystemBodyID).sort(byId), expected) === true && same(possible, unsure) === true && unranked && same(chips, [...expected, ...unsure].sort(byId)) === true ? true : short([known.length, expected.length, unsure.length, possible.length, chips.length])
+  })
+  addSave('save-blocks: the colonies the exclusion reads are the race\'s own and the alien colonies it has a record of, and each one\'s verdict and undamaged orbital mining modules are the raw tables\' (people, stored installation rows, the fleets of its race at its body and assigned to it or to none)', async () => {
+    const planner = await plannerOf(ctx)
+    const read = await planner['colonization-data'].loadCmcBlocks(database, { GameID: g, RaceID: r })
+    const got = read.map((row) => [row.PopulationID, row.BlocksCmc, row.Modules]).sort((a, b) => a[0] - b[0])
+    const expected = [...rawBlocks.entries()].map(([id, entry]) => [id, entry.blocked, entry.modules]).sort((a, b) => a[0] - b[0])
+    const page = vm.cmcBlocks.map((row) => [row.PopulationID, row.BlocksCmc, row.Modules]).sort((a, b) => a[0] - b[0])
+
+    return expected.length > 0 && same(got, expected) === true && same(page, expected) === true ? true : short([got.length, expected.length, got.filter((row, index) => short(row) !== short(expected[index])).slice(0, 3)])
+  })
+  addSave('save-planner: every body the Colonization Planner keeps a civilian mining complex off is a body the page blocks, and every body the page leaves open is one it keeps open', async () => {
+    const planner = await plannerOf(ctx)
+    const bodies = await planner['colonization-data'].loadBodies(database, { GameID: g, RaceID: r })
+    const rules = await planner['colonization-data'].loadCmcRules(database, { GameID: g, RaceID: r })
+    const siteOf = new Map(bodies.map((body) => [body.SystemBodyID, planner.colonization.cmcSite(body, rules)]))
+    const pageById = new Map(vm.bodies.map((body) => [body.SystemBodyID, body]))
+    const disagree = []
+
+    siteOf.forEach((site, id) => {
+      const page = pageById.get(id)
+
+      if (page && site.uncolonised !== !page.cmcBlocked) {
+        disagree.push([id, site.uncolonised, page.cmcBlocked])
+      }
+    })
+
+    const chips = vm.bodies.filter((body) => body.cmcCandidate && !body.bare)
+    const notOpen = chips.filter((body) => !siteOf.has(body.SystemBodyID) || !siteOf.get(body.SystemBodyID).uncolonised).map((body) => body.SystemBodyID)
+
+    return disagree.length || notOpen.length ? short([disagree.slice(0, 3), notOpen.slice(0, 3)]) : true
   })
   addSave('save-rate: each deposit\'s assumed output is the complexes times the raw mining value of a complex, the raw mine production, the raw accessibility and the radiation modifier', () => {
     const bad = []
@@ -1302,7 +1602,7 @@ const saveStatements = async (ctx, save) => {
     return permutation(scored.map((row) => row.longevityRank), scored.length) === true && scored.every((row, index) => row.rank === index + 1) && longevity.rows.slice(scored.length).every((row) => !provenance.isAvailable(row.score) && row.rank === null) && descending && longevity.shown === 'longevity' ? true : short(scored.slice(0, 3).map((row) => [row.name, row.rank, value(row.score)]))
   })
   addSave('save-page: the page\'s candidates are the utility\'s over its own bodies, in either mode, with the headline order the default', () => {
-    const asked = instantiate(pageOptions, { $store: STORE, database, GameID: g, RaceID: r, data: { race: vm.race, deposits: vm.deposits, colonies: vm.colonies, aliens: vm.aliens, miners: vm.miners, routes: vm.routes, systems: vm.systems, cmcRanking: 'longevity', cmcPreference: { ...FIXED_SETTINGS } } })
+    const asked = instantiate(pageOptions, { $store: STORE, database, GameID: g, RaceID: r, data: { race: vm.race, deposits: vm.deposits, colonies: vm.colonies, aliens: vm.aliens, miners: vm.miners, cmcBlocks: vm.cmcBlocks, routes: vm.routes, systems: vm.systems, cmcRanking: 'longevity', cmcPreference: { ...FIXED_SETTINGS } } })
 
     return same(vm.candidates.rows.map((row) => row.SystemBodyID), headline.rows.map((row) => row.SystemBodyID)) === true && same(asked.candidates.rows.map((row) => row.SystemBodyID), longevity.rows.map((row) => row.SystemBodyID)) === true && vm.candidates.shown === 'headline' ? true : 'the page does not rank as the utility does'
   })
@@ -1314,6 +1614,212 @@ const saveStatements = async (ctx, save) => {
   })
 
   return { skipped: false, statements, close: () => database.close() }
+}
+
+// ---------- the planted copy of the migrated fixture ----------
+
+const openFixture = (file) => new Promise((resolve, reject) => {
+  const raw = new sqlite3.Database(file, sqlite3.OPEN_READWRITE, (error) => (error ? reject(error) : resolve(raw)))
+})
+
+const runSql = (raw, sql) => new Promise((resolve, reject) => raw.run(sql, (error) => (error ? reject(error) : resolve())))
+
+// The exclusions the migrated fixture holds none of (no mass driver, no orbital miners, no damaged ship, and its one alien colony has people), planted on a copy of it with complexes switched on and read by the real page and the real Planner. Each case is a body no colony stands on and no colony's place is within a unit of, given a Duranium deposit the race has surveyed, and the colony, fleet or alien record the case names: `colony` is 'own', 'known' (an alien colony the race has a record of) or 'unknown' (one it has none of), `people` gives it people, `driver` plants a mass driver on it, `fleet` plants a fleet of the race with a ship of its mining class at the body (`orbit: 'none'` saves it with no orbited body, `apart` moves it that many units off, `damaged` damages every module, `assigned` is 'other' (an existing colony) or 'self'). A witness the fixture does not give (a mining class, a fleet, a colony to copy, enough free bodies) is a failure, never a skipped case.
+const PLANTED = [
+  { name: 'people', blocked: true, colony: 'own', people: true },
+  { name: 'driver', blocked: true, colony: 'own', driver: true },
+  { name: 'miners', blocked: true, colony: 'own', fleet: {} },
+  { name: 'minersAssignedHere', blocked: true, colony: 'own', fleet: { assigned: 'self' } },
+  { name: 'minersByPosition', blocked: true, colony: 'own', fleet: { orbit: 'none' } },
+  { name: 'minersDamaged', blocked: false, colony: 'own', fleet: { damaged: true } },
+  { name: 'minersAssignedElsewhere', blocked: false, colony: 'own', fleet: { assigned: 'other' } },
+  { name: 'minersOutOfRange', blocked: false, colony: 'own', fleet: { apart: 500 } },
+  { name: 'minersNoColony', blocked: false, fleet: {} },
+  { name: 'emptyColony', blocked: false, colony: 'own' },
+  { name: 'alienPeople', blocked: true, colony: 'known', people: true },
+  { name: 'alienDriver', blocked: true, colony: 'known', driver: true },
+  { name: 'alienEmpty', blocked: false, colony: 'known' },
+  { name: 'alienDriverUnknown', blocked: false, colony: 'unknown', driver: true },
+]
+
+const fixtureStatements = async (ctx) => {
+  const source = path.resolve(root, PLANTED_FROM.file)
+
+  if (!fs.existsSync(source)) {
+    return { skipped: true, statements: [] }
+  }
+
+  const planner = await plannerOf(ctx)
+  const { loadBodies, loadCmcBlocks, loadCmcRules } = planner['colonization-data']
+  const { cmcNote, cmcSite } = planner.colonization
+  const { pageOptions } = ctx
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-cmc-planted-'))
+  const game = PLANTED_FROM.game
+  const race = PLANTED_FROM.race
+  const reading = { GameID: game, RaceID: race }
+
+  fs.copyFileSync(source, path.join(folder, 'AuroraDB-planted.db'))
+
+  const raw = await openFixture(path.join(folder, 'AuroraDB-planted.db'))
+  const close = async () => {
+    await closeRaw(raw)
+    fs.rmSync(folder, { recursive: true, force: true })
+  }
+  const database = { query: (sql) => allRows(raw, sql), close }
+  const problems = []
+  const statements = []
+  const addFixture = (name, test) => statements.push([`save-fixture: ${name}`, test])
+  const sameSpot = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1
+  const sqlValue = (cell) => (typeof cell === 'string' ? `'${cell.replace(/'/g, "''")}'` : String(cell))
+  // A copy of one row of a table with the columns of `over` changed, the template row the one `where` finds first.
+  const copyRow = async (table, where, over) => {
+    const columns = (await rowsOf(database, `pragma table_info(${table})`)).map((column) => column.name)
+    const lacking = Object.keys(over).filter((column) => !columns.includes(column))
+
+    if (lacking.length) {
+      problems.push(`${table} has no column ${lacking.join(', ')}`)
+    }
+
+    await runSql(raw, `insert into ${table} (${columns.join(', ')}) select ${columns.map((column) => (column in over ? sqlValue(over[column]) : column)).join(', ')} from ${table} where ${where} limit 1`)
+  }
+
+  try {
+    await runSql(raw, `update FCT_Game set AllowCMC = 1 where GameID = ${game}`)
+
+    const bodies = await loadBodies(database, reading)
+    const rules = await loadCmcRules(database, reading)
+    const blocksBefore = new Map((await loadCmcBlocks(database, reading)).map((row) => [row.PopulationID, row]))
+    const places = await rowsOf(database, `select FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${game}`)
+    const deposited = new Set((await rowsOf(database, `select distinct SystemBodyID from FCT_MineralDeposit where GameID = ${game}`)).map((row) => row.SystemBodyID))
+    const standing = (body) => places.some((place) => sameSpot(place.Xcor, body.Xcor) && sameSpot(place.Ycor, body.Ycor))
+    const free = bodies.filter((body) => Number.isFinite(body.Xcor) && Number.isFinite(body.Ycor) && !body.OwnPopulations.length && !body.AlienPopulations.length && !deposited.has(body.SystemBodyID) && !standing(body) && Object.entries(cmcSite(body, rules)).every(([key, met]) => key === 'uncolonised' || met))
+    const chosen = []
+
+    for (const body of free) {
+      if (chosen.length < PLANTED.length && !chosen.some((other) => sameSpot(other.Xcor, body.Xcor) && sameSpot(other.Ycor, body.Ycor))) {
+        chosen.push(body)
+      }
+    }
+
+    const miningClass = (await rowsOf(database, `select FCT_ShipClass.ShipClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent from FCT_ShipClass inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = 38 where FCT_ShipClass.GameID = ${game} and FCT_ShipClass.RaceID = ${race} and FCT_ShipClass.MiningModules > 0 order by FCT_ShipClass.ShipClassID limit 1`))[0]
+    const fleets = await rowsOf(database, `select FCT_Ship.FleetID, min(FCT_Ship.ShipID) as ShipID from FCT_Ship where FCT_Ship.GameID = ${game} and FCT_Ship.RaceID = ${race} group by FCT_Ship.FleetID order by FCT_Ship.FleetID`)
+    const own = await rowsOf(database, `select PopulationID from FCT_Population where GameID = ${game} and RaceID = ${race} order by PopulationID`)
+    const alien = (await rowsOf(database, `select PopulationID, AlienRaceID from FCT_AlienPopulation where GameID = ${game} and ViewingRaceID = ${race} order by PopulationID limit 1`))[0]
+    const fleetsWanted = PLANTED.filter((item) => item.fleet).length
+
+    if (!rules.allowed || !rules.shipyard || !(rules.settledColonies > 1)) {
+      problems.push(`the race does not meet the game's rules with complexes on: ${short(rules)}`)
+    }
+
+    if (chosen.length < PLANTED.length) {
+      problems.push(`${chosen.length} free bodies of ${PLANTED.length} wanted, of ${bodies.length} bodies`)
+    }
+
+    if (!miningClass) {
+      problems.push('the race has no ship class of orbital mining modules with a component line of that type')
+    }
+
+    if (fleets.length < fleetsWanted) {
+      problems.push(`${fleets.length} fleets with ships of ${fleetsWanted} wanted`)
+    }
+
+    if (!own.length || !alien) {
+      problems.push(`no colony of the race (${own.length}) or alien colony it knows (${alien ? 1 : 0}) to copy`)
+    }
+
+    const planted = []
+
+    if (!problems.length) {
+      const nextFleet = fleets[Symbol.iterator]()
+      let populationId = 900000
+
+      for (const [index, spec] of PLANTED.entries()) {
+        const body = chosen[index]
+        const template = `GameID = ${game} and PopulationID = ${own[0].PopulationID}`
+        const item = { ...spec, body, populationId: null }
+
+        await runSql(raw, `insert into FCT_MineralDeposit (GameID, MaterialID, SystemID, SystemBodyID, Amount, Accessibility, HalfOriginalAmount, OriginalAcc) values (${game}, 1, ${body.SystemID}, ${body.SystemBodyID}, 50000, 0.9, 50000, 0.9)`)
+        await runSql(raw, `insert into FCT_SystemBodySurveys (GameID, RaceID, SystemBodyID) select ${game}, ${race}, ${body.SystemBodyID} where not exists (select 1 from FCT_SystemBodySurveys where GameID = ${game} and RaceID = ${race} and SystemBodyID = ${body.SystemBodyID})`)
+
+        if (spec.colony) {
+          populationId += 1
+          item.populationId = populationId
+          await copyRow('FCT_Population', template, { PopulationID: populationId, RaceID: spec.colony === 'own' ? race : alien.AlienRaceID, SystemID: body.SystemID, SystemBodyID: body.SystemBodyID, PopName: `Planted ${spec.name}`, Population: spec.people ? 5 : 0, Capital: 0 })
+
+          if (spec.colony === 'known') {
+            await copyRow('FCT_AlienPopulation', `GameID = ${game} and ViewingRaceID = ${race} and PopulationID = ${alien.PopulationID}`, { PopulationID: populationId, AlienRaceID: alien.AlienRaceID, PopulationAmount: 0, PopulationName: `Planted ${spec.name}` })
+          }
+
+          if (spec.driver) {
+            await runSql(raw, `insert into FCT_PopulationInstallations (GameID, PopID, PlanetaryInstallationID, Amount) values (${game}, ${populationId}, 24, 1)`)
+          }
+        }
+
+        if (spec.fleet) {
+          const { value: ship } = nextFleet.next()
+          const assigned = spec.fleet.assigned === 'other' ? own[0].PopulationID : spec.fleet.assigned === 'self' ? populationId : 0
+
+          await runSql(raw, `update FCT_Fleet set Xcor = ${body.Xcor + (spec.fleet.apart || 0)}, Ycor = ${body.Ycor}, OrbitBodyID = ${spec.fleet.orbit === 'none' ? 0 : body.SystemBodyID}, AssignedPopulationID = ${assigned}, SystemID = ${body.SystemID} where FleetID = ${ship.FleetID}`)
+          await runSql(raw, `update FCT_Ship set ShipClassID = ${miningClass.ShipClassID} where ShipID = ${ship.ShipID}`)
+
+          if (spec.fleet.damaged) {
+            await runSql(raw, `insert into FCT_DamagedComponent (ShipID, ComponentID, GameID, Number) values (${ship.ShipID}, ${miningClass.ComponentID}, ${game}, ${miningClass.NumComponent})`)
+          }
+        }
+
+        planted.push(item)
+      }
+    }
+
+    const after = new Map((await loadBodies(database, reading)).map((body) => [body.SystemBodyID, body]))
+    const rulesAfter = await loadCmcRules(database, reading)
+    const blocksAfter = new Map((await loadCmcBlocks(database, reading)).map((row) => [row.PopulationID, row]))
+    const vm = instantiate(pageOptions, { $store: STORE, database, GameID: game, RaceID: race, data: {} })
+
+    for (const name of Object.keys(pageOptions.asyncComputed)) {
+      await vm.runAsync(name)
+    }
+
+    const shown = new Map(vm.bodies.map((item) => [item.SystemBodyID, item]))
+    const listed = new Set(vm.candidates.rows.map((row) => row.SystemBodyID))
+    const observed = planted.map((item) => {
+      const body = after.get(item.body.SystemBodyID)
+      const site = cmcSite(body, rulesAfter)
+      const mark = shown.get(item.body.SystemBodyID)
+
+      return { name: item.name, blocked: item.blocked, keptOff: body.CmcBlockers.length > 0, open: site.uncolonised, siteOpen: Object.values(site).every(Boolean), note: cmcNote(site), pageBlocked: mark ? mark.cmcBlocked : null, chip: Boolean(mark && mark.cmcCandidate), listed: listed.has(item.body.SystemBodyID) }
+    })
+    const lacking = (test) => (problems.length ? short(problems) : test())
+
+    addFixture('the copy has what the cases need: complexes switched on and the race meeting the game\'s other rules, a free body and a fleet for every case, a mining class with a component line of that type, and a colony and an alien colony to copy', () => (problems.length ? short(problems) : planted.length === PLANTED.length && vm.raceRules.AllowCMC === true ? true : short([planted.length, vm.raceRules])))
+    addFixture('a planted colony blocks its body on its people, a mass driver or orbital miners at work there (found by position whatever orbit the fleet is saved with, assigned to the colony or to none), a known alien colony does so under the same conditions, and nothing else does: damaged miners, miners assigned to another colony or out of range, miners with no colony, an empty colony, an empty alien colony and one the race has no record of leave the body free', () => lacking(() => {
+      const wrong = observed.filter((item) => item.keptOff !== item.blocked).map((item) => [item.name, item.keptOff, item.blocked])
+
+      return wrong.length ? short(wrong) : true
+    }))
+    addFixture('the Minerals page and the Planner agree on every planted body: the page marks it blocked and leaves it a chip and a candidate row, and the Planner\'s site meets the game\'s conditions with the note naming the colony condition, exactly as the rule says', () => lacking(() => {
+      const wrong = observed.filter((item) => same({ pageBlocked: item.pageBlocked, chip: item.chip, listed: item.listed, open: item.open, siteOpen: item.siteOpen, named: /no colony on it that has people/.test(item.note) }, { pageBlocked: item.blocked, chip: !item.blocked, listed: !item.blocked, open: !item.blocked, siteOpen: !item.blocked, named: item.blocked }) !== true).map((item) => [item.name, item.pageBlocked, item.chip, item.listed, item.open, item.siteOpen, item.note])
+
+      return wrong.length ? short(wrong) : true
+    }))
+    addFixture('no colony the fixture had changes its verdict and the planted colonies the race can read are the only new ones: an own or a known alien colony is read with its verdict, an alien colony the race has no record of is not read', () => lacking(() => {
+      const changed = [...blocksBefore.values()].filter((row) => !blocksAfter.has(row.PopulationID) || blocksAfter.get(row.PopulationID).BlocksCmc !== row.BlocksCmc).map((row) => row.PopulationID)
+      const added = [...blocksAfter.values()].filter((row) => !blocksBefore.has(row.PopulationID)).map((row) => [row.PopName, row.BlocksCmc]).sort()
+      const wanted = planted.filter((item) => item.colony === 'own' || item.colony === 'known').map((item) => [`Planted ${item.name}`, item.blocked]).sort()
+
+      return changed.length ? short(changed) : same(added, wanted)
+    }))
+
+    // The planted copy has candidates (the saves of the line have none: the fixture's game does not found complexes and the shipped game's one surveyed body is its capital), so the checks of the saves run over it too, the exclusion's among them against the raw tables.
+    const generic = await saveStatements(ctx, { file: `the planted copy of ${PLANTED_FROM.file}`, game, race }, database)
+
+    statements.push(...generic.statements)
+  } catch (error) {
+    await close()
+    throw error
+  }
+
+  return { skipped: false, statements, close }
 }
 
 // ---------- the planted faults ----------
@@ -1369,6 +1875,28 @@ const MUTATIONS = [
   { name: 'the table not bound to the candidates', file: P, find: ':items="candidates.rows"', replace: ':items="deposits"', fails: ['panel-render'] },
   { name: 'the reset not wired', file: P, find: ' @click="resetPreference"', replace: '', fails: ['panel-render'] },
   { name: 'an unknown lifetime shown as a number', file: P, find: '? `${compactYears(result.value, this.separator)} yr` : \'—\'', replace: '? `${compactYears(result.value, this.separator)} yr` : \'0 yr\'', fails: ['page'] },
+  { name: 'a blocked body still marked a candidate', file: P, find: "cmcCandidate: cmcBlocked ? '' : cmcMinerals.join(' and ')", replace: "cmcCandidate: cmcMinerals.join(' and ')", fails: ['page'] },
+  { name: 'the page\'s blocks marking every colony the read returns, not those that block', file: P, find: 'this.cmcBlocks.filter((colony) => colony.BlocksCmc).map(', replace: 'this.cmcBlocks.map(', fails: ['page'] },
+  { name: 'the blocks of the page not taken from the shared read', file: P, find: 'const cmcBlocked = blocked.has(row.SystemBodyID)', replace: 'const cmcBlocked = false', fails: ['page', 'data'] },
+  { name: 'the blocks read tracked under another name', file: P, find: 'get: tracked(\'cmcBlocks\'', replace: 'get: tracked(\'cmcBlock\'', fails: ['read'] },
+  { name: 'a blocked body listed among the candidates', file: U, find: '!body.bare && !(body.complexes > 0) && !body.cmcBlocked && body.cmcInReach', replace: '!body.bare && !(body.complexes > 0) && body.cmcInReach', fails: ['page'] },
+  { name: 'the candidate rules left on the 2.7 line', file: U, find: "const CANDIDATE_VERSIONS = ['3.1.x']", replace: "const CANDIDATE_VERSIONS = ['2.7.x']", fails: ['rules'] },
+  { name: 'the exclusion rule left on the 2.7 line', file: C, find: "const CMC_VERSIONS = ['3.1.x']", replace: "const CMC_VERSIONS = ['2.7.x']", fails: ['rules'] },
+  { name: 'a colony\'s people not blocking its body', file: C, find: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }', replace: 'BlocksCmc: colony.Installations > 0 || modules > 0 }', fails: ['data', 'save-fixture'] },
+  { name: 'orbital miners not blocking the body they work at', file: C, find: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }', replace: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 }', fails: ['data', 'save-fixture'] },
+  { name: 'an empty colony blocking its body', file: C, find: 'BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }', replace: 'BlocksCmc: true }', fails: ['data', 'save-fixture'] },
+  { name: 'a mass driver not blocking its body', file: C, find: 'export const CMC_BLOCKING_INSTALLATIONS = Object.freeze([12, 24, 39, 52])', replace: 'export const CMC_BLOCKING_INSTALLATIONS = Object.freeze([12, 39, 52])', fails: ['data', 'save-fixture'] },
+  { name: 'an installation row with no amount not blocking', file: D, find: 'in (${CMC_BLOCKING_INSTALLATIONS.join(\', \')})) as Installations', replace: 'in (${CMC_BLOCKING_INSTALLATIONS.join(\', \')}) and FCT_PopulationInstallations.Amount > 0) as Installations', fails: ['data'] },
+  { name: 'the damaged modules of a fleet counted as at work', file: D, find: 'sum(coalesce(${WORKING_MODULES}, FCT_ShipClass.MiningModules)) as Modules', replace: 'sum(FCT_ShipClass.MiningModules) as Modules', fails: ['data', 'save-fixture'] },
+  { name: 'a fleet matched to a colony by the orbit it is saved with, not by position', file: C, find: 'if ([fleet.Xcor, fleet.Ycor, colony.Xcor, colony.Ycor].every(Number.isFinite)) {', replace: 'if (false) {', fails: ['data', 'save-fixture'] },
+  { name: 'a fleet counted for a colony it is not within a unit of', file: C, find: 'const withinOneUnit = (a, b) => Math.abs(a - b) < 1', replace: 'const withinOneUnit = (a, b) => Math.abs(a - b) <= 1', fails: ['data'] },
+  { name: 'a fleet assigned to another colony counted for this one', file: C, find: ' && (!(fleet.AssignedPopulationID > 0) || !fleet.AssignedExists || fleet.AssignedPopulationID === colony.PopulationID))', replace: ')', fails: ['data', 'save-fixture'] },
+  { name: 'a fleet assigned to a colony that is gone not counted', file: C, find: ' || !fleet.AssignedExists || ', replace: ' || ', fails: ['data'] },
+  { name: 'a fleet of another race counted for a colony', file: C, find: 'fleet.RaceID === colony.RaceID && fleetAt(fleet, colony)', replace: 'fleetAt(fleet, colony)', fails: ['data'] },
+  { name: 'a colony the race has no record of read', file: D, find: 'and (FCT_Population.RaceID = ${RaceID} or FCT_Population.PopulationID in (', replace: 'and (1 or FCT_Population.PopulationID in (', fails: ['data', 'save-fixture'] },
+  { name: 'the alien colonies the race knows not read', file: D, find: 'FCT_Population.RaceID = ${RaceID} or FCT_Population.PopulationID in (', replace: 'FCT_Population.RaceID = ${RaceID} or 0 and FCT_Population.PopulationID in (', fails: ['data', 'save-fixture'] },
+  { name: 'the Planner site ignoring the colonies on the body', file: C, find: 'uncolonised: body.CmcBlockers.length === 0,', replace: 'uncolonised: true,', fails: ['data', 'save-fixture'] },
+  { name: 'the Planner not giving a body its blocking colonies', file: D, find: 'blocks.forEach((colony) => colony.BlocksCmc && byId.has(colony.SystemBodyID) &&', replace: 'blocks.forEach((colony) => colony.BlocksCmc && byId.has(colony.SystemBodyID) && false &&', fails: ['data', 'save-fixture'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -1392,13 +1920,26 @@ const sourcesOf = (mutant) => {
 const contextOf = async (sources) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
   const sourcesFor = { ...(changed(U) ? { 'cmc-candidates': sources[U] } : {}), ...(changed(M) ? { minerals: sources[M] } : {}) }
-  const utilitySources = { ...(changed(U) ? { 'utilities/cmc-candidates': sources[U] } : {}), ...(changed(M) ? { 'utilities/minerals': sources[M] } : {}) }
+  const utilitySources = { ...(changed(U) ? { 'utilities/cmc-candidates': sources[U] } : {}), ...(changed(M) ? { 'utilities/minerals': sources[M] } : {}), ...(changed(C) ? { 'utilities/colonization': sources[C] } : {}), ...(changed(D) ? { 'utilities/colonization-data': sources[D] } : {}) }
+  const plannerSources = { ...(changed(C) ? { colonization: sources[C] } : {}), ...(changed(D) ? { 'colonization-data': sources[D] } : {}) }
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
   const pageOptions = await loadPage('pages/minerals', { stubs: STUBS, sources: { 'pages/minerals': sources[P], ...utilitySources } })
   const persistedOptions = await loadPage('pages/minerals', { stubs: STUBS, sources: { 'pages/minerals': sources[P], ...utilitySources }, modules: { 'mixins/persisted-view': PERSISTED_VIEW } })
   const readOptions = await loadPage('pages/minerals', { stubs: STUBS, sources: { 'pages/minerals': sources[P], ...utilitySources }, modules: { 'mixins/load-state': null } })
 
-  return { m: { candidates: loaded['cmc-candidates'], minerals: loaded.minerals, policy: loaded['cmc-policy'], provenance: loaded.provenance }, pageOptions, persistedOptions, readOptions, pageText: sources[P] }
+  plannerCache = null
+
+  return { m: { candidates: loaded['cmc-candidates'], minerals: loaded.minerals, policy: loaded['cmc-policy'], provenance: loaded.provenance }, pageOptions, persistedOptions, readOptions, plannerSources, pageText: sources[P] }
+}
+
+// The Colonization Planner's utilities, loaded once per run (a check script runs one part per process): `plannerSources` carries a planted fault of one of their modules.
+let plannerCache = null
+const plannerOf = async (ctx) => {
+  if (!plannerCache) {
+    plannerCache = await loadUtilities(PLANNER_NAMES, { stubs: PLANNER_STUBS, sources: ctx.plannerSources })
+  }
+
+  return plannerCache
 }
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))
@@ -1443,6 +1984,15 @@ const statementsOf = async (ctx, withSaves) => {
         statements.push(...read.statements)
         opened.push(read)
       }
+    }
+
+    const fixture = await fixtureStatements(ctx)
+
+    if (fixture.skipped) {
+      skipped.push(PLANTED_FROM.file)
+    } else {
+      statements.push(...fixture.statements)
+      opened.push(fixture)
     }
   }
 

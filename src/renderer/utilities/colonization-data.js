@@ -1,22 +1,41 @@
-// Reads for the Colonization Planner, all through what the selected race knows: bodies of its known systems (FCT_RaceSysSurvey), deposits only where it has surveyed the body (FCT_SystemBodySurveys), other races' colonies only as its intelligence has them (FCT_AlienPopulation). Every query is scoped by GameID and RaceID.
+// Reads for the Colonization Planner, all through what the selected race knows: bodies of its known systems (FCT_RaceSysSurvey), deposits only where it has surveyed the body (FCT_SystemBodySurveys), other races' colonies only as its intelligence has them (FCT_AlienPopulation). Every query is scoped by GameID and RaceID. The one exception is the game's exclusion of a civilian mining complex (`loadCmcBlocks`), which is a test of the stored record of a colony: the alien colonies the race knows are read by it, so the test is the game's own.
 
 import groupBy from 'lodash/groupBy'
-import { cmcStarInReach } from './colonization'
+import { CMC_BLOCKING_INSTALLATIONS, cmcBlocks, cmcStarInReach } from './colonization'
 import { climateBaseTemp } from './habitability'
 import { loadJumpPoints } from './jump-graph'
 import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook, unloggedMining } from './minerals'
 import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
 import { loadNavalAdmins } from './naval-admins'
 import { ofRule, registerRule, unavailable } from './provenance'
+import { WORKING_MODULES } from './warnings/common'
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
 
 // A SQL sum that is null, not smaller, when any row of the group has no value (`sum` skips nulls). A group with no rows at all sums to a real 0.
 const completeSum = (column) => `case when count(*) = count(${column}) then coalesce(sum(${column}), 0) else null end`
 
-// Every colonisable-looking body of a known system, with the atmosphere, the deposits of a surveyed body and the colonies on it. Gas giants and jump points never appear; asteroids and comets do. Each body also gets `CmcStarInReach` (colonization.js `cmcStarInReach` for its star), and each own colony `BlocksCmc`: whether the game would keep a civilian mining complex off its body (people, automated mines, complexes or ex-complexes, or no orbital miners of the race assigned to it there).
+// The colonies the game's exclusion of a civilian mining complex reads, and which of them keep one off their body (`BlocksCmc`: colonization.js `cmcBlocks`, the one rule the Minerals page and the Planner share). The game tests every race's colony records; the race's own are read, and so are the alien colonies its intelligence knows (FCT_AlienPopulation), by their stored record: the people and installations of the colony, and the undamaged orbital mining modules of the fleets of its race (WORKING_MODULES: the modules of the class less the damaged ones; a ship whose count cannot be read counts at the full modules of its class). A colony the race has no record of is not read. A fleet carries the modules of its ships whose class has orbital mining modules, with its position, its orbit and its assignment (`AssignedExists` says whether the colony it is assigned to is still there).
+export const loadCmcBlocks = async (database, { GameID, RaceID }) => {
+  const [colonies, fleets] = await Promise.all([
+    rows(database, `select FCT_Population.PopulationID, FCT_Population.RaceID, FCT_Population.SystemBodyID, FCT_Population.SpeciesID, FCT_Population.PopName, FCT_Population.Population, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, (select count(*) from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.GameID = ${GameID} and FCT_PopulationInstallations.PlanetaryInstallationID in (${CMC_BLOCKING_INSTALLATIONS.join(', ')})) as Installations
+from FCT_Population
+left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID
+where FCT_Population.GameID = ${GameID} and (FCT_Population.RaceID = ${RaceID} or FCT_Population.PopulationID in (select FCT_AlienPopulation.PopulationID from FCT_AlienPopulation where FCT_AlienPopulation.GameID = ${GameID} and FCT_AlienPopulation.ViewingRaceID = ${RaceID}))`),
+    rows(database, `select FCT_Fleet.FleetID, FCT_Fleet.RaceID, FCT_Fleet.OrbitBodyID, FCT_Fleet.AssignedPopulationID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, exists (select 1 from FCT_Population as VIR_Assigned where VIR_Assigned.PopulationID = FCT_Fleet.AssignedPopulationID) as AssignedExists, sum(coalesce(${WORKING_MODULES}, FCT_ShipClass.MiningModules)) as Modules
+from FCT_Fleet
+inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID and FCT_Ship.GameID = FCT_Fleet.GameID
+inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0
+where FCT_Fleet.GameID = ${GameID}
+group by FCT_Fleet.FleetID`),
+  ])
+
+  return cmcBlocks(colonies, fleets)
+}
+
+// Every colonisable-looking body of a known system, with the atmosphere, the deposits of a surveyed body and the colonies on it. Gas giants and jump points never appear; asteroids and comets do. Each body also gets `CmcStarInReach` (colonization.js `cmcStarInReach` for its star) and `CmcBlockers`, the colonies on it that keep a civilian mining complex off (loadCmcBlocks).
 export const loadBodies = async (database, { GameID, RaceID }) => {
-  const [bodies, gases, deposits, own, alien, stars, lagrangePoints] = await Promise.all([
+  const [bodies, gases, deposits, own, alien, stars, lagrangePoints, blocks] = await Promise.all([
     rows(database, `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.StarID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.AtmosPress, FCT_SystemBody.TidalLock, FCT_SystemBody.DustLevel, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.DistanceToParent, FCT_SystemBody.Eccentricity, FCT_SystemBody.Year, FCT_SystemBody.FixedBody, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.ComponentNumber, FCT_Star.Luminosity as StarLuminosity, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_SystemBodyName.Name as SystemBodyName, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.Eccentricity as ParentEccentricity, VIR_Parent.Year as ParentYear, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as BodySurveyed, case when FCT_BannedBodies.SystemBodyID is null then 0 else 1 end as Banned
 from FCT_SystemBody
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_SystemBody.GameID
@@ -34,7 +53,7 @@ where FCT_AtmosphericGas.GameID = ${GameID}`),
 from FCT_MineralDeposit
 inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_MineralDeposit.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${RaceID}
 where FCT_MineralDeposit.GameID = ${GameID}`),
-    rows(database, `select FCT_Population.PopulationID, FCT_Population.SystemBodyID, FCT_Population.SpeciesID, FCT_Population.Population, FCT_Population.PopName, case when FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID in (12, 39, 52) and FCT_PopulationInstallations.Amount > 0) or not exists (select 1 from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 where FCT_Fleet.RaceID = FCT_Population.RaceID and FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Fleet.AssignedPopulationID in (FCT_Population.PopulationID, 0)) then 1 else 0 end as BlocksCmc
+    rows(database, `select FCT_Population.PopulationID, FCT_Population.SystemBodyID, FCT_Population.SpeciesID, FCT_Population.Population, FCT_Population.PopName
 from FCT_Population
 where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
     rows(database, `select FCT_AlienPopulation.PopulationID, FCT_Population.SystemBodyID, FCT_AlienPopulation.AlienRaceID, FCT_AlienPopulation.PopulationAmount
@@ -51,6 +70,7 @@ inner join FCT_Star on FCT_Star.StarID = FCT_LagrangePoint.StarID
 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_LagrangePoint.GameID
 where FCT_LagrangePoint.GameID = ${GameID}`),
+    loadCmcBlocks(database, { GameID, RaceID }),
   ])
 
   const starsBySystem = groupBy(stars, 'SystemID')
@@ -70,6 +90,7 @@ where FCT_LagrangePoint.GameID = ${GameID}`),
     body.Minerals = []
     body.OwnPopulations = []
     body.AlienPopulations = []
+    body.CmcBlockers = []
     body.CmcStarInReach = !!starInReach.get(body.StarID)
     byId.set(body.SystemBodyID, body)
   }
@@ -78,6 +99,7 @@ where FCT_LagrangePoint.GameID = ${GameID}`),
   deposits.forEach((deposit) => byId.has(deposit.SystemBodyID) && byId.get(deposit.SystemBodyID).Minerals.push(deposit))
   own.forEach((population) => byId.has(population.SystemBodyID) && byId.get(population.SystemBodyID).OwnPopulations.push(population))
   alien.forEach((population) => byId.has(population.SystemBodyID) && byId.get(population.SystemBodyID).AlienPopulations.push(population))
+  blocks.forEach((colony) => colony.BlocksCmc && byId.has(colony.SystemBodyID) && byId.get(colony.SystemBodyID).CmcBlockers.push(colony))
 
   return [...byId.values()]
 }

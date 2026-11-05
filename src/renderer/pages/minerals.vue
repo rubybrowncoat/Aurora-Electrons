@@ -222,7 +222,7 @@
                   <template #activator="{ on }">
                     <v-chip x-small label outlined v-on="on">CMC</v-chip>
                   </template>
-                  <span>Could host a civilian mining complex: more than 10,000 t of {{ item.body.cmcCandidate }} at accessibility 0.7 or better, and the body is close enough to its star. The game founds one only if a colony in the system has over 10 M people, the body has no colony (one with only orbital miners is fine) and isn't banned, and its star is in reach (a companion star within 80 AU of what it orbits, or linked by Lagrange points). It then rolls 1 in 3 for each such body, richest first. The Colonization Planner checks every condition per body.</span>
+                  <span>Could host a civilian mining complex: more than 10,000 t of {{ item.body.cmcCandidate }} at accessibility 0.7 or better, and the body is close enough to its star. The game founds one only if a colony in the system has over 10 M people, the body isn't banned, its star is in reach (a companion star within 80 AU of what it orbits, or linked by Lagrange points), and no colony on the body has people, an automated mine, a civilian or ex-civilian mining complex, a mass driver or orbital miners at work. It then rolls 1 in 3 for each such body, richest first. The Colonization Planner checks every condition per body.</span>
                 </v-tooltip>
                 <v-tooltip v-if="item.body.GroundMineralSurvey" top max-width="320">
                   <template #activator="{ on }">
@@ -376,7 +376,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to pick the bodies worth a civilian mining complex first. A candidate is a surveyed body within reach of its star, with no complex on it yet and more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better. A site is listed as possible and stays unknown if the amount or accessibility of such a deposit is not recorded, or if its colony's civilian installations are not fully recorded. The game's other conditions are not checked here. The headline order ranks mining potential, then accessibility, then amount. The optional longevity preference uses editable weights for a weighted mean of the reserve, accessibility and lifetime terms. The lifetime is how long the assumed complexes would take to dig out the qualifying deposits, the longest of them. Neither order is the game's choice of where a complex is founded, which follows its own scoring and a dice roll, and nothing here predicts it. A dash is a figure the save does not record or a field left blank, never 0. Hover its mark for what is missing.
+            Use it to pick where a civilian mining complex is likely to be worth founding: the list ranks the bodies that qualify first. A candidate is a surveyed body within reach of its star, with more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better and no colony on it that has people, an automated mine, a civilian or ex-civilian mining complex, a mass driver or orbital miners at work. A colony with none of these does not exclude its body. Orbital miners count while one of their modules is undamaged and their fleet is at the colony's body, assigned to it or to nothing. The race's own colonies and the alien colonies it knows are read; any other alien colony cannot be seen, so its body can still show as a candidate. A site is listed as possible and stays unknown if the amount or accessibility of such a deposit is not recorded, or if its colony's civilian installations are not fully recorded. The game's other conditions are not checked here. The headline order ranks mining potential, then accessibility, then amount. The optional longevity preference uses editable weights for a weighted mean of the reserve, accessibility and lifetime terms. The lifetime is how long the assumed complexes would take to dig out the qualifying deposits, the longest of them. Neither order is the game's choice of where a complex is founded, which follows its own scoring and a dice roll, and nothing here predicts it. A dash is a figure the save does not record or a field left blank, never 0, and its mark names what is missing.
           </div>
         </v-card>
 
@@ -543,7 +543,7 @@ import { systemBodyName } from '../utilities/aurora'
 import { DEFAULT_SETTINGS, MAX_TEXT, RANKINGS, SETTING_FIELDS, candidateRanking, normaliseSettings } from '../utilities/cmc-candidates'
 import { CMC_PURCHASE_COST, CMC_TAX_INCOME, NO_CMC_POLICY, POLICY_STATES, TARGET_STATES, cmcPolicyRows, loadCmcPolicy } from '../utilities/cmc-policy'
 import { cmcBodyInReach } from '../utilities/colonization'
-import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadRoutes } from '../utilities/colonization-data'
+import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadCmcBlocks, loadRoutes } from '../utilities/colonization-data'
 import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
 import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMineralResults, loadPacketsInFlight, loadQueueNeeds, worstState } from '../utilities/colony-minerals'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
@@ -563,6 +563,7 @@ const INPUT_LABELS = {
   packets: 'the mass-driver packets',
   miners: 'the orbital miners',
   aliens: 'the alien colonies',
+  cmcBlocks: 'the colonies that keep a civilian mining complex off a body',
   policy: 'the civilian mining policy',
   formulaVersion: "the save's game version",
 }
@@ -800,6 +801,7 @@ export default {
       const aliens = {}
       const miners = Object.fromEntries(this.miners.map((row) => [row.SystemBodyID, row]))
       const bodies = {}
+      const blocked = new Set(this.cmcBlocks.filter((colony) => colony.BlocksCmc).map((colony) => colony.SystemBodyID))
 
       this.colonies.forEach((colony) => (colonies[colony.SystemBodyID] = colonies[colony.SystemBodyID] || []).push(colony))
       this.aliens.forEach((alien) => (aliens[alien.SystemBodyID] = aliens[alien.SystemBodyID] || []).push(alien))
@@ -839,6 +841,8 @@ export default {
         const distanceResult = miningDistanceResult(placed ? distanceTo(row) : null, { origins: this.routes.colonies.length, placed })
         const inReach = cmcBodyInReach(row)
         const cmcMinerals = inReach ? CMC_MINERAL_IDS.filter((id) => qualifiesForCmc(row.deposits[id])).map((id) => this.mineralName(id)) : []
+        // The colonies that keep a civilian mining complex off the body: the one rule of colonization.js `cmcBlocks`, which the Colonization Planner's site check reads too.
+        const cmcBlocked = blocked.has(row.SystemBodyID)
 
         return {
           ...row,
@@ -852,8 +856,9 @@ export default {
           complexes: sum(own, 'Complexes'),
           complexGaps: sum(own, 'ComplexGaps'),
           complexColonies: own.filter((colony) => colony.Complexes > 0),
-          cmcCandidate: cmcMinerals.join(' and '),
+          cmcCandidate: cmcBlocked ? '' : cmcMinerals.join(' and '),
           cmcInReach: inReach,
+          cmcBlocked,
           workers: [
             ...own.map((colony) => ({ key: `colony-${colony.PopulationID}`, text: colony.PopName, note: this.minesText(colony) })),
             ...(fleet ? [{ key: 'orbital', text: this.counted(fleet.Ships, 'orbital miner', 'orbital miners'), note: this.counted(fleet.Modules, 'module', 'modules') }] : []),
@@ -1822,6 +1827,18 @@ export default {
         const [aliens] = await this.database.query(`select FCT_AlienPopulation.PopulationID, FCT_AlienPopulation.PopulationName, FCT_Population.SystemBodyID, FCT_AlienRace.AlienRaceName from FCT_AlienPopulation inner join FCT_Population on FCT_Population.PopulationID = FCT_AlienPopulation.PopulationID left join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_AlienPopulation.AlienRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID} where FCT_AlienPopulation.GameID = ${this.GameID} and FCT_AlienPopulation.ViewingRaceID = ${this.RaceID}`)
 
         return Object.freeze(aliens)
+      }),
+      default: [],
+    },
+
+    // The colonies of the race and the alien colonies it knows, each with whether it keeps a civilian mining complex off its body (the rule the Colonization Planner's site check uses too).
+    cmcBlocks: {
+      get: tracked('cmcBlocks', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return Object.freeze(await loadCmcBlocks(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: [],
     },
