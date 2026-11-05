@@ -38,7 +38,7 @@ registerRule({
   units: 'per year',
   verification: 'estimated',
   structure: ['FCT_Species.PopulationGrowthModifier', 'FCT_Commander, FCT_CommanderBonuses (Population Growth bonus 8)', 'FCT_SystemBody.RadiationLevel', 'FCT_Population.Population'],
-  note: 'Annual growth as a fraction: 20% over the cube root of the population in millions (at most 10%), times the species and governor modifiers and the crowding factor, less 1% per 400 points of radiation. The constants have no source in the save and the rate is not compared with a stored change of population.',
+  note: 'Annual growth as a fraction: 20% over the cube root of the population in millions (at most 10%), times the governor modifier, the species modifier on growth that is positive and the crowding factor, less 1% per 400 points of radiation. The constants have no source in the save and the rate is not compared with a stored change of population.',
 })
 
 registerRule({
@@ -153,8 +153,12 @@ export const baseGrowthRate = (population) => (population > 0 ? Math.min(0.1, 0.
 // Full growth up to a third of the body's capacity, then a linear fall to none at capacity. A capacity that is not positive has no crowding figure.
 export const crowdingFactor = (bodyPopulation, capacity) => (capacity > 0 ? Math.max(0, Math.min(1, 1.5 * (1 - bodyPopulation / capacity))) : NaN)
 
-// Annual growth as a fraction. Radiation takes 1% per 400 points off the result.
-export const growthRate = (colony, population, bodyPopulation, capacity) => baseGrowthRate(population) * colony.PopulationGrowthModifier * colony.PopulationGrowthBonus * crowdingFactor(bodyPopulation, capacity) - colony.RadiationLevel / 40000
+// Annual growth as a fraction. The base rate takes the governor bonus, the species modifier scales that growth only where it is positive (3.1: `Population.RecalculateAnnualSurfaceGrowthAndOvercrowding`, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since 2.7.1, line 229), crowding scales the product and radiation takes 1% per 400 points off the result.
+export const growthRate = (colony, population, bodyPopulation, capacity) => {
+  const growth = baseGrowthRate(population) * colony.PopulationGrowthBonus
+
+  return (growth > 0 ? growth * colony.PopulationGrowthModifier : growth) * crowdingFactor(bodyPopulation, capacity) - colony.RadiationLevel / 40000
+}
 
 export const growthRateResult = (colony, capacity) => derive({ rule: 'colonies.growthRate', source: colony, required: ['Population', 'BodyPopulation', 'PopulationGrowthModifier', 'PopulationGrowthBonus', 'RadiationLevel'], parts: { capacity }, compute: ({ capacity: value }) => growthRate(colony, colony.Population, colony.BodyPopulation, value) })
 

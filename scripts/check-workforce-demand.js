@@ -11,6 +11,8 @@
 
   The yards aboard a ship run on the saves that hold them, whatever saves are named (SHIP_YARD_SAVES, read-only; a copy is a temporary table over the save's own; a save that is not there reads UNSUPPORTED): the page's colonies read gives each colony the workers of the yards no ship holds, value for value against a sum worked out here from the save's yard and ship rows, and the colonies named for a yard aboard a ship read the figure worked out by hand; with the queue counted, an activity given to a yard aboard a ship in a copy is not read, and the workers the colony's activities change leave it out. A rewrite of both filters that says the same thing must leave those checks green.
 
+  The species growth modifier is applied to positive growth only (3.1: Population.RecalculateAnnualSurfaceGrowthAndOvercrowding, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since 2.7.1, line 229). A worked case runs a colony of 100 M people at a species modifier of 1.5, and one whose governor bonus takes its growth below zero, through the growth rate, the Outlook's growth figure and its projection, and reads the rate alone of a colony with no people and an unreadable modifier and of one with no people at a radiation level. The saves whose own colonies are run beside it are read by hand (population, species, body and installation rows), not through the Outlook's colonies read, which is of the 2.7 schema: the interim 3.1 fixture (a 2.7 game migrated to the 3.1 schema, game 141, race 784) and the stock 2.7.1 save, each UNSUPPORTED when it is not there. A save whose colonies all read a species modifier of 1 cannot tell either growth mutant apart: its save case is no credit for the mutant, and where no save can tell it apart the worked case carries the kill. Every colony's rate is compared with the rule worked out here, the species modifier on growth that is positive and left off growth that is not, with the zero case (no people) and the negative one (a governor bonus below zero) taken from the same colonies.
+
   The mutants load a temp copy of the utilities folder with one thing changed; each must fail the check named with it. The faults of the yards aboard a ship are planted in the page and must fail their checks by a value on every save that holds the case, never by a throw of the page.
 */
 const path = require('path')
@@ -391,6 +393,23 @@ const syntheticCases = (apps, capacities) => {
     return [open, negative].every(({ committed }) => committed.status === 'unavailable' && committed.value === null && committed.inputs.missing.some((name) => /capacity target/.test(name))) && stopped.committed.status !== 'unavailable'
   })
 
+  holds('growthModifier', 'the species growth modifier scales growth that is positive and is left off growth that is not: a colony of 100 M people at a species modifier of 1.5 grows at one and a half times its base rate, one with no people at all keeps a rate of 0 whatever its species modifier reads (even when the row has none), and one whose governor bonus takes its growth below zero keeps the whole loss, while the Outlook\'s growth figure and its projection carry the same rate', () => {
+    const base = 0.2 / Math.cbrt(100)
+    const capacityOf = (row) => apps.colonies.bodyCapacity(row)
+    const rateOf = (row) => apps.colonies.growthRate(row, row.Population, row.BodyPopulation, capacityOf(row))
+    const withBonus = (row, bonus) => apps.colonies.growthRate({ ...row, PopulationGrowthBonus: bonus }, row.Population, row.BodyPopulation, capacityOf(row))
+    const positiveRow = colonyRow({ Population: 100, PopulationGrowthModifier: 1.5 })
+    const zeroRow = colonyRow({ Population: 0, PopulationGrowthModifier: undefined })
+    const negativeRow = colonyRow({ Population: 100, PopulationGrowthModifier: 1.5, PopulationGrowthBonus: -1 })
+    const radiatedRow = colonyRow({ Population: 0, PopulationGrowthModifier: 1.5, RadiationLevel: 400 })
+    const positive = rateOf(positiveRow)
+    const negative = rateOf(negativeRow)
+    const [grown] = apps.colonies.outlookColonies([positiveRow], [], YEARS)
+    const [shrunk] = apps.colonies.outlookColonies([negativeRow], [], YEARS)
+
+    return near(positive, base * 1.5) && rateOf(zeroRow) === 0 && near(rateOf(radiatedRow), -0.01) && near(negative, -base) && near(withBonus(positiveRow, 1), positive) && near(grown.results.growth.value, positive) && near(shrunk.results.growth.value, negative) && near(grown.results.projection.value.series[1], 100 * (1 + positive) ** (1 / 12)) && near(shrunk.results.projection.value.series[1], 100 * (1 + negative) ** (1 / 12)) && shrunk.results.projection.value.series[1] < 100
+  })
+
   return results
 }
 
@@ -672,6 +691,83 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
   console.log(`  ${name}: ${withQueue.length} colonies with events, ${installationEvents.length} installation events (${dated.length} dated), ${yardEvents.length} yard events, ${committedRows.filter((row) => row.laterRange).length} with a range at the horizon, ${committedRows.filter((row) => !row.committed).length} unavailable`)
 }
 
+// ---------- the species growth modifier ----------
+
+// The saves whose own colonies are run through the growth rule: the interim 3.1 fixture (a 2.7 game migrated to the 3.1 schema, race 784 of game 141) and the stock 2.7.1 save. Their tables are read by hand rather than through the Outlook's colonies read, which is of the 2.7 schema; a save that is not there reads UNSUPPORTED.
+const GROWTH_SAVES = [
+  { file: 'saves/AuroraDB-310-spookyerol-migrated.db', game: 141, race: 784 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+]
+
+// The faults planted in the growth rule, each with the worked case and the save case that must fail with it.
+const GROWTH_MUTANTS = [
+  { name: 'a species growth modifier applied to growth that is not positive, as 2.7 did', file: COLONIES_FILE, from: '(growth > 0 ? growth * colony.PopulationGrowthModifier : growth)', to: '(growth * colony.PopulationGrowthModifier)', fails: 'growthModifier', save: 'growthSaveUnscaled' },
+  { name: 'a species growth modifier left out of growth that is positive', file: COLONIES_FILE, from: 'growth > 0 ? growth * colony.PopulationGrowthModifier : growth', to: 'growth', fails: 'growthModifier', save: 'growthSaveScaled' },
+]
+
+// The growth of the colonies the save holds, as { cases: [statement, held, key], unsupported: [statement] }. Each colony's rate is compared with the rule as the 3.1 source applies it (Population.cs#L9534-9537): the base rate (20% over the cube root of the population in millions, at most 10%) takes the governor bonus, the species modifier takes its share of that growth only where it is positive, crowding scales the product and radiation takes 1% per 400 points off. The zero case gives a colony no people, the negative one a governor bonus that takes its growth below zero; neither may carry the species modifier.
+const growthSaveCases = async (database, save, apps) => {
+  const name = database.file
+  const colonies = await rowsOf(database, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemBodyID, FCT_Population.ReqInf, FCT_Species.PopulationGrowthModifier, FCT_Species.PopulationDensityModifier, FCT_SystemBody.Radius, FCT_SystemBody.HydroExt, FCT_SystemBody.TidalLock, FCT_SystemBody.BodyClass, FCT_SystemBody.RadiationLevel from FCT_Population inner join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${save.game} and FCT_Population.RaceID = ${save.race} and FCT_Population.Population > 0 order by FCT_Population.PopulationID`)
+  const bodies = new Map((await rowsOf(database, `select SystemBodyID, sum(Population) as Population from FCT_Population where GameID = ${save.game} and RaceID = ${save.race} group by SystemBodyID`)).map((row) => [row.SystemBodyID, row.Population]))
+  // The installations the page's own colonies read sums, so that a colony's infrastructure cap is the one the Outlook works with.
+  const installations = new Map((await rowsOf(database, `select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.InfrastructureValue * FCT_PopulationInstallations.Amount) as Infrastructure, sum(DIM_PlanetaryInstallation.LGInfrastructureValue * FCT_PopulationInstallations.Amount) as LGInfrastructure, sum(DIM_PlanetaryInstallation.Workers * FCT_PopulationInstallations.Amount) as Workers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${save.game} group by FCT_PopulationInstallations.PopID`)).map((row) => [row.PopID, row]))
+  const rows = colonies.map((colony) => {
+    const built = installations.get(colony.PopulationID) || { Infrastructure: 0, LGInfrastructure: 0, Workers: 0 }
+
+    return { ...colony, BodyPopulation: bodies.get(colony.SystemBodyID), PopulationGrowthBonus: 1, Infrastructure: built.Infrastructure, LGInfrastructure: built.LGInfrastructure, InstallationWorkers: built.Workers, YardWorkers: 0, InfrastructureCost: 0, LowGravity: 0 }
+  })
+  const capacityOf = (row) => apps.colonies.bodyCapacity(row)
+  const crowdOf = (row) => apps.colonies.crowdingFactor(row.BodyPopulation, capacityOf(row))
+  const rateOf = (row) => apps.colonies.growthRate(row, row.Population, row.BodyPopulation, capacityOf(row))
+  const rateWith = (row, change) => {
+    const changed = { ...row, ...change }
+
+    return apps.colonies.growthRate(changed, changed.Population, changed.BodyPopulation, capacityOf(changed))
+  }
+  const baseOf = (row) => Math.min(0.1, 0.2 / Math.cbrt(row.Population))
+  // The share of a rate the species modifier takes: the rate without radiation over the base rate and the crowding factor. It is the species modifier where the modifier is applied, 1 where growth is positive and the modifier is not, and -1 where the growth itself is negative and the modifier is not.
+  const shareOf = (rate, row) => (rate + row.RadiationLevel / 40000) / (baseOf(row) * crowdOf(row))
+
+  if (!rows.length) {
+    return { cases: [], unsupported: [`${name}: the species growth modifier`, 'the race holds no colony with people'], discriminates: { growthSaveScaled: false, growthSaveUnscaled: false } }
+  }
+
+  const scalable = rows.filter((row) => row.PopulationGrowthModifier !== 1 && crowdOf(row) > 0)
+  // Whether the save can tell a growth mutant apart: a colony whose species modifier is not 1, whose crowding factor is positive, and whose growth the case runs has the sign the mutant changes — positive where the modifier must be applied, negative where it must be left off. The stock save's colonies all read 1, so it credits neither mutant and its save case is unsupported for both.
+  const discriminates = {
+    growthSaveScaled: scalable.some((row) => baseOf(row) * row.PopulationGrowthBonus > 0),
+    growthSaveUnscaled: scalable.some((row) => baseOf(row) * -1 < 0),
+  }
+  const lossShare = (row) => shareOf(rateWith(row, { PopulationGrowthBonus: -1 }), row)
+  const wrongScaled = scalable.filter((row) => !near(shareOf(rateOf(row), row), row.PopulationGrowthModifier))
+  const wrongUnscaled = scalable.filter((row) => !near(lossShare(row), -1) || near(lossShare(row), -row.PopulationGrowthModifier))
+  const wrongLoss = scalable.filter((row) => !near(rateWith(row, { PopulationGrowthBonus: -1 }), -baseOf(row) * crowdOf(row) - row.RadiationLevel / 40000))
+  const wrongZero = rows.filter((row) => !near(rateWith(row, { Population: 0 }), -row.RadiationLevel / 40000))
+  const entries = apps.colonies.outlookColonies(rows, [], YEARS)
+  // The first projected month is the growth rate, held at the infrastructure cap where the cap binds, which the Outlook's own results give.
+  const wrongOutlook = rows.filter((row, index) => {
+    const { growth, projection, cap } = entries[index].results
+
+    if (growth.value === null || projection.value === null) {
+      return true
+    }
+
+    const rate = rateOf(row)
+    const grown = Math.max(0, row.Population * (1 + rate) ** (1 / 12))
+
+    return !near(growth.value, rate) || !near(projection.value.series[0], row.Population) || !near(projection.value.series[1], rate > 0 && grown >= cap.value ? Math.max(row.Population, cap.value) : grown)
+  })
+  const cases = [
+    [`${name}: each of the ${rows.length} colonies grows at its own species modifier over the base rate and the crowding factor (${scalable.length} of them with a modifier other than 1)`, wrongScaled.length === 0, 'growthSaveScaled'],
+    [`${name}: a governor bonus that takes a colony's growth below zero is not species-scaled: the loss is the base rate and the crowding factor, with no modifier of the ${scalable.length} colonies`, wrongUnscaled.length === 0 && wrongLoss.length === 0, 'growthSaveUnscaled'],
+    [`${name}: a colony with no people grows at 0 whatever its species modifier reads, radiation alone taking the rate off`, wrongZero.length === 0, 'growthSaveZero'],
+    [`${name}: the Outlook's growth figure and its first projected month are that rate on all ${rows.length} colonies`, wrongOutlook.length === 0, 'growthSaveOutlook'],
+  ]
+
+  return { cases, unsupported: scalable.length ? [] : [[`${name}: a colony whose species growth modifier is not 1`, 'no colony of the race has one']], discriminates }
+}
+
 // ---------- the yards aboard a ship ----------
 
 const PAGE_FILE = path.join('src', 'renderer', 'pages', 'colony-outlook.vue')
@@ -817,6 +913,58 @@ const shipYardCases = async (pageOptions, store) => {
 
 const valueOrZero = (result) => (result && result.status !== 'unavailable' ? result.value : 0)
 
+// The species growth modifier on the worked cases and on the saves that hold colonies: the cases printed, and in a full run each planted fault, which must fail its worked case and the save case beside it.
+const growthSection = async (apps, capacities, results) => {
+  console.log('\n== the species growth modifier ==')
+  const opened = []
+
+  for (const save of GROWTH_SAVES) {
+    const database = await openSave(save.file)
+
+    if (database) {
+      opened.push({ database, save })
+    } else {
+      unsupportedNote(`${save.file}: the species growth modifier`, 'the save is not there')
+    }
+  }
+
+  try {
+    for (const { database, save } of opened) {
+      const grown = await growthSaveCases(database, save, apps)
+
+      grown.unsupported.forEach(([statement, detail]) => unsupportedNote(statement, detail))
+      grown.cases.forEach(([statement, held]) => check(statement, held))
+    }
+
+    for (const mutant of mutating() ? GROWTH_MUTANTS : []) {
+      const mutated = await mutatedUtilities(mutant.file, mutant.from, mutant.to)
+      const broken = syntheticCases(mutated, capacities).filter(([, held]) => !held).map(([, , key]) => key)
+      const telling = []
+
+      for (const { database, save } of opened) {
+        const grown = await growthSaveCases(database, save, mutated)
+
+        broken.push(...grown.cases.filter(([, held]) => !held).map(([, , key]) => key))
+
+        if (!Object.hasOwn(grown.discriminates, mutant.save)) {
+          throw new Error(`${database.file}: the growth mutants name no save case "${mutant.save}"`)
+        }
+
+        if (grown.discriminates[mutant.save]) {
+          telling.push(database.file)
+        }
+      }
+
+      const named = results.find(([, , key]) => key === mutant.fails)
+      const keys = [...new Set(broken)]
+
+      check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..." and, on a save that can tell it apart, the save's growth case beside it`, named[1] && keys.includes(mutant.fails) && (!telling.length || keys.includes(mutant.save)), `${keys.length} cases fail: ${keys.join(', ')}; saves that can tell it apart: ${telling.join(', ') || 'none'}`)
+    }
+  } finally {
+    opened.forEach(({ database }) => database.close())
+  }
+}
+
 const main = async () => {
   const saves = parseArguments(process.argv.slice(2))
   const explicitSaves = process.argv.includes('--save')
@@ -861,6 +1009,8 @@ const main = async () => {
 
     check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${[...new Set(broken)].join(', ')}`)
   }
+
+  await growthSection(apps, capacities, results)
 
   for (const save of ordinarySaves) {
     const database = await openSave(save.file)
