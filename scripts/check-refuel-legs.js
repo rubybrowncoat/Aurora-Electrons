@@ -1429,8 +1429,8 @@ const chooseWorld = () => {
 const { WORLD, FLEETS, TANKERS } = chooseWorld()
 const LEG_KM = WORLD.hours * 3600 * WORLD.speed
 const NAME_ORDER = ['Xray Convoy', 'Yankee Convoy', 'Zulu Convoy']
-// The refuelling rate of the race in the planted copy: low, so that the hours a fill takes show in the days of the round trip.
-const RATE = 500
+// The refuelling rate of the race in the planted copy: low, so that the hours a fill takes show in the days of the round trip and move the trips a year by more than the step the figure is drawn in, which is what catches a year that leaves the refuelling out.
+const RATE = 50
 
 const openRw = (file) => new Promise((resolve, reject) => {
   const raw = new sqlite3.Database(file, sqlite3.OPEN_READWRITE, (error) => (error ? reject(error) : resolve(raw)))
@@ -2171,8 +2171,16 @@ const cycleProblems = (view, plans, words) => plans.flatMap((plan) => {
 
   if (parts.includes(null) || total === null || Math.abs(total - sum) > slack) {
     problems.push([plan.name, 'total', cycle('total'), sum / 86400])
-  } else if (year === null || !(Math.abs(year - 365 / (total / 86400)) <= 0.08)) {
-    problems.push([plan.name, 'trips a year', cycle('year'), 365 / (total / 86400)])
+  } else {
+    // The trips a year are the year over the round trip as its rows give it, the refuelling in it. A figure drawn without the fill is the shorter trip's year, another figure where the fill moves the year by more than two steps of the one the page draws (tenths): the figure is read against both, and one nearer the shorter trip's year is the fill left out.
+    const withFill = 365 / (total / 86400)
+    const fill = given ? secondsOf(refuel, bound) : 0
+    const shorter = fill === null ? null : 365 / ((total - fill) / 86400)
+    const left = shorter !== null && Math.abs(shorter - withFill) > 0.2 && Math.abs(year - shorter) < Math.abs(year - withFill)
+
+    if (year === null || !(Math.abs(year - withFill) <= 0.08)) {
+      problems.push([plan.name, left ? 'the trips a year leave out the refuelling' : 'trips a year', cycle('year'), withFill, shorter])
+    }
   }
 
   const row = rowOf(view, plan.id)

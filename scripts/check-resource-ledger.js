@@ -1972,7 +1972,7 @@ const browser = (ctx) => {
 
     const view = persisted.view
 
-    return same(seen.views, ['fuel', 'maintenance', 'reserves', 'stations']) === true && Object.entries(seen.byView).every(([name, { shown }]) => name === shown) && view.key === 'logisticsView' && view.default === 'fuel' && seen.views.every((name) => view.valid(name)) && !view.valid('other') ? true : short([seen.views, Object.entries(seen.byView).map(([name, { shown }]) => [name, shown])])
+    return same(seen.views, ['fuel', 'maintenance', 'reserves', 'summary', 'stations']) === true && Object.entries(seen.byView).every(([name, { shown }]) => name === shown) && view.key === 'logisticsView' && view.default === 'fuel' && seen.views.every((name) => view.valid(name)) && !view.valid('other') ? true : short([seen.views, Object.entries(seen.byView).map(([name, { shown }]) => [name, shown])])
   })
   add('browser-hauling-mount: Hauling draws the minerals panel once, on screen, embedded in the Hauling plan panel, as a component the page resolved, with the colonies, the plan and the days of its hauls', () => {
     const seen = part('hauling')
@@ -2700,7 +2700,7 @@ const MUTATIONS = [
   { name: 'a minerals panel that never uses the production rates it read', file: 'component', find: 'modifierOf: this.modifierOf || this.productionModifierOf', replace: 'modifierOf: this.modifierOf || (() => null)', fails: ['component'] },
   { name: 'a panel that does not say which production is not known', file: 'component', find: "...(item.unknownUse.length ? [{ key: 'use',", replace: "...(false ? [{ key: 'use',", fails: ['component'] },
   { name: 'a mount on the Logistics page of the wrong group', file: 'logistics', find: 'kind="supplies" :colonies="colonies"', replace: 'kind="minerals" :colonies="colonies"', fails: ['browser-logistics-mount'] },
-  { name: 'a Logistics view that the page does not keep', file: 'logistics', find: "reserves: 'Reserves', stations: 'Fleet stations' }", replace: "stations: 'Fleet stations' }", fails: ['browser-logistics-views'] },
+  { name: 'a Logistics view that the page does not keep', file: 'logistics', find: "summary: 'Empire summary', ", replace: '', fails: ['browser-logistics-views'] },
   { name: 'a table that lists the sources in the order of the feeds', file: 'component', find: 'const rank = (row) => (row.shortfalls.length ? 0 : row.active ? 1 : 2)', replace: 'const rank = () => 0', fails: ['component'] },
   { name: 'a shortfall short alone that a rival made worse, named as its own', file: 'ledger', find: 'const competing = worse > EPSILON', replace: 'const competing = aloneServed >= event.amount - EPSILON', fails: ['combined'] },
   { name: 'a destination credited the whole haul whatever the source gave', file: 'ledger', find: 'add(taker.landing, tick, { ...arrival, amount: served })', replace: 'add(taker.landing, tick, arrival)', fails: ['haul'] },

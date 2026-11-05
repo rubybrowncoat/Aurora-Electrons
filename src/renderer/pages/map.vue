@@ -3539,8 +3539,9 @@ export default {
   }
 
   .tool--tags {
-    flex: 0 1 170px;
-    min-width: 140px;
+    // The chooser's own value, "All tags (0)", is wider than the field at the monospace face and the largest text size, so the field takes the width it needs there.
+    flex: 0 1 200px;
+    min-width: 190px;
   }
 
   .tool--actions {
