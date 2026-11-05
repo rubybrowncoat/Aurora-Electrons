@@ -78,6 +78,7 @@
                     <div v-if="!group.items.length" class="caption text--secondary">None in this window.</div>
                   </div>
                 </div>
+                <div class="panel-foot caption text--secondary">Use it to see which uses earn and which spend, and what each is worth over a year. Each use sits on the income or the spending side by its Income flag in the wealth use table, never by a list kept in the app: the engineering, ordnance and ground unit projects and Lost to Independence are marked as spending there, and a use the table does not hold counts as spending too. The save keeps 365 days of the log: the game drops a row a year old or older when it saves, so the 365 d window is the whole history, and a log that spans less than a year is scaled to a year by the time it spans.</div>
               </v-card>
             </v-col>
             <v-col cols="12" lg="6">

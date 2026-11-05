@@ -761,7 +761,7 @@ const defineCases = (modules) => {
   const commanders = modules.commanders
   const admin = (id, bonuses, extra = {}) => ({ CommanderID: id, Name: `Admin ${id}`, CommanderType: 2, CommandType: 0, bonuses, ...extra })
   const colonyRow = (extra = {}) => ({ PopulationID: 1, PopName: 'Mars', GovernorID: 0, Population: 5, BonusOne: 25, BonusTwo: 0, BonusThree: 0, ...extra })
-  const shipRow = (extra = {}) => ({ ShipID: 1, ShipName: 'Digger', ClassName: 'Miner', CaptainID: 0, ScienceOfficerID: 0, RankRequired: 2, Terraformers: 0, MiningModules: 3, Harvesters: 0, SciencePosts: 0, GeoSurvey: 0, GravSurvey: 0, ...extra })
+  const shipRow = (extra = {}) => ({ ShipID: 1, ShipName: 'Digger', ClassName: 'Miner', CaptainID: 0, ScienceOfficerID: 0, RankRequired: 2, ShipSeniorCO: 0, Terraformers: 0, MiningModules: 3, Harvesters: 0, SciencePosts: 0, GeoSurvey: 0, GravSurvey: 0, ...extra })
   const officer = (id, bonuses, extra = {}) => ({ CommanderID: id, Name: `Officer ${id}`, CommanderType: 0, CommandType: 0, RankLevel: 2, bonuses, ...extra })
   const scientist = (id, bonuses, extra = {}) => ({ CommanderID: id, Name: `Scientist ${id}`, CommanderType: 3, CommandType: 0, ResSpecID: 1, bonuses, ...extra })
   const projectRow = (extra = {}) => ({ ProjectID: 1, ProjectName: 'Lasers', ScientistID: 0, ResSpecID: 1, Facilities: 2, ...extra })

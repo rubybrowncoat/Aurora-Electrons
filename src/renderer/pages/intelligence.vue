@@ -28,7 +28,7 @@
             <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :custom-sort="sortNullLast" :sort-by.sync="racesTable.sortBy" :sort-desc.sync="racesTable.sortDesc" :items-per-page.sync="racesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: racePageSizes }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
               <template #[`item.AlienRaceName`]="{ item }">
                 <div class="py-2">
-                  <div class="font-weight-medium">{{ item.AlienRaceName }}</div>
+                  <div class="font-weight-medium"><span v-if="item.colourSwatch" class="race-colour" :style="{ background: item.colourSwatch }" :title="`Race colour ${item.colourSwatch}`" />{{ item.AlienRaceName }}</div>
                   <div class="caption text--secondary">{{ item.Abbrev }}</div>
                 </div>
               </template>
@@ -67,9 +67,12 @@
                 <v-row dense>
                   <v-col v-for="fact in facts" :key="fact.label" cols="12" sm="6" md="4" lg="3">
                     <div class="caption text--secondary">{{ fact.label }}</div>
-                    <div>{{ fact.value }}<provenance-mark v-for="(result, index) in fact.results" :key="index" :result="result" /></div>
+                    <div><span v-if="fact.swatch" class="race-colour" :style="{ background: fact.swatch }" />{{ fact.value }}<provenance-mark v-for="(result, index) in fact.results" :key="index" :result="result" /></div>
                   </v-col>
                 </v-row>
+              </div>
+              <div class="panel-foot caption text--secondary">
+                Use it to read where the race stands with the player and what has been gathered about it. Race colour is the colour picked for the race in the Diplomacy window: a race with none set shows as not set, and the game draws such a race in white. Hostile contact interrupts counts the systems where the setting is on, listed under Systems and species. It only silences the player's event interrupt for a new hostile contact or a hostile contact update: the event is still logged and shown in the event log, and nothing else about the contact changes. A system with no stored setting is not silenced.
               </div>
             </v-card>
 
@@ -186,6 +189,14 @@
                   <v-chip v-for="species in selectedSpecies" :key="species.SpeciesID" small outlined class="mr-1 mb-1">{{ species.SpeciesName }} · {{ speciesStatus(species.Status) }}</v-chip>
                   <span v-if="!selectedSpecies.length" class="caption text--secondary">None identified.</span>
                 </div>
+                <div class="caption text--secondary mb-1 mt-3">Hostile contact interrupts</div>
+                <div>
+                  <v-chip v-for="setting in selectedSettings" :key="setting.SystemID" small outlined class="mr-1 mb-1" :color="setting.silenced ? 'warning' : undefined">{{ setting.name }} · {{ setting.silenced === null ? 'unknown' : setting.silenced ? 'silenced' : 'not silenced' }}<provenance-mark v-if="setting.stored || setting.silenced === null" :result="setting.result" /></v-chip>
+                  <span v-if="!selectedSettings.length" class="caption text--secondary">No system seen.</span>
+                </div>
+              </div>
+              <div v-if="detailView === 'places'" class="panel-foot caption text--secondary">
+                Use it to see where the player's event interrupt for a hostile contact is silenced for the selected race. A setting belongs to one system and one alien race and only silences that interrupt: the event is still logged. A system with no stored setting is not silenced.
               </div>
             </v-card>
           </template>
@@ -211,7 +222,7 @@ import { activeAppearance, toneColor } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { branchStore } from '../utilities/history'
-import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, DIPLOMACY_LINES, ENGINE_TYPES, GROUND_THRESHOLD, POPULATION_LEVELS, REWARD_COST, SECONDS_PER_YEAR, SENSOR_THRESHOLD, SPECIES_STATUS, TONS_PER_SIZE, aliveByClass, aliveShips, alienRacesSql, classTons, coloniesObserved, communicationLabel, contactStatus, contactTime, diplomaticPoints, gameYear, groundReveal, intelSnapshot, lastShipContact, lostShips, observed, populationField, populationLevel, rebuildFleet, rewardAttempts, sensorReveal, sizedColonies, snapshotSeries, standing, trackedTons, translationProgress, treatiesGranted, treatiesReceived, treatyNames } from '../utilities/intelligence'
+import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, DIPLOMACY_LINES, ENGINE_TYPES, GROUND_THRESHOLD, POPULATION_LEVELS, REWARD_COST, SECONDS_PER_YEAR, SENSOR_THRESHOLD, SPECIES_STATUS, TONS_PER_SIZE, aliveByClass, aliveShips, alienRacesSql, classTons, coloniesObserved, colourText, communicationLabel, contactStatus, contactTime, diplomaticPoints, gameYear, groundReveal, hostileSettings, hostileSummary, intelSnapshot, lastShipContact, lostShips, observed, populationField, populationLevel, raceColour, raceOptionsSql, rebuildFleet, rewardAttempts, sensorReveal, sizedColonies, snapshotSeries, standing, trackedTons, translationProgress, treatiesGranted, treatiesReceived, treatyNames } from '../utilities/intelligence'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { describeResult, getRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
@@ -226,6 +237,7 @@ const INPUT_LABELS = {
   groundUnits: 'the observed ground units',
   systems: 'the systems they were seen in',
   species: 'the known species',
+  raceOptions: 'the race colours and the hostile contact settings',
   formulaVersion: 'the save\'s schema',
 }
 
@@ -327,6 +339,11 @@ export default {
       return chartTheme(this.appearance)
     },
 
+    // The colour stored for each alien race the race knows, by race id: what the Diplomacy window gave it.
+    colours() {
+      return Object.fromEntries(this.raceOptions.colours.map((row) => [row.AlienRaceID, row.AlienRaceColour]))
+    },
+
     rows() {
       return this.races.map((race) => {
         const status = contactStatus(race.ContactStatus)
@@ -335,6 +352,7 @@ export default {
         const tonnage = trackedTons(race)
         const lastContact = lastShipContact(race, this.StartYear)
         const standingResult = standing(race.DiplomaticPoints, this.formulaVersion)
+        const colourResult = raceColour(this.colours[race.AlienRaceID])
 
         // The figures that can be unknown replace their raw columns, so a table sorts them last and shows a dash; `source` is the row as the query gave it.
         return {
@@ -344,6 +362,8 @@ export default {
           communication: communicationLabel(race.CommStatus),
           standingResult,
           standingText: valueOrNull(standingResult) || '—',
+          colourResult,
+          colourSwatch: isAvailable(colourResult) && colourResult.value.set ? colourResult.value.css : null,
           firstContact: this.dateResult(race.FirstDetected, 'the first contact time'),
           lastContact,
           LastContact: lastContact && isAvailable(lastContact) ? lastContact.value : null,
@@ -433,6 +453,7 @@ export default {
       const progress = translationProgress(race.CommModifier)
       const intelligence = observed(race.AlienRaceIntelligencePoints, 'the race intelligence points')
       const damage = observed(race.DamageCausedByAlienRace, 'the damage received')
+      const hostile = hostileSummary(this.selectedSettings)
       let communication = { value: race.communication, results: [] }
 
       if (race.CommEstablished > 0) {
@@ -452,6 +473,8 @@ export default {
         { label: 'Treaties received', value: treaties(received), results: [received] },
         { label: 'Race intelligence', value: isAvailable(intelligence) ? `${this.count(intelligence.value, 1)} points; a discovery each time it passes ${REWARD_COST}` : '—', results: [intelligence] },
         { label: 'Damage received', value: this.count(valueOrNull(damage)), results: [damage] },
+        { label: 'Race colour', value: colourText(race.colourResult), swatch: race.colourSwatch, results: [race.colourResult] },
+        { label: 'Hostile contact interrupts', value: hostile.text, results: [hostile.result] },
       ]
 
       if (race.CommStatus === ATTEMPTING_COMMUNICATION) {
@@ -580,6 +603,11 @@ export default {
 
     selectedSpecies() {
       return this.species.filter((entry) => entry.AlienRaceID === this.selectedId)
+    },
+
+    // The hostile contact setting of the selected race in each system it was seen in or has a stored setting for (utilities/intelligence.js `hostileSettings`).
+    selectedSettings() {
+      return hostileSettings({ seen: this.selectedSystems, stored: this.raceOptions.settings.filter((row) => row.AlienRaceID === this.selectedId) })
     },
 
     raceHeaders() {
@@ -857,6 +885,21 @@ export default {
       }),
       default: [],
     },
+    // The colour each alien race was given in the Diplomacy window and the hostile contact settings stored for the systems (`raceOptionsSql`, utilities/intelligence.js).
+    raceOptions: {
+      get: tracked('raceOptions', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { colours: [], settings: [] }
+        }
+
+        const sql = raceOptionsSql(this.GameID, this.RaceID)
+        const [colours] = await this.database.query(sql.colours)
+        const [settings] = await this.database.query(sql.settings)
+
+        return { colours, settings }
+      }),
+      default: { colours: [], settings: [] },
+    },
   },
 }
 </script>
@@ -874,6 +917,17 @@ export default {
   .stale-value {
     font-style: italic;
     opacity: 0.7;
+  }
+
+  .race-colour {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    border: 1px solid rgba(128, 128, 128, 0.6);
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: middle;
   }
 
   td {

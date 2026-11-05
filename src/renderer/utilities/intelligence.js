@@ -145,6 +145,24 @@ registerRule({
   note: 'A figure the save stores and the page shows as it is: an observed class\'s speed, armour and shields, a colony\'s signatures and counts, a sensor\'s strength and range, a ground unit\'s counters, race intelligence points and damage received. A missing one is unavailable, never 0.',
 })
 
+const RACE_OPTION_VERSIONS = ['3.1.x']
+
+registerRule({
+  id: 'intelligence.raceColour',
+  versions: RACE_OPTION_VERSIONS,
+  verification: 'estimated',
+  structure: ['FCT_AlienRace.AlienRaceColour'],
+  note: 'The colour picked for an alien race in the Diplomacy window, saved as the colour\'s 32-bit ARGB number: alpha in the top byte, then red, green and blue, as a signed integer, so a solid colour is negative. A saved 0, or any colour with an alpha of 0, is no colour set, which the game draws as white. The reading follows the game\'s own code and is not compared with a saved colour: the saves at hand store none. A missing or non-integer value has no colour.',
+})
+
+registerRule({
+  id: 'intelligence.hostileInterrupt',
+  versions: RACE_OPTION_VERSIONS,
+  verification: 'estimated',
+  structure: ['FCT_AlienRaceSystemStatus.NoHostileInterrupt'],
+  note: 'Whether the player\'s event interrupt is silenced for a new hostile contact or a hostile contact update of one alien race in one system, from the setting the game stores for that pair. It only silences that interrupt: the event is still logged and nothing about the contact changes. A system with no stored setting is not silenced. The reading follows the game\'s own code and is not compared with a saved setting: the saves at hand store none. A setting that is not a stored flag is unknown.',
+})
+
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // The number, or null when it is not one: a figure the save does not hold is not 0.
@@ -182,6 +200,72 @@ export const gameYear = (startYear, seconds) => withInputs('intelligence.gameYea
 
 // A time in seconds as a result of 'intelligence.contactDate' (the value is the seconds; the page formats the date from the start year). `name` is the time's name in the missing list.
 export const contactTime = (startYear, seconds, name = 'the contact time') => withInputs('intelligence.contactDate', [[startYear, START_YEAR], [seconds, name]], () => seconds)
+
+// The colour stored for an alien race (`FCT_AlienRace.AlienRaceColour`, the 32-bit ARGB number the game saves) as a result of 'intelligence.raceColour' whose value is { set, hex, css }: `set` is false for no colour (a saved 0 or an alpha of 0), `hex` is '#rrggbb' and `css` a colour a style takes. Unavailable when the save holds no integer in the range of a 32-bit colour.
+export const raceColour = (stored) => {
+  const rule = 'intelligence.raceColour'
+  const name = 'the colour of the race'
+
+  if (!Number.isInteger(stored) || stored < -2147483648 || stored > 4294967295) {
+    return unavailable({ rule, missing: [name] })
+  }
+
+  const argb = stored >>> 0
+  const alpha = argb >>> 24
+
+  if (alpha === 0) {
+    return ofRule({ rule, value: { set: false, hex: null, css: null }, inputs: { present: [name] } })
+  }
+
+  const hex = `#${(argb & 0xffffff).toString(16).padStart(6, '0')}`
+  const css = alpha === 255 ? hex : `rgba(${(argb >>> 16) & 255}, ${(argb >>> 8) & 255}, ${argb & 255}, ${Math.round((alpha / 255) * 1000) / 1000})`
+
+  return ofRule({ rule, value: { set: true, hex, css }, inputs: { present: [name] } })
+}
+
+// A colour result in words: 'Not set' for no colour, its hex for a colour and a dash when the save holds none.
+export const colourText = (result) => (!isAvailable(result) ? '—' : result.value.set ? result.value.hex : 'Not set')
+
+// A stored flag as true or false: a boolean, a number (true unless 0) or the words True and False, as the game reads a boolean column; null for anything else.
+const storedFlag = (value) => (typeof value === 'boolean' ? value : isNumber(value) ? value !== 0 : typeof value === 'string' && /^(true|false)$/i.test(value.trim()) ? value.trim().toLowerCase() === 'true' : null)
+
+const NO_SETTING = 'no setting is stored for the system, which the game reads as not silenced'
+
+// The hostile contact setting of one alien race in each system it was seen in or has a stored setting for, as [{ SystemID, name, stored, silenced, result }] by name. `seen` are the race's systems ({ SystemID, Name }) and `stored` its rows of `raceOptionsSql(...).settings`. `silenced` is true or false, null where the stored setting is not a flag; `result` is of 'intelligence.hostileInterrupt', unavailable for such a setting. A system with no stored setting is not silenced, with that as an assumption of its result.
+export const hostileSettings = ({ seen, stored }) => {
+  const rule = 'intelligence.hostileInterrupt'
+  const systems = new Map()
+
+  seen.forEach((system) => systems.set(system.SystemID, { SystemID: system.SystemID, Name: system.Name, row: null }))
+  stored.forEach((row) => systems.set(row.SystemID, { SystemID: row.SystemID, Name: row.Name || (systems.get(row.SystemID) || {}).Name, row }))
+
+  return [...systems.values()].map(({ SystemID, Name, row }) => {
+    const flag = row ? storedFlag(row.NoHostileInterrupt) : false
+
+    return {
+      SystemID,
+      name: Name || `System ${SystemID}`,
+      stored: row !== null,
+      silenced: flag,
+      result: flag === null ? unavailable({ rule, missing: ['the hostile contact setting'] }) : ofRule({ rule, value: flag, inputs: { present: [row ? 'the hostile contact setting' : 'no stored setting'] }, assumptions: row ? [] : [NO_SETTING] }),
+    }
+  }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+}
+
+// What the hostile contact settings of one race say in all, as { text, result }: how many of its systems are silenced, with the result of 'intelligence.hostileInterrupt' (unavailable while a stored setting is not a flag).
+export const hostileSummary = (settings) => {
+  const rule = 'intelligence.hostileInterrupt'
+  const unknown = settings.filter((setting) => setting.silenced === null).length
+  const silenced = settings.filter((setting) => setting.silenced === true).length
+
+  if (unknown) {
+    return { text: `${silenced} of ${plural(settings.length, 'system', 'systems')} silenced, ${unknown} unknown`, result: unavailable({ rule, missing: [`the hostile contact setting of ${plural(unknown, 'system', 'systems')}`] }) }
+  }
+
+  const text = !settings.length ? 'No system seen' : silenced ? `Silenced in ${silenced} of ${plural(settings.length, 'system', 'systems')}` : 'Not silenced in any system'
+
+  return { text, result: ofRule({ rule, value: silenced, inputs: { present: ['the hostile contact settings'] }, assumptions: settings.some((setting) => !setting.stored) ? [NO_SETTING] : [] }) }
+}
 
 // FCT_AlienRace.ContactStatus. `color` is a tone (see `toneColor` in appearance.js).
 export const CONTACT_STATUS = {
@@ -476,6 +560,12 @@ export const lastShipContact = (row, startYear) => {
 const SHIPS_OF_RACE = 'FCT_AlienShip.GameID = FCT_AlienRace.GameID and FCT_AlienShip.ViewRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienShip.AlienRaceID = FCT_AlienRace.AlienRaceID'
 
 export const alienRacesSql = (GameID, RaceID) => `select FCT_AlienRace.AlienRaceID, FCT_AlienRace.AlienRaceName, FCT_AlienRace.Abbrev, FCT_AlienRace.ContactStatus, FCT_AlienRace.CommStatus, FCT_AlienRace.CommModifier, FCT_AlienRace.CommEstablished, FCT_AlienRace.DiplomaticPoints, FCT_AlienRace.AlienRaceIntelligencePoints, FCT_AlienRace.DamageCausedByAlienRace, FCT_AlienRace.FirstDetected, FCT_AlienRace.FixedRelationship, FCT_AlienRace.TradeTreaty, FCT_AlienRace.TechTreaty, FCT_AlienRace.GeoTreaty, FCT_AlienRace.GravTreaty, VIR_Theirs.AlienRaceID as TheirRecordID, VIR_Theirs.TradeTreaty as TheirTradeTreaty, VIR_Theirs.TechTreaty as TheirTechTreaty, VIR_Theirs.GeoTreaty as TheirGeoTreaty, VIR_Theirs.GravTreaty as TheirGravTreaty, FCT_Game.GameTime as Now, (select count(*) from FCT_AlienClass where FCT_AlienClass.GameID = FCT_AlienRace.GameID and FCT_AlienClass.ViewRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienClass.AlienRaceID = FCT_AlienRace.AlienRaceID) as KnownClasses, (select count(*) from FCT_AlienShip where ${SHIPS_OF_RACE}) as TrackedShips, (select count(*) from FCT_AlienShip where ${SHIPS_OF_RACE} and FCT_AlienShip.Destroyed = 0) as KnownShips, (select sum(FCT_AlienClass.TCS) * ${TONS_PER_SIZE} from FCT_AlienShip left join FCT_AlienClass on FCT_AlienClass.AlienClassID = FCT_AlienShip.AlienClassID where ${SHIPS_OF_RACE} and FCT_AlienShip.Destroyed = 0) as KnownTons, (select count(FCT_AlienClass.TCS) from FCT_AlienShip left join FCT_AlienClass on FCT_AlienClass.AlienClassID = FCT_AlienShip.AlienClassID where ${SHIPS_OF_RACE} and FCT_AlienShip.Destroyed = 0) as SizedShips, (select count(*) from FCT_AlienShip where ${SHIPS_OF_RACE} and FCT_AlienShip.Destroyed = 1) as DestroyedShips, (select max(FCT_AlienShip.LastContactTime) from FCT_AlienShip where ${SHIPS_OF_RACE}) as LastContact, (select count(FCT_AlienShip.LastContactTime) from FCT_AlienShip where ${SHIPS_OF_RACE}) as ContactTimes, (select count(*) from FCT_AlienPopulation where FCT_AlienPopulation.GameID = FCT_AlienRace.GameID and FCT_AlienPopulation.ViewingRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienPopulation.AlienRaceID = FCT_AlienRace.AlienRaceID) as KnownPopulations, (select sum(FCT_AlienPopulation.PopulationAmount) from FCT_AlienPopulation where FCT_AlienPopulation.GameID = FCT_AlienRace.GameID and FCT_AlienPopulation.ViewingRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienPopulation.AlienRaceID = FCT_AlienRace.AlienRaceID and FCT_AlienPopulation.MaxIntelligence > ${POPULATION_SIZE_THRESHOLD}) as KnownPopulation, (select count(*) from FCT_AlienSystem where FCT_AlienSystem.GameID = FCT_AlienRace.GameID and FCT_AlienSystem.DetectRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienSystem.AlienRaceID = FCT_AlienRace.AlienRaceID) as KnownSystems, (select count(*) from FCT_AlienGroundUnitClass where FCT_AlienGroundUnitClass.GameID = FCT_AlienRace.GameID and FCT_AlienGroundUnitClass.ViewRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienGroundUnitClass.AlienRaceID = FCT_AlienRace.AlienRaceID) as GroundClasses, (select count(*) from FCT_AlienRaceSensor where FCT_AlienRaceSensor.GameID = FCT_AlienRace.GameID and FCT_AlienRaceSensor.ViewingRaceID = FCT_AlienRace.ViewRaceID and FCT_AlienRaceSensor.AlienRaceID = FCT_AlienRace.AlienRaceID) as KnownSensors from FCT_AlienRace inner join FCT_Game on FCT_Game.GameID = FCT_AlienRace.GameID left join FCT_AlienRace as VIR_Theirs on VIR_Theirs.GameID = FCT_AlienRace.GameID and VIR_Theirs.ViewRaceID = FCT_AlienRace.AlienRaceID and VIR_Theirs.AlienRaceID = FCT_AlienRace.ViewRaceID where FCT_AlienRace.GameID = ${GameID} and FCT_AlienRace.ViewRaceID = ${RaceID} order by FCT_AlienRace.FirstDetected`
+
+// What the page adds to the races: the colour each alien race was given in the Diplomacy window (`colours`, one row per alien race the viewing race knows) and the hostile contact settings the game stores for the systems of the viewing race (`settings`, with the viewing race's name for each system). They are read apart from `alienRacesSql`, which the recorder takes its snapshots with.
+export const raceOptionsSql = (GameID, RaceID) => ({
+  colours: `select FCT_AlienRace.AlienRaceID, FCT_AlienRace.AlienRaceColour from FCT_AlienRace where FCT_AlienRace.GameID = ${GameID} and FCT_AlienRace.ViewRaceID = ${RaceID}`,
+  settings: `select FCT_AlienRaceSystemStatus.AlienRaceID, FCT_AlienRaceSystemStatus.SystemID, FCT_AlienRaceSystemStatus.NoHostileInterrupt, FCT_RaceSysSurvey.Name from FCT_AlienRaceSystemStatus left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.GameID = FCT_AlienRaceSystemStatus.GameID and FCT_RaceSysSurvey.RaceID = FCT_AlienRaceSystemStatus.ViewingRaceID and FCT_RaceSysSurvey.SystemID = FCT_AlienRaceSystemStatus.SystemID where FCT_AlienRaceSystemStatus.GameID = ${GameID} and FCT_AlienRaceSystemStatus.ViewingRaceID = ${RaceID}`,
+})
 
 const TREATY_FLAGS = ['TradeTreaty', 'TechTreaty', 'GeoTreaty', 'GravTreaty']
 

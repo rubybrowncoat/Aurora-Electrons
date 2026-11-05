@@ -84,6 +84,7 @@ export const SOFT = Object.freeze({
   '/commanders': Object.freeze([
     Object.freeze({ key: 'rank', label: 'Officer ranks', affects: 'rank names and levels, the order by rank and the specialist ship suggestions, which need the rank a class requires', fields: Object.freeze(['FCT_Commander.RankID', 'FCT_Ranks.*', 'FCT_ShipClass.RankRequired']) }),
     Object.freeze({ key: 'age', label: 'Officer ages', affects: 'officer ages', fields: Object.freeze(['FCT_Species.*', 'FCT_Commander.SpeciesID']) }),
+    Object.freeze({ key: 'seniorCO', label: 'Ship Senior CO', affects: 'the Senior CO mark of the ships table and of the roster, and the captain rank of the specialist ship suggestions, which is unknown while the save does not store the setting: the game raises the class rank by one for a ship set to Senior CO', fields: Object.freeze(['FCT_Ship.ShipSeniorCO']) }),
   ]),
   '/production': Object.freeze([navalRank('the orbital terraforming rates of the colonies, which rest on the ranks of the naval admin commanders')]),
   '/mineral-outlook': Object.freeze([navalRank('the mining rates of the orbital miners, which rest on the ranks of the naval admin commanders')]),
@@ -347,12 +348,9 @@ export const DECLARED = Object.freeze([
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-01', table: 'FCT_Race', columns: Object.freeze(['chkShowBodyColours', 'chkCCIncludeLowG', 'chkGasGiantColour']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-04', table: 'FCT_Race', columns: Object.freeze(['chkJumpPointBuoys']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-01', table: 'FCT_Population', columns: Object.freeze(['AlienArtifacts', 'ConstructPriority', 'AccruedArtifactPoints', 'AccruedConstructPoints', 'NoRuinRecovery']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-11', table: 'FCT_Ship', columns: Object.freeze(['ShipSeniorCO']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-07', table: 'FCT_ShipyardTask', columns: Object.freeze(['NumShips']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-13', table: 'FCT_MissileType', columns: Object.freeze(['Lurker']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-304-01', table: 'FCT_AlienClass', columns: Object.freeze(['AlienClassType']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-07', table: 'FCT_AlienRace', columns: Object.freeze(['AlienRaceColour']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-07', table: 'FCT_AlienRaceSystemStatus', columns: Object.freeze(['NoHostileInterrupt']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-05', table: 'FCT_GroundUnitFormation', columns: Object.freeze(['FormationSymbol']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-05', table: 'FCT_GroundUnitFormationTemplate', columns: Object.freeze(['NameThemeID', 'RandomFormationNameFromTheme', 'SymbolType', 'EchelonLevel']) }),
 ])

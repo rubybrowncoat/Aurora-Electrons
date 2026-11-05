@@ -48,6 +48,9 @@ export const TERRAFORMING = 9
 // A ship class this small (FCT_ShipClass.Size, in hull spaces, 1,000 t) or smaller is a light naval unit, and its captain's bonus counts in full where a larger ship's counts halved. The limit is inclusive.
 const LIGHT_NAVAL_SIZE = 20
 
+// FCT_Ranks.RankType of the naval ranks (the game's commander type Naval, the first of its enumeration).
+const NAVAL_RANK_TYPE = 0
+
 // `FCT_Commander.RetireStatus` values. `kind` sorts them for the Former panel.
 export const RETIRE_STATUSES = {
   1: { label: 'Killed in naval combat', kind: 'dead' },
@@ -69,15 +72,18 @@ export const RETIRE_STATUSES = {
 // SQL condition for the commanders still serving. The game saves a retired or dead commander only when the player keeps them (`RetainRetired`) or they are a prisoner; `RetireStatus` is 0 while they serve, and a captured one keeps 0 with `Prisoner` set.
 export const SERVING_COMMANDER = 'FCT_Commander.RetireStatus = 0 and FCT_Commander.Prisoner = 0'
 
-// The SQL the roster's queries take for the columns the save has: `groups` is { rank, age } from the capability check of /commanders (utilities/capabilities.js `SOFT`), null while it has not answered, which reads as a save that has everything. A group the save lacks is selected as nulls (never 0, so the figures built on it are unavailable) and its joins are left out: `rankColumns`, `rankLevel` and `classRank` for the ranks, `ageColumn` for the species' graduation age.
+// The SQL the roster's queries take for the columns the save has: `groups` is { rank, age, seniorCO } from the capability check of /commanders (utilities/capabilities.js `SOFT`), null while it has not answered, which reads as a save that has everything. A group the save lacks is selected as nulls (never 0, so the figures built on it are unavailable) and its joins are left out: `rankColumns`, `rankLevel`, `classRank` and `shipFlag` for the ranks, `ageColumn` for the species' graduation age; the ship's Senior CO flag and the count of naval ranks that a flagged ship's captain rank needs are nulls without the `seniorCO` group.
+// `classRank` is the rank the class requires beside the ship's Senior CO flag and the number of naval ranks the race holds, which `captainRank` needs to tell whether a rank above the class's exists; `shipFlag` is the same flag of the ship an assigned officer serves on, null for a post that is not on a ship. A save without the flag selects it as null, and `captainRank` holds a null flag to be unknown, never no flag: its captain's rank is then unavailable rather than the class's.
 export const rosterParts = (groups, { GameID, RaceID }) => {
   const ranked = !groups || groups.rank !== false
   const aged = !groups || groups.age !== false
+  const flagged = !groups || groups.seniorCO !== false
 
   return {
     rankColumns: ranked ? 'FCT_Ranks.RankName, FCT_Ranks.RankAbbrev' : 'null as RankName, null as RankAbbrev',
     rankLevel: ranked ? 'VIR_Levels.Lowest - FCT_Ranks.Priority + 1 as RankLevel' : 'null as RankLevel',
-    classRank: ranked ? 'FCT_ShipClass.RankRequired' : 'null as RankRequired',
+    classRank: ranked ? `FCT_ShipClass.RankRequired, ${flagged ? `FCT_Ship.ShipSeniorCO, (select count(*) from FCT_Ranks where FCT_Ranks.GameID = ${GameID} and FCT_Ranks.RaceID = ${RaceID} and FCT_Ranks.RankType = ${NAVAL_RANK_TYPE}) as NavalRanks` : 'null as ShipSeniorCO, null as NavalRanks'}` : 'null as RankRequired, null as ShipSeniorCO, null as NavalRanks',
+    shipFlag: flagged ? 'VIR_Ship.ShipSeniorCO as AssignmentSeniorCO' : 'null as AssignmentSeniorCO',
     ageColumn: aged ? 'FCT_Species.GraduationAge' : 'null as GraduationAge',
     ageJoin: aged ? 'left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID' : '',
     rankJoin: ranked ? 'left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID' : '',
@@ -160,8 +166,8 @@ registerRule({
   versions: ['3.1.x'],
   units: 'post',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired, Size', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)'],
-  note: 'The post and bonus that matter on a specialist ship, from its class: terraformers and miners use the captain\'s bonus, survey ships the science officer\'s Survey bonus when the class has a Science Department and otherwise the captain\'s, in full for a class of 20 hull spaces or less (the limit included) and halved for a larger one. A secondary officer ranks one below the captain. The post-to-bonus match was observed on a sample of saved assignments; the captain\'s share is the game source\'s rule and is not checked against a save. A class whose module counts, size or required rank are not stored has no post.',
+  structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired, Size', 'FCT_Ship.ShipSeniorCO', 'FCT_Ranks.RankType (the count of the naval ranks)', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)'],
+  note: 'The post and bonus that matter on a specialist ship, from its class: terraformers and miners use the captain\'s bonus, survey ships the science officer\'s Survey bonus when the class has a Science Department and otherwise the captain\'s, in full for a class of 20 hull spaces or less (the limit included) and halved for a larger one. The captain\'s rank is the rank the class requires, which already carries the class\'s own Senior CO option, and one rank higher for a ship that is flagged Senior CO itself, as the game asks the ship for its rank; a secondary officer ranks one below the class rank whatever the flag. The post-to-bonus match was observed on a sample of saved assignments; the captain\'s share is the game source\'s rule and is not checked against a save. A class whose module counts, size or required rank are not stored has no post, nor has a captain\'s post of a ship whose Senior CO setting is not stored or whose flagged rank the race\'s ranks do not hold; a save that does not store the setting at all keeps the class\'s rank for the post and says so.',
 })
 
 registerRule({
@@ -508,14 +514,40 @@ export const captainlessShips = (ships) => {
 
 const SHIP_INPUTS = { RankRequired: 'the rank the class requires', ClassSize: 'the size of the class', Terraformers: 'the number of terraformers', MiningModules: 'the number of mining modules', Harvesters: 'the number of harvesters', SciencePosts: 'the number of science posts', GeoSurvey: 'the geological survey strength', GravSurvey: 'the gravitational survey strength' }
 
-// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else their captain's: in full for a class of `LIGHT_NAVAL_SIZE` hull spaces or less (`ship.ClassSize`), half for a larger one. Secondary officers rank one below the captain. A class whose module counts, size or required rank are not stored has no post. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
+// The rank a ship's captain must hold, as { level, flagged, missing } (`Ship.method_47` of the game, which asks the ship for it): the rank the class requires as a level (1 is the lowest naval rank; the stored requirement already carries the class's own Senior CO option, so it is not added again) and one level higher for a ship that is flagged Senior CO itself (`FCT_Ship.ShipSeniorCO` is 1). The game finds no rank for a flagged ship whose class already holds the highest naval rank: `ship.NavalRanks` is the number of the race's naval ranks. `missing` names what is not stored or not there, and `level` is then null. A flag the save does not hold — a save without the column, whose read selects it as null, or a null under it — is not read as an unflagged ship: the game adds one rank to the class's when the flag is 1, so either could have been 1, and the rank is unknown with `flagged` null and the setting named in `missing`. The ranks of the other posts stay relative to the class.
+export const captainRank = (ship) => {
+  const where = ship.ClassName || `class of ship ${ship.ShipID}`
+  const known = isKnownNumber(ship.ShipSeniorCO)
+  const ranked = isKnownNumber(ship.RankRequired)
+  const missing = [...(ranked ? [] : [`${SHIP_INPUTS.RankRequired} of ${where}`]), ...(known ? [] : [`the Senior CO setting of ${ship.ShipName || `ship ${ship.ShipID}`}`])]
+
+  if (missing.length) {
+    return { level: null, flagged: null, missing }
+  }
+
+  const flagged = ship.ShipSeniorCO === 1
+
+  if (!flagged) {
+    return { level: ship.RankRequired, flagged, missing }
+  } else if (!isKnownNumber(ship.NavalRanks)) {
+    return { level: null, flagged, missing: ['the naval ranks of the race'] }
+  } else if (ship.RankRequired + 1 > ship.NavalRanks) {
+    return { level: null, flagged, missing: [`a naval rank above the rank the class requires of ${where}`] }
+  }
+
+  return { level: ship.RankRequired + 1, flagged, missing }
+}
+
+// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share, seniorCO }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else their captain's: in full for a class of `LIGHT_NAVAL_SIZE` hull spaces or less (`ship.ClassSize`), half for a larger one. The captain's `level` is `captainRank`'s, `seniorCO` whether the ship's own flag raised it; a secondary officer ranks one below the rank the class requires, the flag leaving it alone. A class whose module counts, size or required rank are not stored has no post, nor has a captain's post of a ship whose Senior CO setting the save does not hold, or that has no rank above its class's. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
 export const specialistPost = (ship, blocked = NONE) => {
   const where = ship.ClassName || `class of ship ${ship.ShipID}`
   const lacking = (columns) => columns.filter((column) => !isKnownNumber(ship[column])).map((column) => `${SHIP_INPUTS[column] || column} of ${where}`)
   const post = (value) => {
-    const missing = [...lacking(['RankRequired']), ...(blocked.has(value.bonusId) ? [`the save's row for bonus ${value.bonusId}, ${value.label}`] : [])]
+    const science = value.post === 'science'
+    const rank = science ? null : captainRank(ship)
+    const missing = [...(science ? lacking(['RankRequired']) : rank.missing), ...(blocked.has(value.bonusId) ? [`the save's row for bonus ${value.bonusId}, ${value.label}`] : [])]
 
-    return missing.length ? unavailable({ rule: POST, missing }) : ofRule({ rule: POST, value: { ...value, level: value.post === 'science' ? Math.max(1, ship.RankRequired - 1) : ship.RankRequired }, inputs: { present: ['class modules', 'RankRequired'] } })
+    return missing.length ? unavailable({ rule: POST, missing }) : ofRule({ rule: POST, value: { ...value, level: science ? Math.max(1, ship.RankRequired - 1) : rank.level, seniorCO: science ? false : rank.flagged }, inputs: { present: science ? ['class modules', 'RankRequired'] : ['class modules', 'RankRequired', 'Senior CO setting'] } })
   }
 
   if (!isKnownNumber(ship.Terraformers)) {

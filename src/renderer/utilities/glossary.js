@@ -142,9 +142,9 @@ const PAGE_HELP = Object.freeze({
   '/finances': {
     overview: 'Finances adds up the wealth the game logs each production cycle, income and spending by category, and sets the treasury beside it. It reads the race\'s wealth log and treasury from the save, and the history snapshots the app has recorded on this branch. What the game does not log as income or spending is missing from the totals, the shipping scenarios are estimates entered here, and the save is only read.',
     usage: [
-      'Window sets the days of the log the sections read, from 30 d to 365 d.',
+      'Window sets the days of the log the sections read, from 30 d to 365 d; the save keeps no more than 365 d of the log.',
       'Income and spending lists each production cycle\'s income, spending and net by category, as a chart or a table.',
-      'Income and spending by source turns the window into yearly totals and shares for each source of income and kind of spending.',
+      'Income and spending by source turns the window into yearly totals and shares for each source of income and kind of spending, each placed on the income or the spending side by its Income flag in the wealth use table.',
       'Treasury charts the balance over the window.',
       'Treasury against the log compares the stored treasury between two recorded snapshots with the logged cycles between them and names the residual the log does not account for; a dash is a span that cannot be compared.',
       'Civilian shipping-line payouts shows the rates a line is paid, and a worked payout estimate takes a Category, the Units carried and the One-way loaded distance, billion km.',
@@ -252,6 +252,7 @@ const PAGE_HELP = Object.freeze({
     usage: [
       'Known races lists every alien race met with its Stance, Communication and Diplomatic points; click a row to select it.',
       'The selected race\'s section shows its status, communication and whether the relationship is fixed, with what has been learned so far.',
+      'Race colour is the colour picked for the race in the Diplomacy window and shows as not set when none is; Hostile contact interrupts counts the systems where the player\'s event interrupt for a hostile contact is silenced, which Systems and species lists system by system. The setting only silences that interrupt, the event is still logged, and a system with no stored setting is not silenced.',
       'The diplomatic points and the intelligence and translation during communication attempts follow the selected race over the recorded snapshots, while Ships tracked is rebuilt from the first-seen and last-seen times of the ship contacts in the save.',
       'Observed switches between the Classes, Colonies, Sensors, Ground units, and Systems and species for the race; a system chip opens the Galaxy Map.',
       'A race that Empire History does not record shows a notice instead of the page, and what has not been observed is unknown, not 0.',

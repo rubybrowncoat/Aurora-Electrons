@@ -5,6 +5,7 @@
 // - A parent link (a command's parent command, a fleet's command, a ship's fleet) that names nothing of the race is an orphan (`orphan-parent`), one that names a row of another race or game is `foreign-parent`, and one that is not stored is `parent-unknown`. The entry stays unresolved: it is a top-level entry whose `anchor` says so and so is everything below it.
 // - A loop in the commands' parent links ends visibly: each loop is one entry of `cycles` naming its members, the member with the lowest id is where it is cut and shown as a top-level entry, and every member carries `parent-cycle`.
 // - A fleet of a shipping line and a ship of a shipping line (or in such a fleet) are civilian, not the navy. They are left out and counted in `summary.civilian`, unless the model is built `shippingLines`: then they are entries like the others, each marked `shippingLine` and counted in `summary.civilian` as well. A flag that is not stored leaves the entry in the tree with `shipping-line-unknown`, with or without the shipping lines.
+// - The ship's Senior CO flag is an option, not structure: a save without the column keeps the whole tree, every ship's flag reads as unknown (null, never no) and the model's `seniorCO` says the column is not there, so only the mark is lost. The captain's rank of a ship whose flag is not in the save falls back to the rank the class requires.
 // - A fleet is not a post. A command's post is the admin commander (CommandType 12) and a ship's the captain (CommandType 1).
 
 import { findCycles, missingColumns } from './ground-formations'
@@ -21,6 +22,9 @@ export const NAVAL_HIERARCHY_COLUMNS = {
   FCT_Ship: ['ShipID', 'ShipName', 'FleetID', 'ShippingLineID', 'GameID', 'RaceID'],
 }
 
+// The columns a save may lack without losing the model, each read as null when it is not there: the ship's Senior CO flag, which only marks a ship and asks its captain for one rank above the class's. A save without it keeps its commands, fleets and ships, every ship's flag reads as unknown (null, never no) and `seniorCO.read` says the column was not read.
+export const NAVAL_HIERARCHY_OPTIONAL = { FCT_Ship: ['ShipSeniorCO'] }
+
 // The order of the kinds among the children of one entry.
 export const NAVAL_KINDS = ['command', 'fleet', 'ship']
 
@@ -33,20 +37,21 @@ const requireIds = ({ GameID, RaceID }) => {
   }
 }
 
-// The statements that read the model for a game and a race, each a SELECT, by name. `outsideCommands` and `outsideFleets` are the rows the race's rows name as parents that are not the race's own, so a link to another race or game can be told from a link to nothing.
-export const navalHierarchySql = ({ GameID, RaceID }) => {
+// The statements that read the model for a game and a race, each a SELECT, by name. `outsideCommands` and `outsideFleets` are the rows the race's rows name as parents that are not the race's own, so a link to another race or game can be told from a link to nothing. `seniorCO` (true by default) selects the ship's Senior CO flag; false reads it as null for a save without the column.
+export const navalHierarchySql = ({ GameID, RaceID }, { seniorCO = true } = {}) => {
   requireIds({ GameID, RaceID })
 
   const own = (table) => `${table}.GameID = ${GameID} and ${table}.RaceID = ${RaceID}`
   const foreign = (table) => `not (${own(table)})`
   const commandParents = `select FCT_NavalAdminCommand.ParentAdminCommandID from FCT_NavalAdminCommand where ${own('FCT_NavalAdminCommand')} union select FCT_Fleet.ParentCommandID from FCT_Fleet where ${own('FCT_Fleet')}`
+  const seniorColumn = seniorCO ? 'FCT_Ship.ShipSeniorCO' : 'null as ShipSeniorCO'
 
   return {
     commands: `select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.AdminCommandName, FCT_NavalAdminCommand.ParentAdminCommandID, FCT_NavalAdminCommand.GameID, FCT_NavalAdminCommand.RaceID from FCT_NavalAdminCommand where ${own('FCT_NavalAdminCommand')} order by FCT_NavalAdminCommand.NavalAdminCommandID`,
     outsideCommands: `select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.GameID, FCT_NavalAdminCommand.RaceID from FCT_NavalAdminCommand where FCT_NavalAdminCommand.NavalAdminCommandID in (${commandParents}) and ${foreign('FCT_NavalAdminCommand')} order by FCT_NavalAdminCommand.NavalAdminCommandID`,
     fleets: `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID, FCT_Fleet.ShippingLine, FCT_Fleet.GameID, FCT_Fleet.RaceID from FCT_Fleet where ${own('FCT_Fleet')} order by FCT_Fleet.FleetID`,
     outsideFleets: `select FCT_Fleet.FleetID, FCT_Fleet.GameID, FCT_Fleet.RaceID from FCT_Fleet where FCT_Fleet.FleetID in (select FCT_Ship.FleetID from FCT_Ship where ${own('FCT_Ship')}) and ${foreign('FCT_Fleet')} order by FCT_Fleet.FleetID`,
-    ships: `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShippingLineID, FCT_Ship.GameID, FCT_Ship.RaceID from FCT_Ship where ${own('FCT_Ship')} order by FCT_Ship.ShipID`,
+    ships: `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShippingLineID, ${seniorColumn}, FCT_Ship.GameID, FCT_Ship.RaceID from FCT_Ship where ${own('FCT_Ship')} order by FCT_Ship.ShipID`,
   }
 }
 
@@ -76,8 +81,11 @@ const keyOf = (kind, id) => `${kind}:${id}`
 // Whether a shipping-line flag marks a civilian entry: true for a positive number, false for 0, null where the flag is not stored.
 const civilianFlag = (value) => (typeof value === 'number' && Number.isFinite(value) ? value > 0 : null)
 
+// Whether a ship is set to Senior CO, as the game tests it (`ShipSeniorCO == 1`): true or false for a stored number, null where the flag is not stored.
+const seniorFlag = (value) => (typeof value === 'number' && Number.isFinite(value) ? value === 1 : null)
+
 // The model of a race's naval administration from the rows of `navalHierarchySql` (the arrays `commands`, `outsideCommands`, `fleets`, `outsideFleets` and `ships`; one that is left out is empty) and, optionally, the `commanders` of `holderSql` for the types 12 and 1 (left out, the posts are unread). `options.shippingLines` (false by default) keeps the shipping lines' fleets and ships. Gives { GameID, RaceID, shippingLines, nodes, byKey, roots, cycles, problems, summary, holders }:
-// - `nodes` is every entry in tree order (each entry follows its parent, the children by kind then id): { key ('command:7'), kind, id, name, shippingLine (true for a shipping line's fleet or ship, else false), parent: { kind, id, key, state: 'none' | 'resolved' | 'orphan' | 'foreign' | 'unknown' | 'cycle' }, children (keys), anchor: { kind: 'root' | 'orphan' | 'foreign' | 'unknown' | 'cycle', key }, resolved, depth, post ({ state, holders, unsettled }; a fleet is `none`), problems }.
+// - `nodes` is every entry in tree order (each entry follows its parent, the children by kind then id): { key ('command:7'), kind, id, name, shippingLine (true for a shipping line's fleet or ship, else false), seniorCO (a ship's Senior CO flag: true when it is set, false when it is not, null for a command or a fleet and for a ship whose flag is not stored or not in the save), parent: { kind, id, key, state: 'none' | 'resolved' | 'orphan' | 'foreign' | 'unknown' | 'cycle' }, children (keys), anchor: { kind: 'root' | 'orphan' | 'foreign' | 'unknown' | 'cycle', key }, resolved, depth, post ({ state, holders, unsettled }; a fleet is `none`), problems }.
 // - `roots` are the keys of the top-level entries: those with no parent, then orphans, then the rest, each by kind then id. Every entry is under exactly one of them.
 // - `cycles` are { id, members (command ids), cutAt }. `problems` is every problem of every entry, each { key, kind, message, ... }.
 // - `summary` reconciles with the rows: the counts per kind, `excluded` and `duplicateRows` per kind, `civilian` ({ fleets, ships }: the shipping lines' fleets and ships of the race, listed or not), the problem counts, `posts` (the commands and ships by the state of their post) and `strayHolders` ({ command, ship }: serving commanders whose post is not an entry of the race).
@@ -124,10 +132,10 @@ export const buildNavalHierarchy = (rows, ids, options = {}) => {
     return { parent: { kind, id: raw, key: keyOf(kind, raw), state: 'orphan' }, problems: [{ kind: 'orphan-parent', parentId: raw, message: `Parent ${kind} ${raw} is not in the save` }] }
   }
 
-  const add = (kind, id, name, link, post, extra = [], shippingLine = false) => {
+  const add = (kind, id, name, link, post, extra = [], shippingLine = false, seniorCO = null) => {
     const key = keyOf(kind, id)
 
-    nodes.set(key, { key, kind, id, name: name ?? null, shippingLine, parent: link.parent, children: [], anchor: null, resolved: false, depth: 0, post, problems: [...link.problems, ...extra, ...postProblems(post)] })
+    nodes.set(key, { key, kind, id, name: name ?? null, shippingLine, seniorCO, parent: link.parent, children: [], anchor: null, resolved: false, depth: 0, post, problems: [...link.problems, ...extra, ...postProblems(post)] })
 
     if (link.parent.state === 'resolved') {
       parentOf.set(key, link.parent.key)
@@ -151,7 +159,7 @@ export const buildNavalHierarchy = (rows, ids, options = {}) => {
   })
 
   keptShips.forEach((row) => {
-    add('ship', row.ShipID, row.ShipName, linkOf(row.FleetID, 'fleet', keptFleetIds, foreignFleets, 'ship'), postOf(shipHolders, row.ShipID), unknownFlag(row.ShippingLineID, 'ship'), isCivilianShip(row))
+    add('ship', row.ShipID, row.ShipName, linkOf(row.FleetID, 'fleet', keptFleetIds, foreignFleets, 'ship'), postOf(shipHolders, row.ShipID), unknownFlag(row.ShippingLineID, 'ship'), isCivilianShip(row), seniorFlag(row.ShipSeniorCO))
   })
 
   const cycles = findCycles(commandParent).map((members) => ({ id: `cycle:${members[0]}`, members, cutAt: members[0] }))
@@ -230,7 +238,7 @@ export const buildNavalHierarchy = (rows, ids, options = {}) => {
   return { GameID, RaceID, shippingLines, nodes: order, byKey: nodes, roots: topLevel.map((node) => node.key), cycles, problems, summary, holders: { read: commandHolders !== null, missing: [] } }
 }
 
-// Reads the model for a game and a race from the open save, with SELECT statements only; `shippingLines` (false by default) keeps the shipping lines' fleets and ships. A save that lacks a table or column of NAVAL_HIERARCHY_COLUMNS gives { supported: false, missing } and no figures; otherwise { supported: true, ...model } (see `buildNavalHierarchy`). The commanders are read when the save has the columns of HOLDER_COLUMNS; without them every post is `unread` and `holders` says what the save lacks.
+// Reads the model for a game and a race from the open save, with SELECT statements only; `shippingLines` (false by default) keeps the shipping lines' fleets and ships. A save that lacks a table or column of NAVAL_HIERARCHY_COLUMNS gives { supported: false, missing } and no figures; otherwise { supported: true, ...model } (see `buildNavalHierarchy`). A save without a column of NAVAL_HIERARCHY_OPTIONAL still gives the whole model, with that column read as null: `seniorCO` is { read, missing } for the ship's Senior CO flag, which is unknown on every ship when it is not read. The commanders are read when the save has the columns of HOLDER_COLUMNS; without them every post is `unread` and `holders` says what the save lacks.
 export const loadNavalHierarchy = async (database, { GameID, RaceID, shippingLines = false }) => {
   requireIds({ GameID, RaceID })
 
@@ -240,9 +248,11 @@ export const loadNavalHierarchy = async (database, { GameID, RaceID, shippingLin
     return { supported: false, missing, GameID, RaceID }
   }
 
+  const seniorGaps = await missingColumns(database, NAVAL_HIERARCHY_OPTIONAL)
+  const seniorCO = seniorGaps.length === 0
   const rows = {}
 
-  for (const [name, sql] of Object.entries(navalHierarchySql({ GameID, RaceID }))) {
+  for (const [name, sql] of Object.entries(navalHierarchySql({ GameID, RaceID }, { seniorCO }))) {
     ;[rows[name]] = await database.query(sql)
   }
 
@@ -252,5 +262,5 @@ export const loadNavalHierarchy = async (database, { GameID, RaceID, shippingLin
     ;[rows.commanders] = await database.query(holderSql({ GameID, RaceID }, [COMMAND_POST, SHIP_POST]))
   }
 
-  return { supported: true, ...buildNavalHierarchy(rows, { GameID, RaceID }, { shippingLines }), holders: { read: !holderGaps.length, missing: holderGaps } }
+  return { supported: true, ...buildNavalHierarchy(rows, { GameID, RaceID }, { shippingLines }), holders: { read: !holderGaps.length, missing: holderGaps }, seniorCO: { read: seniorCO, missing: seniorGaps } }
 }

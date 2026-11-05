@@ -23,7 +23,7 @@ export const DIAGRAM_LIMIT = 150
 const LEVEL = '    '
 
 // The columns of the CSV, in order.
-export const HIERARCHY_COLUMNS = ['Tree', 'Game ID', 'Race ID', 'Kind', 'ID', 'Name', 'Shipping line', 'Depth', 'Path', 'Path IDs', 'Parent kind', 'Parent ID', 'Parent state', 'Post', 'Holder ID', 'Holder', 'Vacancy', 'Anchor', 'Note']
+export const HIERARCHY_COLUMNS = ['Tree', 'Game ID', 'Race ID', 'Kind', 'ID', 'Name', 'Shipping line', 'Senior CO', 'Depth', 'Path', 'Path IDs', 'Parent kind', 'Parent ID', 'Parent state', 'Post', 'Holder ID', 'Holder', 'Vacancy', 'Anchor', 'Note']
 
 // The columns of numbers, which are never guarded against a spreadsheet formula.
 const NUMBER_COLUMNS = new Set(['Game ID', 'Race ID', 'ID', 'Depth', 'Parent ID', 'Holder ID'])
@@ -71,6 +71,7 @@ export const hierarchyRows = (model, tree) => {
       ID: entry.id,
       Name: entry.name,
       'Shipping line': entry.shippingLine ? 'yes' : '',
+      'Senior CO': entry.seniorCO === true ? 'yes' : entry.seniorCO === false ? 'no' : '',
       Depth: path.length,
       Path: here.map((step) => step.name ?? '').join(' / '),
       'Path IDs': here.map((step) => step.key).join('/'),
@@ -239,8 +240,9 @@ export const hierarchyMarkdown = (model, tree, empire = '', branch = null) => {
     const top = row.Depth > 0 || row.Anchor === 'root' ? '' : `, ${row.Anchor}`
     const notes = row.Note === '' ? '' : ` — ${row.Note.split('; ').map((note) => `\`${note}\``).join(' ')}`
     const line = row['Shipping line'] === '' ? '' : ', shipping line'
+    const senior = row['Senior CO'] === 'yes' ? ', Senior CO' : ''
 
-    lines.push(`${LEVEL.repeat(row.Depth - base)}- ${label} (${row.Kind} ${row.ID}${line}${top})${post}${notes}`)
+    lines.push(`${LEVEL.repeat(row.Depth - base)}- ${label} (${row.Kind} ${row.ID}${line}${senior}${top})${post}${notes}`)
   })
 
   if (part) {
@@ -276,11 +278,21 @@ export const hierarchyExport = (model, tree, format, empire = '', branch = null)
   return { text, fileName: `${prefix}${part === null ? '' : `-${part.replace(':', '-')}`}.${csv ? 'csv' : 'md'}`, type: csv ? 'text/csv' : 'text/markdown' }
 }
 
-// What the page says in place of the export, or null when the model can be exported: the model is not supported (the save lacks tables or columns), or the serving commanders could not be read (the posts then are not listed).
+// What the page says in place of the export, or null when the model can be exported: the model is not supported (the save lacks tables or columns), the serving commanders could not be read (the posts then are not listed), or the ships' Senior CO flag could not be read (the mark is not shown, and the rank each ship's captain requires is unknown, since the game would have raised it by one had the flag been set).
 export const hierarchyNotice = (model, tree) => {
   if (!model.supported) {
     return `The save lacks ${fieldList(model.missing)}, so the ${TREE_NOUNS[tree]} cannot be listed.`
   }
 
-  return model.holders.read ? null : `The save lacks ${fieldList(model.holders.missing)}, so the serving commanders are not listed.`
+  const notes = []
+
+  if (!model.holders.read) {
+    notes.push(`The save lacks ${fieldList(model.holders.missing)}, so the serving commanders are not listed.`)
+  }
+
+  if (model.seniorCO && !model.seniorCO.read) {
+    notes.push(`The save lacks ${fieldList(model.seniorCO.missing)}, so the Senior CO mark is not shown and the rank each ship's captain requires is unknown.`)
+  }
+
+  return notes.length ? notes.join(' ') : null
 }

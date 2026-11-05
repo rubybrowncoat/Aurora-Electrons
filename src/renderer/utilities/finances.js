@@ -3,7 +3,7 @@
 import { STATUS, STATUS_MARKS, combine, envelope, getRule, ofRule, registerRule, unavailable, valueOrNull, weakestStatus } from './provenance'
 
 export const SECONDS_PER_DAY = 86400
-// The save keeps one year of wealth history: the span a yearly figure is scaled to.
+// The save keeps a wealth row only while it is younger than a year (the game's save drops a row of 31,536,000 s or more, 365 days): the longest history a window can hold and the span a yearly figure is scaled to.
 export const HISTORY_DAYS = 365
 // The cycle length taken when the history holds a single cycle end, so no length can be measured.
 export const DEFAULT_STEP_DAYS = 5

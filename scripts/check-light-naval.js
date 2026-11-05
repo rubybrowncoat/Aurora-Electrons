@@ -144,10 +144,10 @@ const officer = (overrides = {}) => ({ HasCaptain: true, CaptainBonus: 1.4, HasS
 
 const sensorShip = (id, size, overrides = {}) => ({ ShipID: id, MothershipID: 0, CurrentCrew: 100, ClassCrew: 100, CrewMorale: 1, GeoValue: 2, GeoDesigned: 2, GravValue: 0, GravDesigned: 0, DamagedLines: 0, ...officer({ CaptainBonus: 1.5, ClassSize: size }), ...overrides })
 
-const postRow = (overrides = {}) => ({ ShipID: 1, ShipName: 'Scout', ClassName: 'Scout', RankRequired: 2, ClassSize: 10, Terraformers: 0, MiningModules: 0, Harvesters: 0, SciencePosts: 0, GeoSurvey: 2, GravSurvey: 0, ...overrides })
+const postRow = (overrides = {}) => ({ ShipID: 1, ShipName: 'Scout', ClassName: 'Scout', RankRequired: 2, ShipSeniorCO: 0, ClassSize: 10, Terraformers: 0, MiningModules: 0, Harvesters: 0, SciencePosts: 0, GeoSurvey: 2, GravSurvey: 0, ...overrides })
 
-// The Commanders page's ships read, as its source writes it: the template literal after `ships: {` with the game, the race and the class rank column filled in for a complete save.
-const pageShipsSql = (text) => {
+// The Commanders page's ships read, as its source writes it: the template literal after `ships: {` with the game, the race and the class rank columns (`classRank`, of `rosterParts` for a complete save) filled in.
+const pageShipsSql = (text, classRank) => {
   const from = text.indexOf('    ships: {\n      get: tracked(\'ships\'')
   const open = text.indexOf('this.database.query(`', from) + 'this.database.query(`'.length
   const close = text.indexOf('`).then(([items])', open)
@@ -156,7 +156,7 @@ const pageShipsSql = (text) => {
     throw new Error('the Commanders page\'s ships read is not where the check looks for it')
   }
 
-  return text.slice(open, close).replace(/\$\{this\.GameID\}/g, String(GAME)).replace(/\$\{this\.RaceID\}/g, String(RACE)).replace(/\$\{parts\.classRank\}/, 'FCT_ShipClass.RankRequired')
+  return text.slice(open, close).replace(/\$\{this\.GameID\}/g, String(GAME)).replace(/\$\{this\.RaceID\}/g, String(RACE)).replace(/\$\{parts\.classRank\}/, () => classRank)
 }
 
 // A declaration of a page's script, evaluated: the object or array literal after `const <name> = `.
@@ -335,7 +335,7 @@ check('save', 'on the fixture the two survey ships of the class Intrepid rate by
 
 check('page', 'the Commanders page\'s own ships read delivers the class size, and with it a survey ship without a Science Department is rated at the full share at 20 hull spaces and half above, on the fixture and on the copies', async (w) => {
   const { commanders: c } = await w.modules()
-  const sql = pageShipsSql(w.texts.commandersPage)
+  const sql = pageShipsSql(w.texts.commandersPage, c.rosterParts(null, { GameID: GAME, RaceID: RACE }).classRank)
   const copies = clones()
   const rowsOf = (database) => database.query(sql).all().filter((row) => row.ClassName === 'Intrepid')
   const unstaffed = (row) => ({ ...row, SciencePosts: 0 })
