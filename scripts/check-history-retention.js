@@ -1705,6 +1705,17 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
     assert.equal(never.includes(vm.date(budget.cut)), false)
   })
 
+  check('page: the Retention line on the event archive states the span its stored rows cover, and says nothing of a span for a record that gives no time', () => {
+    const budget = { on: true, player: true, cap: 50000, events: 3, measured: 900, predicted: 1000000, gaps: 0, cut: null, depth: { from: 9000000, to: 9500000, count: 3 }, error: '' }
+    const { vm } = mount({ file: longFile, budget })
+    const text = vm.eventBudgetText
+    const none = mount({ file: longFile, budget: { ...budget, depth: { from: null, to: null, count: 3 } } }).vm.eventBudgetText
+
+    assert.ok(text.includes(`It runs from ${vm.date(budget.depth.from)} to ${vm.date(budget.depth.to)}.`), text)
+    assert.equal(none.includes('It runs from'), false)
+    assert.equal(/\b10,000\b|five year/i.test(text), false)
+  })
+
   check('page: a smaller cap on the event archive waits for confirmation even when the shown branch holds no archive, the confirmation says the cap applies to every campaign, race and branch at their next capture, and a larger cap is kept at once', async () => {
     const config = new MemoryConfig()
     const { vm, tree } = mount({ file: longFile, config })
@@ -1904,6 +1915,7 @@ const UTILITY_MUTATIONS = [
 
 // A deliberate fault in the page's script or in the Retention panel's template.
 const PAGE_MUTATIONS = [
+  { name: 'the event archive line says nothing of its span', mutate: replacing('const depth = budget.depth && budget.depth.from !== null ?', 'const depth = false ?'), fails: ['page: the Retention line on the event archive states the span'] },
   { name: 'the profile kept for the race, not the app', mutate: replacing('retentionProfile: { key: \'historyRetention\', default: DEFAULT_RETENTION,', 'retentionProfile: { key: \'historyRetention\', scope: \'race\', default: DEFAULT_RETENTION,'), fails: ['page: the retention profile is a view declared for the app'] },
   { name: 'the profile kept under another key', mutate: replacing('key: \'historyRetention\'', 'key: \'historyRetentionProfile\''), fails: ['page: the retention profile is a view declared for the app', 'page: the confirmed profile is kept'] },
   { name: 'any text is a valid profile', mutate: replacing('valid: oneOf(RETENTION_PROFILES.map((profile) => profile.id)) }', 'valid: () => true }'), fails: ['page: the retention profile is a view declared for the app', 'page: a stored profile this version does not offer'] },

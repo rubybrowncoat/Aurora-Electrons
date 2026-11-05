@@ -1,4 +1,4 @@
-// Event archive: the opt-in record of a race's game log, kept per branch of a campaign beside the branch's history file. A save holds only a moving window of the log (the five game years the game keeps, cut again to the newest 10,000 rows at each load), so what a later save no longer holds survives only here. The choice is campaign state, `campaign.<campaign id>.race.<RaceID>.logArchive` (true) in the settings; the archive of a branch is its own file, `campaign-<campaign id>-<branch id>-events.json`:
+// Event archive: the opt-in record of a race's game log, kept per branch of a campaign beside the branch's history file. A save holds the log the game's own retention left in it: a configurable number of recent days (90 by default, `EventLog/MinimumSaveDays`) plus older whole increments until it holds at least 10,000 events, and the loader reads every row back without a limit or an order (docs/EVENT_TYPES_INTERRUPTS_AND_HIDDEN_EVENTS_REFERENCE.md § Persistence and reload, Log retention at save and Loading by increment). So what a later save no longer holds survives only here, and how far the save's own log reaches is read from its rows (`logDepth`), never assumed. The choice is campaign state, `campaign.<campaign id>.race.<RaceID>.logArchive` (true) in the settings; the archive of a branch is its own file, `campaign-<campaign id>-<branch id>-events.json`:
 // { version: 1, races: { [RaceID]: { increments, spans, tip, revision, captures, conflicts, failures?, cut? } } }
 // - `increments` [[IncrementID, GameTime, Length, groups]] in IncrementID order, only increments that hold an event of the race. `(IncrementID, GameTime, Length)` is the increment's identity: after a rewind the same IncrementID names another increment, so an ID alone is never matched across a fork.
 // - `groups` [[...EVENT_FIELDS, count]]: the identical rows of an increment as one entry with how many there were. Identical rows are real (up to 63 in one increment of a measured save) and nothing tells them apart, so they are kept and counted as a multiset, never deduplicated to one.
@@ -202,6 +202,51 @@ export const readRaceEvents = async (database, { GameID, RaceID, t, window = nul
 const emptyRecord = () => ({ increments: [], spans: [], revision: 0, captures: [], conflicts: [] })
 
 export const recordEvents = (record) => record.increments.reduce((sum, increment) => sum + increment[3].reduce((count, group) => count + group[EVENT_FIELDS.length], 0), 0)
+
+// The span a list of stored rows covers and how many rows it holds: { from, to, count }, or null when the list holds none. `from` and `to` are the earliest and latest stored `Time`, and null when no row gives one; a row without a time still counts. Read from the rows themselves, so the log's depth is what the save kept and never an assumed window or load limit.
+export const logDepth = (rows) => {
+  if (!rows || !rows.length) {
+    return null
+  }
+
+  let from = null
+  let to = null
+
+  rows.forEach((row) => {
+    if (isKnownNumber(row.Time)) {
+      const time = Number(row.Time)
+
+      from = from === null ? time : Math.min(from, time)
+      to = to === null ? time : Math.max(to, time)
+    }
+  })
+
+  return { from, to, count: rows.length }
+}
+
+// The span a record's stored rows cover and how many events it counts: { from, to, count }, or null when it holds none. Identical rows count one by one, as the archive keeps them, and the times are the groups' own (a game-master-only row's too, since the log holds it).
+export const recordDepth = (record) => {
+  if (!record || !record.increments.length) {
+    return null
+  }
+
+  let from = null
+  let to = null
+  let count = 0
+
+  record.increments.forEach((increment) => increment[3].forEach((group) => {
+    count += group[EVENT_FIELDS.length]
+
+    if (isKnownNumber(group[0])) {
+      const time = Number(group[0])
+
+      from = from === null ? time : Math.min(from, time)
+      to = to === null ? time : Math.max(to, time)
+    }
+  }))
+
+  return { from, to, count }
+}
 
 // The spans after adding [from, to], merged where they touch.
 export const withSpan = (spans, from, to) => {

@@ -15,7 +15,7 @@
     <div v-else-if="!record" class="pa-4 text--secondary">Nothing is recorded for the race on this branch yet. The open save is recorded when the app next reads it.</div>
     <div v-else class="archive-body">
       <div class="archive-tiles">
-        <div class="archive-tile"><div class="caption text--secondary">Events kept</div><div class="archive-value">{{ count(kept) }} <span class="caption text--secondary">of {{ count(cap) }}</span></div><div class="caption text--secondary">About {{ size }} as stored (an estimate)</div><div v-if="hidden" class="caption text--secondary">{{ count(hidden) }} game-master-only {{ hidden === 1 ? 'event is' : 'events are' }} kept and not listed</div></div>
+        <div class="archive-tile"><div class="caption text--secondary">Events kept</div><div class="archive-value">{{ count(kept) }} <span class="caption text--secondary">of {{ count(cap) }}</span></div><div class="caption text--secondary">About {{ size }} as stored (an estimate)</div><div v-if="covers" class="caption text--secondary">From {{ covers.from }} to {{ covers.to }}</div><div v-if="hidden" class="caption text--secondary">{{ count(hidden) }} game-master-only {{ hidden === 1 ? 'event is' : 'events are' }} kept and not listed</div></div>
         <div class="archive-tile"><div class="caption text--secondary">Observed</div><div class="archive-value">{{ spans.length ? `${count(spans.length)} span${spans.length === 1 ? '' : 's'}` : 'Nothing' }}</div><div class="caption text--secondary">{{ observedNote }}</div></div>
         <div class="archive-tile"><div class="caption text--secondary">Conflicts</div><div class="archive-value">{{ count(shownConflicts.length) }}</div><div class="caption text--secondary">{{ shownConflicts.length ? 'Kept, never deleted' : 'No later save contradicted a kept event' }}</div><div v-if="hiddenConflicts" class="caption text--secondary">{{ count(hiddenConflicts) }} more concern game-master-only events and are not listed</div></div>
         <div v-if="cutTile" class="archive-tile"><div class="caption text--secondary">{{ cutTile.title }}</div><div class="archive-value">{{ cutTile.date }}</div><div class="caption text--secondary">{{ cutTile.detail }}</div></div>
@@ -61,14 +61,14 @@
     </div>
 
     <div class="panel-foot caption text--secondary">
-      Use it to look back past the moving window of the open save's log by showing the archive in its place. Each branch has its own archive. It inherits its parent's records up to the fork and is never merged afterwards. A save keeps only a moving window of the log. Events outside the observed spans are unknown, and an empty interval inside a span was observed and had no events. Pinned and new marks follow the same rules in the archive, and pins are still compared with the open save.
+      Use it to look back past what the open save still holds by showing the archive in its place. Each branch has its own archive. It inherits its parent's records up to the fork and is never merged afterwards. A save holds the log its own retention left, and the archive keeps every row its captures read of it. Events outside the observed spans are unknown, and an empty interval inside a span was observed and had no events. Pinned and new marks follow the same rules in the archive, and pins are still compared with the open save.
     </div>
   </v-card>
 </template>
 
 <script>
 import countFormat from '../../mixins/count-format'
-import { eventEstimate, gapsOf, recordEvents } from '../../utilities/event-archive'
+import { eventEstimate, gapsOf, recordDepth, recordEvents } from '../../utilities/event-archive'
 import { bytesText } from '../../utilities/history'
 import { gameDateText } from '../../utilities/history-milestones'
 import { gameMasterCount, playerConflicts } from '../../utilities/log-archive-view'
@@ -113,6 +113,13 @@ export default {
 
     observedNote() {
       return this.spans.length ? `${this.date(this.spans[0][0])} to ${this.date(this.spans[this.spans.length - 1][1])}` : 'No span yet'
+    },
+
+    // The span the record's stored rows cover, dated from the rows themselves: { from, to }, or null when none gives a time. It is what the archive kept, never what a save's window was assumed to hold.
+    covers() {
+      const depth = recordDepth(this.record)
+
+      return depth && depth.from !== null ? { from: this.date(depth.from), to: this.date(depth.to) } : null
     },
 
     // The tile for the date the record is complete from: the cap and a clear both cut it, so the words name neither. Null when nothing was cut.

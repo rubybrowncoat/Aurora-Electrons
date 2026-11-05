@@ -4,7 +4,7 @@
   bun scripts/check-event-archive.js [--no-mutations] [--head-check=<key>[,<key>...]]
 
   Groups, each check numbered and keyed (a mutation names the keys it must break):
-  - rows: how an event is normalised and identified (null against 0, text, the exact fingerprint, the multiset of identical rows), what a capture takes of a read;
+  - rows: how an event is normalised and identified (null against 0, text, the exact fingerprint, the multiset of identical rows), what a capture takes of a read, and the span and count a list of stored rows or a record covers (`logDepth`, `recordDepth`, read from the rows and never an assumed window);
   - merge: the reconciliation of captures (the same capture again, the open oldest and newest increments, a closed increment that contradicts, a ledger that does not match, the spans and their gaps, the cap), the archive as rows, a file that cannot be read;
   - branch: the archive of a fork (up to the fork, through a parent with none, never merged, a seed that stays empty);
   - pins: a pin once per group, the limit, the pins a fork inherits, what a save says of a pin;
@@ -644,6 +644,25 @@ check('rows', 'the archive as rows is one row for each event, newest first: a gr
   assert.deepEqual([rows[0].GameTime, rows[0].Length], [300, 100])
   assert.deepEqual(m.a.archiveRows(null), [])
   assert.equal(m.a.recordEvents({ increments: [] }), 0)
+})
+
+check('depth', 'a log\'s depth is the earliest and latest stored time and the rows it holds, never an assumed window or load limit: a row with no time still counts, a numeric string is a time, and an empty log has none', 'unit', ({ m }) => {
+  assert.equal(m.a.logDepth([]), null)
+  assert.equal(m.a.logDepth(null), null)
+  assert.deepEqual(m.a.logDepth([ev(1, 'a'), ev(3, 'b'), ev(2, 'c')]), { from: 101, to: 301, count: 3 })
+  assert.deepEqual(m.a.logDepth([ev(2, 'a', { Time: '50' }), ev(2, 'b', { Time: null })]), { from: 50, to: 50, count: 2 })
+  assert.deepEqual(m.a.logDepth([ev(2, 'a', { Time: null })]), { from: null, to: null, count: 1 })
+  assert.deepEqual(m.a.logDepth([{ Time: 0, EventType: 1 }, { Time: -5, EventType: 2 }]), { from: -5, to: 0, count: 2 })
+})
+
+check('recorddepth', 'a record\'s depth is the earliest and latest of its stored groups\' times and the events it counts, identical rows one by one, and no record has none', 'unit', ({ m }) => {
+  const { record } = merged(m, null, capture(m, 1, 3, [...many(1, 'a', 3), ev(2, 'b'), ev(3, 'c')]))
+
+  assert.deepEqual(m.a.recordDepth(record), { from: 101, to: 301, count: 5 })
+  assert.equal(m.a.recordDepth(record).count, m.a.recordEvents(record))
+  assert.deepEqual(m.a.recordDepth({ ...record, increments: record.increments.map((increment) => [increment[0], increment[1], increment[2], increment[3].map((group) => [null, ...group.slice(1)])]) }).from, null)
+  assert.equal(m.a.recordDepth(null), null)
+  assert.equal(m.a.recordDepth({ increments: [] }), null)
 })
 
 check('cap', 'a record over the cap loses whole increments, the oldest first, and says from when it holds everything: the spans are clipped to the cut and the conflicts of the dropped increments go', 'unit', ({ m }) => {
@@ -2518,6 +2537,8 @@ const MUTATIONS = [
   { name: 'a different count is told as held', file: 'event-pins.js', find: "  return 'count'\n}", replace: "  return 'held'\n}", fails: ['pinstate'] },
   { name: 'the throwing-store replay is omitted from its named check', schedules: ['rsuperseded'], fails: ['recorder-schedules'] },
   { name: 'the supersession replay is omitted from its named check', schedules: ['rthrow'], fails: ['recorder-schedules'] },
+  { name: 'a log\'s depth ends at its first row', file: 'event-archive.js', find: 'return { from, to, count: rows.length }', replace: 'return { from, to: from, count: rows.length }', fails: ['depth'] },
+  { name: 'a record\'s depth counts identical rows once', file: 'event-archive.js', find: 'count += group[EVENT_FIELDS.length]', replace: 'count += 1', fails: ['recorddepth'] },
 ]
 
 // ---------- running ----------

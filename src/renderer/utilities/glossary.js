@@ -98,7 +98,7 @@ const PAGE_HELP = Object.freeze({
     terms: ['warning-check', 'maintenance-supply', 'fuel-litres', 'mineral-shortage', 'estimated-output'],
   },
   '/log': {
-    overview: 'Game Log reads the events the game has logged for the race, newest first, with filters, colours and pins the game does not offer. It can keep an archive of the events each save showed, so events that have fallen out of the save\'s window stay readable. Pins and the archive are the app\'s own records for the race and branch, the presets are saved filter sets kept for the whole app, and the save is only read.',
+    overview: 'Game Log reads the events the game has logged for the race, newest first, with filters, colours and pins the game does not offer. It can keep an archive of the events each save showed, so events a later save no longer holds stay readable. Pins and the archive are the app\'s own records for the race and branch, the presets are saved filter sets kept for the whole app, and the save is only read.',
     usage: [
       'Search messages, Keywords (any), System or colony and Event types narrow the Events list, and Presets keeps a set of filters under a name to apply again.',
       'Game Log options collapses daily repeats, keeps only custom-coloured events, switches the event archive on and resets the filters.',
@@ -106,7 +106,7 @@ const PAGE_HELP = Object.freeze({
       'Event archive shows what the archive has observed on this branch, and Events listed from switches the list between This save and the Archive.',
       'Short-interval checklist lists the fire and boarding events of the chosen Window and how far the log covers it, as evidence for a stalled short interval; it names no cause. The arrow at its title folds it, and it starts folded when the last day, the default window, holds no event or is not covered by the log.',
       'Timeline counts the events by month under the search, place and type filters; click a month to set From and Through, click it again to clear them, or pick a Month directly.',
-      'In Events, click a message to read it in full, expand a daily repeat for each message, pin an event, hide its type, or open its place on the Galaxy Map or in the Colonization Planner; New marks the events since the last visit to this branch.',
+      'In Events, click a message to read it in full, expand a daily repeat for each message, pin an event, hide its type, or open its place on the Galaxy Map or in the Colonization Planner; New marks the events since the last visit to this branch. The list reads every event the save or the archive holds, states the span and count of the rows it holds, and marks a row of a type the race hid in the game\'s Events window.',
     ],
     terms: ['game-log', 'production-cycle', 'cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window'],
   },
