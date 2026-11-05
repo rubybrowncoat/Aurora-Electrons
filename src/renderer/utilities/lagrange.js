@@ -4,26 +4,31 @@ import { crewFraction } from './crew'
 import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LAGRANGE_VERSIONS = ['2.7.x']
+// The two timing rules also hold on 3.1, which skips a ship with no crew aboard and caps the duration at Int32.MaxValue seconds before converting it to an integer (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime`; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918).
+const TIMING_VERSIONS = ['2.7.x', '3.1.x']
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 export const BASE_DAYS = 60 * 30
 const SECONDS_PER_DAY = 86400
+// The game returns the duration as a 32-bit integer number of seconds, so a longer one is capped at Int32.MaxValue seconds before the conversion (3.1); the cap is carried here in days, the unit the page shows.
+const MAX_SECONDS = 2147483647
+const MAX_DAYS = MAX_SECONDS / SECONDS_PER_DAY
 
 registerRule({
   id: 'lagrange.stabilisationMultiplier',
-  versions: LAGRANGE_VERSIONS,
+  versions: TIMING_VERSIONS,
   units: '×',
   verification: 'estimated',
   structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_DamagedComponent', 'FCT_CommanderBonuses.BonusValue'],
-  note: 'A ship with an undamaged jump point stabilisation module takes 2 minus its captain\'s Production bonus times as long, and Class Crew / Current Crew times as long again while it is short of crew. The sources do not say whether the bonus divides the time or is taken off the 2, so the bonus term is not checked against a stabilisation the save records. A ship with no crew aboard has no defined time.',
+  note: 'A ship with an undamaged jump point stabilisation module takes 2 minus its captain\'s Production bonus times as long, and Class Crew / Current Crew times as long again while it is short of crew. The sources do not say whether the bonus divides the time or is taken off the 2, so the bonus term is not checked against a stabilisation the save records. A ship with no crew aboard is skipped and contributes nothing to the time, whatever its class needs (3.1; in 2.7 its division by zero aborted the calculation).',
 })
 
 registerRule({
   id: 'lagrange.stabilisationDays',
-  versions: LAGRANGE_VERSIONS,
+  versions: TIMING_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Mass', 'lagrange.stabilisationMultiplier'],
-  note: '60 / the square root of the body\'s mass in Earth masses months of 30 days, times the quickest usable ship\'s multiplier. The trip to the body is left out.',
+  note: '60 / the square root of the body\'s mass in Earth masses months of 30 days, times the quickest usable ship\'s multiplier, and capped at Int32.MaxValue seconds, the largest duration the game\'s integer time can hold (3.1; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918). The trip to the body is left out.',
   assumptions: ['the quickest usable ship does the work', 'the trip to the body takes no time'],
 })
 
@@ -56,7 +61,7 @@ registerRule({
 
 const inputsOf = (present) => ({ present })
 
-// What a ship's captain, crew and damage make of a stabilisation: { state, result }. `state` is 'ready' (it can stabilise: `result` is the multiplier on the time), 'damaged' (a stabilisation module is damaged), 'no-crew' (no crew aboard, so the game's time is not defined), 'bonus' (the captain's Production bonus is 2 or more, which the rule gives no time for) or 'unknown' (the crew or the class crew is not in the save). `ship`: { Damaged, CurrentCrew, ClassCrew, ProductionBonus, CaptainName }, `ProductionBonus` being null when the captain has none recorded. `version`: the formula version of the save (`loadFormulaVersion`).
+// What a ship's captain, crew and damage make of a stabilisation: { state, result }. `state` is 'ready' (it can stabilise: `result` is the multiplier on the time), 'damaged' (a stabilisation module is damaged), 'no-crew' (no crew aboard, whatever its class needs, so the 3.1 game skips the ship and it contributes nothing to the time), 'bonus' (the captain's Production bonus is 2 or more, which the rule gives no time for) or 'unknown' (the crew or the class crew is not in the save, whether the class needs a crew or not: a class with no crew whose current crew is missing does not say there is none). `ship`: { Damaged, CurrentCrew, ClassCrew, ProductionBonus, CaptainName }, `ProductionBonus` being null when the captain has none recorded. `version`: the formula version of the save (`loadFormulaVersion`).
 export const stabilisationMultiplier = (ship, version = null) => {
   const rule = 'lagrange.stabilisationMultiplier'
 
@@ -65,11 +70,12 @@ export const stabilisationMultiplier = (ship, version = null) => {
   }
 
   const fraction = crewFraction(ship)
+  const aboard = Number.isFinite(ship.CurrentCrew) ? ship.CurrentCrew > 0 : null
 
-  if (fraction === null) {
+  if (fraction === null || aboard === null) {
     return { state: 'unknown', result: unavailable({ rule, missing: ['the ship\'s crew or its class crew'] }) }
-  } else if (fraction === 0) {
-    return { state: 'no-crew', result: unavailable({ rule, missing: ['the game\'s time with no crew aboard (its rule divides by the crew)'], present: ['the ship\'s crew and its class crew'] }) }
+  } else if (!aboard) {
+    return { state: 'no-crew', result: unavailable({ rule, missing: ['a crew aboard (3.1 skips a ship with no crew whatever its class needs, so it adds no time)'], present: ['the ship\'s crew and its class crew'] }) }
   }
 
   const bonus = Number.isFinite(ship.ProductionBonus) ? ship.ProductionBonus : 1
@@ -116,7 +122,7 @@ export const bestStabilisation = (rows) => {
   return { ship: best, result: combine({ rule, parts: { ship: best.result }, compute: ({ ship }) => ship, assumptions: [`${unknown === 1 ? 'a ship' : `${unknown} ships`} whose crew is not in the save ${unknown === 1 ? 'is' : 'are'} left out, though quicker`] }) }
 }
 
-// Days to stabilise a body of `mass` Earth masses with the quickest ship's multiplier (`bestStabilisation`'s result). A mass that is missing or not above 0 gives no time, and so does a multiplier that is unavailable; the result then lists every missing input.
+// Days to stabilise a body of `mass` Earth masses with the quickest ship's multiplier (`bestStabilisation`'s result), capped at the game's Int32.MaxValue seconds (3.1) so that a very short crew or a tiny body gives the cap and never a figure that overflows. A mass that is missing or not above 0 gives no time, and so does a multiplier that is unavailable; the result then lists every missing input.
 export const stabilisationDays = (mass, multiplier) => {
   const rule = 'lagrange.stabilisationDays'
   const massKnown = Number.isFinite(mass) && mass > 0
@@ -126,7 +132,7 @@ export const stabilisationDays = (mass, multiplier) => {
     return unavailable({ rule, missing, present: massKnown ? ['the body\'s mass'] : [] })
   }
 
-  return combine({ rule, parts: { multiplier }, compute: ({ multiplier: factor }) => (BASE_DAYS / Math.sqrt(mass)) * factor, inputs: inputsOf(['the body\'s mass']) })
+  return combine({ rule, parts: { multiplier }, compute: ({ multiplier: factor }) => Math.min((BASE_DAYS / Math.sqrt(mass)) * factor, MAX_DAYS), inputs: inputsOf(['the body\'s mass']) })
 }
 
 // The days a fleet that has arrived still needs, from the order's stored seconds; unavailable when the save has none.

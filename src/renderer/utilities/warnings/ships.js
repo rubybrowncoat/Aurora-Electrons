@@ -143,7 +143,7 @@ export const checks = checksOf([
         build: (ship) => {
           const level = crewFraction(ship)
           const effects = crewEffects(ship, { modules: ship.ClassLines > 0 ? modulesOf(linesByShip[ship.ShipID] || []) : null, holds: holdsOf(ship), version })
-          const stopped = effects.some((effect) => effect.state === 'blocked' || effect.state === 'stopped' || effect.state === 'unsupported')
+          const stopped = effects.some((effect) => effect.state === 'blocked' || effect.state === 'stopped')
 
           return shipRow(ship, {
             crew: level === null ? unknownCell(ctx, lacking(ship, { CurrentCrew: CREW_ABOARD, ClassCrew: CLASS_CREW })) : { text: percent(level), tone: levelTone(level) },

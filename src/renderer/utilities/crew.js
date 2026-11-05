@@ -4,6 +4,8 @@ import { roundToDecimal } from './math'
 import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const CREW_VERSIONS = ['2.7.x']
+// The stabilisation time also holds on 3.1, which skips a ship with no crew aboard instead of failing its division by zero (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime`; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918).
+const STABILISATION_VERSIONS = ['2.7.x', '3.1.x']
 // The share of its class crew a ship has aboard, as the game scales a ship's modules and its cargo handling: Current Crew / Class Crew, 1 once the class crew is aboard (an over-crewed ship is no faster) and 1 for a class without crew (the game never scales it, so there is no division by zero). A ship with no crew aboard has 0, and a missing crew or class crew gives null, never 1. `ship`: { CurrentCrew, ClassCrew }.
 export const crewFraction = (ship) => {
   if (!Number.isFinite(ship.ClassCrew)) {
@@ -24,16 +26,16 @@ const BASE_STRUCTURE = ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew']
 const MODULE_STRUCTURE = [...BASE_STRUCTURE, 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent']
 const STANDING = 'Estimated: read from the game\'s rules; no saved game shows a short-crewed ship doing this, so it is checked against nothing stored.'
 
-// The activities a crew deficit slows. `types`: the module types (DIM_ComponentType) whose undamaged modules the share scales, `time` that the game lengthens the time instead of cutting a rate (the speed is the same share), `twice` that the share counts twice, `zero` what a ship with no crew aboard does where the game's rule divides by the crew.
+// The activities a crew deficit slows. `types`: the module types (DIM_ComponentType) whose undamaged modules the share scales, `time` that the game lengthens the time instead of cutting a rate (the speed is the same share), `twice` that the share counts twice, `zero` that a ship with no crew aboard does none of it at all, `aboard` that the game skips a ship with no crew aboard before it reads the class's crew, whatever the class needs, `versions` the game versions the rule holds for when they are not the module's.
 const ACTIVITIES = [
-  { key: 'handling', label: 'Cargo handling', time: true, zero: 'blocked', structure: [...BASE_STRUCTURE, 'FCT_ShipClass.CargoCapacity, ColonistCapacity, TroopCapacity'], note: 'A ship short of crew takes Class Crew / Current Crew times as long to load or unload cargo, colonists and troops, so it works at the share of its crew aboard; an over-crewed ship is no faster. The game divides by the crew, so a ship with no crew aboard has no defined time and loads nothing here (inferred, not checked against saved data). Logistics bonuses and the shuttle strength are separate terms.' },
+  { key: 'handling', label: 'Cargo handling', time: true, zero: true, structure: [...BASE_STRUCTURE, 'FCT_ShipClass.CargoCapacity, ColonistCapacity, TroopCapacity'], note: 'A ship short of crew takes Class Crew / Current Crew times as long to load or unload cargo, colonists and troops, so it works at the share of its crew aboard; an over-crewed ship is no faster. The game divides by the crew, so a ship with no crew aboard has no defined time and loads nothing here (inferred, not checked against saved data). Logistics bonuses and the shuttle strength are separate terms.' },
   { key: 'survey', label: 'Survey', types: [6, 7], twice: true, structure: [...MODULE_STRUCTURE, 'FCT_Ship.CrewMorale'], note: 'A short-crewed ship\'s survey sensors run at the share of its crew aboard, and the game applies the share again to the fleet\'s running total, so a lone ship surveys at the share squared and in a fleet of several the order of the ships changes the result. Crew morale is a separate factor.' },
   { key: 'harvesting', label: 'Harvesting', types: [32], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s Sorium harvester modules work at the share of its crew aboard, on top of the racial rate, the commander and admin Mining bonuses and the deposit\'s accessibility.' },
   { key: 'mining', label: 'Orbital mining', types: [38], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s orbital mining modules work at the share of its crew aboard, on top of the racial mine production, the Mining bonuses and the deposit\'s accessibility.' },
   { key: 'maintenance', label: 'Maintenance', types: [48], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s maintenance modules give the share of their capacity that its crew aboard bears to the class crew.' },
   { key: 'salvage', label: 'Salvage', types: [39], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s salvage modules work at the share of its crew aboard, on top of the commander\'s Production bonus.' },
   { key: 'terraforming', label: 'Terraforming', types: [33], structure: MODULE_STRUCTURE, note: 'A short-crewed ship\'s terraforming modules work at the share of its crew aboard, on top of the racial rate and the commander\'s and admin Terraforming bonuses.' },
-  { key: 'stabilisation', label: 'Stabilisation', types: [29], time: true, zero: 'unsupported', structure: MODULE_STRUCTURE, note: 'A short-crewed ship takes Class Crew / Current Crew times as long to stabilise a jump point or a Lagrange point or to build a jump gate, so it works at the share of its crew aboard; the quickest ship of a fleet counts. With no crew aboard the game divides by zero and the time is not defined here.' },
+  { key: 'stabilisation', label: 'Stabilisation', types: [29], time: true, aboard: true, versions: STABILISATION_VERSIONS, structure: MODULE_STRUCTURE, note: 'A short-crewed ship takes Class Crew / Current Crew times as long to stabilise a jump point or a Lagrange point or to build a jump gate, so it works at the share of its crew aboard; the quickest ship of a fleet counts. A ship with no crew aboard is skipped and contributes nothing, whatever its class needs (3.1: `Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime`, docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918; in 2.7 its division by zero aborted the calculation).' },
 ]
 
 registerRule({
@@ -46,7 +48,7 @@ registerRule({
   assumptions: [STANDING],
 })
 
-ACTIVITIES.forEach(({ key, structure, note }) => registerRule({ id: `crew.${key}`, versions: CREW_VERSIONS, units: '×', verification: 'estimated', structure, note, assumptions: [STANDING] }))
+ACTIVITIES.forEach(({ key, structure, note, versions = CREW_VERSIONS }) => registerRule({ id: `crew.${key}`, versions, units: '×', verification: 'estimated', structure, note, assumptions: [STANDING] }))
 
 // What the module types of an activity add up to on a ship: { designed, working } from `modules` ({ [typeId]: { designed, working } } for the class's component lines), null where the class's lines are not in the save.
 const moduleCount = (modules, types) => types.reduce((total, type) => ({ designed: total.designed + (modules[type] ? modules[type].designed : 0), working: total.working + (modules[type] ? modules[type].working : 0) }), { designed: 0, working: 0 })
@@ -55,14 +57,18 @@ const percent = (share) => (share > 0 && share < 0.0005 ? 'under 0.1%' : `${roun
 
 const inputsOf = (activity) => ({ present: ['the ship\'s crew and its class crew', activity.types ? 'the class\'s modules and the ship\'s damage' : 'the class\'s holds'] })
 
-// What one activity costs a ship at crew share `fraction` (not null), as { key, label, state, factor, idle, result, text }: `factor` the share of its normal output or speed the ship keeps (0 to 1; null where the game defines none), `state` 'full' (no deficit), 'reduced', 'stopped' (a module rate scaled to 0), 'blocked' (no crew aboard, so no cargo handling) or 'unsupported' (the game's rule has no value with no crew aboard), `idle` that every module is damaged already so the deficit costs nothing now, `result` the provenance result of 'crew.<key>' (unavailable for 'unsupported') and `text` a short phrase.
-const effectOf = (activity, fraction, idle, version) => {
+// What one activity costs a ship at crew share `fraction` (not null) and with `aboard` whether a crew is aboard (false for a ship the game skips, whatever its class needs; null when the ship's current crew is not in the save), as { key, label, state, factor, idle, result, text }: `factor` the share of its normal output or speed the ship keeps (0 to 1; null where the game defines none), `state` 'full' (no deficit), 'reduced', 'stopped' (a module rate scaled to 0), 'blocked' (no crew aboard: nothing is handled and nothing is stabilised, as the game skips such a ship) or 'unknown' (an activity the game only does with a crew aboard, when whether one is aboard is not in the save), `idle` that every module is damaged already so the deficit costs nothing now, `result` the provenance result of 'crew.<key>' and `text` a short phrase.
+const effectOf = (activity, fraction, idle, version, aboard) => {
   const rule = `crew.${activity.key}`
   const assumptions = ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE]
   const base = { key: activity.key, label: activity.label, idle }
   const suffix = idle ? ' (every module damaged)' : ''
 
-  if (fraction > 0 || !activity.zero) {
+  if (activity.aboard && aboard === null) {
+    return { ...base, state: 'unknown', factor: null, result: unavailable({ rule, missing: ['the ship\'s crew'] }), text: `${activity.label} unknown${suffix}` }
+  }
+
+  if ((!activity.aboard || aboard) && (fraction > 0 || !activity.zero)) {
     const factor = activity.twice ? fraction * fraction : fraction
     const state = fraction >= 1 ? 'full' : factor > 0 ? 'reduced' : 'stopped'
     const detail = activity.twice && fraction < 1 ? ', the share counted twice' : activity.time && fraction < 1 ? `, ${roundToDecimal(1 / fraction, 2)}× the time` : ''
@@ -70,16 +76,13 @@ const effectOf = (activity, fraction, idle, version) => {
     return { ...base, state, factor, result: ofRule({ rule, value: factor, inputs: inputsOf(activity), assumptions }), text: `${activity.label} ${percent(factor)}${detail}${suffix}` }
   }
 
-  if (activity.zero === 'blocked') {
-    return { ...base, state: 'blocked', factor: 0, result: ofRule({ rule, value: 0, inputs: inputsOf(activity), assumptions }), text: `${activity.label} blocked, no crew aboard${suffix}` }
-  }
-
-  return { ...base, state: 'unsupported', factor: null, result: unavailable({ rule, missing: ['the game\'s time with no crew aboard (its rule divides by the crew)'], present: inputsOf(activity).present }), text: `${activity.label} not modelled, no crew aboard${suffix}` }
+  return { ...base, state: 'blocked', factor: 0, result: ofRule({ rule, value: 0, inputs: inputsOf(activity), assumptions }), text: `${activity.label} blocked, no crew aboard${suffix}` }
 }
 
-// The activities a crew deficit slows on one ship, each as `effectOf` gives it, for the activities the ship has: a hold (`holds`, true, false or null when the class's capacities are not in the save) or modules of the types in `modules`. `modules` is { [typeId]: { designed, working } } for the class's component lines of each type, or null when the class's lines are not in the save: the modules are then unknown, not absent, and one 'unknown' entry says so. A crew that is not in the save gives that one entry alone. A ship at its full crew has entries at state 'full'. `version`: the formula version of the save (`loadFormulaVersion`).
+// The activities a crew deficit slows on one ship, each as `effectOf` gives it, for the activities the ship has: a hold (`holds`, true, false or null when the class's capacities are not in the save) or modules of the types in `modules`. `modules` is { [typeId]: { designed, working } } for the class's component lines of each type, or null when the class's lines are not in the save: the modules are then unknown, not absent, and one 'unknown' entry says so. A crew or class crew that is not in the save gives that one entry alone, except a class that needs no crew whose current crew is missing: the other activities keep the share of 1 and one the game only does with a crew aboard (stabilisation) is unknown. A ship at its full crew has entries at state 'full'. `version`: the formula version of the save (`loadFormulaVersion`).
 export const crewEffects = (ship, { modules, holds, version = null }) => {
   const fraction = crewFraction(ship)
+  const aboard = Number.isFinite(ship.CurrentCrew) ? ship.CurrentCrew > 0 : null
 
   if (fraction === null) {
     return [{ key: 'crew', label: 'Crew', state: 'unknown', factor: null, idle: false, result: unavailable({ rule: 'crew.fraction', missing: ['the ship\'s crew or its class crew'] }), text: 'Crew unknown' }]
@@ -90,7 +93,7 @@ export const crewEffects = (ship, { modules, holds, version = null }) => {
   if (holds === null) {
     effects.push({ key: 'handling', label: 'Cargo handling', state: 'unknown', factor: null, idle: false, result: unavailable({ rule: 'crew.handling', missing: ['the class\'s cargo, colonist and troop capacity'] }), text: 'Cargo handling unknown' })
   } else if (holds) {
-    effects.push(effectOf(ACTIVITIES[0], fraction, false, version))
+    effects.push(effectOf(ACTIVITIES[0], fraction, false, version, aboard))
   }
 
   if (modules === null) {
@@ -103,7 +106,7 @@ export const crewEffects = (ship, { modules, holds, version = null }) => {
     const { designed, working } = moduleCount(modules, activity.types)
 
     if (designed > 0) {
-      effects.push(effectOf(activity, fraction, working <= 0, version))
+      effects.push(effectOf(activity, fraction, working <= 0, version, aboard))
     }
   })
 
