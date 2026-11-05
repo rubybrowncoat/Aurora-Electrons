@@ -233,6 +233,11 @@ const logisticsResults = async (context, fixtures, mutate) => {
 
   holds('with no bonus blocked the harvesters make a fuel total, a net and a runway the page shows', clean.fuelTotals.harvestersUnknown === 0 && Number.isFinite(clean.fuelTotals.production) && clean.fuelTotals.production > 0 && /^[+−]/.test(fuelTile(clean).value))
 
+  // The station and reserve panels read columns of their own, outside the page's core inputs (`CORE_INPUTS`), and each names what it could not read: a save without one of their columns degrades the report and leaves the page's own figures as they were, rather than withholding the page.
+  const station = await page(fixtures.noStation)
+
+  holds('on a save without a station-only column (FCT_FleetHistory.Description) the report is degraded, not unsupported, and the page\'s own fuel figures are those of a complete save', fixtures.noStation.reports['/logistics'].status === 'degraded' && JSON.stringify(station.fuelTotals) === JSON.stringify(clean.fuelTotals) && /^[+−]/.test(fuelTile(station).value))
+
   const renamed = await page(fixtures.renamed6)
   const totals = renamed.fuelTotals
   const tile = fuelTile(renamed)
@@ -325,6 +330,7 @@ const pageChecks = async ({ mods, stubs, source, check, alteredCopy, preflightOf
       noCrew: await copy('crew', ['alter table FCT_Ship drop column CurrentCrew']),
       noContactSpeed: await copy('contactspeed', ['alter table FCT_Contacts drop column Speed']),
       noRank: await copy('rank', ['alter table FCT_Commander drop column RankID']),
+      noStation: await copy('station', ['alter table FCT_FleetHistory drop column Description']),
       renamed6: await copy('bonus6', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"]),
     }
 

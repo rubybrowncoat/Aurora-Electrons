@@ -6,9 +6,11 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected and the commanders soft groups whole. Every report supported is asserted on the 2.7 base save instead, whose column names the pages are still written for, until the items that rename those reads for 3.1 land: the shipped 3.1.0 database reads 10 supported, 2 degraded and 14 unsupported reports at 2ce0058, all of them on FCT_Star.Component;
+  - the saves of the line (the shipped 3.0.0 and 3.1.0 databases, the migrated 3.1 fixture): of the 3.1 line with none of the seven columns missing, the formula version 3.1.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report supported is asserted on the 2.7 base save instead, whose column names the pages are still written for, until the items that rewrite the reads of the renamed and removed columns land (`RENAMED_READS`: FCT_Star.Component by AE-308-02 and the gas columns by AE-308-03, each with the inputs and reports that still name it, so a half-migrated set of reads fails rather than passing as the item's whole set): the saves of the line read 10 supported, 4 degraded and 12 unsupported reports, and the columns those reports lack are exactly the listed ones;
   - the saves from before the line (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): refused as a save from before Aurora 3.0, naming the seven columns Aurora 3.0 added that the file lacks, with every report still evaluated so that the layout alone holds each page back, and no formula version (the direct loader states none for them either);
   - copies of the 2.7 base save (AuroraDB_270_base.db) in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
+  - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
+  - the alien-class reads, on the interim fixture that holds 32 alien classes (the shipped saves and the export hold none, so the preflight says nothing of their queries): the Intelligence page's three reads, the recovery ledger's statements (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History), Route Finder's small places and the known wrecks check of Warnings run through the page loader and loadUtilities and return rows; a read the 3.1 line blocks by a column another item owns (`RENAMED_READS`) is recorded with that item, not fixed;
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
   - the Commanders page's own roster queries (taken from its source) run on copies without a rank or age column, on the parts the preflight chose, and fail on the parts of a complete save;
   - the resource reserves panel's reads, which the scan of its component does not follow (`EXTRA_READS`, an optional input of /logistics and /hauling): a copy without FCT_ShipClass.MinimumFuel and FCT_Race.MSPProduction degrades /hauling by the panel alone and names both fields on /logistics beside the page's own required read, and the copies without FuelStockpile or MaintenanceStockpile count the panel among the readers; and the Production bonus (5) its production rates rest on, which a copy with the bonus renamed leaves /hauling degraded by, naming the reserve production;
@@ -26,6 +28,7 @@ const vm = require('vm')
 const sqlite3 = require('sqlite3')
 const { Sequelize } = require('sequelize')
 const { loadUtilities } = require('./lib/utilities')
+const { loadPage, instantiate } = require('./lib/page-loader')
 const { readsOfFile, scanReads } = require('./lib/capability-scan')
 const { chainChecks } = require('./lib/capability-chains')
 const { pageChecks } = require('./lib/capability-pages')
@@ -61,6 +64,21 @@ const LINE_COLUMNS = [
 ]
 // Three of the seven, FCT_Game's LostColonies among them and two outside it: a copy without these is a damaged 3.1 save, not one from before the line, and it states no formula version.
 const DAMAGED_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Ship.ShipSeniorCO', 'FCT_Population.AlienArtifacts']
+
+// The columns Aurora 3.1 renamed or removed that a read of a page still names, with the item that rewrites the reads, the number of inputs that name the column and the reports those inputs belong to, as this commit leaves them: a save of the line lacks each of them and no other column a report reads, so the reports that are not supported on it rest on these. An item that lands deletes its entries, and the check of a save of the line fails on an entry no report names any more as on a column that is not listed. The count and the reports pin the state the migration starts from: an item that renames some of its reads changes them, and the check then fails until the item restates what it still has to do or deletes the entry, so a half-migrated read cannot pass as the whole of what the item claims (`renamedReaders`). Three removed columns are named by no read the preflight sees: DIM_PlanetaryInstallation.CivMove (AE-308-01) only by a model attribute that no query uses, FCT_ShipClass.FighterClass (AE-308-04) only by a check script, and DIM_AssignmentTypeFilter.Fighter by nothing.
+const RENAMED_READS = {
+  'FCT_Star.Component': { owner: 'AE-308-02', reads: 66, reports: ['/colony-outlook', '/habitability', '/hauling', '/information', '/lagrange', '/log', '/logistics', '/map', '/mineral-outlook', '/minerals', '/notebook', '/production', '/routes', '/shipyards', '/survey-progress', '/warnings'] },
+  'DIM_Gases.Dangerous': { owner: 'AE-308-03', reads: 3, reports: ['/habitability', '/map'] },
+  'DIM_Gases.DangerousLevel': { owner: 'AE-308-03', reads: 3, reports: ['/habitability', '/map'] },
+  'FCT_AtmosphericGas.AtmosGasAmount': { owner: 'AE-308-03', reads: 2, reports: ['/habitability', '/map'] },
+}
+
+// The inputs of the registry that name a column, as `[{ route, key }]`: what a renamed read still has, compared with what `RENAMED_READS` pins.
+const renamedReaders = (capabilities, field) => {
+  const [table, column] = field.split('.')
+
+  return Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => (input.reads[table] || []).includes(column)).map((input) => ({ route, key: input.key })))
+}
 
 const dropStatements = (fields) => fields.map((field) => `alter table ${field.split('.')[0]} drop column ${field.split('.')[1]}`)
 
@@ -413,6 +431,9 @@ const summary = (result) => {
 
 const notSupported = (result) => Object.values(result.reports).filter((report) => report.status !== 'supported')
 
+// The columns the reports of a result lack, once each as 'Table.Column' (a lookup row that differs is not one, and a table the save lacks reads as 'Table (table)'): what the required inputs, the optional inputs and the soft groups name.
+const namedFields = (result) => [...new Set(Object.values(result.reports).flatMap((report) => [...report.missing, ...report.degraded.filter((entry) => !entry.gate)].flatMap((entry) => entry.fields)))].sort()
+
 const failedGates = (result) => [...Object.entries(result.gates.bonuses).map(([id, gate]) => [`bonus ${id}`, gate]), ...Object.entries(result.gates.components).map(([id, gate]) => [`component type ${id}`, gate])].filter(([, gate]) => gate.status === 'unavailable').map(([name]) => name)
 
 const preflightOf = async (capabilities, file) => {
@@ -444,9 +465,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/lagrange jumpInfrastructure', '/lagrange jumpBuilders', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/hauling routeQueues', '/information fleetShips', '/information fuelSites', '/information FuelReserveReader', '/logistics mspSupply', '/logistics fuelDonors', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics ResourceReserves', '/logistics FuelReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/map recoveryObjects', '/map observationRead', '/map recoveryObservationRead', '/survey-progress formations', '/survey-progress groundCommanders', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/survey-progress observationRead', '/survey-progress recoveryObservationRead', '/history observationRead', '/history recoveryObservationRead', '/commanders navalTree', '/commanders groundTree']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/warnings page', '/notebook page', '/lagrange ships', '/lagrange jumpInfrastructure', '/lagrange jumpBuilders', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/hauling routeQueues', '/information fleetShips', '/information fuelSites', '/information FuelReserveReader', '/logistics mspSupply', '/logistics fuelDonors', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics FleetStations', '/logistics ResourceReserves', '/logistics FuelReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/map habitability', '/map recoveryObjects', '/map observationRead', '/map recoveryObservationRead', '/survey-progress formations', '/survey-progress groundCommanders', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/survey-progress observationRead', '/survey-progress recoveryObservationRead', '/history observationRead', '/history recoveryObservationRead', '/commanders navalTree', '/commanders groundTree']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships, the jump point infrastructure and the gate builders of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the saved queues of /hauling, the fleet profile\'s ships, the fuel service sites and the fuel reserve reader of /information, the incoming minerals, the fuel service of the ships, the fleet stations\' reads and the fuel reserves of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the ground formations and the life pods and wrecks of /map, the ground survey commanders, the ruins, the ancient constructs and the troop ships of /survey-progress, the formations observed of /survey-progress and /history, the life pods and wrecks observed of /map, /survey-progress and /history, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings and the page\'s other reads there, the ships, the jump point infrastructure and the gate builders of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the saved queues of /hauling, the fleet profile\'s ships, the fuel service sites and the fuel reserve reader of /information, the incoming minerals, the fuel service of the ships, the fleet stations\' reads and the fuel reserves of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the colony costs, the ground formations and the life pods and wrecks of /map, the bodies the notes link to on /notebook, the ground survey commanders, the ruins, the ancient constructs and the troop ships of /survey-progress, the formations observed of /survey-progress and /history, the life pods and wrecks observed of /map, /survey-progress and /history, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   const formationReaders = (route) => capabilities.INPUTS[route].filter((input) => input.reads.FCT_GroundUnitFormationElement || input.reads.FCT_GroundUnitFormation).map((input) => input.key).sort().join()
 
@@ -498,7 +519,15 @@ const registryChecks = (capabilities, scan, navigation) => {
 
   const gated = new Set([...Object.values(capabilities.BONUS_NAMES), ...Object.values(capabilities.COMPONENT_TYPES)].flatMap((gate) => gate.routes))
 
+  Object.entries(RENAMED_READS).forEach(([field, entry]) => {
+    const readers = renamedReaders(capabilities, field)
+    const reports = [...new Set(readers.map((reader) => reader.route))].sort()
+
+    check(`registry: ${field}, which ${entry.owner} rewrites, is still named by the ${entry.reads} inputs on the ${entry.reports.length} reports pinned for it and by no other, so a half-migrated set of reads fails here (an item that lands deletes its entry, and a read it did not rewrite then makes a save of the line lack a column the list does not name)`, readers.length === entry.reads && sameFields(reports, entry.reports), `${readers.length} inputs on ${reports.join(', ')}`)
+  })
+
   check('registry: every route a lookup gate names is a report', [...gated].every((route) => capabilities.REPORT_ROUTES.includes(route)), [...gated].filter((route) => !capabilities.REPORT_ROUTES.includes(route)).join(', '))
+  check('registry: no lookup gate keys on a row the 3.1 line removed (commander bonus 26, Fighter Combat; component type 65, Fighter Pod Bay), which no save of the line holds, so a gate on it would never read as expected', !(26 in capabilities.BONUS_NAMES) && !(65 in capabilities.COMPONENT_TYPES), `${Object.keys(capabilities.BONUS_NAMES).join()}; ${Object.keys(capabilities.COMPONENT_TYPES).join()}`)
   check('registry: Hauling rests on the Production bonus (5, the colonies\' production rates of the reserve panel) and the cargo handling bonus (24) and on no other lookup, so the Shipbuilding and Ground Construction bonuses leave it supported', Object.entries(capabilities.BONUS_NAMES).filter(([, bonus]) => bonus.routes.includes('/hauling')).map(([id]) => id).join() === '5,24')
   check('registry: every route of the scan with inputs is a report (or the shell)', Object.keys(scan).filter((route) => scan[route] && Object.keys(scan[route]).length).every((route) => route === 'shell' || capabilities.REPORT_ROUTES.includes(route) || Object.values(scan[route]).every((input) => !Object.keys(input.reads).length)))
 }
@@ -575,7 +604,7 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
     return
   }
 
-  // The pages still read some 2.7 column names that Aurora 3.1 renamed (FCT_Star.Component among them), so a save of the line leaves those reports unsupported until the items that rename the reads land: this checks the line, the formula, the lookups and the shell of a real save of the line, and the changed-column checks below run on the 2.7 base save whose reads the pages are written for.
+  // The pages still read some column names that Aurora 3.1 renamed or removed (`RENAMED_READS`), so a save of the line leaves the reports that rest on them unsupported until the items that rewrite the reads land: this checks that those columns are the only ones a report lacks, and the line, the formula, the lookups and the shell of a real save of the line. The changed-column checks below run on the 2.7 base save, whose column names the pages are still written for.
   check(`${save.label}: every report is evaluated`, allReported(capabilities, result), Object.keys(result.reports).length)
   check(`${save.label}: the shell is supported`, result.shell.status === 'supported', JSON.stringify(result.shell))
   check(`${save.label}: every lookup row reads as expected`, failedGates(result).length === 0, failedGates(result).join(', '))
@@ -583,6 +612,12 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
   check(`${save.label}: the direct loader states the stated version for it too`, (await loadedFormula(capabilities, file)) === capabilities.STATED_FORMULA_VERSION)
   check(`${save.label}: the save is of the 3.1 line, with none of the ${LINE_COLUMNS.length} columns missing`, result.line.status === 'accepted' && result.line.reason === null && result.line.line === capabilities.STATED_FORMULA_VERSION && result.line.missing.length === 0, JSON.stringify(result.line))
   check(`${save.label}: the commanders soft groups are both whole`, result.reports['/commanders'].groups.rank === true && result.reports['/commanders'].groups.age === true)
+  check(`${save.label}: the columns its reports lack are the ${Object.keys(RENAMED_READS).length} renamed or removed ones a read still names (${[...new Set(Object.values(RENAMED_READS).map((entry) => entry.owner))].join(', ')}), and no other`, sameFields(namedFields(result), Object.keys(RENAMED_READS)), namedFields(result).join(', '))
+
+  const bonusRows = await all(file, 'select BonusID, Description, Percentage from DIM_CommanderBonusType where BonusID in (26, 39)')
+  const componentRows = await all(file, 'select ComponentTypeID, TypeDescription from DIM_ComponentType where ComponentTypeID in (65, 72)')
+
+  check(`${save.label}: the lookups hold the 3.1 rows: Fighter Combat (26) and Fighter Pod Bay (65) are gone, Light Tactical (39) is a multiplier and Ordnance Factory Module (72) a component type`, bonusRows.length === 1 && bonusRows[0].BonusID === 39 && bonusRows[0].Description === 'Light Tactical' && bonusRows[0].Percentage === 1 && componentRows.length === 1 && componentRows[0].ComponentTypeID === 72 && componentRows[0].TypeDescription === 'Ordnance Factory Module', JSON.stringify([...bonusRows, ...componentRows]))
 }
 
 const alteredChecks = async (capabilities, source) => {
@@ -622,6 +657,7 @@ const alteredChecks = async (capabilities, source) => {
     const noBuild = await copy('nobuild', ['alter table DIM_PlanetaryInstallation drop column NoBuild'])
     const noXcor = await copy('xcor', ['alter table FCT_SystemBody drop column Xcor'])
     const noDelay = await copy('delay', ['alter table FCT_Ship drop column SensorDelay'])
+    const noStation = await copy('station', ['alter table FCT_FleetHistory drop column Description'])
     const noUnits = await copy('units', ['alter table FCT_GroundUnitFormationElement drop column Units'])
     const noFormationShip = await copy('formationship', ['alter table FCT_GroundUnitFormation drop column ShipID'])
     const noOrbit = await copy('orbit', ['alter table FCT_SystemBody drop column Bearing'])
@@ -700,6 +736,7 @@ const alteredChecks = async (capabilities, source) => {
 
     const species = (await preflightOf(capabilities, noSpecies)).result
     const crew = (await preflightOf(capabilities, noCrew)).result
+    const station = (await preflightOf(capabilities, noStation)).result
     const message = (await preflightOf(capabilities, noMessage)).result
     const mineral = (await preflightOf(capabilities, noMineral)).result
     const panel = (await preflightOf(capabilities, noPanelReads)).result
@@ -715,6 +752,25 @@ const alteredChecks = async (capabilities, source) => {
 
     check('altered: FCT_Commander.SpeciesID dropped degrades /commanders by the age group, naming the join key', species.reports['/commanders'].status === 'degraded' && species.reports['/commanders'].groups.age === false && species.reports['/commanders'].degraded.some((entry) => entry.key === 'age' && entry.fields.includes('FCT_Commander.SpeciesID')), JSON.stringify(species.reports['/commanders']))
     check('altered: FCT_Ship.CurrentCrew dropped leaves /lagrange degraded by its optional ships, naming the field, and not unsupported', crew.reports['/lagrange'].status === 'degraded' && crew.reports['/lagrange'].missing.length === 0 && crew.reports['/lagrange'].degraded.some((entry) => entry.key === 'ships' && entry.fields.includes('FCT_Ship.CurrentCrew')), JSON.stringify(crew.reports['/lagrange']))
+
+    // The station and reserve panels of /logistics: their reads are in the page's `page` input, which is required, so a save without one of their columns would withhold the whole report, although the page's own reads never name them. The soft group takes those fields out of what the page cannot do without: the report degrades, the panel names what it could not read, and the page's own required reads still withhold it.
+    const stationReport = station.reports['/logistics']
+
+    check('altered: FCT_FleetHistory.Description dropped (a column only the station panels read) leaves /logistics degraded by the station and reserve group, naming the field, and not unsupported', stationReport.status === 'degraded' && stationReport.missing.length === 0 && stationReport.groups.stationPanels === false && stationReport.degraded.some((entry) => entry.group && entry.key === 'stationPanels' && entry.fields.includes('FCT_FleetHistory.Description')), JSON.stringify([stationReport.status, stationReport.missing, stationReport.degraded]))
+    check('altered: FCT_Ship.SensorDelay dropped (a column the page\'s own required read names) leaves /logistics unsupported, so the group does not take a required read out of the page', undelayed.reports['/logistics'].status === 'unsupported' && undelayed.reports['/logistics'].missing.some((entry) => entry.key === 'page' && entry.fields.includes('FCT_Ship.SensorDelay')), JSON.stringify(undelayed.reports['/logistics']))
+
+    if (mutating()) {
+      const directory = mutatedCopy('utilities/capabilities.js', ', STATION_PANEL_READS]', ']')
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+        const report = (await preflightOf(mutant, noStation)).result.reports['/logistics']
+
+        check('altered: a copy of the code in which the station panels stay in the page\'s own required input leaves /logistics unsupported on a save without their column, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.key === 'page'), report.status)
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
     check('altered: FCT_GameLog.MessageText dropped (read through a table alias) makes /log unsupported, naming the field', message.reports['/log'].status === 'unsupported' && message.reports['/log'].missing.some((entry) => entry.fields.includes('FCT_GameLog.MessageText')), JSON.stringify(message.reports['/log']))
     check('altered: FCT_Population.Duranium dropped (a column built by name) makes /mineral-outlook unsupported, naming the field', mineral.reports['/mineral-outlook'].status === 'unsupported' && mineral.reports['/mineral-outlook'].missing.some((entry) => entry.fields.includes('FCT_Population.Duranium')) && mineral.reports['/finances'].status === 'supported', JSON.stringify(mineral.reports['/mineral-outlook'].missing))
     check('altered: a column only the ground formations read dropped (FCT_GroundUnitFormation.ReplacementTemplateID) degrades /map and /survey-progress by their formation inputs and leaves neither unsupported', onlyFormations(formationReads, '/map', 'groundFormations') && onlyFormations(formationReads, '/survey-progress', 'formations') && formationReads.reports['/map'].degraded[0].fields.includes('FCT_GroundUnitFormation.ReplacementTemplateID'), JSON.stringify([formationReads.reports['/map'], formationReads.reports['/survey-progress']]))
@@ -953,8 +1009,110 @@ const STUBS = {
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 
-const CONSUMER_MODULES = ['capabilities', 'commanders', '../mixins/production-modifiers', '../store/capabilities']
+// The appearance helper of the Intelligence page, which the page loader's stub of utilities/appearance does not carry (`toneColor`): the page reads no appearance in these checks, so a small one stands in.
+const INTELLIGENCE_APPEARANCE = 'export const activeAppearance = () => ({}); export const toneColor = () => undefined'
 
+// The read behind an input that names FCT_AlienClass, as the page or utility makes it: the number of rows it returns, or the error it throws. The recovery ledger's four statements stand for three inputs (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History); a failed statement is thrown in its own words, so an owned column names its item.
+const recoveryObjectsRead = async (context) => {
+  const { objects, failed } = await context.recovery.loadRecoveryObjects(context.database, context.ids)
+  const failures = Object.values(failed)
+
+  if (failures.length) {
+    throw new Error(failures.join('; '))
+  }
+
+  return Object.values(objects).reduce((total, rows) => total + (rows ? rows.size : 0), 0)
+}
+
+const smallPlacesRead = async (context) => (await context.places.loadSmallPlaces(context.database, context.ids, String)).length
+
+// The known wrecks check of the Warnings page, read as the page reads it (`read(ctx)`).
+const knownWrecksRead = async (context) => {
+  const wrecks = context.wrecks.checks.find((entry) => entry.key === 'known-wrecks')
+
+  if (!wrecks) {
+    throw new Error('the known wrecks check is not in utilities/warnings/space.js')
+  }
+
+  return (await wrecks.read({ database: context.database, ...context.ids, count: (value) => String(value) })).length
+}
+
+// The inputs of the registry that name FCT_AlienClass, by route and key, each with the read that serves it: the Intelligence page's three reads through its own page script, the recovery ledger's statements, Route Finder's small places and the known wrecks check of Warnings. A registry input with no reader here fails the check: those are exactly the alien-class reads the preflight would leave unrun.
+const ALIEN_READERS = {
+  '/intelligence': { races: (context) => context.page.runAsync('races').then((rows) => rows.length), ships: (context) => context.page.runAsync('ships').then((rows) => rows.length), classes: (context) => context.page.runAsync('classes').then((rows) => rows.length) },
+  '/map': { recoveryObjects: recoveryObjectsRead, recoveryObservationRead: recoveryObjectsRead },
+  '/survey-progress': { recoveryObservationRead: recoveryObjectsRead },
+  '/history': { recoveryObservationRead: recoveryObjectsRead },
+  '/routes': { smallPlaces: smallPlacesRead },
+  '/warnings': { 'check:known-wrecks': knownWrecksRead },
+}
+
+// The alien-class reads, run where a save holds alien classes: the interim fixture is the only save of the line that does (the time-zero export and the shipped databases hold none), so the preflight's column check proves nothing of their queries. These are the pages' and utilities' own reads, through the page loader and `loadUtilities`, with the game and the player's race as the app reads them from FCT_Race. A read the 3.1 line blocks by a column another named item owns (`RENAMED_READS`) is recorded with that item and not fixed (a check red for a reason a pending item owns is recorded, not fixed); any other failure fails this check.
+const alienClassChecks = async (capabilities, file) => {
+  if (!fs.existsSync(file)) {
+    console.log('SKIP  alien: saves/AuroraDB-310-spookyerol-migrated.db is not there, so the alien-class reads are not run (not run)')
+
+    return
+  }
+
+  const log = []
+  const database = openSave(file, log)
+
+  try {
+    const [races] = await database.query('select GameID, RaceID from FCT_Race where NPR = 0 order by GameID, RaceID limit 1')
+    const [game] = races
+
+    check('alien: the interim fixture names a game and a player race to run the alien-class reads for', Boolean(game), 'no FCT_Race row with NPR = 0')
+
+    if (!game) {
+      return
+    }
+
+    const [[{ classes }]] = await database.query(`select count(*) as classes from FCT_AlienClass where ViewRaceID = ${Number(game.RaceID)}`)
+
+    check('alien: the interim fixture holds alien classes in the view of the race they are read for', classes > 0, `${classes} classes for race ${game.RaceID}`)
+
+    const { 'recovery-ledger': recovery, 'place-data': places, 'warnings/space': wrecks } = await loadUtilities(['recovery-ledger', 'place-data', 'warnings/space'], { stubs: STUBS })
+    const intelligence = await loadPage('pages/intelligence', { stubs: STUBS, modules: { 'utilities/appearance': INTELLIGENCE_APPEARANCE } })
+    const page = instantiate(intelligence, { $store: { getters: {}, state: {}, dispatch: () => Promise.resolve() }, database, GameID: game.GameID, RaceID: game.RaceID })
+    const context = { database, ids: { GameID: game.GameID, RaceID: game.RaceID }, page, recovery, places, wrecks }
+    const inputs = Object.entries(capabilities.INPUTS).flatMap(([route, entries]) => entries.filter((entry) => Object.keys(entry.reads).includes('FCT_AlienClass')).map((entry) => [route, entry.key]))
+    const unserved = inputs.filter(([route, key]) => !(ALIEN_READERS[route] && ALIEN_READERS[route][key]))
+
+    check(`alien: every input of the registry that names FCT_AlienClass (${inputs.length}) has a read this check runs`, inputs.length > 0 && unserved.length === 0, unserved.map(([route, key]) => `${route} ${key}`).join(', '))
+
+    const results = []
+
+    for (const [route, key] of inputs.filter(([route, key]) => ALIEN_READERS[route] && ALIEN_READERS[route][key])) {
+      let rows = null
+      let failure = null
+
+      try {
+        rows = await ALIEN_READERS[route][key](context)
+      } catch (error) {
+        failure = String((error && error.message) || error).split('\n')[0]
+      }
+
+      const owned = failure ? Object.keys(RENAMED_READS).find((field) => failure.includes(field)) : null
+
+      results.push(`${route} ${key}: ${failure ? (owned ? `blocked by ${owned} (${RENAMED_READS[owned].owner})` : `FAILED: ${failure}`) : `${rows} rows`}`)
+
+      if (failure) {
+        check(`alien: ${route} ${key} is blocked by ${owned || 'a column no item owns'}; a read the 3.1 line blocks by a column another item owns is recorded with that item, not fixed`, Boolean(owned), failure)
+      } else {
+        check(`alien: ${route} ${key} runs on the interim fixture and returns rows`, rows > 0, `${rows} rows`)
+      }
+    }
+
+    console.log(`INFO  alien reads on ${path.basename(file)} for game ${game.GameID} race ${game.RaceID}: ${results.join('; ')}`)
+
+    check('alien: every query the alien-class reads sent is a select', log.length > 0 && log.every((sql) => /^\s*select\b/i.test(sql)), log.filter((sql) => !/^\s*select\b/i.test(sql)).join('; '))
+  } finally {
+    await database.close()
+  }
+}
+
+const CONSUMER_MODULES = ['capabilities', 'commanders', '../mixins/production-modifiers', '../store/capabilities']
 const rendererDirectory = path.join(repo, 'src', 'renderer')
 
 // The pages that load the naval admin commands of one share, with the file that names the share (`loadNavalAdmins(..., { share })`): the Colonization Planner's read is in utilities/colonization-data.js, the handling times' of Transport and Hauling in utilities/handling-support.js. `MARKER_USES` gives each of them the share it loads.
@@ -1606,6 +1764,9 @@ const main = async () => {
     await realSaveChecks(capabilities, save, provenance.fieldWords)
   }
 
+  // The alien-class reads the preflight cannot run: the interim fixture holds the alien classes (the shipped saves and the export hold none), so the pages' own reads run there.
+  await alienClassChecks(capabilities, path.resolve(repo, 'saves/AuroraDB-310-spookyerol-migrated.db'))
+
   const real260 = path.resolve(repo, 'AuroraDB_260_base.db')
 
   if (fs.existsSync(real260)) {
@@ -1618,7 +1779,7 @@ const main = async () => {
     console.log('SKIP  line: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
   }
 
-  // The base save the altered copies and the report-level checks are made from: a 2.7 save, whose column names the pages are still written for, so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. It moves to a save of the line once the items that rename the pages' reads land (FCT_Star.Component to ComponentNumber and its siblings, AE-308-02), and `realSaveChecks` then asserts every report supported on the 3.0 and 3.1 saves again.
+  // The base save the altered copies and the report-level checks are made from: a 2.7 save, whose column names the pages are still written for, so that every report is supported on it. The line gate refuses it, which changes no report's evaluation. It moves to a save of the line once the items that rewrite the pages' reads of the renamed and removed columns land (`RENAMED_READS`: FCT_Star.Component to ComponentNumber, AE-308-02, and the gas columns, AE-308-03), and `realSaveChecks` then asserts every report supported on the 3.0 and 3.1 saves again.
   const source = path.resolve(repo, 'AuroraDB_270_base.db')
   // A save of the line: the checks of the line itself and the store's accepted-copy test.
   const lineSource = path.resolve(repo, 'saves/AuroraDB_310_shipped.db')
