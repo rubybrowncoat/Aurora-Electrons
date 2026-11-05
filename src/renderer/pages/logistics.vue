@@ -7,6 +7,7 @@
             <v-btn value="fuel" small><v-icon small left>mdi-gas-station</v-icon>Fuel</v-btn>
             <v-btn value="maintenance" small><v-icon small left>mdi-wrench</v-icon>Maintenance supplies</v-btn>
             <v-btn value="reserves" small><v-icon small left>mdi-shield-lock-outline</v-icon>Reserves</v-btn>
+            <v-btn value="summary" small><v-icon small left>mdi-table-large</v-icon>Empire summary</v-btn>
             <v-btn value="stations" small><v-icon small left>mdi-flag-variant</v-icon>Fleet stations</v-btn>
           </v-btn-toggle>
         </v-col>
@@ -298,6 +299,10 @@
           <resource-reserves :key="`${GameID}-${RaceID}`" kind="supplies" :colonies="colonies" :place="place" :modifier-of="modifierOf" />
         </template>
 
+        <template v-else-if="view === 'summary'">
+          <empire-summary :key="`${GameID}-${RaceID}`" :rows="summaryTable" :state="summaryState" :order="summaryOrder" @order="summaryOrder = $event" @retry="retrySummary" />
+        </template>
+
         <template v-else>
           <fleet-stations :key="`${GameID}-${RaceID}`" :state="stationState" :view="stationView" :repository="stationRepository" :repository-error="stationRepositoryError" :scope="stationScope" :context="stationContext" :database="database" :game-id="GameID" :race-id="RaceID" @retry="retryStations" @changed="stationsChanged" />
         </template>
@@ -313,6 +318,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
 import MaintenancePool from '../components/logistics/MaintenancePool.vue'
+import EmpireSummary from '../components/logistics/EmpireSummary.vue'
 import MspSupply from '../components/logistics/MspSupply.vue'
 import FleetStations from '../components/fleets/FleetStations.vue'
 import ResourceReserves from '../components/logistics/ResourceReserves.vue'
@@ -342,6 +348,7 @@ import { sortNullLast, totalOf } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { MSP_HORIZONS, loadMspSupply, mspSupplyRows } from '../utilities/msp-supply'
+import { SUMMARY_COLUMNS, loadSummarySources, summaryRows } from '../utilities/empire-logistics'
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
@@ -354,17 +361,19 @@ const INPUT_LABELS = {
   formulaVersion: 'the save\'s schema',
   mspSupply: 'the incoming minerals',
   fuelDonors: 'the fuel service of the ships',
+  summarySources: 'the ships, modules and services of the colony summary',
   ...STATION_LABELS,
 }
-// The read of the incoming minerals feeds the supplied-output panel alone, and the read of the ships' fuel service the tanker panel and the fuel service column of the harvesters: the rest of the page never waits for them, and a failure of one is shown on its own panel.
+// The read of the incoming minerals feeds the supplied-output panel alone, the read of the ships' fuel service the tanker panel and the fuel service column of the harvesters, and the read of the ships, modules and services of the colony summary that panel alone: the rest of the page never waits for them, and a failure of one is shown on its own panel.
 const MSP_INPUTS = ['mspSupply']
 const DONOR_INPUTS = ['fuelDonors']
-const OPTIONAL_INPUTS = [...MSP_INPUTS, ...DONOR_INPUTS]
+const SUMMARY_INPUTS = ['summarySources']
+const OPTIONAL_INPUTS = [...MSP_INPUTS, ...DONOR_INPUTS, ...SUMMARY_INPUTS]
 // The reads behind the fleet stations panel feed that panel alone, each with its own loading, failure and Retry there.
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key) && !STATION_INPUTS.includes(key))
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
-const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies', reserves: 'Reserves', stations: 'Fleet stations' }
+const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies', reserves: 'Reserves', summary: 'Empire summary', stations: 'Fleet stations' }
 const PAGE_SIZES = [15, 30, -1]
 // How far ahead the harvesters' obtainable fuel looks, in years.
 const HARVESTER_HORIZONS = [
@@ -379,7 +388,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, FleetStations, FuelFigures, FuelReserves, LoadState, MaintenancePool, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
+  components: { ChartCanvas, EmpireSummary, FleetStations, FuelFigures, FuelReserves, LoadState, MaintenancePool, MspSupply, PageLink, ProvenanceMark, ResourceReserves, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -396,6 +405,7 @@ export default {
       tankersTable: tableView('logisticsTankersTable', { sortBy: ['Fuel'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       locationsTable: tableView('logisticsLocationsTable', { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       supplyTable: tableView('logisticsSupplyTable', {}),
+      summaryOrder: { key: 'logisticsSummaryOrder', default: 'capacity', valid: oneOf(SUMMARY_COLUMNS.map((column) => column.key)) },
     }),
   ],
   data() {
@@ -452,6 +462,11 @@ export default {
       return this.optionalState(DONOR_INPUTS)
     },
 
+    // The read of the ships, modules and services of the colony summary, in the same way: the summary shows no figure from a read that is in flight or failed.
+    summaryState() {
+      return this.optionalState(SUMMARY_INPUTS)
+    },
+
     // The player's fuel reserve that holds for each ship by its ID (its own, else its class's), null for a ship with none.
     reserveByShip() {
       const table = this.fuelReserves && this.fuelReserves.ready ? this.fuelReserves.table : null
@@ -485,6 +500,15 @@ export default {
       }
 
       return mspSupplyRows({ colonies: this.colonies, sources: this.mspSupply, modifierOf: this.modifierOf, navalAdmins: this.navalAdmins, formulaVersion: this.formulaVersion, RaceID: this.RaceID, years: this.mspHorizon }).map((row) => ({ ...row, name: row.colony.PopName, place: this.place(row.colony) }))
+    },
+
+    // The colony summary, null until the read is in: the rows of the game's Empire Logistics list in the chosen order.
+    summaryTable() {
+      if (!this.summarySources || this.summaryState.loading || this.summaryState.failed) {
+        return null
+      }
+
+      return summaryRows({ colonies: this.colonies, sources: this.summarySources, modifierOf: this.modifierOf, order: this.summaryOrder }).map((row) => ({ ...row, name: row.colony.PopName, place: this.place(row.colony) }))
     },
 
     // FUEL
@@ -910,6 +934,10 @@ export default {
     retryDonors() {
       DONOR_INPUTS.forEach((key) => this.$asyncComputed[key].update())
     },
+
+    retrySummary() {
+      SUMMARY_INPUTS.forEach((key) => this.$asyncComputed[key].update())
+    },
   },
   asyncComputed: {
     // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility.
@@ -1016,6 +1044,19 @@ export default {
         }
 
         return await loadMspSupply(database, { GameID, RaceID, blocked })
+      }),
+      default: null,
+    },
+    // What the colony summary reads beside the colony rows: the ships that count against each colony's maintenance, the maintenance modules near them, the installation services and the order the save stores the colonies in, read for the summary alone.
+    summarySources: {
+      get: tracked('summarySources', async function () {
+        const { database, GameID, RaceID } = this
+
+        if (!database || !GameID || !RaceID) {
+          return null
+        }
+
+        return await loadSummarySources(database, { GameID, RaceID })
       }),
       default: null,
     },

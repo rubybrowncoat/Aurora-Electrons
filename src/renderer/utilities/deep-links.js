@@ -15,7 +15,7 @@
 // | `/colony-outlook`  | `colony=<PopulationID>`                                                  |
 // | `/production`      | `colony=<PopulationID>`                                                  |
 // | `/commanders`      | `commander=<CommanderID>`, or `colony=<PopulationID>` for its governor   |
-// | `/logistics`       | `view=fuel` or `view=maintenance`                                        |
+// | `/logistics`       | `view=fuel`, `maintenance`, `reserves`, `summary` or `stations`          |
 // | `/log`             | `system=<SystemID>` or `colony=<PopulationID>`                           |
 // | `/warnings`        | `check=<check key>`, or `severity=<severity key>` and `group=<group key>` |
 // | `/propulsion`      | `class=<ShipClassID>` (the hull of a saved class) or `engine=<SDComponentID>` (an existing engine) |

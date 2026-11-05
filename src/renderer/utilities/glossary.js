@@ -194,13 +194,14 @@ const PAGE_HELP = Object.freeze({
   '/logistics': {
     overview: 'Fuel & Maintenance sets what the race makes of fuel and maintenance supplies against what its ships burn and use, by colony and by ship, and keeps the player\'s reserve records and fleet station notes beside them. It reads the refineries, harvesters, tankers, maintenance facilities, supply ships and stocks of the save. Yearly figures are estimates under the rules in the footers, the records are the app\'s own, and the save is only read.',
     usage: [
-      'The view toggle switches the page between Fuel, Maintenance supplies, Reserves and Fleet stations.',
+      'The view toggle switches the page between Fuel, Maintenance supplies, Reserves, Empire summary and Fleet stations.',
       'Under Fuel, Fuel balance per year sets the refineries\' and harvesters\' output against the ships\' burn, Burn by class estimates each class\'s yearly burn two ways, and Colony fuel and refineries shows where fuel is made and where Sorium is about to run out.',
       'Tankers and fuel service tells each tanker\'s stored fuel from the fuel it is free to give, and the Local reserve records for a ship or a ship class below keeps a reserve record for either, with a note and the choice to share it with every branch.',
       'Sorium harvesters, shown where the race has harvesters, gives each one\'s rate and the fuel that fits over the period picked in Fits over.',
       'Under Maintenance supplies, Maintenance locations lists each colony and ship that maintains ships with its stock, production and upkeep; Show colonies without ships adds the idle ones, and a row expands to its capacity sources, stock providers and the ships it maintains.',
       'Maintenance supplies with incoming minerals adds the mining, packets and hauls arriving over the horizon chosen to the stock-only output above, and Supply ships lists the ships carrying supplies.',
       'Under Reserves, the ledger walks the chosen horizon day by day to show when a planned withdrawal would leave a colony short of fuel or supplies; Show sources without a record lists every source, the scenario chips pick which scenarios run together, and the editor keeps the player\'s reserves and withdrawals as scenario records.',
+      'Under Empire summary, each colony with some capacity, tonnage, production, stock or service gets a row of the figures of the game\'s Empire Logistics list; Order by picks the column the rows run down from, a tonnage above the capacity, or production that is on and short or switched off, shows in colour, and the foot sets the rules apart from the Maintenance table\'s.',
       'Under Fleet stations, each fleet\'s noted station and supply base sits beside where the fleet is; New note records one, and Show fleets without a note lists the rest.',
       'A rate the save does not give leaves a figure not known, never 0; a figure with a mark carries what it rests on.',
     ],

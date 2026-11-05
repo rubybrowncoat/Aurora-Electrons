@@ -89,13 +89,17 @@ const ACTIONS = {
   63: { name: 'Unload All Minerals', item: 0, quantity: false, minimum: false, transit: false },
   96: { name: 'Unload All Installations', item: 0, quantity: false, minimum: false, transit: false },
   124: { name: 'Standard Transit Inside System', item: 13, quantity: false, minimum: false, transit: false },
+  140: { name: 'Load Ship Component', item: 15, quantity: true, minimum: false, transit: false },
+  141: { name: 'Unload Ship Component', item: 21, quantity: true, minimum: false, transit: false },
   165: { name: 'Balance Minerals', item: 0, quantity: false, minimum: false, transit: false },
   176: { name: 'Load Installation', item: 2, quantity: true, minimum: false, transit: false },
   177: { name: 'Unload Installation', item: 19, quantity: true, minimum: false, transit: false },
   178: { name: 'Load Mineral Type', item: 1, quantity: true, minimum: false, transit: false },
   179: { name: 'Unload Mineral Type', item: 20, quantity: true, minimum: false, transit: false },
   180: { name: 'Load Mineral when X available', item: 1, quantity: true, minimum: true, transit: false },
+  189: { name: 'Unload All Ship Components', item: 0, quantity: true, minimum: false, transit: false },
   223: { name: 'Load All Minerals Until Full', item: 0, quantity: false, minimum: false, transit: false },
+  237: { name: 'Load All Ship Components', item: 0, quantity: false, minimum: false, transit: false },
 }
 
 // The colony of system n is population 100 + n on body 1000 + n; the jump points between systems a and b are 1000 a + b (leaving a) and 1000 b + a (entering b), moved by `via` for another pair.
@@ -315,6 +319,10 @@ add('flows', 'a cycle moves what its loads and unloads say, read over two passes
   assert.deepEqual(flowsOf([stop(1, 4), jump(1, 2), stop(2, 6, { MaxItems: 5 }), jump(2, 3), stop(3, 6), jump(3, 1)]), ['colonists|colony:101|colony:102'], 'an unload of colonists takes all it can whatever its quantity says')
   assert.deepEqual(flowsOf([stop(1, 4), jump(1, 2), stop(2, 6), jump(2, 3), stop(3, 6), jump(3, 1)]), ['colonists|colony:101|colony:102'], 'an unload of all that is held leaves nothing')
   assert.deepEqual(flowsOf([stop(1, 223), jump(1, 2), stop(2, 63, { MaxItems: 5 }), jump(2, 3), stop(3, 63), jump(3, 1)]), one, 'a quantity an action does not read does not limit it')
+  assert.deepEqual(flowsOf(loop(237, 189)), ['components|colony:101|colony:102'], 'ship components loaded by one order are unloaded by another')
+  assert.deepEqual(flowsOf(loop(237, [189, { MaxItems: 5 }])), ['components|colony:101|colony:102'], 'Unload All Ship Components carries a quantity and ignores it')
+  assert.deepEqual(flowsOf([typed(1, 140, 5, 10), jump(1, 2), typed(2, 141, 5, 5), jump(2, 3), stop(3, 189), jump(3, 1)]), ['components|colony:101|colony:102'], 'Unload Ship Component carries a quantity and ignores it: it takes every unit of its component')
+  assert.deepEqual(flowsOf([typed(1, 140, 5), jump(1, 2), typed(2, 141, 6), jump(2, 3), stop(3, 189), jump(3, 1)]), ['components|colony:101|colony:103'], 'an unload of one component takes only that component')
   assert.deepEqual(flowsOf([stop(1, 223), jump(1, 3), stop(3, 62), jump(3, 2), stop(2, 63), jump(2, 1)]), ['minerals|colony:101|colony:102', 'minerals|colony:103|colony:102'], 'two loads for one unload are two flows')
 })
 
@@ -1159,8 +1167,9 @@ const MUTATIONS = [
   { name: 'an unload leaves what it took held', file: S, find: 'if (!part.limited || total <= part.amount) {', to: 'if (false) {', fails: ['flows'] },
   { name: 'an unload takes all that is held even when it is limited', file: S, find: 'if (!part.limited || total <= part.amount) {', to: 'if (true) {', fails: ['flows'] },
   { name: 'only the last load is held', file: S, find: '        entries.set(key, { source: part.stop,', to: '        entries.clear()\n        entries.set(key, { source: part.stop,', fails: ['flows'] },
-  { name: 'every unload with a quantity is limited', file: S, find: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity', fails: ['flows'] },
-  { name: 'an unload of colonists with a quantity stored is limited', file: S, find: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: action.quantity && integer(order.MaxItems) > 0', fails: ['flows'] },
+  { name: 'every unload with a quantity is limited', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity', fails: ['flows'] },
+  { name: 'an unload of colonists with a quantity stored is limited', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: action.quantity && integer(order.MaxItems) > 0', fails: ['flows'] },
+  { name: 'an unload of one ship component is limited by its quantity', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', fails: ['flows'] },
   { name: 'a desired route counts every source of the unloads at its second colony', file: S, find: '.filter((source) => source.from === desire.from)', to: '', fails: ['desires'] },
   { name: 'a survey location is the same in every system', file: S, find: '`survey:${present(order.StartSystemID)}:${present(order.DestinationID)}`', to: '`survey:0:${present(order.DestinationID)}`', fails: ['path-identity'] },
   { name: 'a jump inside a system ignores its exit', file: S, find: '`lagrange:${present(order.DestinationID)}>${present(order.DestinationItemID)}`', to: '`lagrange:${present(order.DestinationID)}>0`', fails: ['path-identity'] },
@@ -1237,7 +1246,7 @@ const BENIGN = [
   { name: 'the empty year written as a function result', family: 'rewrite', file: A, find: 'const NO_YEAR = null', to: 'const NO_YEAR = (() => null)()' },
   { name: 'the loader\'s required columns listed in another order', family: 'list order', file: Q, find: "const REQUIRED_ORDER_COLUMNS = ['MoveOrderID', 'FleetID', 'MoveOrder', 'MoveActionID', 'StartSystemID', 'DestinationType', 'DestinationID']", to: "const REQUIRED_ORDER_COLUMNS = ['DestinationID', 'DestinationType', 'StartSystemID', 'MoveActionID', 'MoveOrder', 'FleetID', 'MoveOrderID']" },
   { name: 'the check for capacities not in the save written the other way round', family: 'condition turned round', file: S, find: '} else if (figure.holds === null) {', to: '} else if (null === figure.holds) {' },
-  { name: 'the limit of an unload written with its terms swapped', family: 'condition turned round', file: S, find: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: integer(order.MaxItems) > 0 && action.quantity && ITEM_UNLOADS.has(order.MoveActionID)' },
+  { name: 'the limit of an unload written with its terms swapped', family: 'condition turned round', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: integer(order.MaxItems) > 0 && action.quantity && QUANTITY_UNLOADS.has(order.MoveActionID)' },
   { name: 'the sum of the held cargo written the other way round', family: 'condition turned round', file: C, find: '.reduce((total, entry) => total + entry.amount, 0)', to: '.reduce((total, entry) => entry.amount + total, 0)' },
   { name: 'the sources a delivery is covered by written the other way round', family: 'condition turned round', file: S, find: 'const serving = settled.filter((member) => shares.get(member) > 0)', to: 'const serving = settled.filter((member) => 0 < shares.get(member))' },
   { name: 'the scale of the settled test written with its terms swapped', family: 'condition turned round', file: C, find: 'Math.max(1, Math.abs(entry.amount))', to: 'Math.max(Math.abs(entry.amount), 1)' },
@@ -2461,7 +2470,7 @@ const BROWSER_MUTATIONS = [
   { name: 'the panel is drawn transparent', file: G, find: 'elevation="1" data-route-groups>', to: 'elevation="1" data-route-groups style="opacity: 0">', fails: ['screen-groups', 'screen-capacity', 'screen-flags', 'screen-links', 'screen-names', 'screen-closed', 'screen-state', 'screen-filter'] },
   { name: 'the handling of a cycle that never settles is drawn', file: 'page', find: '<handling-breakdown v-if="item.cargo.settled" :rows', to: '<handling-breakdown v-if="true" :rows', group: 'groups-a', fails: ['screen-unsettled'] },
   { name: 'the note that a cycle never settles is not drawn', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>', to: '<div v-else-if="false" class="caption text--secondary mt-2" data-cargo-unsettled>', group: 'groups-b', fails: ['screen-unsettled'] },
-  { name: 'the note that a cycle never settles is drawn in other words', file: 'page', find: 'data-cargo-unsettled>{{ cargoUnsettled }}</div>', to: 'data-cargo-unsettled>{{ cargoUnsettled.toUpperCase() }}</div>', group: 'groups-c', fails: ['screen-unsettled'] },
+  { name: 'the note that a cycle never settles is drawn in other words', file: 'page', find: 'data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</div>', to: 'data-cargo-unsettled>{{ (item.cargo.unmodelled || cargoUnsettled).toUpperCase() }}</div>', group: 'groups-c', fails: ['screen-unsettled'] },
   { name: 'the desired routes the panel keeps are not read again', file: 'page', find: '@changed="desiresChanged"', to: '@changed="() => {}"', fails: ['desire-created', 'desire-edited', 'desire-reloaded', 'desire-deleted', 'desire-count'] },
   { name: 'the coverage of a desired route is always told covered', file: 'desireView', find: 'data-desire-state-text>{{ coverageText(item.cover.state) }}', to: "data-desire-state-text>{{ coverageText('covered') }}", group: 'desires-4', fails: ['desire-coverage'] },
   { name: 'a route nothing serves is drawn with a freight delivered', file: 'desireView', find: '<div v-if="item.cover.capacity !== null"><span data-desire-delivered>', to: '<div v-if="item.cover.capacity !== null || item.cover.state === \'uncovered\'"><span data-desire-delivered>', group: 'desires-4', fails: ['desire-delivered'] },
@@ -2495,7 +2504,7 @@ const BROWSER_BENIGN = [
   { name: 'the closed queues titled with a suffix', family: 'qualifier moved', reads: 'groups', file: G, find: 'Queues that do not repeat ({{ audit.closed.length }})', to: '({{ audit.closed.length }}) queues that do not repeat' },
   { name: 'the empty table worded with a synonym', family: 'synonym', reads: 'groups', file: G, find: 'no-data-text="No fleet repeats a route."', to: 'no-data-text="No fleet runs a repeating route."' },
   { name: 'the handling of a settled cycle drawn on a strict comparison', family: 'condition turned round', reads: 'groups', file: 'page', find: '<handling-breakdown v-if="item.cargo.settled" :rows', to: '<handling-breakdown v-if="item.cargo.settled === true" :rows' },
-  { name: 'the note of a cycle that never settles drawn as a paragraph', family: 'element kind', reads: 'groups', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ cargoUnsettled }}</div>', to: '<p v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ cargoUnsettled }}</p>' },
+  { name: 'the note of a cycle that never settles drawn as a paragraph', family: 'element kind', reads: 'groups', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</div>', to: '<p v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</p>' },
   { name: 'the number and the id of a stored order told the other way round', family: 'parts reordered', reads: 'groups', file: G, find: '#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span><span v-if="!member.record.orders.length">none</span>', to: 'order <span data-route-order-id>{{ order.MoveOrderID }}</span> at position <span data-route-order-number>{{ order.MoveOrder }}</span></span><span v-if="!member.record.orders.length">none</span>' },
   { name: 'the button of a new desired route with the event in its longhand', family: 'v-on longhand', reads: 'desires', file: 'desireView', find: 'data-desire-new @click="startNew"', to: 'data-desire-new v-on:click="startNew"' },
   { name: 'the demand of a desired route read through a list', family: 'condition rewritten', reads: 'desires', file: 'desireView', find: "draft.yearly === '' || draft.yearly === null ? null : Number(draft.yearly)", to: "['', null].includes(draft.yearly) ? null : Number(draft.yearly)" },

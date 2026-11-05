@@ -57,7 +57,7 @@ const OPTIONAL = Object.freeze({
   '/colony-outlook': (key) => key === 'bootstrapSources' || key === 'colonistSources',
   '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
   '/finances': (key) => key === 'shippingTax',
-  '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'FleetStations' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves' || key === 'FuelReserves',
+  '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'summarySources' || key === 'FleetStations' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves' || key === 'FuelReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
   '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'fuelSites' || key === 'FuelReserveReader' || key === 'positionFacts' || key === 'orbitFacts',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',

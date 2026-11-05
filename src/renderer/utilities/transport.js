@@ -9,15 +9,15 @@ import { handleEvent, nebulaGapOf, routeEvents, speedIn, timingGaps, walkEvents 
 export const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
 
-// Move actions that load or unload cargo, by what they carry.
-export const LOADS = { 4: 'colonists', 176: 'installations', 62: 'minerals', 178: 'minerals', 180: 'minerals', 223: 'minerals', 165: 'minerals' }
-export const UNLOADS = { 6: 'colonists', 96: 'installations', 177: 'installations', 63: 'minerals', 179: 'minerals', 165: 'minerals' }
+// Move actions that load or unload cargo, by what they carry. Ship components are cargo like the rest: Load Ship Component (140) and Load All Ship Components (237) put them in the free capacity of the hold on the timer of the other loads (`Fleet.CalculateLoadOperationTime`), the hold's free capacity counts what it holds of them (`Ship.GetAvailableCargoCapacity`) and they stay in it until Unload Ship Component (141) or Unload All Ship Components (189) takes them to the colony (`Ship.UnloadShipComponentsToPopulation`).
+export const LOADS = { 4: 'colonists', 140: 'components', 176: 'installations', 62: 'minerals', 178: 'minerals', 180: 'minerals', 223: 'minerals', 165: 'minerals', 237: 'components' }
+export const UNLOADS = { 6: 'colonists', 96: 'installations', 141: 'components', 177: 'installations', 63: 'minerals', 179: 'minerals', 165: 'minerals', 189: 'components' }
 // Move actions that load or unload ground units (Load Ground Unit, Unload Ground Unit, Unload All Ground Units from Transport Bay).
 const TROOP_ACTIONS = new Set([86, 87, 88])
 // Move actions that hand fuel, maintenance supplies or cargo to another fleet (Join & Refuel Target Fleet, Refuel from own Tankers, Equalise Maintenance Supplies, Resupply from own Supply Ships, Receive Cargo, Join & Refuel Target Sub-Fleet).
 const SHIP_TO_SHIP_ACTIONS = new Set([5, 30, 92, 128, 155, 184])
 // Seconds to load or unload one cargo point or one colonist at a loading strength of 1 (docs `logistics`, Logistics and Cargo Handling).
-const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }
+const HANDLING_SECONDS = { minerals: 20, installations: 20, components: 20, colonists: 10 }
 // DIM_MoveAction: Load All Minerals, Load Colonists, Unload Minerals and Unload Colonists.
 const LOAD_CARGO = 62
 const LOAD_COLONISTS = 4
@@ -45,71 +45,86 @@ export const shuttleServiceJoin = (gameId, populationColumn) => `left join (sele
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). Evidence: docs/plans/backlog/evidence/AE-080-01.md, AE-081-01.md and AE-082-01.md.
 const TRANSPORT_VERSIONS = ['2.7.x']
+// The loading rules the later line states: the colony's spaceport or cargo shuttle station joins the base of a ship's strength before any officer multiplies it, and a ship with no undamaged cargo shuttle bays counts one bay, so that no ship's bays keep it from loading at a colony.
+const LOADING_VERSIONS = ['3.1.x']
 
+// Source of the later line's difference: it has no landing size, since every loader tests Ship.GetCargoShuttleTransferMultiplier against zero (rule transport.cargoEligibility) and its own term keeps only the Size <= 10m branch (rule transport.ownStrength).
 registerRule({
   id: 'transport.landingThreshold',
   versions: TRANSPORT_VERSIONS,
   units: 'HS',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size'],
-  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the rule and by the creator\'s public clarification of 500 t. The source of the later game keeps the 10 hull space branch of the shuttle rule (a class of 10 hull spaces or less takes the race\'s loading modifier as its own strength, a larger one its undamaged bays\' strength times it), but its helper that adds up a ship\'s bays returns 1 for a ship with none, so a bayless ship has a base of one there, not 0. Whether a bayless ship over 10 hull spaces may still load at a colony without a spaceport or cargo shuttle station is not settled, and this rule is registered for the earlier line only. The 1000 t limit of the later patch notes is not what the source does: its shuttle limit is 10 hull spaces, and 20 hull spaces is the light naval classification limit.',
+  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the rule and by the creator\'s public clarification of 500 t. The later line does not have this landing rule: a ship with its crew aboard loads at any colony there, so this rule is registered for the earlier line only. The 1000 t limit of the later patch notes is not what the source does: its shuttle limit is 10 hull spaces, and 20 hull spaces is the light naval classification limit.',
 })
 
+// Source of the eligibility: the loaders Ship.LoadShipComponentsFromPopulation (Ship.cs 6092-6096), Ship.LoadMineralsFromPopulation, Ship.LoadColonistsFromPopulation and the installation loaders, and the unloaders Ship.UnloadShipComponentsToPopulation, Ship.UnloadColonistsToPopulation and the mineral and installation unloaders, proceed when Ship.GetCargoShuttleTransferMultiplier is not zero and do nothing otherwise; the multiplier is the own term plus the colony term times four Logistics multipliers (Ship.cs 5150-5201), and Commander.method_5 counts an absent percentage bonus as 1. The order list's move requirement HasSelfShuttledCargoCapacity (Fleet.cs) is the only test of bays at a colony with no spaceport or cargo shuttle station, and the loaders do not repeat it.
 registerRule({
   id: 'transport.cargoEligibility',
-  versions: TRANSPORT_VERSIONS,
+  versions: LOADING_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size, Crew', 'FCT_Ship.CurrentCrew', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.CargoShuttleValue'],
-  note: 'A ship loads or unloads minerals, installations or colonists at a colony when its own strength (1 for a landing craft, else its undamaged bays) or the colony\'s spaceport or cargo shuttle station gives a positive strength, and its crew is aboard. The strength terms are checked against saved data; that a ship with no crew aboard cannot load is inferred, not checked against saved data. Ground-unit loading and ship-to-ship transfers are separate rules and are not checked here.',
+  note: 'A ship loads or unloads minerals, installations, colonists or ship components at a colony when its crew is aboard and its transfer multiplier is not zero. Every loader and unloader of the game proceeds on that test alone and does nothing otherwise. The multiplier is the ship\'s own term plus the colony\'s term, times the four officers\' Logistics multipliers. The own term is the race\'s cargo handling technology for a craft of 10 hull spaces or less and else the undamaged cargo shuttle bays\' strength times it, the sum of the bays counting as 1 for a ship with none undamaged, so a ship over 10 hull spaces with no bays, or with every bay damaged, has the technology as its own term. The multiplier is therefore positive whatever bays a ship has and whether or not the colony has a spaceport or cargo shuttle station (the technology is a whole number from 1 up and an officer\'s absent Logistics bonus counts as 1): a ship with its crew aboard loads and unloads at any colony, a bayless ship over 10 hull spaces at a colony with neither service at the technology alone, a craft of 10 hull spaces or less likewise, and a ship with bays at the technology times its bays. The game offers a cargo order at a colony with no spaceport or cargo shuttle station only to a fleet in which a ship has cargo shuttle bays in its class design or is of 10 hull spaces or less; the loaders do not repeat that test, so a stored order of a fleet of larger bayless ships at such a colony was not entered through the order list but is carried out like any other. That a ship with no crew aboard cannot load is inferred, not checked against saved data. Ground-unit loading and ship-to-ship transfers are separate rules and are not checked here.',
   assumptions: ['the colony\'s spaceports and cargo shuttle stations are the installations with a cargo shuttle value'],
 })
 
 registerRule({
   id: 'transport.handlingStrength',
-  versions: TRANSPORT_VERSIONS,
+  versions: LOADING_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_Race.CargoShuttleLoadModifier', 'DIM_PlanetaryInstallation.CargoShuttleValue'],
-  note: 'A ship\'s loading strength is its own term (1 for a craft of 10 hull spaces or less, else its undamaged bay strength) times the race\'s shuttle technology and times the officers\' Logistics factors, plus the technology once more at a colony with a spaceport or cargo shuttle station; that addition is not multiplied by any officer. Matches the game\'s rule.',
+  note: 'A ship\'s loading strength is its base times the officers\' Logistics factors. The base is the ship\'s own term (the race\'s shuttle technology for a craft of 10 hull spaces or less, else its undamaged bay strength times the technology, the bay strength counting as 1 where the ship has none) plus, at a colony with a spaceport or cargo shuttle station, the technology once more: the colony\'s addition joins the base before any officer multiplies. Read from the game\'s source and its worked examples; not compared with a loading time the game stores.',
   assumptions: ['a Logistics bonus the save cannot settle counts as 1, so the time errs long'],
 })
 
+// Source of the strength: Ship.GetCargoShuttleTransferMultiplier (Ship.cs 5150-5201) takes the race's technology for Size <= 10m and else Ship.method_159 (Ship.cs 6991-7024) times it; method_159 returns 1 for a bay sum of exactly zero, a ship built without bays and a ship with every bay damaged alike.
 registerRule({
   id: 'transport.ownStrength',
-  versions: TRANSPORT_VERSIONS,
+  versions: LOADING_VERSIONS,
   units: '×',
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent'],
-  note: 'A ship\'s own loading strength: 1 for a craft of 10 hull spaces or less, whatever bays it has, else the strength of its undamaged cargo shuttle bays. A ship with every bay damaged has none of its own.',
+  note: 'A ship\'s own loading strength: 1 for a craft of 10 hull spaces or less, whatever bays it has, else the strength of its undamaged cargo shuttle bays, which counts as 1 where there are none (a ship built without bays and a ship with every bay damaged alike), so a ship with no bays has a ship term of one.',
   assumptions: ['the bays counted are the undamaged ones of the class lines'],
 })
 
 registerRule({
   id: 'transport.shuttleTechnology',
-  versions: TRANSPORT_VERSIONS,
+  versions: LOADING_VERSIONS,
   units: '×',
   verification: 'confirmed',
   structure: ['FCT_Race.CargoShuttleLoadModifier'],
-  note: 'The race\'s cargo handling technology, the multiplier of every ship\'s own strength at a colony; the same figure is added once for a colony with a spaceport or cargo shuttle station.',
+  note: 'The race\'s cargo handling technology, the multiplier of every ship\'s own term at a colony; the same figure is added once to the base for a colony with a spaceport or cargo shuttle station.',
 })
 
 registerRule({
   id: 'transport.colonyAddition',
-  versions: TRANSPORT_VERSIONS,
+  versions: LOADING_VERSIONS,
   units: '×',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.CargoShuttleValue', 'FCT_Race.CargoShuttleLoadModifier'],
-  note: 'A colony with a spaceport or cargo shuttle station adds the race\'s cargo handling technology once to a ship\'s strength, however many it has; no officer\'s bonus multiplies it.',
+  note: 'A colony with a spaceport or cargo shuttle station adds the race\'s cargo handling technology once to the base of a ship\'s strength, however many it has, before the officers\' bonuses multiply the total.',
   assumptions: ['the colony\'s spaceports and cargo shuttle stations are the installations with a cargo shuttle value'],
 })
 
 registerRule({
   id: 'transport.handlingTime',
-  versions: TRANSPORT_VERSIONS,
+  versions: LOADING_VERSIONS,
   units: 's',
   verification: 'estimated',
   structure: ['FCT_ShipClass.CargoCapacity, ColonistCapacity, Crew', 'FCT_Ship.CurrentCrew'],
-  note: 'A stop takes the slowest ship\'s time: cargo x 20 s (colonists x 10 s) divided by its loading strength and its crew fraction, which applies once; a ship with no crew aboard cannot load and more crew than the class needs is no faster. Reproduced consistently between Hauling and Transport on both sample saves, not compared with times the game stores.',
+  note: 'A stop takes the slowest ship\'s time: cargo x 20 s (colonists x 10 s) divided by its loading strength and its crew fraction, which applies once; a ship with no crew aboard cannot load and more crew than the class needs is no faster. The cargo of a load is the free capacity of the hold, which counts the ship components it holds as it counts minerals and installations; an unload takes what the ship holds of the kind. Reproduced consistently between Hauling and Transport, not compared with times the game stores.',
   assumptions: ['every ship at the stop loads at once', 'a ship short of crew loads in proportion to the crew it has', 'a Logistics bonus the save cannot settle counts as 1'],
+})
+
+// Game.cs 6161-6172 starts Fleet.CalculateUnloadOrTransferOperationTime for 141/189; Fleet.cs 3303-3324,3331-3368 gives seconds = floor(max_ship(component.Size * Amount * Helpers.TonsPerHS(50) * Helpers.decimal_24(20) / crewFraction / (Ship.GetShipToShipCargoShuttleTransferMultiplier() + receiverBonus))). Ship.cs 5210-5222 gives that multiplier = Ship.method_159(CargoShuttleBay, false) * CargoShuttleLoadModifier * commander Logistics * parent naval command Logistics; method_159 (6991-7024) counts one for zero bays, with no small-craft exemption. receiverBonus is 1 if the destination fleet has positive CalculateComponentCapacity(CargoShuttleBay) OR CalculateComponentCapacity(MaintenanceModule), else 0; it is added after the officers, not multiplied by technology. No governor or sector applies. A missing receiver input is unavailable, never zero time. The fleet maximum is truncated to whole seconds.
+registerRule({
+  id: 'transport.componentFleetTime',
+  versions: LOADING_VERSIONS,
+  units: 's',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.CargoCapacity, Crew', 'FCT_Ship.CurrentCrew', 'FCT_ClassComponent', 'FCT_DamagedComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_Race.CargoShuttleLoadModifier'],
+  note: 'A component unload to a fleet has a handling timer: component tonnes times 20 seconds, divided by the crew fraction and by the ship transfer strength. Undamaged bay strength counts as one where there are no bays, times the technology and the ship commander and naval administration bonuses. The receiving fleet adds one after those bonuses if it has cargo shuttle bays or maintenance modules. This timer does not establish that a transfer succeeds or frees the hold.',
 })
 
 registerRule({
@@ -175,11 +190,15 @@ export const UNVERIFIED_VERSION = 'the landing and shuttle rules, though the sav
 // The sentence a note states when the save does not state its game rules, or an empty text when it does.
 export const describeFormulaVersion = (version) => (version ? '' : 'The save does not state which game rules it was played under, so the landing rule is not verified against the save.')
 
-// The largest craft, in hull spaces, that lands at a colony and loads with a strength of 1: the rule's own limit when it holds for the version, null when the version is not known or the rule is not verified for it (the patch notes' 1000 t is not the game source's shuttle limit, which stays at 10 hull spaces, and whether a bayless ship over it may load in the later game is not settled).
-export const landingThreshold = (version) => (ruleSupports('transport.landingThreshold', version) ? SMALL_CRAFT_SIZE : null)
+// The largest craft, in hull spaces, whose own loading strength is the race's technology alone whatever bays it has: the limit of the rule for a version one of them holds for, null when the version is not known (the patch notes' 1000 t is not the game source's shuttle limit, which is 10 hull spaces, and 20 hull spaces is the light naval classification limit). On the earlier line it is also the size that lands at a colony with no spaceport; on the later line (`Size <= 10m` in `Ship.GetCargoShuttleTransferMultiplier`) it is the shuttle branch of the ship's own strength alone, since no ship's bays keep it from a colony there.
+export const landingThreshold = (version) => (ruleSupports('transport.landingThreshold', version) || ruleSupports('transport.ownStrength', version) ? SMALL_CRAFT_SIZE : null)
 
-// What kind of transfer an order is: 'cargo' (minerals, installations and colonists, which the shuttle rules govern), 'troops' (ground units, which they don't), 'ship-to-ship' (fuel, supplies or cargo handed to another fleet, which need bays on the ship or the receiving fleet and give a small craft no landing exemption), or null (not a transfer).
-export const transferCategory = (moveActionId) => (LOADS[moveActionId] || UNLOADS[moveActionId] ? 'cargo' : TROOP_ACTIONS.has(moveActionId) ? 'troops' : SHIP_TO_SHIP_ACTIONS.has(moveActionId) ? 'ship-to-ship' : null)
+// Move actions that unload ship components at a colony or hand them to another fleet: Unload Ship Component and Unload All Ship Components are the only cargo unloads that take a fleet as their destination (a destination of type 10), and there the transfer is between ships, not cargo at a colony.
+const FLEET_UNLOADS = new Set([141, 189])
+const FLEET_DESTINATION = 10
+
+// What kind of transfer an order is: 'cargo' (minerals, installations, colonists and ship components at a colony, which the shuttle rules govern), 'troops' (ground units, which they don't), 'ship-to-ship' (fuel, supplies or cargo handed to another fleet, which need bays on the ship or the receiving fleet and give a small craft no landing exemption; an unload of ship components to a fleet is one, `destinationType` 10), or null (not a transfer).
+export const transferCategory = (moveActionId, destinationType = null) => (FLEET_UNLOADS.has(moveActionId) && destinationType === FLEET_DESTINATION ? 'ship-to-ship' : LOADS[moveActionId] || UNLOADS[moveActionId] ? 'cargo' : TROOP_ACTIONS.has(moveActionId) ? 'troops' : SHIP_TO_SHIP_ACTIONS.has(moveActionId) ? 'ship-to-ship' : null)
 
 // Where a ship loads or unloads: a colony, with whether a spaceport or cargo shuttle station serves it (`row.ShuttleCapacity` from `SHUTTLE_SERVICE_COLUMNS`, null when it is not read), their names, and the colony (`row.PopulationID`, null for a site with no population) and system (`row.SystemID`) whose governor, sector and naval administration give the officers' Logistics bonuses. A place with no colony (a system, a body nobody lives on) moves no cargo.
 export const colonyEndpoint = (row, place = row.PopName) => ({ place, colony: true, service: Number.isFinite(row.ShuttleCapacity) ? row.ShuttleCapacity >= 1 : null, services: row.ServiceNames || '', populationId: Number.isFinite(row.PopulationID) ? row.PopulationID : null, systemId: Number.isFinite(row.SystemID) ? row.SystemID : null })
@@ -197,6 +216,7 @@ const INPUT_NAMES = {
   'handling-version': 'a loading rule verified for the game version',
   capacity: 'a ship\'s cargo and colonist capacity',
   endpoint: 'the stop\'s colony',
+  'receiver-support': 'the receiving fleet\'s cargo shuttle bays or maintenance modules',
 }
 
 // What stands in for a stop whose endpoint was not given: nothing about it is known.
@@ -211,7 +231,10 @@ const shipNameOf = (ship) => ship.ShipName || ship.ClassName || 'A ship'
 
 const tonnes = (size) => `${size * TONNES_PER_HULL_SPACE} t`
 
-// Whether one ship can load or unload cargo at an endpoint by the game's rule: `status` 'permitted' (`via` says what lets it), 'blocked' (`reasons` names the ship or endpoint that lacks what is needed and what is missing: no crew aboard, a place with no colony, bays that are all damaged or a craft over the landing size with no bays at a colony with no spaceport or cargo shuttle station) or 'unsupported' (an input is not in the save, or the landing size is not verified for `version`, so the answer is not known). The ship is { ShipName, ClassName, Size, ShuttleStrength, DesignedShuttleStrength, CurrentCrew, ClassCrew }.
+// Whether a line's loaders can refuse a ship with no undamaged cargo shuttle bays: false where the ship's own term counts one bay for it (`Ship.method_159`), so that its transfer multiplier is positive at any colony and only the crew can stop it.
+const zeroBayBase = (version) => ruleSupports('transport.ownStrength', version)
+
+// Whether one ship can load or unload cargo at an endpoint by the game's rule: `status` 'permitted' (`via` says what lets it), 'blocked' (`reasons` names the ship or endpoint that lacks what is needed and what is missing: no crew aboard, a place with no colony and, on a line whose loaders can refuse a ship, bays that are all damaged or a craft over the landing size with no bays at a colony with no spaceport or cargo shuttle station) or 'unsupported' (an input is not in the save, or the game version is not known, so the answer is not known). Where the version's loaders test the transfer multiplier alone (`zeroBayBase`) a ship with its crew aboard loads at any colony, with or without bays, a spaceport or a cargo shuttle station; its time then needs the inputs `strengthGaps` names. The ship is { ShipName, ClassName, Size, ShuttleStrength, DesignedShuttleStrength, CurrentCrew, ClassCrew }.
 export const shipEligibility = (ship, given, version) => {
   const endpoint = endpointOf(given)
   const name = shipNameOf(ship)
@@ -237,6 +260,8 @@ export const shipEligibility = (ship, given, version) => {
 
   if (helped.length) {
     return verdict('permitted', null, '', helped)
+  } else if (zeroBayBase(version)) {
+    return verdict('permitted', null, '', [ship.Size <= SMALL_CRAFT_SIZE ? `a craft of ${tonnes(SMALL_CRAFT_SIZE)} or less` : 'one bay counted for a ship with no undamaged cargo shuttle bays'])
   } else if (!Number.isFinite(ship.Size)) {
     return verdict('unsupported', 'size', `${name}'s size is not in the save`)
   } else if (landingThreshold(version) === null) {
@@ -270,26 +295,39 @@ const GAP_TEXT = {
   bays: (name) => `${name}'s cargo shuttle bays are not in the save`,
 }
 
-// The loading strength of one ship at a stop, by the game's rule, as its terms: the ship's own strength (1 for a craft of `SMALL_CRAFT_SIZE` hull spaces or less, whatever bays it has; its undamaged bays' strength, `ShuttleStrength`, for a larger ship) times the officers' Logistics factors (`officerFactors`, 1 where an officer has no bonus or it is not known) times the race's cargo handling technology is the ship's own term `ownTerm`; the colony's spaceport or cargo shuttle station adds that technology once more, however many it has, as `additive`, which no officer multiplies. `strength` is their sum. Ships are { Size, ShuttleStrength, ShipID, NavalAdminCommandID }; `endpoint` as `colonyEndpoint` gives it; `shuttleTechnology` is the race's CargoShuttleLoadModifier; `version` the formula version; `support` the officers' bonuses. Any input that is not known (`strengthGaps`) gives null, never a guess; an officer that is not known counts as 1 and sets `estimate`.
+// The loading strength of one ship at a stop, by the game's rule, as its terms. The ship's own strength `own` is 1 for a craft of `SMALL_CRAFT_SIZE` hull spaces or less, whatever bays it has, and for a larger ship its undamaged bays' strength (`ShuttleStrength`), counted as 1 where it has none: a ship built without bays and a ship with every bay damaged alike have a ship term of one. The race's cargo handling technology times `own` is the ship's own term `ownTerm`; the colony's spaceport or cargo shuttle station adds that technology once more, however many it has, as `additive`; their sum is the `base`, and the officers' Logistics factors (`officerFactors`, 1 where an officer has no bonus or it is not known) multiply the whole base, the colony's addition included. `strength` is the base times the officers' product `officers`. Ships are { Size, ShuttleStrength, ShipID, NavalAdminCommandID }; `endpoint` as `colonyEndpoint` gives it; `shuttleTechnology` is the race's CargoShuttleLoadModifier; `version` the formula version; `support` the officers' bonuses. Any input that is not known (`strengthGaps`) gives null, never a guess; an officer that is not known counts as 1 and sets `estimate`.
 export const handlingBreakdown = (ship, endpoint, shuttleTechnology, version = null, support = null) => {
   if (strengthGaps(ship, endpoint, shuttleTechnology, version).length) {
     return null
   }
 
-  const own = ship.Size <= SMALL_CRAFT_SIZE ? 1 : ship.ShuttleStrength
+  const own = ship.Size <= SMALL_CRAFT_SIZE || !(ship.ShuttleStrength > 0) ? 1 : ship.ShuttleStrength
   const stack = stackFactors(officerFactors(ship, endpoint, support))
-  const ownTerm = own * stack.product * shuttleTechnology
+  const ownTerm = own * shuttleTechnology
   const additive = endpoint.service ? shuttleTechnology : 0
+  const base = ownTerm + additive
 
-  return { own, factors: stack.factors, officers: stack.product, technology: shuttleTechnology, ownTerm, additive, strength: ownTerm + additive, estimate: stack.estimate, known: stack.known, unknown: stack.unknown }
+  return { own, factors: stack.factors, officers: stack.product, technology: shuttleTechnology, ownTerm, additive, base, strength: base * stack.product, estimate: stack.estimate, known: stack.known, unknown: stack.unknown }
+}
+
+// `TargetCargoSupport` is the receiving fleet's addition (0 or 1), null when not read; it is not a colony service or a landing exemption.
+const shipTransferBreakdown = (ship, order, shuttleTechnology, support) => {
+  const endpoint = { place: order.label, populationId: null, systemId: order.SystemID }
+  const stack = stackFactors(officerFactors(ship, endpoint, support).filter((factor) => factor.key === 'commander' || factor.key === 'admin'))
+  const own = ship.ShuttleStrength === 0 ? 1 : ship.ShuttleStrength
+  const shipTerm = own * shuttleTechnology
+  const additive = order.TargetCargoSupport
+
+  return { own, factors: stack.factors, officers: stack.product, technology: shuttleTechnology, ownTerm: shipTerm, additive, base: shipTerm, strength: shipTerm * stack.product + additive, estimate: stack.estimate, known: stack.known, unknown: stack.unknown }
 }
 
 // Seconds a group of ships spends loading or unloading at one stop: every ship works at once, each taking cargo x 20 s (colonists x 10 s) / (its `handlingBreakdown` strength x its crew fraction), so the stop takes the slowest ship's time. A ship short of crew takes Class Crew / Current Crew times as long, once; an over-crewed ship is no faster and a ship with no crew aboard cannot load (docs `crew-and-commanders`, v2.6).
 // `ships`: [{ ShipName, ClassName, ShipID, NavalAdminCommandID, CargoCapacity, ColonistCapacity, Size, ShuttleStrength, DesignedShuttleStrength, CurrentCrew, ClassCrew }]; `order`: { MoveActionID, endpoint } (an endpoint as `colonyEndpoint` gives it); `share`: the part of a full load moved; `version`: the formula version for the landing size (`loadFormulaVersion`); `support`: the officers' Logistics bonuses (`loadHandlingSupport`), `CLASS_ONLY` for a class plan, null when not read.
 // Returns `seconds` (null when a ship at the stop can't load or its eligibility is not known), `limiting` (the ship that takes longest, null when none has anything to move), `strength` (its loading strength), `breakdown` (that ship's factors as `handlingBreakdown` gives them, with its `crew` share and `seconds`), `estimate` (an officer's bonus at the stop is not known, so the time is counted without it and errs long) with the officers whose bonus `known` applies and `unknown` is not settled, and `eligibility`: { status: 'permitted' | 'blocked' | 'unsupported', category, appliesCargoRules, via, reasons, checked, version }, `reasons` each { status, code, text, ship, endpoint } naming the responsible ship or endpoint and what is missing. An order that is not a cargo load or unload (`transferCategory`: troops, ship-to-ship transfers, anything else) isn't judged by the cargo rules: `appliesCargoRules` is false and nothing about it is rejected here.
 export const stopHandling = (order, ships, shuttleTechnology, share = 1, { version = null, support = null } = {}) => {
-  const category = transferCategory(order.MoveActionID)
-  const kind = LOADS[order.MoveActionID] || UNLOADS[order.MoveActionID]
+  const category = transferCategory(order.MoveActionID, order.DestinationType)
+  const fleetComponents = category === 'ship-to-ship' && FLEET_UNLOADS.has(order.MoveActionID)
+  const kind = category === 'cargo' || fleetComponents ? LOADS[order.MoveActionID] || UNLOADS[order.MoveActionID] : null
 
   if (!kind) {
     return { seconds: 0, limiting: null, strength: 0, breakdown: null, estimate: false, known: [], unknown: [], eligibility: { status: 'unsupported', category, appliesCargoRules: false, via: [], reasons: [], checked: 0, version } }
@@ -323,7 +361,8 @@ export const stopHandling = (order, ships, shuttleTechnology, share = 1, { versi
 
     checked += 1
 
-    const verdict = shipEligibility(ship, endpoint, version)
+    const crew = crewFraction(ship)
+    const verdict = fleetComponents ? { status: crew === null ? 'unsupported' : crew === 0 ? 'blocked' : 'permitted', via: ['ship-to-ship cargo shuttles'], reasons: crew === null || crew === 0 ? [{ status: crew === null ? 'unsupported' : 'blocked', code: 'crew', text: `${name}'s crew is ${crew === null ? 'not in the save' : 'not aboard'}`, ship: name, endpoint: endpoint.place }] : [] } : shipEligibility(ship, endpoint, version)
 
     reasons.push(...verdict.reasons)
 
@@ -333,16 +372,15 @@ export const stopHandling = (order, ships, shuttleTechnology, share = 1, { versi
 
     verdict.via.forEach((source) => via.add(source))
 
-    const gaps = strengthGaps(ship, endpoint, shuttleTechnology, version)
+    const gaps = fleetComponents ? [shuttleTechnology > 0 ? null : 'technology', Number.isFinite(ship.ShuttleStrength) ? null : 'bays', ruleSupports('transport.componentFleetTime', version) ? null : 'handling-version', order.TargetCargoSupport === 0 || order.TargetCargoSupport === 1 ? null : 'receiver-support'].filter(Boolean) : strengthGaps(ship, endpoint, shuttleTechnology, version)
 
     if (gaps.length) {
-      reasons.push(...gaps.map((gap) => ({ status: 'unsupported', code: gap, text: GAP_TEXT[gap](name, endpoint.place), ship: name, endpoint: endpoint.place })))
+      reasons.push(...gaps.map((gap) => ({ status: 'unsupported', code: gap, text: gap === 'receiver-support' ? 'the receiving fleet\'s cargo shuttle bays or maintenance modules are not read' : GAP_TEXT[gap](name, endpoint.place), ship: name, endpoint: endpoint.place })))
 
       return
     }
 
-    const breakdown = handlingBreakdown(ship, endpoint, shuttleTechnology, version, support)
-    const crew = crewFraction(ship)
+    const breakdown = fleetComponents ? shipTransferBreakdown(ship, order, shuttleTechnology, support) : handlingBreakdown(ship, endpoint, shuttleTechnology, version, support)
     const shipSeconds = (amount * HANDLING_SECONDS[kind]) / (breakdown.strength * crew)
 
     entries.push(breakdown)
@@ -359,7 +397,7 @@ export const stopHandling = (order, ships, shuttleTechnology, share = 1, { versi
   const status = unique.some((reason) => reason.status === 'blocked') ? 'blocked' : unique.length ? 'unsupported' : 'permitted'
   const merged = mergeFactors(entries.map((entry) => entry.factors))
 
-  return { seconds: unique.length ? null : seconds, limiting, strength, breakdown: slowest, estimate: merged.some((factor) => factor.state === 'unknown'), known: merged.filter((factor) => factor.state === 'applies'), unknown: merged.filter((factor) => factor.state === 'unknown'), eligibility: { status, category, appliesCargoRules: true, via: [...via], reasons: unique, checked, version } }
+  return { seconds: unique.length ? null : fleetComponents ? Math.floor(seconds) : seconds, limiting, strength, breakdown: slowest, estimate: merged.some((factor) => factor.state === 'unknown'), known: merged.filter((factor) => factor.state === 'applies'), unknown: merged.filter((factor) => factor.state === 'unknown'), eligibility: { status, category, appliesCargoRules: !fleetComponents, via: [...via], reasons: unique, checked, version } }
 }
 
 // Whether a fleet can transit an unstabilised jump point on its own: each group of its ships (military engines and commercial engines, ships in a hangar left out) needs a jump drive in the group that is rated for the group's largest ship. Commercial ships count commercial jump drives too; military ships don't. Ships are [{ Size, MilitaryEngines, Drive, AnyDrive, MothershipID }], `Drive` the best ordinary jump drive of the class and `AnyDrive` the best of any kind, as ship sizes.
@@ -503,7 +541,7 @@ export const tripResult = (trip) => {
   return null
 }
 
-// The loading strength of each stop as table rows for the breakdown panel: one row per stop that moves cargo, `stops` being [{ key, label, breakdown }] with each `breakdown` as `stopHandling` gives it (null for a stop that moves nothing, which has no row). A row carries the ship that sets the stop, its own strength, each officer's factor with the `cell` that shows it, the technology, the colony's additive term, the crew share, the strength and the seconds, and a provenance result for each: `result` of the strength (the officers whose bonus applies are inputs it read, the unknown ones inputs it lacked), `results` of the own strength, the technology, the colony's addition, the crew share and the seconds, and the `result` of each officer's factor (unavailable for an officer the save cannot settle, which the strength counts as 1).
+// The loading strength of each stop as table rows for the breakdown panel: one row per stop that moves cargo, `stops` being [{ key, label, breakdown }] with each `breakdown` as `stopHandling` gives it (null for a stop that moves nothing, which has no row). A row carries the ship that sets the stop, its own strength, the technology, the colony's additive term, the `base` those make (the own strength times the technology, plus the colony's addition), each officer's factor with the `cell` that shows it, the crew share, the strength (the base times the officers) and the seconds, and a provenance result for each: `result` of the strength (the officers whose bonus applies are inputs it read, the unknown ones inputs it lacked), `results` of the own strength, the technology, the colony's addition, the crew share and the seconds, and the `result` of each officer's factor (unavailable for an officer the save cannot settle, which the strength counts as 1).
 export const handlingRows = (stops) => stops.filter((stop) => stop.breakdown).map(({ key, label, breakdown }) => {
   const { inputs, assumptions } = bonusProvenance(breakdown)
   const officerResult = (factor) => {
@@ -524,6 +562,7 @@ export const handlingRows = (stops) => stops.filter((stop) => stop.breakdown).ma
     technology: breakdown.technology,
     ownTerm: breakdown.ownTerm,
     additive: breakdown.additive,
+    base: breakdown.base,
     crew: breakdown.crew,
     strength: breakdown.strength,
     seconds: breakdown.seconds,

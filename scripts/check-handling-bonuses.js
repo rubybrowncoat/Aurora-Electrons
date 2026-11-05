@@ -2,7 +2,7 @@
   Checks how the officers' Logistics bonuses stack on a ship's loading strength (src/renderer/utilities/handling-bonuses.js, handling-support.js, naval-admins.js, transport.js, hauling.js, haul-plan.js, the breakdown component and the Transport and Hauling pages) without a save.
 
   Every statement runs on ships, colonies, officers and a database made here and on the real utilities, component and pages. Nothing is read from a save. The statements cover the acceptance of AE-082-01:
-  - the ship's own term changes with each applicable officer bonus (the ship commander, the naval admin chain at the stop's system, the colony governor, the sector commander), and the colony's additive term does not;
+  - the officers' Logistics bonuses multiply the whole base strength, the colony's addition included, and a ship's own term does not change with them;
   - a crew deficit applies once, an over-crewed ship is no faster and a ship with no crew aboard cannot load;
   - Transport (the round trip and the fleets sailing together), Hauling (the cycle) and the repeated scenarios (the class plans) share one breakdown of the factors, and the pages hand the loaded officers to it;
   - an officer the save cannot settle makes the figure an estimate that lists the officers it knows, and an officer with no row is no bonus, not an unknown;
@@ -62,7 +62,7 @@ const memo = (make) => {
 }
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
-const VERSION = '2.7.1'
+const VERSION = '3.1.x'
 // The race's cargo shuttle technology (the load modifier): every strength below is worked from it by hand.
 const TECH = 1.5
 const IDS = { GameID: 1, RaceID: 2 }
@@ -224,7 +224,7 @@ const check = (name, description, run) => CHECKS.push({ name, description, run }
 
 const STORE = { getters: { 'capabilities/result': {}, 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }
 
-check('ship-term', 'the ship\'s own term changes with each applicable officer bonus and with no other, and the colony\'s additive term stays what the race\'s technology gives', async (w) => {
+check('ship-term', 'the officers\' bonuses multiply the base strength (the ship\'s own term and the colony\'s addition) and the ship\'s own term and the colony\'s addition stay what the bays and the race\'s technology give', async (w) => {
   const { transport } = await w.modules()
   const at = (sup, shipExtra = {}, row = {}) => transport.handlingBreakdown(ship(shipExtra), transport.colonyEndpoint(colony(row)), TECH, VERSION, sup)
   const bare = at(support())
@@ -252,13 +252,14 @@ check('ship-term', 'the ship\'s own term changes with each applicable officer bo
 
       assert.deepEqual(states(found.factors), { ...states(bare.factors), [key]: 'applies' }, `${key} alone applies`)
       near(found.officers, factor, `${key} product`)
-      near(found.ownTerm, 2 * factor * TECH, `${key} own term`)
+      near(found.ownTerm, 2 * TECH, `${key} leaves the own term`)
       near(found.additive, TECH, `${key} leaves the additive term`)
-      near(found.strength, found.ownTerm + found.additive, `${key} strength`)
-      seen.push(found.ownTerm)
+      near(found.base, 3 * TECH, `${key} leaves the base`)
+      near(found.strength, (2 * TECH + TECH) * factor, `${key} strength`)
+      seen.push(found.strength)
     }
 
-    assert.ok(seen[0] < seen[1] && seen[1] < seen[2], `${key}: a larger bonus gives a larger own term`)
+    assert.ok(seen[0] < seen[1] && seen[1] < seen[2], `${key}: a larger bonus gives a larger strength`)
   }
 
   const full = at(FULL())
@@ -266,15 +267,16 @@ check('ship-term', 'the ship\'s own term changes with each applicable officer bo
   assert.deepEqual(states(full.factors), { commander: 'applies', admin: 'applies', governor: 'applies', sector: 'applies' })
   near(full.officers, FULL_PRODUCT)
   near(full.officers, full.factors.reduce((product, factor) => product * factor.value, 1))
-  near(full.ownTerm, 2 * FULL_PRODUCT * TECH)
+  near(full.ownTerm, 2 * TECH)
   near(full.additive, TECH)
-  near(full.strength, 2 * FULL_PRODUCT * TECH + TECH)
+  near(full.strength, (2 * TECH + TECH) * FULL_PRODUCT)
 
-  // A landing craft's own strength is 1 whatever bays it has, and the officers multiply that.
+  // A landing craft's own strength is 1 whatever bays it has, and the officers multiply the base it makes with the colony's addition.
   const small = at(FULL(), { Size: 10, ShuttleStrength: 9 })
 
   near(small.own, 1)
-  near(small.ownTerm, FULL_PRODUCT * TECH)
+  near(small.ownTerm, TECH)
+  near(small.strength, (TECH + TECH) * FULL_PRODUCT)
 
   // A stop with no colony has no governor and no sector commander; a colony with no officer row has none either.
   const site = at(FULL(), {}, { PopulationID: null })
@@ -283,7 +285,7 @@ check('ship-term', 'the ship\'s own term changes with each applicable officer bo
   near(site.officers, 1.2 * 1.05)
 })
 
-check('additive', 'what a spaceport or cargo shuttle station adds is the race\'s technology once, whatever the officers and however many stations, and no officer multiplies it', async (w) => {
+check('additive', 'what a spaceport or cargo shuttle station adds is the race\'s technology once, however many stations, and it joins the base the officers multiply', async (w) => {
   const { transport } = await w.modules()
   const at = (sup, row = {}, shipExtra = {}) => transport.handlingBreakdown(ship(shipExtra), transport.colonyEndpoint(colony(row)), TECH, VERSION, sup)
 
@@ -292,17 +294,18 @@ check('additive', 'what a spaceport or cargo shuttle station adds is the race\'s
       const found = at(sup, { ShuttleCapacity: stations })
 
       near(found.additive, TECH, `${stations} stations`)
-      near(found.strength - found.ownTerm, TECH, `${stations} stations`)
+      near(found.base, found.ownTerm + TECH, `${stations} stations`)
+      near(found.strength, (found.ownTerm + TECH) * found.officers, `${stations} stations`)
     }
   }
 
   near(at(FULL()).additive, at(support()).additive, 'the additive term is the same with and without officers')
-  assert.ok(at(FULL()).ownTerm > at(support()).ownTerm)
+  assert.ok(at(FULL()).strength > at(support()).strength)
 
   const unserved = at(FULL(), { ShuttleCapacity: 0 })
 
   near(unserved.additive, 0)
-  near(unserved.strength, unserved.ownTerm)
+  near(unserved.strength, unserved.ownTerm * unserved.officers)
   assert.equal(at(FULL(), { ShuttleCapacity: null }), null, 'a colony whose service is not in the save has no strength')
   assert.equal(at(FULL(), {}, { ShuttleStrength: null }), null, 'a ship whose bays are not in the save has no strength')
 })
@@ -312,7 +315,7 @@ check('crew', 'a crew deficit applies once, an over-crewed ship is no faster and
   const endpoint = transport.colonyEndpoint(colony())
   const run = (extra) => transport.stopHandling({ MoveActionID: 62, endpoint }, [ship(extra)], TECH, 1, { version: VERSION, support: FULL() })
   const full = run({})
-  const strength = 2 * FULL_PRODUCT * TECH + TECH
+  const strength = (2 * TECH + TECH) * FULL_PRODUCT
 
   near(full.strength, strength)
   near(full.seconds, (1000 * 20) / strength)
@@ -400,7 +403,7 @@ check('estimate', 'an officer the save cannot settle makes the figure an estimat
   assert.deepEqual(found.unknown.map((factor) => factor.key), ['governor'])
   assert.deepEqual(states(found.breakdown.factors), { commander: 'applies', admin: 'applies', governor: 'unknown', sector: 'applies' })
   near(found.breakdown.officers, 1.2 * 1.05 * 1.1, 'the unknown governor counts as 1')
-  near(found.seconds, (1000 * 20) / (2 * 1.2 * 1.05 * 1.1 * TECH + TECH), 'the time counts the officers it knows')
+  near(found.seconds, (1000 * 20) / ((2 * TECH + TECH) * 1.2 * 1.05 * 1.1), 'the time counts the officers it knows')
 
   const settled = stop(FULL())
 
@@ -894,8 +897,8 @@ check('rows', 'the breakdown rows carry each term of the strength, a cell that t
   near(row.technology, TECH)
   near(row.additive, TECH)
   near(row.crew, 0.5)
-  near(row.ownTerm, 2 * 1.2 * TECH)
-  near(row.strength, 2 * 1.2 * TECH + TECH)
+  near(row.ownTerm, 2 * TECH)
+  near(row.strength, (2 * TECH + TECH) * 1.2)
   assert.equal(row.estimate, true)
   assert.equal(new Set(Object.values(cells)).size, 3, 'a bonus, none and unknown show differently')
   assert.equal(cells.sector, cells.admin, 'two officers with no bonus show alike')
@@ -1002,7 +1005,7 @@ check('pages', 'the Hauling and Transport pages hand the officers they read to t
   assert.deepEqual(origin.factors.map((factor) => factor.key), names)
   assert.deepEqual(states(origin.factors), { commander: 'applies', admin: 'applies', governor: 'applies', sector: 'applies' })
   assert.deepEqual(states(site.factors), { commander: 'applies', admin: 'applies', governor: 'none', sector: 'applies' }, 'a colony with no governor row has none')
-  near(origin.ownTerm, 2 * FULL_PRODUCT * TECH)
+  near(origin.ownTerm, 2 * TECH)
   near(origin.additive, TECH)
   assert.equal(loaded.estimate, false)
 
@@ -1380,7 +1383,7 @@ const BENIGN = [
 // The old unhandled SQL-rejection outcome is not itself retained or credited at either index.
 
 const FAULTS = [
-  swap('the colony\'s additive term is multiplied by the officers', 'transport', 'const additive = endpoint.service ? shuttleTechnology : 0', 'const additive = endpoint.service ? shuttleTechnology * stack.product : 0', ['additive', 'ship-term']),
+  swap('the colony\'s addition is left out of the officer product', 'transport', 'strength: base * stack.product', 'strength: ownTerm * stack.product + additive', ['additive', 'ship-term']),
   swap('the colony adds the technology twice', 'transport', 'const additive = endpoint.service ? shuttleTechnology : 0', 'const additive = endpoint.service ? shuttleTechnology * 2 : 0', ['additive']),
   swap('the sector commander\'s bonus is taken in full', 'bonuses', 'const SECTOR_SHARE = 0.25', 'const SECTOR_SHARE = 1', ['ship-term']),
   edit('the governor is left out', 'bonuses', /personal\('governor',\s*support\.governors,\s*endpoint\.populationId,[^)]*\)/, () => "none('governor', 'x')", ['ship-term']),
@@ -1392,7 +1395,7 @@ const FAULTS = [
   swap('the crew deficit is applied twice', 'transport', '(amount * HANDLING_SECONDS[kind]) / (breakdown.strength * crew)', '(amount * HANDLING_SECONDS[kind]) / (breakdown.strength * crew * crew)', ['crew']),
   swap('an over-crewed ship loads faster', 'crew', 'Math.min(1, Math.max(0, ship.CurrentCrew) / ship.ClassCrew)', 'Math.max(0, ship.CurrentCrew) / ship.ClassCrew', ['crew']),
   swap('a ship with no crew aboard is let through', 'transport', '} else if (share === 0) {', '} else if (false) {', ['crew']),
-  swap('the crew deficit is folded into the strength', 'transport', 'const ownTerm = own * stack.product * shuttleTechnology', 'const ownTerm = own * stack.product * shuttleTechnology * (crewFraction(ship) || 1)', ['crew']),
+  swap('the crew deficit is folded into the strength', 'transport', 'const ownTerm = own * shuttleTechnology', 'const ownTerm = own * shuttleTechnology * (crewFraction(ship) || 1)', ['crew']),
   swap('an unknown officer does not make the figure an estimate', 'bonuses', 'estimate: factors.some((factor) => factor.state === \'unknown\'),', 'estimate: false,', ['estimate']),
   swap('an officer unknown for one ship is hidden by another', 'bonuses', 'const rank = { unknown: 2, applies: 1, none: 0 }', 'const rank = { unknown: 0, applies: 1, none: 2 }', ['estimate']),
   swap('the estimate does not name the officers it lacks', 'bonuses', 'missing: unknown.map(', 'missing: [].map(', ['estimate', 'rows']),

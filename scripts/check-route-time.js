@@ -54,7 +54,7 @@ const near = (actual, expected, epsilon = 1e-9) => assert.ok(typeof actual === '
 
 // ---------- the fixture ----------
 
-const VERSION = '2.7.1'
+const VERSION = '3.1.x'
 const TECH = 1.5
 const SPEED = 100
 const SHOCK = { lo: 121, hi: 180 }

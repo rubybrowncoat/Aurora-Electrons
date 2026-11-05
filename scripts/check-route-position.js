@@ -1891,7 +1891,7 @@ check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off
     const destination = place(8, other)
     const reach = { route: graph.searchRoutes([], [origin]).toPlace(destination), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
     const ship = HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })
-    const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, other]), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
+    const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, other]), handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
 
     assert.equal(vm.fleetRuns.length, 1, speed + ' km/s: the fleet is timed')
     vm.fleetRuns.forEach((run) => {
@@ -1908,7 +1908,7 @@ check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off
   const destination = place(8, planet)
   const reach = { route: graph.searchRoutes([], [origin]).toPlace(destination), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
   const ship = HAULER({ MaxSpeed: 20, FleetSpeed: 20, EnginePower: 0.4, UndamagedEnginePower: 0.4, UseMaximumSpeed: 0 })
-  const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, planet]), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
+  const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, planet]), handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
   const moved = rp.positionRecord(rp.placeEndpoint(destination), { facts: { ...facts, orbits: orbitsOf([asteroid, planet]) }, adapters: rp.ADAPTERS, from: rp.placeEndpoint(origin), speed: 20 })
 
   assert.equal(moved.basis, 'propagated', 'the planet is worked out on its own')
@@ -1936,7 +1936,7 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
   const there = place('fleet', 7, { SystemID: 2, Xcor: 5, Ycor: 5 })
   const route = modules['jump-graph'].searchRoutes(LINKS, [{ SystemID: 1, Xcor: 10, Ycor: 5 }], { order: 'jumps', lagrangePoints: LAGRANGE }).toPlace(there)
   const reach = { route, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
-  const make = (facts, data = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
+  const make = (facts, data = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
   const group = { FleetID: 5, FleetName: 'Convoy', civilian: false }
   const shipClass = { ShipClassID: 1, ClassName: 'Freighter', ships: [HAULER()] }
   const ends = { origin: transport.colonyEndpoint(COLONY()), destination: transport.colonyEndpoint(COLONY({ PopulationID: 8, ShuttleCapacity: 0 })) }
@@ -2093,7 +2093,7 @@ check('pages-hauling-mixed', 'Hauling states what every independent simulation s
   const classOf = (name, speed) => HAULER({ Ships: 2, ClassName: name, ShipClassID: speed, MaxSpeed: speed })
   const FAST = 1500
   const SLOW = 10
-  const make = (classes, speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: speeds.map((speed, index) => fleetOf(5 + index, speed)), orders: speeds.flatMap((_speed, index) => [order(5 + index, 1), order(5 + index, 2, unload)]), fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: `Convoy ${5 + index}`, ShipID: 1 + index, MaxSpeed: speed, FleetSpeed: speed, UseMaximumSpeed: 0 })), formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: classes.map(([name, speed]) => classOf(name, speed)), shuttleTechnology: 1.5, mineralDeliveries: {} } })
+  const make = (classes, speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: speeds.map((speed, index) => fleetOf(5 + index, speed)), orders: speeds.flatMap((_speed, index) => [order(5 + index, 1), order(5 + index, 2, unload)]), fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: `Convoy ${5 + index}`, ShipID: 1 + index, MaxSpeed: speed, FleetSpeed: speed, UseMaximumSpeed: 0 })), formulaVersion: '3.1.x', plan: { hauls: [haul], unmet: [] }, freighters: classes.map(([name, speed]) => classOf(name, speed)), shuttleTechnology: 1.5, mineralDeliveries: {} } })
   const codesOf = (positions) => positions.conditions.map((one) => one.code)
 
   ;[[['Fast', FAST], ['Slow', SLOW]], [['Slow', SLOW], ['Fast', FAST]]].forEach((classes) => {
@@ -2139,7 +2139,7 @@ check('pages-transport-mixed', 'Transport states what every independent run stat
   const there = place(8, 1)
   const km = Math.hypot(rocks[0].xcor - rocks[1].xcor, rocks[0].ycor - rocks[1].ycor)
   const reach = { route: { km, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: km, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
-  const make = (speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: 'Convoy ' + (5 + index), ShipID: 1 + index, FleetSpeed: speed, MaxSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })) } })
+  const make = (speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin: here, destination: there, reachOf: () => reach, fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: 'Convoy ' + (5 + index), ShipID: 1 + index, FleetSpeed: speed, MaxSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })) } })
 
   ;[[10, 100000], [100000, 10]].forEach((speeds) => {
     const order = speeds.join(' then ')
@@ -2175,7 +2175,7 @@ check('pages-saved-distance', 'Hauling and Transport state each figure with the 
   const unload = { ActionName: 'Unload', MoveActionID: 63, Description: 'Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: rocks[1].xcor, Y: rocks[1].ycor, ExitX: rocks[1].xcor, ExitY: rocks[1].ycor }
   const km = Math.hypot(rocks[0].xcor - rocks[1].xcor, rocks[0].ycor - rocks[1].ycor)
   const haul = { from: colony(7, 0), to: colony(8, 1), km, jumps: 0, tonnes: 1100, queue: 100, minerals: [], detour: null }
-  const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: SPEED_KM, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: SPEED_KM, FleetSpeed: SPEED_KM, UseMaximumSpeed: 0 })], formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Fast', ShipClassID: 1, MaxSpeed: SPEED_KM })], shuttleTechnology: 1.5, mineralDeliveries: {} } })
+  const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: SPEED_KM, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: SPEED_KM, FleetSpeed: SPEED_KM, UseMaximumSpeed: 0 })], formulaVersion: '3.1.x', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Fast', ShipClassID: 1, MaxSpeed: SPEED_KM })], shuttleTechnology: 1.5, mineralDeliveries: {} } })
   const [planned] = vm.planRows
   const flownClass = planned.estimates.find((estimate) => estimate.flown)
   const [fleet] = vm.routeRows
@@ -2206,7 +2206,7 @@ check('pages-saved-distance', 'Hauling and Transport state each figure with the 
   const there = place(8, 1)
   const reach = { route: { km, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: km, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
   const ship = (extra) => HAULER({ MaxSpeed: SPEED_KM, FleetSpeed: SPEED_KM, EnginePower: SPEED_KM / 50, UndamagedEnginePower: SPEED_KM / 50, UseMaximumSpeed: 0, ...extra })
-  const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: [ship()] } })
+  const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin: here, destination: there, reachOf: () => reach, fleetShips: [ship()] } })
   const [flownFleet] = run.fleetRuns
   const ends = { origin: modules.transport.colonyEndpoint(COLONY()), destination: modules.transport.colonyEndpoint(COLONY({ PopulationID: 8, ShuttleCapacity: 0 })) }
   const classRun = { ...run.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship()] }, reach, ends), ...run.safeFields(reach) }
@@ -2257,7 +2257,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const there = place(8, 1)
     const reach = { route: { km: distance, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: distance, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
     const ship = speed === null ? null : HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0, ...(scenario.tank || {}) })
-    const vm = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: ship ? [ship] : [] } })
+    const vm = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: ship ? [ship] : [] } })
     const classRows = ship ? [{ ...vm.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship] }, reach, vm.endpoints), ...vm.safeFields(reach) }] : []
     const rows = [...classRows, ...vm.fleetRuns]
     const label = 'Transport, ' + scenario.name
@@ -2292,7 +2292,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const route = modules['jump-graph'].searchRoutes(LINKS, [{ SystemID: 1, Xcor: 10, Ycor: 5 }], { order: 'jumps', lagrangePoints: LAGRANGE }).toPlace(there)
     const reach = { route, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
 
-    return instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: UNSURE, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })] } })
+    return instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: UNSURE, handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin: here, destination: there, reachOf: () => reach, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })] } })
   })()
 
   assert.ok(crossing.endpointPositions.records.some((record) => record.identity.family === 'lagrange-point'), 'the strip lists the Lagrange points the saved distance rests on')
@@ -2305,7 +2305,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const unload = { ActionName: 'Unload', MoveActionID: 63, Description: 'Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: rocks[1].xcor, Y: rocks[1].ycor, ExitX: rocks[1].xcor, ExitY: rocks[1].ycor }
     const haul = { from: colony(7, 0), to: colony(8, 1), km: km(rocks), jumps: 0, tonnes: 1100, queue: 100, minerals: [], detour: null }
     const some = speed !== null
-    const data = { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, fleets: some ? [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }] : [], orders: some ? [order(1), order(2, unload)] : [], fleetShips: some ? [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })] : [], formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: some ? [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed, ...(scenario.tank || {}) })] : [], shuttleTechnology: 1.5, mineralDeliveries: {} }
+    const data = { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, fleets: some ? [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }] : [], orders: some ? [order(1), order(2, unload)] : [], fleetShips: some ? [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })] : [], formulaVersion: '3.1.x', plan: { hauls: [haul], unmet: [] }, freighters: some ? [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed, ...(scenario.tank || {}) })] : [], shuttleTechnology: 1.5, mineralDeliveries: {} }
     const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data })
     const label = 'Hauling, ' + scenario.name
     const [planned] = vm.planRows
@@ -2421,7 +2421,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
 
     // Transport: the class row, the fleet row and the strip.
     const ship = HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })
-    const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: kind.origin, destination: kind.destination, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship] } })
+    const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.1.x', origin: kind.origin, destination: kind.destination, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship] } })
     const classRow = { ...run.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship] }, reach, run.endpoints), ...run.safeFields(reach) }
 
     ;[classRow, ...run.fleetRuns].forEach((row) => {
@@ -2470,7 +2470,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
       const order = (id, extra) => ({ FleetID: 5, OrderDelay: 0, ActionName: 'Load', Jumps: 0, ExitSystemID: 1, SystemID: 1, DestinationType: 2, DestinationID: id, MoveActionID: 62, Description: 'Load', PopName: 'Mars', PopulationID: 7, ShuttleCapacity: 1, ServiceNames: 'Spaceport', X: rocks[0].xcor, Y: rocks[0].ycor, ExitX: rocks[0].xcor, ExitY: rocks[0].ycor, ...extra, MoveOrder: id })
       const unload = { ActionName: 'Unload', MoveActionID: 63, Description: 'Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: rocks[1].xcor, Y: rocks[1].ycor, ExitX: rocks[1].xcor, ExitY: rocks[1].ycor }
       const haul = { from: colony(7, 0), to: colony(8, 1), km: Math.hypot(rocks[0].xcor - rocks[1].xcor, rocks[0].ycor - rocks[1].ycor), jumps: 0, tonnes: 1100, queue: 100, minerals: [], detour: null }
-      const data = { loadErrors: loadErrorsOf(null), positionFacts: factsOf(colonies, motion), orbitFacts: orbitsOf(rocks), handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })], formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed })], shuttleTechnology: 1.5, mineralDeliveries: {} }
+      const data = { loadErrors: loadErrorsOf(null), positionFacts: factsOf(colonies, motion), orbitFacts: orbitsOf(rocks), handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })], formulaVersion: '3.1.x', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed })], shuttleTechnology: 1.5, mineralDeliveries: {} }
       const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data })
       const [planned] = vm.planRows
       const [fleet] = vm.routeRows
@@ -2500,7 +2500,7 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   const haul = (from, to) => ({ from: COLONY({ PopulationID: from, PopName: `Colony ${from}` }), to: COLONY({ PopulationID: to, PopName: `Colony ${to}`, Xcor: 3 * KM }), km: 3 * KM, jumps: 1, tonnes: 1100, queue: 100, minerals: [], detour: null })
   const hauls = [haul(7, 8), haul(7, 9)]
 
-  const make = (facts, extra = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, fleets: [fleet(5), fleet(6)], orders, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], formulaVersion: '2.7.1', plan: { hauls, unmet: [] }, freighters: [HAULER({ Ships: 2 })], shuttleTechnology: 1.5, mineralDeliveries: {}, ...extra } })
+  const make = (facts, extra = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, fleets: [fleet(5), fleet(6)], orders, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], formulaVersion: '3.1.x', plan: { hauls, unmet: [] }, freighters: [HAULER({ Ships: 2 })], shuttleTechnology: 1.5, mineralDeliveries: {}, ...extra } })
   const vm = make(UNSURE)
 
   // A route simulation is kept under the delay of its orders and a haul simulation under the path it flies: the same again is the one kept, a change of either is worked out afresh and equals what it is with nothing kept.

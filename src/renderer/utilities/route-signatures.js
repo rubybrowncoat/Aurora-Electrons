@@ -5,7 +5,7 @@
 // A group is the fleets with one route key and one conditional set. Every group, and each fleet in it, names the stored orders it was inferred from (`orders`), so an inference can always be traced back.
 
 import { place } from './deep-links'
-import { ITEM_LOADS, ITEM_UNLOADS } from './cargo-actions'
+import { ITEM_LOADS, ITEM_UNLOADS, QUANTITY_UNLOADS } from './cargo-actions'
 import { orderPlaceKey } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, UNLOADS } from './transport'
@@ -187,7 +187,7 @@ const endpointKey = (order, raceId) => {
 // The system the fleet is in after an order: the far side of a transit, else where the order starts.
 const endSystemOf = (order, action) => (isTransit(order, action) ? order.NewSystemID : order.StartSystemID)
 
-// The three parts of one order: `path` (what it passes or goes to), `service` (what it does there) and `pacing` (its delay), with `stop` (the place key of an order that goes to a place, null for a jump), `action`, `itemId` (the mineral or installation type a typed load or unload names, else null), `amount` (its stored quantity), `limited` (an unload of a type that names a quantity and leaves the rest), `movable` (it goes to an object that moves).
+// The three parts of one order: `path` (what it passes or goes to), `service` (what it does there) and `pacing` (its delay), with `stop` (the place key of an order that goes to a place, null for a jump), `action`, `itemId` (the mineral, installation or ship component type a typed load or unload names, else null), `amount` (its stored quantity), `limited` (an unload of a type that names a quantity and leaves the rest), `movable` (it goes to an object that moves).
 export const orderParts = (order, actions, raceId) => {
   const action = actionOf(actions, order.MoveActionID)
   const jump = isTransit(order, action) || isLagrangeJump(order)
@@ -198,7 +198,7 @@ export const orderParts = (order, actions, raceId) => {
   const minimum = action.minimum ? `:m${halfEven(integer(order.MinQuantity))}` : ''
   const typed = ITEM_LOADS.has(order.MoveActionID) || ITEM_UNLOADS.has(order.MoveActionID)
 
-  return { path, service: `${present(order.MoveActionID)}${item}${quantity}${minimum}`, pacing: integer(order.OrderDelay), stop, action: order.MoveActionID, itemId: typed ? present(order.DestinationItemID) : null, amount: integer(order.MaxItems), limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0, movable: MOVABLE_TYPES.has(order.DestinationType) }
+  return { path, service: `${present(order.MoveActionID)}${item}${quantity}${minimum}`, pacing: integer(order.OrderDelay), stop, action: order.MoveActionID, itemId: typed ? present(order.DestinationItemID) : null, amount: integer(order.MaxItems), limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0, movable: MOVABLE_TYPES.has(order.DestinationType) }
 }
 
 // Why a queue does not close, or null when it does: each order starts in the system the one before it ends in, the first after the last.

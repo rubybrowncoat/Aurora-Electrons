@@ -81,7 +81,7 @@ const fixtures = (m) => {
   const B3 = { colony: { PopulationID: 4, PopName: 'Idle', SystemID: 10, Xcor: 1e6, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' }, rate: cap(0), stock: { 10: 5000 } }
   const FREIGHTER = { ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }
   const options = (requirement = req()) => m['mine-bootstrap'].builderOptions({ requirement, target: T, builders: [B3, B2, B1], jumpPoints: [] })
-  const importing = (over = {}) => ({ builder: options()[0], freighters: [FREIGHTER], shuttleTechnology: 1, version: '2.7.x', workers: { now: split(249.9), later: split(249.9), cost: 0 }, ...over })
+  const importing = (over = {}) => ({ builder: options()[0], freighters: [FREIGHTER], shuttleTechnology: 1, version: '3.1.x', workers: { now: split(249.9), later: split(249.9), cost: 0 }, ...over })
   const runImport = (over = {}, requirement = req()) => m['mine-bootstrap'].importRoute({ requirement, target: T, ...importing(over) })
   const form = (id, over = {}) => ({ FormationID: id, Name: `F${id}`, PopulationID: 1, ShipID: 0, ParentFormationID: 0, ownSize: 5000, hq: 6000, rating: 0, commander: null, ...over })
   const power = (formations, population = 1) => m['mine-bootstrap'].engineerPower(formations, population)
@@ -455,11 +455,14 @@ const pure = (ctx) => {
 
     return true
   })
-  add('import: a colony without a spaceport that a large ship cannot land at blocks the route and names the handling problem', () => {
-    const route = runImport({ builder: { ...f.options()[0], colony: { ...B1.colony, ShuttleCapacity: 0 } }, freighters: [{ ...FREIGHTER, ShuttleStrength: 0 }] })
+  add('import: a bayless large ship at a colony without a spaceport still loads, at the technology alone, so the route is timed and names no unverified landing size', () => {
+    const bare = runImport({ builder: { ...f.options()[0], colony: { ...B1.colony, ShuttleCapacity: 0 } }, freighters: [{ ...FREIGHTER, ShuttleStrength: 0 }] })
+    const bayed = runImport({ builder: { ...f.options()[0], colony: { ...B1.colony, ShuttleCapacity: 0 } } })
 
-    assert.equal(route.status, 'blocked')
-    assert.ok(route.limits[0].includes('No freighter class can run the haul'))
+    assert.notEqual(bare.status, 'unavailable')
+    assert.ok(!bare.missing.some((text) => text.includes('landing size')))
+    assert.ok(bare.figures.best, 'a class is timed')
+    near(bare.figures.tripDays, bayed.figures.tripDays)
 
     return true
   })
@@ -482,9 +485,9 @@ const pure = (ctx) => {
   })
   add('haul: a haul of installations counts one cargo point to the tonne and a haul of minerals two, and the default is minerals', () => {
     const haul = { tonnes: 100000, km: 1e6, from: B1.colony, to: T }
-    const installations = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '2.7.x', 'installations')
-    const minerals = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '2.7.x', 'minerals')
-    const byDefault = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '2.7.x')
+    const installations = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.1.x', 'installations')
+    const minerals = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.1.x', 'minerals')
+    const byDefault = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.1.x')
 
     assert.equal(installations.holds, 1)
     assert.equal(minerals.holds, 2)
