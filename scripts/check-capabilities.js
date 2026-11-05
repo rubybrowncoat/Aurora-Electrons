@@ -11,6 +11,9 @@
   - copies of the 2.7 base save (AuroraDB_270_base.db, once made a copy with the star component column renamed to ComponentNumber and the gas tables of the shipped 3.1 save) in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
   - the alien-class reads, on the interim fixture that holds 32 alien classes (the shipped saves and the export hold none, so the preflight says nothing of their queries): the Intelligence page's three reads, the recovery ledger's statements (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History), Route Finder's small places and the known wrecks check of Warnings run through the page loader and loadUtilities and return rows; a read the 3.1 line blocks by a column another item owns (`RENAMED_READS`) is recorded with that item, not fixed;
+  - the structures the catalogue declares before a page reads them (`DECLARED`: the ordnance series tables, the Lagrange anchor columns and the option, archaeology and light-naval columns): the saves of the line hold every column of every entry and each item lists its own; the saves from before the line hold none of them and no report loses a status for it; no declared field is an input of a report, and the preflight is shown the save of the line without each of them in turn, each absent and no report's status changed (a model carries an attribute only where a page reads the column); a copy of the code whose model regains an unread attribute widens the read, and the same probe withholds that report, which the check must notice; and a copy of the code that misspells a declared column or leaves a declared table out of the preflight's schema read names a field absent that the save holds, which the save's check must notice;
+  - the life pod, wreck and waypoint queries, on the interim fixture: the recovery ledger's four statements and the small places' reads run and return the objects the save holds, beside the anchor columns the catalogue declares for them (AE-308-06);
+  - the lookup rows the line changed (AE-308-08), on every save of the line: move actions 211-214 gone and 237 present, standing order 57, wealth uses 53-55, tech types 286-288, installations 53 and 54, and event types 233, 319 and 373-381 under their 3.1 names (scripts/check-lookups.js holds the app's own ID-keyed constants to the export);
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
   - the Commanders page's own roster queries (taken from its source) run on copies without a rank or age column, on the parts the preflight chose, and fail on the parts of a complete save;
   - the resource reserves panel's reads, which the scan of its component does not follow (`EXTRA_READS`, an optional input of /logistics and /hauling): a copy without FCT_ShipClass.MinimumFuel and FCT_Race.MSPProduction degrades /hauling by the panel alone and names both fields on /logistics beside the page's own required read, and the copies without FuelStockpile or MaintenanceStockpile count the panel among the readers; and the Production bonus (5) its production rates rest on, which a copy with the bonus renamed leaves /hauling degraded by, naming the reserve production;
@@ -464,6 +467,20 @@ const preflightOf = async (capabilities, file) => {
   }
 }
 
+// The opened save as the preflight sees it without one column: the schema rows of `field`'s table are read from the real file and that one row is left out, so a report that reads the column is withheld exactly as on a save that lacks it. Nothing is written and no copy is made, so a primary key is probed as well as an ordinary column, and the file the save was opened from keeps every column.
+const withoutColumn = (database, field) => {
+  const [table, column] = field.split('.')
+  const dropped = (row) => String(row.tbl || '').toLowerCase() === table.toLowerCase() && String(row.name || '').toLowerCase() === column.toLowerCase()
+
+  return {
+    query: async (sql, options) => {
+      const [rows, metadata] = await database.query(sql, options)
+
+      return [/pragma_table_xinfo/i.test(sql) && Array.isArray(rows) ? rows.filter((row) => !dropped(row)) : rows, metadata]
+    },
+  }
+}
+
 const registryChecks = (capabilities, scan, navigation) => {
   const routes = navigation.PAGES.map((page) => page.route)
 
@@ -525,6 +542,17 @@ const registryChecks = (capabilities, scan, navigation) => {
       check(`registry: every field of the ${route} group "${group.key}" is read by the report`, group.fields.every((field) => read.has(field)), group.fields.filter((field) => !read.has(field)).join(', '))
     })
   })
+
+  // The structures the catalogue declares before a page reads them (AE-308-05, AE-308-06, AE-308-07): every entry names a table, its columns and the items that declare and will read it, once each. No declaration adds an input of its own: a declared field is no report's input, because a model carries an attribute only where a page reads the column, so the preflight reads every declared table's schema and gates nothing by it.
+  const inputFields = new Set(Object.values(capabilities.INPUTS).flatMap((inputs) => inputs.flatMap((input) => Object.entries(input.reads).flatMap(([table, columns]) => columns.map((column) => `${table}.${column}`)))))
+  const declaredFields = capabilities.DECLARED.flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`))
+  const entryShape = (entry) => /^(?:FCT|DIM)_[A-Za-z0-9]+$/.test(entry.table) && entry.columns.length > 0 && entry.columns.every((column) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) && /^AE-\d{3}-\d{2}$/.test(entry.item) && /^AE-\d{3}-\d{2}$/.test(entry.readBy) && (entry.retained === undefined || typeof entry.retained === 'boolean') && (entry.note === undefined || typeof entry.note === 'string')
+  const malformed = capabilities.DECLARED.filter((entry) => !entryShape(entry)).map((entry) => entry.table)
+  const repeated = declaredFields.filter((field, index) => declaredFields.indexOf(field) !== index)
+  const readDeclarations = declaredFields.filter((field) => inputFields.has(field))
+
+  check('registry: every declared 3.1 structure names a table, its columns and the items that declare and will read it, once each', capabilities.DECLARED.length > 0 && malformed.length === 0 && repeated.length === 0, [...malformed, ...repeated].join(', '))
+  check('registry: no declared 3.1 structure is an input of a report, so a declaration adds no input of its own and gates nothing', readDeclarations.length === 0, readDeclarations.join(', '))
 
   const gated = new Set([...Object.values(capabilities.BONUS_NAMES), ...Object.values(capabilities.COMPONENT_TYPES)].flatMap((gate) => gate.routes))
 
@@ -624,6 +652,18 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
     check(`${save.label}: the direct loader states no formula version for it either`, (await loadedFormula(capabilities, file)) === null)
     check(`${save.label}: the refused save still has every report evaluated, so the layout alone holds each page back`, allReported(capabilities, result), Object.keys(result.reports).length)
 
+    // The declared structures are no report's input: a save from before the line lacks every added one and holds the two the line kept from the 2.7 header, and no report loses a status for a declaration.
+    const declaredOnly = capabilities.DECLARED.filter((entry) => !entry.retained).flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`))
+    const retainedFields = capabilities.DECLARED.filter((entry) => entry.retained).flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`))
+    const presentFields = result.declared.flatMap((entry) => entry.present.map((column) => `${entry.table}.${column}`))
+    const held = presentFields.filter((field) => declaredOnly.includes(field))
+    const named = namedFields(result).filter((field) => declaredOnly.includes(field))
+    const kept = retainedFields.filter((field) => presentFields.includes(field))
+
+    check(`${save.label}: the save holds none of the ${declaredOnly.length} declared 3.1 structures a page does not read`, held.length === 0, held.join(', '))
+    check(`${save.label}: no report is held back by a declared 3.1 structure a page does not read, so a save without one changes no report's status`, named.length === 0, named.join(', '))
+    check(`${save.label}: the save holds the ${retainedFields.length} columns the line kept from the 2.7 header, which a save from before the line has too (${kept.join(', ')})`, kept.length === retainedFields.length, retainedFields.filter((field) => !kept.includes(field)).join(', '))
+
     return
   }
 
@@ -642,6 +682,35 @@ const realSaveChecks = async (capabilities, save, fieldWords) => {
   const componentRows = await all(file, 'select ComponentTypeID, TypeDescription from DIM_ComponentType where ComponentTypeID in (65, 72)')
 
   check(`${save.label}: the lookups hold the 3.1 rows: Fighter Combat (26) and Fighter Pod Bay (65) are gone, Light Tactical (39) is a multiplier and Ordnance Factory Module (72) a component type`, bonusRows.length === 1 && bonusRows[0].BonusID === 39 && bonusRows[0].Description === 'Light Tactical' && bonusRows[0].Percentage === 1 && componentRows.length === 1 && componentRows[0].ComponentTypeID === 72 && componentRows[0].TypeDescription === 'Ordnance Factory Module', JSON.stringify([...bonusRows, ...componentRows]))
+
+  // The structures the catalogue declares before a page reads them (AE-308-05, AE-308-06, AE-308-07): a save of the line holds every column of every entry, whether or not a report reads one, and each of the three items lists its own.
+  const declared = result.declared
+  const declaredOf = (item) => declared.filter((entry) => entry.item === item)
+  const listed = (entries) => entries.map((entry) => `${entry.table}(${entry.columns.join(' ')})`).join(', ')
+  const whole = (entries) => entries.length > 0 && entries.every((entry) => entry.absent.length === 0)
+
+  check(`${save.label}: the two ordnance series tables are declared in the catalogue and present with all their columns (${listed(declaredOf('AE-308-05'))})`, whole(declaredOf('AE-308-05')), JSON.stringify(declaredOf('AE-308-05').filter((entry) => entry.absent.length)))
+  check(`${save.label}: the Lagrange anchor columns are declared and present (${listed(declaredOf('AE-308-06'))})`, whole(declaredOf('AE-308-06')), JSON.stringify(declaredOf('AE-308-06').filter((entry) => entry.absent.length)))
+  check(`${save.label}: the option, archaeology and light-naval columns are declared and present (${listed(declaredOf('AE-308-07'))})`, whole(declaredOf('AE-308-07')), JSON.stringify(declaredOf('AE-308-07').filter((entry) => entry.absent.length)))
+
+  // The other lookup rows the line changed (AE-308-08): the removed rows are gone and the added rows hold their 3.1 names. A fixture of the line is a save of the same line as the export, so the names are the same on every save of the line.
+  const lookup = async (table, idColumn, ids, columns) => all(file, `select ${idColumn}, ${columns} from ${table} where ${idColumn} in (${ids.join(', ')}) order by ${idColumn}`)
+  const names = (rows, idColumn, column) => rows.map((row) => `${row[idColumn]} ${String(row[column]).trim()}`).join('; ')
+  const moves = await lookup('DIM_MoveAction', 'MoveActionID', [211, 212, 213, 214, 237], 'Description')
+  const standing = await lookup('DIM_StandingOrders', 'OrderID', [57], 'Description')
+  const uses = await lookup('DIM_WealthUse', 'WealthUseID', [53, 54, 55], 'Description')
+  const techs = await lookup('DIM_TechType', 'TechTypeID', [286, 287, 288], 'Description')
+  const yards = await lookup('DIM_PlanetaryInstallation', 'PlanetaryInstallationID', [53, 54], 'Name')
+  const events = await lookup('DIM_EventType', 'EventTypeID', [233, 319, 373, 374, 375, 376, 377, 378, 379, 380, 381], 'Description')
+  const eventNames = new Map(events.map((row) => [row.EventTypeID, String(row.Description).trim()]))
+  const added = ['Xenoarchaeology Research', 'Artifacts Recovered', 'Aether Gate Detected', 'All Minerals Exhausted', 'New Neutral Alien Ship', 'New Friendly Alien Ship', 'New Allied Alien Ship', 'Mining Colony Update', 'Incomplete Salvage']
+
+  check(`${save.label}: the move actions are the 3.1 rows: 211-214 are gone and 237 is Load All Ship Components (${names(moves, 'MoveActionID', 'Description')})`, moves.length === 1 && moves[0].MoveActionID === 237 && moves[0].Description === 'Load All Ship Components')
+  check(`${save.label}: standing order 57 is LD: Civilian Contract (${names(standing, 'OrderID', 'Description')})`, standing.length === 1 && standing[0].OrderID === 57 && standing[0].Description === 'LD: Civilian Contract')
+  check(`${save.label}: wealth uses 53, 54 and 55 are Engineering, Ordnance and Ground Unit Projects (${names(uses, 'WealthUseID', 'Description')})`, uses.length === 3 && uses[0].WealthUseID === 53 && uses[0].Description === 'Engineering Projects' && uses[1].WealthUseID === 54 && uses[1].Description === 'Ordnance Projects' && uses[2].WealthUseID === 55 && uses[2].Description === 'Ground Unit Projects')
+  check(`${save.label}: tech types 286-288 are the two Aether Gate tech types and the Ordnance Factory Module (${names(techs, 'TechTypeID', 'Description')})`, techs.length === 3 && techs[0].Description === 'Ordnance Factory Module' && techs[1].Description === 'Aether Gate Detection' && techs[2].Description === 'Aether Gate Prevention')
+  check(`${save.label}: installations 53 and 54 are the Light Naval Shipyard and the Aether Gate Monitoring Station (${names(yards, 'PlanetaryInstallationID', 'Name')})`, yards.length === 2 && yards[0].Name === 'Light Naval Shipyard' && yards[1].Name === 'Aether Gate Monitoring Station')
+  check(`${save.label}: the event types are the 3.1 rows: 233 is New Hostile Alien Ship, 319 is Light Naval Construction, and 373-381 are the nine added types (${names(events, 'EventTypeID', 'Description')})`, eventNames.get(233) === 'New Hostile Alien Ship' && eventNames.get(319) === 'Light Naval Construction' && [373, 374, 375, 376, 377, 378, 379, 380, 381].every((id, index) => eventNames.get(id) === added[index]))
 }
 
 const alteredChecks = async (capabilities, source) => {
@@ -1772,6 +1841,117 @@ const starColumnChecks = async (capabilities) => {
   }
 }
 
+// The structures the catalogue declares before a page reads them (AE-308-05, AE-308-06, AE-308-07): a save of the line holds every column of every entry, and no report's status rests on one. The preflight is shown the save without each declared column in turn: a model carries an attribute only where a page reads the column, so no report may lose its status. A model that regained an unread attribute makes its page select it, and the same probe then withholds that report, which a copy of the code re-adding one must show. A copy of the code that misspells a declared column, or leaves a declared table out of the preflight's schema read, has the preflight name a column or a table absent that the save holds, which the check of a save of the line must notice.
+const declarationChecks = async (capabilities, file, routes) => {
+  const absent = (result) => result.declared.filter((entry) => entry.absent.length)
+  const baseline = (await preflightOf(capabilities, file)).result
+
+  check('declared: a save of the line holds every structure the catalogue declares, so each is reported present', absent(baseline).length === 0, absent(baseline).map((entry) => `${entry.table}(${entry.absent.join(' ')})`).join(', '))
+
+  const statuses = (result) => Object.fromEntries(Object.entries(result.reports).map(([route, report]) => [route, report.status]))
+  const changed = (before, after) => Object.keys(before).filter((route) => before[route] !== after[route]).map((route) => `${route} ${before[route]} -> ${after[route]}`)
+  const fields = [...new Set(capabilities.DECLARED.flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`)))]
+  const before = statuses(baseline)
+  const database = openSave(file, [])
+  const drift = []
+  const unread = []
+
+  try {
+    for (const field of fields) {
+      const [table, column] = field.split('.')
+      const result = await capabilities.preflight(withoutColumn(database, field))
+
+      if (!result.declared.some((entry) => entry.table === table && entry.absent.includes(column))) {
+        unread.push(field)
+      }
+
+      const moved = changed(before, statuses(result))
+
+      if (moved.length) {
+        drift.push(`${field}: ${moved.join(', ')}`)
+      }
+    }
+  } finally {
+    await database.close()
+  }
+
+  check(`declared: the preflight reads the save without each of the ${fields.length} declared columns in turn, and names each absent`, unread.length === 0, unread.join(', '))
+  check(`declared: a save of the line without any one of its ${fields.length} declared columns keeps every report's status, as no model carries a column no page reads`, drift.length === 0, drift.join('; '))
+
+  if (!mutating()) {
+    return
+  }
+
+  // A copy of the code whose SystemBody model regains an unread attribute: the reads the scan writes for it select the column on /map, and the probe above must find the report withheld. The attribute is added to the model of a copy of the utilities folder, and the reads of that copy are the ones `--write` would write from it.
+  const widened = mutatedCopy('utilities/database.js', "    FixedBody: Sequelize.BOOLEAN, //\n  }, {\n    sequelize,\n    modelName: 'SystemBody'", "    FixedBody: Sequelize.BOOLEAN, //\n    ArtifactReserve: Sequelize.INTEGER, //\n  }, {\n    sequelize,\n    modelName: 'SystemBody'")
+  const mutants = [
+    { name: 'a declared column is misspelled', directory: mutatedCopy('utilities/capabilities.js', "columns: Object.freeze(['LagrangeStatus', 'OrbitLagrangeID'])", "columns: Object.freeze(['LagrangeStatuss', 'OrbitLagrangeID'])"), names: (result) => result.declared.some((entry) => entry.table === 'FCT_Fleet' && entry.absent.includes('LagrangeStatuss')) },
+    { name: 'a declared table is left out of the preflight\'s schema read', directory: mutatedCopy('utilities/capabilities.js', '  DECLARED.forEach((entry) => tables.add(entry.table))\n', ''), names: (result) => result.declared.filter((entry) => entry.item === 'AE-308-05').every((entry) => entry.present.length === 0 && entry.absent.length === entry.columns.length) },
+  ]
+
+  try {
+    for (const mutant of mutants) {
+      const module = (await loadUtilities(['capabilities'], { directory: path.join(mutant.directory, 'utilities') })).capabilities
+      const result = (await preflightOf(module, file)).result
+
+      check(`declared: a copy of the code in which ${mutant.name} has the preflight name a field absent that the save holds, as the check above must notice`, mutant.names(result), JSON.stringify(absent(result)))
+    }
+
+    const reads = generated(scanReads(routes, { database: path.join(widened, 'utilities', 'database.js') }))
+    const module = (await loadUtilities(['capabilities'], { sources: { 'capability-reads': reads } })).capabilities
+    const open = openSave(file, [])
+    let moved = []
+
+    try {
+      moved = changed(before, statuses(await module.preflight(withoutColumn(open, 'FCT_SystemBody.ArtifactReserve'))))
+    } finally {
+      await open.close()
+    }
+
+    check(`declared: a copy of the code in which the SystemBody model regains an unread attribute widens the /map read, so the save without that column withholds the report, as the check above must notice (${moved.join(', ') || 'no report moved'})`, moved.some((entry) => entry.startsWith('/map ')), moved.join(', '))
+  } finally {
+    [...mutants.map((mutant) => mutant.directory), widened].forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
+  }
+}
+
+// The life pod, wreck and waypoint queries of the app on a save of the line: the recovery ledger's four statements and the small places' waypoint, wreck and life pod reads run and return the objects the save holds, so the anchor columns the catalogue declares for them (AE-308-06) sit beside queries that run.
+const anchorReadChecks = async (file) => {
+  if (!fs.existsSync(file)) {
+    console.log(`SKIP  anchor: ${path.basename(file)} is not there, so the life pod, wreck and waypoint queries are not run (not run)`)
+
+    return
+  }
+
+  const log = []
+  const database = openSave(file, log)
+
+  try {
+    const [[game]] = await database.query('select GameID, RaceID from FCT_Race where NPR = 0 order by GameID, RaceID limit 1')
+
+    if (!game) {
+      check('anchor: the interim fixture names a game and a player race to run the life pod, wreck and waypoint queries for', false, 'no FCT_Race row with NPR = 0')
+
+      return
+    }
+
+    const { 'recovery-ledger': recovery, 'place-data': places } = await loadUtilities(['recovery-ledger', 'place-data'], { stubs: STUBS })
+    const ids = { GameID: game.GameID, RaceID: game.RaceID }
+    const { objects, failed } = await recovery.loadRecoveryObjects(database, ids)
+    const kinds = Object.keys(recovery.RECOVERY_TARGETS)
+    const unread = kinds.filter((kind) => !objects[kind])
+    const small = await places.loadSmallPlaces(database, ids, String)
+    const rows = kinds.map((kind) => `${kind} ${objects[kind].size}`).join(', ')
+
+    check(`anchor: the recovery ledger's life pod and wreck queries run on the interim fixture and read each kind (${rows})`, unread.length === 0, JSON.stringify(failed))
+    check(`anchor: the small places' waypoint, wreck and life pod queries run on the interim fixture and return the objects it holds (${small.length} rows)`, Array.isArray(small) && small.length > 0)
+    check('anchor: every query the anchor reads sent is a select', log.length > 0 && log.every((sql) => /^\s*select\b/i.test(sql)), log.filter((sql) => !/^\s*select\b/i.test(sql)).join('; '))
+
+    console.log(`INFO  anchor reads on ${path.basename(file)} for game ${game.GameID} race ${game.RaceID}: recovery ${rows}; waypoints, wrecks, life pods, contacts and gates ${small.length} rows`)
+  } finally {
+    await database.close()
+  }
+}
+
 const main = async () => {
   const write = process.argv.includes('--write')
   const unknown = process.argv.slice(2).filter((argument) => argument !== '--write' && argument !== '--no-mutations')
@@ -1818,6 +1998,8 @@ const main = async () => {
 
   // The alien-class reads the preflight cannot run: the interim fixture holds the alien classes (the shipped saves and the export hold none), so the pages' own reads run there.
   await alienClassChecks(capabilities, path.resolve(repo, 'saves/AuroraDB-310-spookyerol-migrated.db'))
+  // The life pod, wreck and waypoint queries the anchor columns are declared for (AE-308-06), run where the save holds the objects.
+  await anchorReadChecks(path.resolve(repo, 'saves/AuroraDB-310-spookyerol-migrated.db'))
 
   const real260 = path.resolve(repo, 'AuroraDB_260_base.db')
 
@@ -1838,6 +2020,7 @@ const main = async () => {
 
   if (fs.existsSync(lineSource)) {
     await lineChecks(capabilities, lineSource, provenance.fieldWords)
+    await declarationChecks(capabilities, lineSource, navigation.PAGES.map((page) => page.route))
   } else {
     console.log('SKIP  line: saves/AuroraDB_310_shipped.db is not there, so the line is not checked on a copy (not run)')
   }

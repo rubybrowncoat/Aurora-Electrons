@@ -1,6 +1,6 @@
 // What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other. Whether the save is of the Aurora line the app reads at all is decided by its shape alone (`lineResult`): a save without the seven columns Aurora 3.0 added over 2.7.1 is refused as a save from before the 3.1 line, while a save of 3.0 or 3.1 is that line, the two being schema-identical. The formula version rests on the same seven (`formulaResult`): a save with all of them is the stated one, assumed, and a save missing any of them states none.
 //
-// The reads of every report come from utilities/capability-reads.js, written by `node scripts/check-capabilities.js --write` from the pages' own queries, one entry per tracked input (`tracked('<key>', ...)` in a page, a check of the warnings page, the app shell's reads). This module adds what the scan cannot know: the columns a query builds by name or lists without its table (`EXTRA_READS`, `MARKER_COLUMNS`, and `MARKER_USES` where a page uses a known part of what it builds), the reads that guard themselves (`TOLERATED`), which inputs a page can really do without (`OPTIONAL`), the column groups a report can lose without the rest (`SOFT`), and the lookup rows whose meaning is checked (`BONUS_NAMES`, `COMPONENT_TYPES`).
+// The reads of every report come from utilities/capability-reads.js, written by `node scripts/check-capabilities.js --write` from the pages' own queries, one entry per tracked input (`tracked('<key>', ...)` in a page, a check of the warnings page, the app shell's reads). This module adds what the scan cannot know: the columns a query builds by name or lists without its table (`EXTRA_READS`, `MARKER_COLUMNS`, and `MARKER_USES` where a page uses a known part of what it builds), the reads that guard themselves (`TOLERATED`), which inputs a page can really do without (`OPTIONAL`), the column groups a report can lose without the rest (`SOFT`), the lookup rows whose meaning is checked (`BONUS_NAMES`, `COMPONENT_TYPES`) and the 3.1 tables and columns declared before a page reads them (`DECLARED`, which gate nothing).
 //
 // A report is 'supported' (every input it reads is there), 'degraded' (an optional input, a soft column group or a lookup row is not, and each is named) or 'unsupported' (an input it cannot do without is missing). A page holds back its content while any input it tracks fails, so an input is required unless the page really goes on without it. `preflight` only selects: from `pragma_table_xinfo` (so generated and hidden columns count) and the lookup tables, never writing to the save.
 import { READS } from './capability-reads'
@@ -327,6 +327,36 @@ const GATE_TABLES = Object.freeze({
   DIM_ComponentType: ['ComponentTypeID', 'TypeDescription'],
 })
 
+// The Aurora 3.1 tables and columns the catalogue knows before a page reads them: the two ordnance series tables (AE-308-05), the Lagrange anchor columns, with the two columns the line kept although their behaviour is replaced (AE-308-06), and the option, archaeology and light-naval columns (AE-308-07). `item` is the item that declares the structure and `readBy` the item the ledger gives the read to, which turns the declaration into an ordinary input of its route when it lands. `retained` marks a column the line kept from the 2.7 header, so a save from before the line holds it too. A declared field is never an input of a report, and no model carries one for a page that does not read the column: the preflight reads every declared table's schema and says whether the save holds each column, and a save that lacks one changes no report's status, so a declaration gates, degrades and withholds nothing of its own.
+export const DECLARED = Object.freeze([
+  Object.freeze({ item: 'AE-308-05', readBy: 'AE-303-03', table: 'FCT_OrdnanceSeries', columns: Object.freeze(['OrdnanceSeriesID', 'Description', 'GameID', 'RaceID']) }),
+  Object.freeze({ item: 'AE-308-05', readBy: 'AE-303-03', table: 'FCT_OrdnanceSeriesMissileType', columns: Object.freeze(['OrdnanceSeriesID', 'MissileTypeID', 'GameID', 'Priority', 'RaceID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-04', table: 'FCT_Fleet', columns: Object.freeze(['AutoLP']), retained: true, note: 'kept in the 3.1 header although its behaviour is replaced, and in the 2.7 header before it; AE-302-04 measures what it holds' }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-05', table: 'FCT_Fleet', columns: Object.freeze(['LagrangeStatus', 'OrbitLagrangeID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-05', table: 'FCT_Waypoint', columns: Object.freeze(['OrbitLagrangeID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-309-04', table: 'FCT_Wrecks', columns: Object.freeze(['OrbitLagrangeID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-309-04', table: 'FCT_Lifepods', columns: Object.freeze(['OrbitBodyID', 'OrbitLagrangeID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-05', table: 'FCT_MissileSalvo', columns: Object.freeze(['OrbitLagrangeID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-13', table: 'FCT_MissileSalvo', columns: Object.freeze(['LurkerMode']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-05', table: 'FCT_SystemBody', columns: Object.freeze(['FixedBodyLagrangePointID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-303-01', table: 'FCT_SystemBody', columns: Object.freeze(['ArtifactReserve', 'RuinLevel']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-04', table: 'FCT_Game', columns: Object.freeze(['OrbitalMotionAst']), retained: true, note: 'kept in the 3.1 header although its behaviour is replaced, and in the 2.7 header before it; AE-302-04 measures it' }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-301-06', table: 'FCT_Game', columns: Object.freeze(['LostColonies', 'GenerateNonOxygenRaces', 'NoShieldTechnology']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-04', table: 'FCT_Game', columns: Object.freeze(['OrbitalMovementInSubPulse']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-09', table: 'FCT_Race', columns: Object.freeze(['NoResearchProjects']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-01', table: 'FCT_Race', columns: Object.freeze(['chkShowBodyColours', 'chkCCIncludeLowG', 'chkGasGiantColour']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-04', table: 'FCT_Race', columns: Object.freeze(['chkJumpPointBuoys']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-01', table: 'FCT_Population', columns: Object.freeze(['AlienArtifacts', 'ConstructPriority', 'AccruedArtifactPoints', 'AccruedConstructPoints', 'NoRuinRecovery']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-11', table: 'FCT_Ship', columns: Object.freeze(['ShipSeniorCO']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-07', table: 'FCT_ShipyardTask', columns: Object.freeze(['NumShips']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-13', table: 'FCT_MissileType', columns: Object.freeze(['Lurker']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-304-01', table: 'FCT_AlienClass', columns: Object.freeze(['AlienClassType']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-07', table: 'FCT_AlienRace', columns: Object.freeze(['AlienRaceColour']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-07', table: 'FCT_AlienRaceSystemStatus', columns: Object.freeze(['NoHostileInterrupt']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-05', table: 'FCT_GroundUnitFormation', columns: Object.freeze(['FormationSymbol']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-309-05', table: 'FCT_GroundUnitFormationTemplate', columns: Object.freeze(['NameThemeID', 'RandomFormationNameFromTheme', 'SymbolType', 'EchelonLevel']) }),
+])
+
 // The Aurora line the app is for, as its major and minor ('3.1'): the stated formula version without its patch.
 export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
 
@@ -340,6 +370,7 @@ const allTables = () => {
   const tables = new Set(Object.keys(GATE_TABLES))
 
   Object.values(INPUTS).forEach((inputs) => inputs.forEach((input) => Object.keys(input.reads).forEach((table) => tables.add(table))))
+  DECLARED.forEach((entry) => tables.add(entry.table))
   tables.add('FCT_Game')
   LINE_SIGNATURE.forEach((field) => tables.add(field.split('.')[0]))
 
@@ -542,7 +573,6 @@ const gateEntries = (gates) => [
 export const blockedBonuses = (gates) => new Set(Object.entries(gates ? gates.bonuses : BONUS_NAMES).filter(([, result]) => !gates || !isAvailable(result)).map(([id]) => Number(id)))
 
 const UNCONFIRMED = 'the capability check of the save has not confirmed the lookup rows these figures depend on'
-
 // Why the lookup rows a figure depends on are not confirmed, as a list of texts: [] when every one of `bonuses` (commander bonus IDs) and `components` (component type IDs) reads as expected, what each lookup says it differs in when the check answered, and one text when it has not (`gates` null).
 export const gateGaps = (gates, { bonuses = [], components = [] }) => {
   if (!gates) {
@@ -554,7 +584,15 @@ export const gateGaps = (gates, { bonuses = [], components = [] }) => {
   return [...bonuses.flatMap((id) => gapsOfGate(gates.bonuses[id], id, 'commander bonus')), ...components.flatMap((id) => gapsOfGate(gates.components[id], id, 'component type'))]
 }
 
-// The save's capabilities from its schema (`schemaOf`) and lookup rows (`rows`: { bonuses, components } keyed by ID): { line, formula, gates, reports: { [route]: { status, missing, degraded, unchecked, groups } }, shell, tables, columns }. `line` is `lineResult`'s: whether the save is of the Aurora line the app reads at all; every report is evaluated whatever it says, and the layout decides what a refused save is shown.
+// What the catalogue declares beyond the pages' reads, as `DECLARED`'s entries with `present` and `absent`: the columns of the entry the save holds and those it lacks. A declared field is no report's input, so none of them gates, degrades or withholds a report, and a save from before the line names every one as absent without changing a status.
+const declaredOf = (schema) => DECLARED.map((entry) => {
+  const absent = entry.columns.filter((column) => !hasColumn(schema, entry.table, column))
+
+  return Object.freeze({ ...entry, present: Object.freeze(entry.columns.filter((column) => !absent.includes(column))), absent: Object.freeze(absent) })
+})
+
+// The save's capabilities from its schema (`schemaOf`) and lookup rows (`rows`: { bonuses, components } keyed by ID): { line, formula, gates, declared, reports: { [route]: { status, missing, degraded, unchecked, groups } }, shell, tables, columns }. `line` is `lineResult`'s: whether the save is of the Aurora line the app reads at all; every report is evaluated whatever it says, and the layout decides what a refused save is shown.
+//  - `declared` are the structures the catalogue knows before a page reads them, by entry, with the columns the save holds and those it lacks ({ item, readBy, table, columns, note?, present, absent }); they gate nothing.
 //  - `missing` are the required inputs with a missing field: [{ key, label, fields }].
 //  - `degraded` are the optional inputs and soft groups with a missing field, [{ key, label, affects, fields, group? }], and the lookup rows that differ, as { key, label, affects, fields: [why], gate: true }.
 //  - `unchecked` are the reads whose columns the preflight does not check because the read guards itself, [{ key, label, table, why }].
@@ -578,7 +616,7 @@ export const evaluate = (schema, rows = {}) => {
   const shell = evaluateInputs('shell', schema)
   const columns = [...schema.values()].reduce((total, set) => total + set.size, 0)
 
-  return { line: lineResult(schema), formula: formulaResult(schema), gates, reports, shell: { ...shell, status: shell.status === 'unsupported' ? 'degraded' : shell.status }, tables: schema.size, columns }
+  return { line: lineResult(schema), formula: formulaResult(schema), gates, declared: declaredOf(schema), reports, shell: { ...shell, status: shell.status === 'unsupported' ? 'degraded' : shell.status }, tables: schema.size, columns }
 }
 
 const asRows = (rows) => (Array.isArray(rows) ? rows : [])

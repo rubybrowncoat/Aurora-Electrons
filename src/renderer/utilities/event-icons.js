@@ -128,7 +128,7 @@ export const EVENT_ICONS = Object.freeze({
   228: 'mdi-cash-remove', // Empire in Debt
   229: 'mdi-flask-minus', // Overallocation of Labs
   232: 'mdi-radar', // New Alien Class
-  233: 'mdi-rocket', // New Alien Ship
+  233: 'mdi-rocket', // New Hostile Alien Ship
   235: 'mdi-account-star', // Crew Grade Increase
   237: 'mdi-shield-off', // Shield Deactivation
   238: 'mdi-file-document', // Tech Data Learned
@@ -186,7 +186,7 @@ export const EVENT_ICONS = Object.freeze({
   316: 'mdi-snowflake', // Ice Sheet Frozen
   317: 'mdi-progress-close', // Shipyard Task Abandoned
   318: 'mdi-book-off', // Training not Possible
-  319: 'mdi-airplane', // Fighter Construction
+  319: 'mdi-airplane', // Light Naval Construction
   320: 'mdi-factory', // Production Started
   321: 'mdi-timer-alert', // Deployment Time Exceeded
   322: 'mdi-account-off', // Commander Unassigned
@@ -235,4 +235,13 @@ export const EVENT_ICONS = Object.freeze({
   365: 'mdi-car-arrow-right', // Successful Ramming Attack
   366: 'mdi-car-arrow-left', // Ship Rammed
   367: 'mdi-account-search', // Interrogation Update
+  373: 'mdi-magnify-scan', // Xenoarchaeology Research
+  374: 'mdi-diamond-stone', // Artifacts Recovered
+  375: 'mdi-radar', // Aether Gate Detected
+  376: 'mdi-diamond-outline', // All Minerals Exhausted
+  377: 'mdi-account-question', // New Neutral Alien Ship
+  378: 'mdi-account-check', // New Friendly Alien Ship
+  379: 'mdi-account-multiple', // New Allied Alien Ship
+  380: 'mdi-mine', // Mining Colony Update
+  381: 'mdi-wrench', // Incomplete Salvage
 })
