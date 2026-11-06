@@ -24,6 +24,8 @@ const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
 const CAMPAIGN_SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
+// The anchors to a body (`OrbitBodyID`) and to a Lagrange point (`OrbitLagrangeID`) the 3.2 line gives a life pod, a wreck and a waypoint, which the recorded 2.x save lacks and the copy carries with their default of none.
+const ANCHOR_COLUMNS = [['FCT_Lifepods', 'OrbitBodyID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Waypoint', 'OrbitLagrangeID', 'INTEGER default 0']]
 const TIMEOUT = 120000
 const STEP = 45000
 const MODULE = 'src/renderer/utilities/system-jump-points.js'
@@ -38,7 +40,7 @@ const FIELDS = ['DestinationID', 'DestinationName', 'Explored', 'JumpGateStrengt
 const campaign = () => ({
   key: 'campaign',
   label: 'the recorded campaign',
-  copyOf: convertedSave(CAMPAIGN_SAVE, { line: true }),
+  copyOf: convertedSave(CAMPAIGN_SAVE, { line: true, columns: ANCHOR_COLUMNS }),
   original: convertedSave(CAMPAIGN_SAVE),
   game: 141,
   names: { game: 'Orphean Concord', race: 'Concord' },
