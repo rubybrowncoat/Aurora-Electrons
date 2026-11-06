@@ -1,7 +1,7 @@
 /*
-  Measures the real orbital propagation against the two played saves, matched by SystemBodyID, without changing either save. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
+  Measures the real orbital propagation against a pair of played saves of one campaign, matched by SystemBodyID, without changing either save. --from and --to name the pair: A, B or C for the three registered saves, or the path of a save relative to the repository root, whose game is the one with the latest clock. The defaults are A and B, the pair this check was written for; B-C is a second witness on the same terms and A-C spans two loads. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
 
-  Snapshots reach B.GameTime from the saved A.GameTime baseline: full elapsed circular/moon-own bearings, whole eccentric calls plus a local remainder, never movement-phase calls. The private stateAt and clockOf seams are exported only in the loaded source copy. horizon:false measures short-period bodies too, without changing the arithmetic or MAX_CALLS; out-of-horizon measurements and every other refusal remain disclosed. All campaign systems are read, not just the race's surveyed subset.
+  Snapshots reach the later save's GameTime from the earlier save's baseline: full elapsed circular/moon-own bearings, whole eccentric calls plus a local remainder, never movement-phase calls. The private stateAt and clockOf seams are exported only in the loaded source copy. horizon:false measures short-period bodies too, without changing the arithmetic or MAX_CALLS; out-of-horizon measurements and every other refusal remain disclosed. All campaign systems are read, not just the race's surveyed subset.
 
   --load-count=N explicitly supplies a nonnegative integer inferred load-history assumption, not a stored fact or a fitted value. Without it the numerical pair comparisons are evidence-only. Conditional bearing assertions assume automatic source sub-pulse selection (an unsaved manual override cannot be excluded). The source load path forces 60 seconds without advancing GameTime. Product residuals never insert those loads; only circular/moon-own conditional bearings use their placement-independent total. Eccentric bounds carry the extra time without inventing a replay order. Diameter-capped bounds are uninformative, not trajectory confirmation. The old one-metre coordinate counts remain diagnostics only.
 */
@@ -10,7 +10,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { Database } = require('bun:sqlite')
 const assert = require('./lib/bounded-assert')
-const { PLAYED, PLAYED_NEXT } = require('./lib/fixtures')
+const { PLAYED, PLAYED_NEXT, PLAYED_THIRD } = require('./lib/fixtures')
 const { loadUtilities } = require('./lib/utilities')
 const { runChild, lastJson } = require('./lib/check-pool')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
@@ -37,21 +37,28 @@ const percentile = (values, p) => values.length ? [...values].sort((a, b) => a -
 const distribution = (values) => ({ count: values.length, max: values.length ? Math.max(...values) : null, p50: percentile(values, 0.5), p95: percentile(values, 0.95) })
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 
+// The registered saves of the campaign, lettered as docs/WORKFLOW.md and the played-save entries of scripts/check-capabilities.js name them; any other --from or --to value is the path of a save, resolved against the repository root as a fixture's file is.
+const SAVES = { A: PLAYED, B: PLAYED_NEXT, C: PLAYED_THIRD }
+
 const readSave = (fixture) => {
   const file = path.resolve(root, fixture.file)
   const database = new Database(file, { readonly: true })
 
   try {
-    const game = database.query('select GameTime, LastGrowthTime, OrbitalMotion, OrbitalMovementInSubPulse, SubPulseLength, OneSecondSubPulse from FCT_Game where GameID = ?').get(fixture.gameId)
-    const increments = database.query('select GameTime, Length from FCT_Increments where GameID = ? order by GameTime').all(fixture.gameId)
-    const rows = database.query('select SystemBodyID, SystemID, StarID, BodyClass, TrojanAsteroid, OrbitalDistance, Bearing, Year, Eccentricity, EccentricityDirection, ParentBodyID, ParentBodyType, FixedBody, FixedBodyParentID, Xcor, Ycor from FCT_SystemBody where GameID = ? order by SystemBodyID').all(fixture.gameId)
-    const stars = database.query('select StarID, ComponentNumber, Xcor, Ycor from FCT_Star where GameID = ?').all(fixture.gameId)
+    const games = database.query('select GameID, GameTime, LastGrowthTime, OrbitalMotion, OrbitalMovementInSubPulse, SubPulseLength, OneSecondSubPulse from FCT_Game').all()
+    // A registered save names its game; a save named by path holds the game it was played in, which is the one with the latest clock, since a new game beside it sits at time zero.
+    const game = fixture.gameId === null ? games.sort((one, other) => other.GameTime - one.GameTime || other.GameID - one.GameID)[0] : games.find((candidate) => candidate.GameID === fixture.gameId)
+
+    assert.ok(game, 'the named game is present in the save')
+    const increments = database.query('select GameTime, Length from FCT_Increments where GameID = ? order by GameTime').all(game.GameID)
+    const rows = database.query('select SystemBodyID, SystemID, StarID, BodyClass, TrojanAsteroid, OrbitalDistance, Bearing, Year, Eccentricity, EccentricityDirection, ParentBodyID, ParentBodyType, FixedBody, FixedBodyParentID, Xcor, Ycor from FCT_SystemBody where GameID = ? order by SystemBodyID').all(game.GameID)
+    const stars = database.query('select StarID, ComponentNumber, Xcor, Ycor from FCT_Star where GameID = ?').all(game.GameID)
     const bodies = Object.fromEntries(rows.map((row) => [row.SystemBodyID, { id: row.SystemBodyID, systemId: row.SystemID, starId: row.StarID, bodyClass: row.BodyClass, trojan: row.TrojanAsteroid, distance: row.OrbitalDistance, bearing: row.Bearing, year: row.Year, eccentricity: row.Eccentricity, direction: row.EccentricityDirection, parentId: row.ParentBodyID, parentType: row.ParentBodyType, fixed: row.FixedBody, fixedParentId: row.FixedBodyParentID, xcor: row.Xcor, ycor: row.Ycor }]))
     const latest = increments[increments.length - 1]
 
-    assert.ok(game && latest, 'the campaign clock and increment ledger are present')
+    assert.ok(latest, 'the campaign clock and increment ledger are present')
 
-    return { file: fixture.file, sha256: sha256(file), oneSecondSubPulse: game.OneSecondSubPulse, clock: { gameTime: game.GameTime, lastGrowthTime: game.LastGrowthTime, orbitalMotion: game.OrbitalMotion, orbitalMovementInSubPulse: game.OrbitalMovementInSubPulse, subPulseLength: game.SubPulseLength, incrementLength: latest.Length }, increments, orbits: { bodies, stars: Object.fromEntries(stars.map((row) => [row.StarID, { id: row.StarID, component: row.ComponentNumber, xcor: row.Xcor, ycor: row.Ycor }])), hidden: {} } }
+    return { file: fixture.file, gameId: game.GameID, sha256: sha256(file), oneSecondSubPulse: game.OneSecondSubPulse, clock: { gameTime: game.GameTime, lastGrowthTime: game.LastGrowthTime, orbitalMotion: game.OrbitalMotion, orbitalMovementInSubPulse: game.OrbitalMovementInSubPulse, subPulseLength: game.SubPulseLength, incrementLength: latest.Length }, increments, orbits: { bodies, stars: Object.fromEntries(stars.map((row) => [row.StarID, { id: row.StarID, component: row.ComponentNumber, xcor: row.Xcor, ycor: row.Ycor }])), hidden: {} } }
   } finally {
     database.close()
   }
@@ -85,9 +92,9 @@ const cadenceBound = (body, context) => {
   return { km: Math.min(diameter, raw) + ROUNDING_KM, informative: raw < diameter }
 }
 
-const measure = async (loadCount, mutation = null) => {
-  const a = readSave(PLAYED)
-  const b = readSave(PLAYED_NEXT)
+const measure = async (pair, loadCount, mutation = null) => {
+  const a = readSave(pair.from.fixture)
+  const b = readSave(pair.to.fixture)
   let source = fs.readFileSync(sourceFile, 'utf8').replace(/\r\n/g, '\n')
 
   if (mutation) {
@@ -120,6 +127,7 @@ const measure = async (loadCount, mutation = null) => {
 
   check('ledger', 'saved increments exactly partition the clock interval', () => {
     assert.ok(ledger.length > 0)
+    assert.equal(a.gameId, b.gameId, 'both saves hold the same game')
     assert.equal(ledger[0].GameTime, a.clock.gameTime)
     ledger.forEach((row, i) => assert.equal(row.GameTime + row.Length, i + 1 === ledger.length ? b.clock.gameTime : ledger[i + 1].GameTime))
     assert.ok(ledger.every((row) => row.Length > 0 && row.Length % sourcePulse(row.Length, a.oneSecondSubPulse) === 0), 'every saved length divides by its source-selected automatic pulse')
@@ -238,8 +246,8 @@ const measure = async (loadCount, mutation = null) => {
     loadModel: { count: loadCount, status: loadCount === null ? 'absent; numerical trajectory comparisons are evidence-only' : 'inferred explicit input, not stored; no event placement assumed', automaticPulseSelection: 'conditional, not stored; no unsaved manual override assumed', numericalStatus: loadCount === null ? 'evidence-only' : 'conditional source-derived assertions' },
     cadence: { elapsed, length, calls, remainder, evaluations: calls + (remainder > 0 ? 1 : 0), repeatedSeconds: calls * length, increments: ledger.length, sourceCallUpperBound: context.sourceCalls, maxSourceCall: MAX_SOURCE_CALL, squaredCalls: context.squaredCalls, squaredIncrements: context.squaredIncrements, maximumIncrement: Math.max(...ledger.map((row) => row.Length)) },
     matched: common.length,
-    newInB: Object.keys(b.orbits.bodies).filter((id) => !a.orbits.bodies[id]).length,
-    absentFromB: Object.keys(a.orbits.bodies).filter((id) => !b.orbits.bodies[id]).length,
+    newInTo: Object.keys(b.orbits.bodies).filter((id) => !a.orbits.bodies[id]).length,
+    absentFrom: Object.keys(a.orbits.bodies).filter((id) => !b.orbits.bodies[id]).length,
     families: FAMILIES.map((family) => ({ family, total: rows.filter((row) => row.family === family).length, refused: rows.filter((row) => row.family === family && row.refusal).length, residualKm: distribution(measured(family).map((row) => row.residualKm)), relativeKm: family === 'moon' ? distribution(moons.map((row) => row.relativeKm)) : undefined, aboveOldMetreDiagnostic: ['circular', 'moon'].includes(family) ? roundingFailures(family, family === 'moon' ? 'relativeKm' : 'residualKm').length : undefined, conditionalBearing: loadCount !== null && ['circular', 'moon'].includes(family) ? { failures: bearingFailures(family).length, ratio: distribution(measured(family).map((row) => row.bearingBoundRatio)), degrees: distribution(measured(family).map((row) => row.bearingBoundDegrees)) } : undefined })),
     circularLagSeconds: distribution(circular.map((row) => row.lagSeconds)),
     circularLagBySystemStar: lagGroups,
@@ -254,14 +262,28 @@ const measure = async (loadCount, mutation = null) => {
 }
 
 const main = async () => {
-  const missing = [PLAYED, PLAYED_NEXT].filter((fixture) => !fs.existsSync(path.resolve(root, fixture.file)))
+  const options = process.argv.slice(2)
+  const argument = (name) => {
+    const index = options.findIndex((value) => value === `--${name}` || value.startsWith(`--${name}=`))
+
+    return index < 0 ? null : options[index] === `--${name}` ? options[index + 1] : options[index].slice(name.length + 3)
+  }
+  // A pair letter names a registered save; any other value is the path of a save, resolved against the repository root as a fixture's file is and read as its game with the latest clock.
+  const named = (text, name) => {
+    assert.ok(typeof text === 'string' && text.trim() !== '' && !text.startsWith('--'), `--${name} takes A, B, C or the path of a save`)
+
+    return SAVES[text.toUpperCase()] ? { label: text.toUpperCase(), fixture: SAVES[text.toUpperCase()] } : { label: text, fixture: { file: text, gameId: null } }
+  }
+  const from = argument('from')
+  const to = argument('to')
+  const pair = { from: named(from === null ? 'A' : from, 'from'), to: named(to === null ? 'B' : to, 'to') }
+  const missing = [pair.from.fixture, pair.to.fixture].filter((fixture) => !fs.existsSync(path.resolve(root, fixture.file)))
 
   if (missing.length) {
     console.log(`SKIP orbit two saves: missing ${missing.map((fixture) => fixture.file).join(', ')} (gitignored played saves); no temporal witness exercised`)
     return
   }
 
-  const options = process.argv.slice(2)
   const loadIndex = options.findIndex((arg) => arg === '--load-count' || arg.startsWith('--load-count='))
   const loadText = loadIndex < 0 ? null : options[loadIndex] === '--load-count' ? options[loadIndex + 1] : options[loadIndex].slice('--load-count='.length)
   const loadCount = loadIndex < 0 ? null : Number(loadText)
@@ -273,13 +295,13 @@ const main = async () => {
     const index = Number(child.slice('--child='.length))
 
     assert.ok(Number.isInteger(index) && index >= 0 && index < MUTANTS.length, 'a declared mutant index is required')
-    console.log(`RESULT ${JSON.stringify(await measure(loadCount, MUTANTS[index]))}`)
+    console.log(`RESULT ${JSON.stringify(await measure(pair, loadCount, MUTANTS[index]))}`)
     return
   }
 
-  const result = await measure(loadCount)
+  const result = await measure(pair, loadCount)
 
-  console.log(`Matched ${result.matched}; skipped ${result.newInB} bodies new in B; absent from B ${result.absentFromB}`)
+  console.log(`Matched ${result.matched}; skipped ${result.newInTo} bodies new in ${pair.to.label}; absent from ${pair.to.label} ${result.absentFrom}`)
   console.log(`Snapshot: ${result.cadence.calls} whole calls of ${result.cadence.length} s plus ${result.cadence.remainder} s local remainder (${result.cadence.evaluations} evaluations); GameTime epoch; product inserts no loads`)
   console.log(`LOAD MODEL ${JSON.stringify(result.loadModel)}; source call upper bound K=${result.cadence.sourceCallUpperBound}, maximum source call ${MAX_SOURCE_CALL} s`)
   result.families.forEach((family) => console.log(JSON.stringify(family)))
@@ -289,7 +311,7 @@ const main = async () => {
 
   if (mutating()) {
     for (const [index, mutation] of MUTANTS.entries()) {
-      const childResult = await runChild(__filename, [`--child=${index}`, ...(loadCount === null ? [] : [`--load-count=${loadCount}`])], { limit: 180000 })
+      const childResult = await runChild(__filename, [`--child=${index}`, ...(loadCount === null ? [] : [`--load-count=${loadCount}`]), ...(from === null ? [] : [`--from=${from}`]), ...(to === null ? [] : [`--to=${to}`])], { limit: 180000 })
       const actual = lastJson(childResult, 'RESULT ')
       const head = result.assertions.find((check) => check.id === mutation.criterion)
       const mutant = actual.assertions.find((check) => check.id === mutation.criterion)

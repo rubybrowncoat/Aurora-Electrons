@@ -30,6 +30,9 @@ const PLAYED = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-1.db', gam
 // The later save of that campaign, 30,804,305 s after `PLAYED` (GameTime 122,529,715 s against 91,725,410 s, 0.977 of the 31,536,000 s year; 18,921 bodies of game 161 against 18,575), so a check that replays the pair reads the earlier save with `--since` and this one as its subject. It is a witness on the same terms as `PLAYED`: never the default, and read as exercising a rule only where a check names it.
 const PLAYED_NEXT = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-2.db', gameId: 161, raceId: 909, gameName: 'UEF' })
 
+// The third save of the campaign, 31,613,400 s after `PLAYED_NEXT` and 62,417,705 s after `PLAYED` (GameTime 154,143,115 s; 20,122 bodies of game 161 against 18,921), which the pair witness reads beside the two earlier ones. It is a witness on the same terms as `PLAYED`: never the default, and read as exercising a rule only where a check names it.
+const PLAYED_THIRD = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-3.db', gameId: 161, raceId: 909, gameName: 'UEF' })
+
 // The played save as the `[file, GameID, RaceID]` triple of a `--save`, `--stock` or `--modded` option.
 const playedTriple = () => [PLAYED.file, PLAYED.gameId, PLAYED.raceId]
 
@@ -104,4 +107,4 @@ const convertedSave = (file, { line = false, columns = [] } = {}) => {
   return target
 }
 
-module.exports = { FIXTURE, INTERIM, PLAYED, PLAYED_NEXT, STAR_STATEMENT, LINE_COLUMNS, fixtureSave, fixtureTriple, fixturePath, fixtureRows, playedTriple, convertedSave }
+module.exports = { FIXTURE, INTERIM, PLAYED, PLAYED_NEXT, PLAYED_THIRD, STAR_STATEMENT, LINE_COLUMNS, fixtureSave, fixtureTriple, fixturePath, fixtureRows, playedTriple, convertedSave }

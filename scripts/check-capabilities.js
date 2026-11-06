@@ -38,7 +38,7 @@ const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
-const { FIXTURE, PLAYED, PLAYED_NEXT } = require('./lib/fixtures')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_THIRD } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
@@ -53,6 +53,7 @@ const REAL = [
   { label: 'shipped 3.2 save', file: 'saves/AuroraDB_320_shipped.db', expect: 'accepted' },
   { label: 'played 3.2 save A', file: PLAYED.file, expect: 'accepted' },
   { label: 'played 3.2 save B', file: PLAYED_NEXT.file, expect: 'accepted' },
+  { label: 'played 3.2 save C', file: PLAYED_THIRD.file, expect: 'accepted' },
   { label: 'modded 2.7 save', file: 'AuroraDB.db', expect: 'refused' },
   { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db', expect: 'refused' },
 ]

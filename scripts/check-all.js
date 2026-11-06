@@ -51,6 +51,10 @@ const supportsGroups = (name) => GROUPS_SCRIPTS.has(name)
 // The slowest scripts start first, so the longest one does not begin last and run on alone.
 const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-history-backup.js', 'check-map-hierarchy.js', 'check-warning-snoozes.js', 'check-legacy-consumption.js']
 const ARGS = { 'check-design-rules.js': ['--fixtures'] }
+// The scripts whose gate is several invocations of the same script, one per entry, each printed on its own line and each able to fail the gate: the two-save witness measures one pair per run, because a run carries one explicit load count, so the gate runs the three pairs of the played campaign rather than letting the first pair stand for the others.
+const PAIRS = {
+  'check-orbit-two-saves.js': [['--from=A', '--to=B', '--load-count=1'], ['--from=B', '--to=C', '--load-count=1'], ['--from=A', '--to=C', '--load-count=2']],
+}
 
 const option = (name) => {
   const found = process.argv.find((argument) => argument.startsWith(`--${name}=`))
@@ -89,20 +93,30 @@ const main = async () => {
     const heads = quick || drivesBrowser(name)
     // A browser script that declares groups runs them in the full gate: the grouped pass is the gate's displayed-binding credit, one page open for every member of a group (owner, 2026-11-01, D1 option B).
     const groups = !quick && heads && supportsGroups(name)
-    const args = [...(ARGS[name] || []), ...(groups ? ['--groups'] : heads && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
     const begun = Date.now()
-    const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(heads && !groups ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
-    const lines = `${stdout}\n${stderr}`.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-    const summary = lines.filter((line) => /\bchecks?\b.*\b(passed|ok|failed)\b|\bpassed\b/i.test(line)).pop() || lines.pop() || ''
-    const result = { name, seconds: (Date.now() - begun) / 1000, code, summary }
+    const runs = []
 
-    console.log(`${code === 0 ? 'ok  ' : 'FAIL'}  ${result.seconds.toFixed(1).padStart(7)} s  ${name}  ${summary.slice(0, 140)}`)
+    for (const extra of PAIRS[name] || [[]]) {
+      const args = [...(ARGS[name] || []), ...extra, ...(groups ? ['--groups'] : heads && source.includes('--no-mutations') ? ['--no-mutations'] : [])]
+      const started = Date.now()
+      const { code, stdout, stderr } = await runChild(path.join(__dirname, name), args, { env: { CHECK_JOBS: cap, ...(heads && !groups ? { CHECK_NO_MUTATIONS: '1' } : {}) } })
+      const lines = `${stdout}\n${stderr}`.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      const summary = lines.filter((line) => /\bchecks?\b.*\b(passed|ok|failed)\b|\bpassed\b/i.test(line)).pop() || lines.pop() || ''
+      const seconds = (Date.now() - started) / 1000
+      const label = extra.length ? ` ${extra.join(' ')}` : ''
 
-    if (code !== 0) {
-      console.log(lines.filter((line) => /^FAIL|^\s*FAIL|Error/.test(line)).slice(0, 10).map((line) => `        ${line.slice(0, 200)}`).join('\n'))
+      console.log(`${code === 0 ? 'ok  ' : 'FAIL'}  ${seconds.toFixed(1).padStart(7)} s  ${name}${label}  ${summary.slice(0, 140)}`)
+
+      if (code !== 0) {
+        console.log(lines.filter((line) => /^FAIL|^\s*FAIL|Error/.test(line)).slice(0, 10).map((line) => `        ${line.slice(0, 200)}`).join('\n'))
+      }
+
+      runs.push({ code, summary })
     }
 
-    return result
+    const failed = runs.find((entry) => entry.code !== 0)
+
+    return { name, seconds: (Date.now() - begun) / 1000, code: failed ? failed.code : 0, summary: (failed || runs[runs.length - 1]).summary }
   }
 
   const results = await inParallel(scripts.filter((name) => !ALONE.has(name)), (name) => run(name, jobs), side)
