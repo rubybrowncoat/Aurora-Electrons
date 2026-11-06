@@ -644,7 +644,12 @@ const ledger = ({ years, capacity, stock, projects, arrivals = [], cycles }) => 
         requested = ZERO_FRACTION
       }
 
-      state.needs.forEach(([name, need]) => (held[name] = minus(have(name), times(need, requested))))
+      // The game floors every mineral balance at 0 after the debit (`MineralData.method_0`, MineralData.cs:37, at the end of `SubtractIndustrialProjectMinerals`, MineralData.cs:994-1011); the fuel is no mineral and a build is cut to it exactly.
+      state.needs.forEach(([name, need]) => {
+        const after = minus(have(name), times(need, requested))
+
+        held[name] = name !== 'fuel' && below(after, ZERO_FRACTION) ? ZERO_FRACTION : after
+      })
       state.built = plus(state.built, requested)
 
       if (same(requested, state.amount)) {
@@ -851,7 +856,7 @@ const engineCases = (engine, decimal) => {
 
   const inherited = against({ projects: [point(1, '100', '1', '1', { Duranium: '1000000' }), point(2, '100', '1', '1', { Duranium: '1' }, 1)], stock: { Duranium: '1000000.00035' }, capacity: '365', cycles: 6 })
 
-  holds('ledgerInherited', 'ENGINE the stock a project leaves is exact, with no error from the subtraction before it: 1000000.00035 t, 1000000 t taken by the project ahead, leaves 0.00035 t, which is a midpoint of the rounding, so the queued project builds 0.0004 (the even digit) and the stock goes to -0.00005 t, as the ledger oracle has it', agree(inherited) && close(inherited.figures.projects[2].firstBuild, 0.0004) && close(numberOf(inherited.model.states[1].built), 0.0004) && close(inherited.figures.left.Duranium, -0.00005))
+  holds('ledgerInherited', 'ENGINE the stock a project leaves is exact, with no error from the subtraction before it, and a balance is floored at 0 after a debit: 1000000.00035 t, 1000000 t taken by the project ahead, leaves 0.00035 t, which is a midpoint of the rounding, so the queued project builds 0.0004 (the even digit), which takes 0.0004 t of the 0.00035 t left, and the stock goes to 0, not -0.00005 t, as the ledger oracle has it', agree(inherited) && close(inherited.figures.projects[2].firstBuild, 0.0004) && close(numberOf(inherited.model.states[1].built), 0.0004) && inherited.figures.left.Duranium === 0)
 
   const remainders = ['1.00003', '1.00014'].map((fuel) => against({ projects: [point(1, '100', '3', '1', { fuel: '2' }), point(2, '100', '1', '1', {}, 1)], stock: { fuel }, arrivals: [{ resource: 'fuel', cycle: 2, quantity: '100' }], capacity: '365', cycles: 40 }))
 
@@ -1799,7 +1804,8 @@ const instantiatePage = (options, database, game, race) => instantiate(options, 
 // The mutants that run the engine's, the wrapper's and the page's cases again, each with one change; each must fail the case named with it.
 const mutantLists = () => {
   const ENGINE_MUTANTS = [
-    { name: 'an engine whose projects do not debit the stock they build from', from: 'left[resource] = subtract(left[resource] || ZERO, multiply(need, requested))', to: 'left[resource] = left[resource] || ZERO', fails: 'conserved' },
+    { name: 'an engine whose projects do not debit the stock they build from', from: 'const after = subtract(left[resource] || ZERO, multiply(need, requested))', to: 'const after = left[resource] || ZERO', fails: 'conserved' },
+    { name: 'an engine that leaves a negative mineral balance after a build rounded up past the stock', from: 'left[resource] = resource !== FUEL && negative(after) ? ZERO : after', to: 'left[resource] = after', fails: 'ledgerInherited' },
     { name: 'an engine that does not round a build to 4 decimals', from: 'requested = round(requested, BUILD_DECIMALS)', to: 'requested = requested', fails: 'rounded' },
     { name: 'an engine whose steady stretch runs one cycle past the finish', from: 'span = Math.min(span, ceilRatio(subtract(state.amount, reach), state.step), additions(', to: 'span = Math.min(span, ceilRatio(subtract(state.amount, reach), state.step) + 1, additions(', fails: 'stepwise' },
     { name: 'an engine whose steady stretch runs one cycle past the stock', from: 'positive(available) ? floorRatio(available, amount) : 0', to: 'positive(available) ? floorRatio(available, amount) + 1 : 0', fails: 'fuelJump' },

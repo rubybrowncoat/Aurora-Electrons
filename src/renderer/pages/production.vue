@@ -71,6 +71,7 @@
                 <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree({ tech: item.TechSystemID })" :name="item.name" /><page-link v-if="item.ShipyardID" class="ml-1" :to="linkTo.shipyards({ yard: item.ShipyardID })" :name="item.yardName" /></div>
                 <div class="caption text--secondary">{{ typeLabels[item.type] }}<span v-if="item.detail"> · {{ item.detail }}</span></div>
                 <div v-if="item.terms" class="caption text--secondary" data-industry-terms>{{ item.terms }}</div>
+                <div v-for="(line, index) in item.components" :key="line" class="caption text--secondary" data-use-components>{{ line }}<provenance-mark v-if="index === 0 && item.componentResult" :result="item.componentResult" /><provenance-mark v-else-if="index === item.components.length - 1 && item.useResult" :result="item.useResult" /></div>
                 <div v-if="item.note" class="caption warning--text">{{ item.note }}</div>
               </div>
             </template>
@@ -122,7 +123,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. An Engineering, Ordnance or Ground Unit Project develops a component, missile or ground unit class the race designed, for twice its stored development cost, and draws on construction capacity (ordnance capacity for an Ordnance Project); the line under the job gives the item, its cost and its minerals. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. An Engineering, Ordnance or Ground Unit Project develops a component, missile or ground unit class the race designed, for twice its stored development cost, and draws on construction capacity (ordnance capacity for an Ordnance Project); the line under the job gives the item, its cost and its minerals. A Light Naval or Space Station project takes the components in the colony's stock when it is made, a whole batch of each; the lines under it give what they credited a unit against the class's cost, the minerals they took off, what that saves at the project's rate and what the credit says of the Use Components box, which an industrial project does not store, while a construction, refit or automatic refit task shows its box as stored. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
           </div>
         </v-card>
 
@@ -247,8 +248,8 @@ import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
-import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
+import { boxLineShown, boxLines, categoryOf, completionBins, componentCredit, creditLines, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, taskUseComponents, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { REFIT_TASK_TYPES } from '../utilities/refits'
 import { SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES } from '../utilities/shipyard-growth'
@@ -580,6 +581,8 @@ export default {
             status = { id: 'running', label: 'Running' }
           }
 
+          const credit = this.creditOf(project, rate)
+
           return this.job({
             key: `industry-${project.ID}`,
             type: 'industry',
@@ -587,6 +590,9 @@ export default {
             name: `${this.units(project.Amount)} × ${project.Name}`,
             detail: PRODUCTION_TYPE_NAMES[project.ProductionType],
             terms: isDevelopmentType(project.ProductionType) ? this.developmentLine(project) : '',
+            components: credit.lines,
+            componentResult: credit.result,
+            useResult: credit.useResult,
             rate,
             finish,
             rateText: this.rateText(rate, this.bp, 'BP/yr'),
@@ -612,6 +618,8 @@ export default {
         const rate = shipRate(modifiers, ship)
         const finish = shipTaskFinish({ rate, task: { remaining: ship.RemainingProduction, totalBP: ship.TotalBP, hulls: ship.Hulls }, paused })
 
+        const box = boxLines(ship)
+
         return this.job({
           key: `ship-${ship.ID}`,
           type: 'ship',
@@ -619,6 +627,8 @@ export default {
           ShipyardID: ship.ShipyardID,
           yardName: ship.ShipyardName,
           name: ship.Name,
+          components: box,
+          componentResult: box.length ? taskUseComponents(ship).result : null,
           detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName, ship.Hulls > 1 ? `1 of ${this.count(ship.Hulls)} ships left` : ''].filter(Boolean).join(' · '),
           rate,
           finish,
@@ -924,6 +934,9 @@ export default {
         detail: '',
         note: '',
         terms: '',
+        components: [],
+        componentResult: null,
+        useResult: null,
         approx: false,
         queued: false,
         shortage: null,
@@ -951,6 +964,18 @@ export default {
       }
 
       return developmentTerms(project, this.developments.items[project.ID], this.count)
+    },
+
+    // The lines under a Light Naval or Space Station job: what the components in stock took off the project when it was made, told from its stored cost and minerals against its class (`componentCredit`) and worded by `creditLines`; none for another type. The box line carries the box rule's own result, which is unavailable: the stored cost never shows that the box was ticked.
+    creditOf(project, rate) {
+      if (project.ProductionType !== PRODUCTION_TYPE.LIGHT_NAVAL && project.ProductionType !== PRODUCTION_TYPE.SPACE_STATION) {
+        return { lines: [], result: null, useResult: null }
+      }
+
+      const credit = componentCredit({ classCost: project.ClassCost, parts: this.componentSources.parts[project.ItemID], storedCost: project.ProdPerUnit, storedMinerals: project })
+      const figure = (value) => this.count(value, Number.isInteger(value) ? 0 : 2)
+
+      return { lines: creditLines({ credit, classCost: project.ClassCost, storedCost: project.ProdPerUnit, units: project.Amount, perYear: valueOrNull(rate), format: figure, duration: (days) => this.duration(days), npr: this.RaceNPR }), result: credit.result, useResult: boxLineShown(credit.use, this.RaceNPR) ? credit.use.result : null }
     },
 
     colony(populationId, fallbackName) {
@@ -1131,7 +1156,7 @@ export default {
         const needs = MINERALS.map((mineral) => `FCT_IndustrialProjects.${mineral.name}`).join(', ')
         const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name} as Stock${mineral.name}`).join(', ')
 
-        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and ${loadedProject()}`)
+        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.ProductionID as ItemID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, FCT_ShipClass.Cost as ClassCost, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_IndustrialProjects.ProductionID and FCT_ShipClass.GameID = FCT_IndustrialProjects.GameID and FCT_IndustrialProjects.ProductionType in (${PRODUCTION_TYPE.LIGHT_NAVAL}, ${PRODUCTION_TYPE.SPACE_STATION}) where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and ${loadedProject()}`)
 
         return rows
       }),
@@ -1143,7 +1168,7 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, TaskClass.ClassName, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then TargetClass.Size else TaskClass.Size end) as Size, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.NumShips as Hulls, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then (case when TargetClass.Commercial = 0 then 1.0 when TargetClass.Commercial is null then null else 0.25 end) else (case when TaskClass.Commercial = 0 then 1.0 when TaskClass.Commercial is null then null else 0.25 end) end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass TaskClass on TaskClass.ShipClassID = FCT_ShipyardTask.ClassID left join FCT_ShipClass TargetClass on TargetClass.ShipClassID = FCT_ShipyardTask.RefitID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_ShipyardTask.UseComponents, FCT_Shipyard.ShipyardName, TaskClass.ClassName, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then TargetClass.Size else TaskClass.Size end) as Size, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.NumShips as Hulls, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then (case when TargetClass.Commercial = 0 then 1.0 when TargetClass.Commercial is null then null else 0.25 end) else (case when TaskClass.Commercial = 0 then 1.0 when TaskClass.Commercial is null then null else 0.25 end) end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass TaskClass on TaskClass.ShipClassID = FCT_ShipyardTask.ClassID left join FCT_ShipClass TargetClass on TargetClass.ShipClassID = FCT_ShipyardTask.RefitID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
 
         return rows
       }),

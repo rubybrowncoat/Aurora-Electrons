@@ -81,6 +81,7 @@ const PAGE_HELP = Object.freeze({
       'Component calculator takes a Ship class, a Colony, the Hulls and a Deadline, days from now, and gives the share of the colony\'s construction capacity that builds the class\'s manufactured components in time; a stock figure typed over a row is an assumption, and Reset stock restores the save\'s.',
       'Procurement manifest takes one or more classes with their hulls and the colony they are Needed at, and lists what is short of each component, where the stock sits and what has to move; CSV downloads the manifest and Copy text copies it.',
       'Engineering, Ordnance and Ground Unit Projects are listed with the item they develop, their cost (twice its development cost) and their minerals; the procurement manifest counts an Engineering Project as component supply and the other two by kind.',
+      'A Light Naval or Space Station project lists what the components in stock credited it when it was made (the cost and minerals a unit, held at the 1 BP floor, and the time saved) and what the credit says of the Use Components box, which an industrial project does not store; a construction, refit or automatic refit task shows its box as stored.',
       'A finish date is a forecast under the rules in each section\'s footer; a dash is a job with no date, and the mark beside it says why.',
     ],
     terms: ['build-points', 'research-points', 'production-capacity', 'mineral-shortage', 'slipway', 'estimated-output'],

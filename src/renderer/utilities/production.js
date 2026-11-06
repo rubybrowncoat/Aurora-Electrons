@@ -8,6 +8,8 @@ import { isFullCapacityYard } from './shipyard-types'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
 
 const PRODUCTION_VERSIONS = ['2.7.x']
+// The versions of the rules written against the line's source: the credit of stored components and the cycle forecast's mineral floor.
+const LINE_VERSIONS = ['3.2.x']
 const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
 const DAYS_PER_YEAR = 365
@@ -122,9 +124,18 @@ registerRule({
   assumptions: ['The date is approximate: the game\'s own steps are not reproduced exactly'],
 })
 
+// The cycle forecast debits what a build takes from the colony's stock as `MineralData.SubtractIndustrialProjectMinerals` does (MineralData.cs:994-1011): every one of the eleven balances is floored at 0 after the subtraction (the helper `MineralData.method_0`, MineralData.cs:37), so a build rounded up to 4 decimals past what a mineral's stock covers leaves 0, never a negative balance that would hold back the next cycle and take from what arrives. The shipyard and scaled debits (`SubtractShipyardTaskMinerals`, MineralData.cs:1017, and `SubtractScaledMinerals`, MineralData.cs:1043) floor the same way. docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since 2.7.1 lists this floor (B341, B355), the creation of the Light Naval and Space Station projects (B343, `production.componentCredit`), the development project types and the ordnance capacity term as its changes to industrial production, and no other step of the cycle (`Population.ProcessIndustrialProjects`, Population.cs:2186).
+registerRule({
+  id: 'production.industryFinish',
+  versions: LINE_VERSIONS,
+  units: 'days',
+  verification: 'estimated',
+  structure: ['production.industryRate'],
+  note: `The project's remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony's production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony's one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A build takes its minerals off the stock and leaves no balance below 0: a build rounded up past what a mineral's stock covers leaves 0. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes. ${ESTIMATE}`,
+})
+
 ;[
   { key: 'research', note: 'The remaining research points over the project\'s rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs.' },
-  { key: 'industry', note: 'The project\'s remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony\'s production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony\'s one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes.' },
   { key: 'ship', versions: ['2.7.x', '3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
   { key: 'training', note: 'The task\'s remaining build points over its rate, in days.' },
@@ -159,10 +170,230 @@ registerRule({
   assumptions: ['The order the game takes a colony\'s projects in each cycle is not saved'],
 })
 
+// A Light Naval or Space Station project is made by `Population.method_147` (Population.cs:7104-7198): it clones the class's minerals (`gclass123_5.ShallowClone()`, Population.cs:7147 and 7185) and takes the class's cost as the cost a unit (`ProdPerUnit`, set from `ShipClass.Cost` in `SetSelectedIndustrialProjectAndPopulateRequirementsListView`, Population.cs:8388-8479), and `Population.method_37` (Population.cs:3059-3104) then takes the stored components. For each component the class mounts it counts the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds (`RaceTechByRaceID.ContainsKey`) is taken only when the Industry tab's Use Components box is Checked (`chkUseComponentsIndustry`, Economics.cs:1946), one of technology the race does not hold is always taken and its shortage refuses the project (Population.cs:7148-7164 and 7185-7194); each component taken lowers the cost a unit by `Cost * NumComponent` and the project's minerals by the component's, scaled by `NumComponent`, and the colony's stock by the batch; after the last the cost a unit is floored at 1 BP (`if (ProdPerUnit < 1m) ProdPerUnit = 1m`, Population.cs:3093). A Space Station refuses a class with prototype components (Population.cs:7183 and 7197). The box is an argument of the creation and no column of `FCT_IndustrialProjects` (`Game.SaveIndustrialProjects`, Game.cs:11479-11546 writes the stored cost a unit and the eleven minerals, nothing else of it). docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since 2.7.1 (B343).
+registerRule({
+  id: 'production.componentCredit',
+  versions: LINE_VERSIONS,
+  units: 'BP',
+  verification: 'estimated',
+  structure: ['FCT_IndustrialProjects.ProductionType, ProductionID, Amount, ProdPerUnit and the mineral columns', 'FCT_ShipClass.Cost', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Cost and the mineral columns', 'FCT_RaceTech.TechID'],
+  note: 'What the components in a colony\'s stock took off a Light Naval or Space Station project when it was made: the class\'s cost less the cost a unit the project stores, which already counts the credit, so the finish date does too. Making the project takes each component the class mounts from the colony\'s stock for the whole batch, and only where the stock holds that much of it: a component of technology the race has not researched must be there, or the project is refused, and one of researched technology is taken only when Use Components is ticked. Each component taken lowers the cost and the minerals a unit by its own, and a unit never costs less than 1 BP. The box is not stored with an industrial project and the credit does not tell it: the research read is the race\'s current research, so a component that was alien and taken when the project was made and has been researched since gives the credit a ticked box would have given, and a credit beyond what the components alien as the race now stands give shows only that components of researched technology were taken. A stored cost a unit within one part in a million of the class\'s cost, either side, counts as the class\'s cost and credits 0, never a negative figure: a stored cost summed from the components\' own costs may sit a rounding off the class\'s. A stored cost a unit beyond that band above the class\'s cost is no credit of the class\'s components, which only ever lower a unit\'s cost, so both costs are given and the credit is not known. The class is read as it now stands.',
+  assumptions: ['The class\'s cost, components and minerals are the ones the project was made from', 'A component with no research row of the race is not researched', 'The research is the race\'s current research, not the one it held when the project was made'],
+})
+
+// The Use Components box of a shipyard task is stored as the player left it: `Shipyard.method_4` writes `UseComponents = Helpers.smethod_43(checkState)` (Shipyard.cs:287), where the earlier game forced it true, and a repeat or an automatic refit copies it from the task before (`UseComponents = gclass196_0.UseComponents`, Population.cs:2020; `completedAutoRefitTask.UseComponents`, Population.cs:1921). A construction task takes a component of researched technology from the stock only when the box is Checked and one of alien technology always (`Population.method_35`, Population.cs:2974-3006); a refit takes the components it adds the same way (`ApplyStoredComponentsToRefitTask`, Population.cs:3008-3057); the next task of an automatic refit takes stock only when the stored box is true (Population.cs:1922-1925), and a repeat of a construction task applies the stored box (Population.cs:2025-2029). docs/SHIPYARD_DEVELOPMENT_AND_SHIP_WORK_REFERENCE.md § Changes since 2.7.1 (B354).
+registerRule({
+  id: 'production.useComponents',
+  versions: LINE_VERSIONS,
+  units: 'flag',
+  verification: 'confirmed',
+  structure: ['FCT_ShipyardTask.UseComponents, TaskTypeID'],
+  note: 'The Use Components box of a construction, refit or automatic refit task as the save stores it: 1 when it was ticked and 0 when it was not, never taken as ticked. A save without the column, or with a value that is no flag, gives no figure. Whether the box was ticked decides which components of researched technology the task credited and what the tasks that follow it credit. An industrial project stores no box, so its result is unavailable: the stored cost shows that components of researched technology were taken, which a ticked box allows and which a component researched since the project was made explains just as well, and never whether the box was ticked. A stored cost a unit above the class\'s cost is no cost the class\'s components give, so neither the credit nor the box is told from it.',
+})
+
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // A 0 or 1 flag column as true or false, null when the save does not hold one.
 export const flagOf = (value) => (value === 0 || value === 1 ? Boolean(value) : null)
+
+// The least a unit of a Light Naval or Space Station project costs, in build points: the game holds the cost a unit at 1 BP after the stored components are taken off (`Population.method_37`, Population.cs:3093-3095).
+export const UNIT_COST_FLOOR = 1
+
+// The cost a unit takes once `credit` BP of stored components is taken off the class's `classCost`, held at the floor.
+export const creditedCost = (classCost, credit) => Math.max(UNIT_COST_FLOOR, classCost - credit)
+
+const CREDIT_TOLERANCE = 1e-6
+const nearly = (a, b) => Math.abs(a - b) <= CREDIT_TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b))
+const beyond = (a, b) => a > b && !nearly(a, b)
+
+// Why the credit is not known where the stored cost a unit is above the class's cost: the class's components only ever lower a unit's cost, so no set of them leaves one above the class's.
+const aboveClassReason = (storedCost, classCost) => `the project's stored cost of ${storedCost} BP a unit is above the class's ${classCost} BP a unit`
+
+// What a Light Naval or Space Station project's class mounts, as the sums the credit is told from: the BP the components of alien technology give (taken whatever the box says) and all of them give, or the gaps the save leaves.
+const mountedCredit = (parts) => {
+  const gaps = []
+  let alien = 0
+  let whole = 0
+
+  parts.forEach((part) => {
+    if (!isNumber(part.count) || !isNumber(part.cost)) {
+      gaps.push(`the count and the cost of ${part.name}`)
+    } else if (part.researched !== 0 && part.researched !== 1) {
+      gaps.push(`whether the race has researched ${part.name}`)
+    } else {
+      whole += part.cost * part.count
+      alien += part.researched === 0 ? part.cost * part.count : 0
+    }
+  })
+
+  return { gaps: [...new Set(gaps)], alien, whole }
+}
+
+// What the Use Components box of an industrial project would be read from: the project stores none, and the stored cost tells the box only as far as the research the race holds now, which a research made since the project was made changes.
+const BOX_UNTOLD = 'the project\'s Use Components box: the project stores none, and the stored cost cannot tell it once a component has been researched since'
+const BOX_LIMIT = 'The research is the race\'s current research, not the one the race held when the project was made'
+const boxResult = (missing = []) => unavailable({ rule: 'production.useComponents', missing: [BOX_UNTOLD, ...missing], units: 'flag', assumptions: [BOX_LIMIT] })
+
+// What the stored cost shows of the Use Components box, which an industrial project does not store: never that the box was ticked, only which components must have been taken under the research the race holds now. The game always takes the components of alien technology and those of researched technology only with the box ticked, so the stored cost lies between the class's cost less every component and its cost less the ones alien now: below the latter by more than one part in a million means components of researched technology were taken ('researched'), which a ticked box allows and which a component researched after the project was made explains just as well; at the latter the cost does not decide it ('untold', with `credited` 'alien' or 'none'), and where the class mounts nothing of researched technology the box had nothing to decide ('moot'); any other cost is one the class's components cannot give ('unexplained'), and a stored cost beyond that band above the class's cost is no cost of the class's components whatever the research, so neither the credit nor the box is told ('above'). 'unknown' with the gaps where the save leaves a count, a cost or whether the race has researched a component. `result` is the rule's own result for the box: unavailable, naming why the stored cost cannot tell it.
+const useOf = ({ classCost, parts, storedCost }) => {
+  const { gaps, alien, whole } = mountedCredit(parts)
+
+  if (gaps.length) {
+    return { state: 'unknown', missing: gaps, result: boxResult(gaps) }
+  }
+
+  const mandatory = creditedCost(classCost, alien)
+  const least = creditedCost(classCost, whole)
+
+  if (beyond(storedCost, classCost)) {
+    return { state: 'above', alien, result: boxResult() }
+  }
+
+  if (beyond(storedCost, mandatory) || beyond(least, storedCost)) {
+    return { state: 'unexplained', alien, result: boxResult() }
+  }
+
+  if (!parts.some((part) => part.researched === 1)) {
+    return { state: 'moot', alien, result: boxResult() }
+  }
+
+  if (beyond(mandatory, storedCost)) {
+    return { state: 'researched', alien, result: boxResult() }
+  }
+
+  return { state: 'untold', alien, credited: nearly(mandatory, creditedCost(classCost, 0)) ? 'none' : 'alien', result: boxResult() }
+}
+
+// The minerals a unit the stored components took off, as [{ name, tonnes }] in the order of the minerals: what the class's components need of each (their count times their minerals) less what the project stores a unit; null while a count, a mineral or a stored figure is not in the save.
+const mineralCredit = (parts, stored) => {
+  if (!stored) {
+    return null
+  }
+
+  const credited = []
+
+  for (const { name } of MINERALS) {
+    const mounted = parts.reduce((total, part) => (total === null || !isNumber(part.count) || !part.minerals || !isNumber(part.minerals[name]) ? null : total + part.count * part.minerals[name]), 0)
+
+    if (mounted === null || !isNumber(stored[name])) {
+      return null
+    }
+
+    if (beyond(mounted, stored[name])) {
+      credited.push({ name, tonnes: mounted - stored[name] })
+    }
+  }
+
+  return credited
+}
+
+// What the stored components took off a Light Naval or Space Station project when it was made, from the project's stored cost a unit and minerals against the class it builds (`production.componentCredit`): { result (the BP a unit credited, unavailable naming what the save lacks), credit (BP a unit, 0 where the two costs are equal within one part in a million, null while unknown), aboveClass (the stored cost a unit is above the class's cost beyond that band, which leaves the credit and the box untold), floored (the stored cost is the 1 BP floor), minerals ([{ name, tonnes }] a unit credited or null), use (what the credit shows of the Use Components box, `useOf`: never that it was ticked, and `result`, the box rule's own unavailable result naming the limit) }. `classCost`: the class's stored cost; `parts`: its components, [{ name, count, cost, minerals: { [mineral]: tonnes }, researched (1, 0 or null where the save cannot say) }], as the component calculator's sources hold them; `storedCost` and `storedMinerals` the project's `ProdPerUnit` and mineral columns.
+export const componentCredit = ({ classCost, parts, storedCost, storedMinerals }) => {
+  const rule = 'production.componentCredit'
+  const missing = []
+
+  if (!isNumber(classCost)) {
+    missing.push('the class\'s cost')
+  }
+
+  if (!isNumber(storedCost)) {
+    missing.push('the project\'s stored cost a unit')
+  }
+
+  if (!Array.isArray(parts) || !parts.length) {
+    missing.push('the components of the class')
+  }
+
+  if (missing.length) {
+    return { result: unavailable({ rule, missing, units: 'BP' }), credit: null, aboveClass: false, floored: false, minerals: null, use: { state: 'unknown', missing, result: boxResult(missing) } }
+  }
+
+  const aboveClass = beyond(storedCost, classCost)
+  // Within the band the two costs are equal for the credit rule: a stored cost summed from the components' own costs may sit a rounding off the class's, and the credit is 0 there, never the negative the difference gives.
+  const credit = aboveClass ? null : nearly(storedCost, classCost) ? 0 : classCost - storedCost
+
+  return {
+    result: aboveClass ? unavailable({ rule, missing: [aboveClassReason(storedCost, classCost)], units: 'BP' }) : ofRule({ rule, value: credit, inputs: { present: ['the class\'s cost', 'the project\'s stored cost a unit', 'the components of the class'] }, units: 'BP' }),
+    credit,
+    aboveClass,
+    floored: credit > 0 && nearly(storedCost, UNIT_COST_FLOOR),
+    minerals: aboveClass ? null : mineralCredit(parts, storedMinerals),
+    use: useOf({ classCost, parts, storedCost }),
+  }
+}
+
+// The lines under a Light Naval or Space Station job, one text each: what the stored components credited, the minerals they took off, what that saves at the project's rate, and what the stored cost shows of the Use Components box, which is never that the box was ticked. A credit that cannot be told is one line naming both costs where the stored cost is above the class's, with the box's line after it, or the figures the save leaves out. `credit`: `componentCredit`'s result; `classCost` and `storedCost` its two costs; `units`: the units left; `perYear`: the project's rate in BP a year, null while it is not known; `format(value)` writes a figure of a cost or a mass, `duration(days)` a span; `npr`: a spied empire, whose research the save does not show (the box is left out of the lines).
+export const creditLines = ({ credit, classCost, storedCost, units, perYear, format, duration, npr = false }) => {
+  const lines = []
+  const { use } = credit
+
+  if (credit.credit === null) {
+    lines.push(credit.aboveClass ? `Credit of the stored components not known: the project's stored cost of ${format(storedCost)} BP a unit is above the class's ${format(classCost)} BP a unit` : `Credit of the stored components not known: missing ${credit.result.inputs.missing.join(', ')}`)
+
+    if (!npr && use.state === 'above') {
+      lines.push('The Use Components box is not stored with the project: the stored cost is above the class\'s cost, so the box\'s state cannot be told from it')
+    }
+
+    return lines
+  }
+
+  if (!(credit.credit > 0)) {
+    lines.push(`No stored components credited: the project costs the class's ${format(classCost)} BP a unit`)
+  } else {
+    lines.push(`Stored components credited ${format(credit.credit)} BP of the class's ${format(classCost)} BP a unit, so the project costs ${format(storedCost)} BP a unit${credit.floored ? ', held at the 1 BP floor' : ''}`)
+  }
+
+  if (credit.minerals && credit.minerals.length) {
+    lines.push(`Minerals credited a unit: ${credit.minerals.map((mineral) => `${mineral.name} ${format(mineral.tonnes)} t`).join(', ')}`)
+  }
+
+  if (credit.credit > 0 && isNumber(units) && units > 0 && isNumber(perYear) && perYear > 0) {
+    lines.push(`At the project's rate the credit saves ${format(credit.credit * units)} BP over the ${format(units)} units left, ${duration(credit.credit * units / perYear * DAYS_PER_YEAR)}`)
+  }
+
+  if (use.state === 'unexplained') {
+    lines.push('The stored cost is not one the class\'s components give: the class or its components differ from the ones the project was made from')
+  } else if (!npr && use.state === 'researched') {
+    lines.push(use.alien > 0 ? `The credit goes beyond the ${format(use.alien)} BP a unit that the class's alien components give alone, so components of researched technology were taken: a ticked Use Components box allows that, and a component researched after the project was made explains the same credit, so the box's state cannot be told from the cost` : 'Components of researched technology were taken: a ticked Use Components box allows that, and a component researched after the project was made explains the same credit, so the box\'s state cannot be told from the cost')
+  } else if (!npr && use.state === 'untold') {
+    lines.push(use.credited === 'alien' ? `The Use Components box is not stored with the project: the credit is what the class's alien components give (${format(use.alien)} BP a unit), taken whether the box is ticked or not, so the box's state cannot be told from the cost` : 'The Use Components box is not stored with the project: with nothing credited, the cost cannot tell whether the box was not ticked or the stock did not cover a whole batch of a component of researched technology')
+  } else if (!npr && use.state === 'moot') {
+    lines.push('The class mounts no component of researched technology, so the Use Components box changed nothing for the project and the cost says nothing of it')
+  }
+
+  return lines
+}
+
+// Whether `creditLines` words the box of a project: the box is left out for a spied empire, whose research the save does not hold, and where the stored cost is below every cost the class's components give the one line says it is no stored one. A stored cost above the class's cost cannot be told of the box either, so that line carries the box rule's result too. The page marks the box line with `use.result`.
+export const boxLineShown = (use, npr = false) => !npr && (use.state === 'researched' || use.state === 'untold' || use.state === 'moot' || use.state === 'above')
+
+// A shipyard task's Use Components box as the save stores it, as { flag (true, false, or null where the save holds none), result } with the result of 'production.useComponents': the box as stored, never taken as ticked.
+export const taskUseComponents = (task) => {
+  const rule = 'production.useComponents'
+  const flag = flagOf(task.UseComponents)
+
+  return { flag, result: flag === null ? unavailable({ rule, missing: ['the task\'s Use Components box'], units: 'flag' }) : ofRule({ rule, value: flag ? 1 : 0, inputs: { present: ['FCT_ShipyardTask.UseComponents'] }, units: 'flag' }) }
+}
+
+// What the stored box decides, by shipyard task type: a construction task credits the components in stock when it is made and again for each task a repeat makes; a refit credits those it adds; an automatic refit credits those it adds and, with the box ticked, the same for the task it makes for the next ship. A repair and a scrap take none, so the box says nothing there.
+const BOX_WORDS = Object.freeze({
+  0: Object.freeze({ on: 'components in stock of researched and alien technology are credited to the task, and to the tasks a repeat makes after it', off: 'only components in stock of alien technology are credited to the task, and to the tasks a repeat makes after it' }),
+  2: Object.freeze({ on: 'components in stock that the refit adds are credited, researched technology included', off: 'only components in stock of alien technology that the refit adds are credited' }),
+  4: Object.freeze({ on: 'components in stock that the refit adds are credited to the task and to each task it makes for the next ship', off: 'only alien components that the refit adds are credited to the task, and the tasks it makes for the next ships credit none' }),
+})
+
+// The line under a shipyard task about its Use Components box, as an array of 0 or 1 text: for a construction, refit or automatic refit task the box as stored and what it decides; none for a repair or a scrap, which the box does not touch, or for a type the save does not give.
+export const boxLines = (task) => {
+  const words = BOX_WORDS[task.ShipyardTaskType]
+
+  if (!words) {
+    return []
+  }
+
+  const { flag } = taskUseComponents(task)
+
+  return [flag === null ? 'Use Components is not stored for the task' : `Use Components ${flag ? 'on' : 'off'}: ${flag ? words.on : words.off}`]
+}
 
 const MODIFIER_TEXT = {
   row: 'the colony\'s production modifiers',
