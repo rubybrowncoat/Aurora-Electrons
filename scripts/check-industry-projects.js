@@ -348,7 +348,7 @@ const idsOf = (rows) => rows.map((row) => Number(row.id.split(':')[1])).sort((a,
 // The figure as a page words it: whole numbers as they are, others to two decimals.
 const figure = (value) => (Number.isInteger(value) ? String(value) : value.toFixed(2))
 
-const MODIFIERS = { ConstructionProduction: 100, OverallProductionModifier: 1, ConstructionPower: 1, EngineerProductionModifier: 0, GroundConstructionPower: 0, OrdnanceProduction: 10, OrdnanceProductionPower: 1, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
+const MODIFIERS = { ConstructionProduction: 100, OverallProductionModifier: 1, ConstructionPower: 1, GroundConstructionPower: 0, OrdnanceProduction: 10, OrdnanceProductionPower: 1, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
 const CAPACITY = { construction: 100, ordnance: 10 }
 
 // The Production page on a copy, its own reads run and its forecast started, with the capacity of every colony of the planted projects given (the page reads it through the capability report of the app).

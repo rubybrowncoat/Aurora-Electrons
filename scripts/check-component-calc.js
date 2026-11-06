@@ -167,7 +167,7 @@ const loadCalculator = async (mutate = null) => {
 // The calculator component on a plan: the component's own computed (`verdict`, `tiles`), given the plan, the needs of the batch and a deadline in days (a date reads as its day number, which the check does not look at).
 const verdictOf = (options) => (plan, needs, deadlineDays) => instantiate(options, { $store: { getters: { StartYear: 2000, GameTime: 0 }, state: {}, dispatch: async () => {} }, data: { plan, needs, deadlineDays, computing: false, dateIn: (days) => `day ${days}` } })
 
-const MODIFIERS = { PopName: 'Test colony', ConstructionProduction: 36500, OverallProductionModifier: 1, ConstructionPower: 1, EngineerProductionModifier: 0, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
+const MODIFIERS = { PopName: 'Test colony', ConstructionProduction: 36500, OverallProductionModifier: 1, ConstructionPower: 1, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
 const HULLS = 4
 const DEADLINE = 30
 

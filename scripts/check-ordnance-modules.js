@@ -497,7 +497,7 @@ check('orbital-place', 'a fleet or body with no saved position is matched by the
 
 check('capacity', 'a colony\'s ordnance capacity adds the orbital term after the installations\' product and never multiplies it by the colony\'s modifier; the other capacities and a row without the term are as before; an unknown term leaves the capacity unavailable', async (w) => {
   const { '../mixins/production-modifiers': mixin, '../utilities/ordnance-modules': o } = await w.modules()
-  const modifiers = { ConstructionProduction: 100, OverallProductionModifier: 0.5, ConstructionPower: 4, EngineerProductionModifier: 0, GroundConstructionPower: 0, OrdnanceProduction: 600, OrdnanceProductionPower: 10, FighterProduction: 60, FighterProductionPower: 2 }
+  const modifiers = { ConstructionProduction: 100, OverallProductionModifier: 0.5, ConstructionPower: 4, GroundConstructionPower: 0, OrdnanceProduction: 600, OrdnanceProductionPower: 10, FighterProduction: 60, FighterProductionPower: 2 }
   const term = o.orbitalOrdnanceTerm({ source: { ships: [{ ShipID: 1, FleetID: 1, ParentCommandID: 1, FleetSystemID: 1, crew: 1, captain: 1, captained: true, modules: 10 }] }, mineRate: 100, admins: { 1: { NavalAdminCommandID: 1, ParentCommandID: 0, SystemID: 1, BonusValue: null, Share: 0, Eligible: true, Unknown: null, BonusUnknown: null, Systems: new Set([1]) } } })
   const unknown = o.orbitalOrdnanceTerm({ source: { ships: [{ ShipID: 1, FleetID: 1, ParentCommandID: 1, FleetSystemID: 1, crew: null, captain: 1, captained: true, modules: 10 }] }, mineRate: 100 })
   const capacity = (row, kind) => mixin.capacityResult(row, kind, new Set())

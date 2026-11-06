@@ -10,6 +10,8 @@ import { combine, isAvailable, ofRule, registerRule, ruleSupports, unavailable, 
 import { fleetCanTransit, hasGate, transitRule } from './transport'
 
 const VERSIONS = ['2.7.x']
+// The ground rule is the one verified against the line's own source; the other three rules stay on the earlier line's formula.
+const GROUND_VERSIONS = ['3.2.x']
 const DAYS_PER_YEAR = 365
 // The share of a parent headquarters' commander bonus a subordinate formation takes up.
 const PARENT_SHARE = 0.25
@@ -43,13 +45,14 @@ registerRule({
   assumptions: ['the freighters are free and fully crewed', 'full holds', 'the stock at the builder covers the recipe', 'mines already installed elsewhere are not counted'],
 })
 
+// The formula, from the game's own code: Population.RecalculateAnnualProductionCapacities adds ConstructionProduction × GroundFormationConstructionModifier × GroundFormationConstructionRating to the colony's construction capacity, and RecalculateGroundFormationConstructionModifier has no caller, so the modifier keeps its initial 1: the engineer term is the race's construction rate times the rating and nothing scales it by the economic or radiation modifier. The rating is Population.RecalculateGroundFormationConstructionRating over GroundUnitFormation.GetConstructionRating (its elements' units times the class ConstructionRating, times the commander's effective Production multiplier, Commander.GetEffectiveGroundCommandBonusMultiplier over the integer Commander.GetGroundCommandCapacityModifier), and the chain of parents is GroundUnitFormation.method_1, whose share is Helpers.decimal_7 (0.25). The per-turn refresh calls the rating with the fortification engineers included and the load-time one with them excluded.
 registerRule({
   id: 'mineBootstrap.groundAssistance',
-  versions: VERSIONS,
+  versions: GROUND_VERSIONS,
   units: 'BP/yr',
   verification: 'estimated',
-  structure: ['FCT_GroundUnitFormation (population, ship and parent)', 'FCT_GroundUnitFormationElement.Units', 'FCT_GroundUnitClass.ConstructionRating, Size, HQCapacity', 'FCT_Commander, FCT_CommanderBonuses (bonus 5, Production)', 'FCT_Race.ConstructionProduction, EconomicProdModifier'],
-  note: 'Engineers add race construction rate x economic modifier x radiation x the sum over their formations of units x construction rating x the formation\'s commander multiplier. A commander counts its Production bonus when the formation\'s own headquarters capacity covers the tonnage of the formation and its subordinates (otherwise the formation has no bonus), and each parent at the same colony with a commander adds a quarter of its own bonus excess. A formation is carried whole by one troop ship. The same rule counts the engineers already at the colony in its capacity. The saved assignment of engineers to fortification work is not stored, so the figure is an upper bound.',
+  structure: ['FCT_GroundUnitFormation (population, ship and parent)', 'FCT_GroundUnitFormationElement.Units', 'FCT_GroundUnitClass.ConstructionRating, Size, HQCapacity', 'FCT_Commander, FCT_CommanderBonuses (bonus 5, Production)', 'FCT_Race.ConstructionProduction'],
+  note: 'Engineers add the race\'s construction rate times the sum over their formations of units times construction rating times the formation\'s commander multiplier. The game never recalculates the engineers\' construction modifier, so it keeps its initial 1 and no economic or radiation factor scales the figure. A commander counts its Production bonus when the formation\'s own headquarters capacity covers the tonnage of the formation and its subordinates (otherwise the formation has no bonus), and each parent at the same colony with a commander adds a quarter of its own bonus excess. A formation is carried whole by one troop ship. The same rule counts the engineers already at the colony in its capacity. The saved assignment of engineers to fortification work is not stored, so the figure is an upper bound.',
   assumptions: ['no engineers are assigned to fortification work', 'a moved formation keeps only the parents already at the colony', 'moving the engineers takes no time and the troop ships are free'],
 })
 
@@ -527,7 +530,7 @@ export const carryFormations = (candidates, troopCapacity) => {
 
 const listed = (items, name) => `${items.slice(0, 3).map(name).join(', ')}${items.length > 3 ? ' and others' : ''}`
 
-// Route 3: engineers moved to the colony. `ground`: { gaps, formations } from the loader (`gaps` the schema columns the save lacks), `factor`: { ConstructionProduction, EngineerProductionModifier } of the colony (null columns unknown), `capacity` the colony's yearly construction capacity result now (with its own engineers counted by `withMappedEngineers`), `usage`, `workers`, `stock` and `format` as `localRoute` takes them, `version` the formula version, `troopCapacity` the race's troop ships ({ lift, ships, classes: [{ TroopCapacity, Ships }] }, null when not read). Unavailable with the reason when the rules this relies on are not mapped for the save. The engineers do not change what the mines themselves need: the workers of manned mines and the minerals of the recipe are assessed as the local route does.
+// Route 3: engineers moved to the colony. `ground`: { gaps, formations } from the loader (`gaps` the schema columns the save lacks), `factor`: the colony's race construction rate ({ ConstructionProduction }, null unknown), `capacity` the colony's yearly construction capacity result now (with its own engineers counted by `withMappedEngineers`), `usage`, `workers`, `stock` and `format` as `localRoute` takes them, `version` the formula version, `troopCapacity` the race's troop ships ({ lift, ships, classes: [{ TroopCapacity, Ships }] }, null when not read). Unavailable with the reason when the rules this relies on are not mapped for the save. The engineers do not change what the mines themselves need: the workers of manned mines and the minerals of the recipe are assessed as the local route does.
 export const groundRoute = ({ requirement, target, ground, factor, capacity, usage, version, troopCapacity, workers = { now: null, later: null, cost: null }, stock = null, gaps: readGaps = [], format = plainNumber }) => {
   const t = texts(format)
   const route = routeBase('ground', 'Ground-force assistance')
@@ -543,8 +546,8 @@ export const groundRoute = ({ requirement, target, ground, factor, capacity, usa
 
   reasons.push(...readGaps)
 
-  if (!factor || !isNumber(factor.ConstructionProduction) || !isNumber(factor.EngineerProductionModifier)) {
-    reasons.push('the colony\'s race construction rate and engineer modifier')
+  if (!factor || !isNumber(factor.ConstructionProduction)) {
+    reasons.push('the colony\'s race construction rate')
   }
 
   if (reasons.length) {
@@ -552,7 +555,7 @@ export const groundRoute = ({ requirement, target, ground, factor, capacity, usa
   }
 
   const { byId, children } = indexFormations(ground.formations)
-  const factorValue = factor.ConstructionProduction * factor.EngineerProductionModifier
+  const factorValue = factor.ConstructionProduction
   const atTarget = engineerPower(ground.formations, target.PopulationID)
   const candidates = ground.formations.filter((formation) => formation.PopulationID > 0 && formation.PopulationID !== target.PopulationID && !formation.ShipID && (formation.rating === null || formation.rating > 0)).map((formation) => {
     const multiplier = formation.rating === null ? null : commandMultiplier(formation, target.PopulationID, byId, children)

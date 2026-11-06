@@ -1279,7 +1279,7 @@ const wrapperCases = ({ production, provenance, 'industry-cycle': engine }) => {
 const pageCases = async (pageOptions) => {
   const results = []
   const holds = (key, statement, condition) => results.push([statement, Boolean(condition), key])
-  const modifiers = { PopName: 'Test colony', ConstructionProduction: SYNTHETIC.capacity, OverallProductionModifier: 1, ConstructionPower: 1, EngineerProductionModifier: 0, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
+  const modifiers = { PopName: 'Test colony', ConstructionProduction: SYNTHETIC.capacity, OverallProductionModifier: 1, ConstructionPower: 1, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
   const zeros = Object.fromEntries(MINERAL_NAMES.flatMap((name) => [[name, 0], [`Stock${name}`, 0]]))
   const row = (extra = {}) => ({ ID: 1, Name: `Project ${extra.ID || 1}`, ProductionType: 0, PopulationID: 7, Percentage: 100, Amount: 4, PartialCompletion: 0, ProdPerUnit: 2, Queue: 0, Paused: 0, FuelRequired: 0, StockFuel: 0, ConversionFrom: null, ConversionSource: null, ...zeros, ...extra })
   const arrival = (resource, day, quantity, populationId = 7) => ({ id: 1, PopulationID: populationId, resource, day, quantity, source: '' })
