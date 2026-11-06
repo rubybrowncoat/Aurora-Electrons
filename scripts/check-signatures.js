@@ -20,6 +20,8 @@ const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { PINNED_ENGINES } = require('./lib/pinned-engines')
+const { PINNED_SAVES, pinnedSaveOfGame } = require('./lib/pinned-saves')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -124,6 +126,12 @@ const racesOf = async (save) => {
 }
 
 const sameFigure = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b))
+
+// The pinned save a game of a save read here is (scripts/lib/pinned-saves.js: told by the id, name, start year and game time its FCT_Game row stores, never by the file name), or null: a pinned engine is of a saved state, and another save that reuses its game and component ids is not it.
+const savedAs = (save, game) => pinnedSaveOfGame(async (sql, parameters) => (await save.database.query(sql, { replacements: Object.fromEntries(Object.entries(parameters).map(([name, value]) => [name.slice(1), value])) }))[0], game)
+
+// Whether a pinned engine of the saved state `saved` and its game explains an engine of component `id` whose stored power differs from the rebuilt one: the pin names the saved state, the game, the component, the field and both figures.
+const explainsPower = (saved, game, id, stored, computed) => PINNED_ENGINES.some((pin) => pin.save === saved && pin.game === game && pin.id === id && pin.field === 'power' && sameFigure(pin.stored, stored) && sameFigure(pin.computed, computed))
 
 // Every class of a save rebuilt from the loader and the rules and set beside what the save stores: the tallies and the mismatches of the three figures.
 const reconcileSave = async (m, save) => {
@@ -731,19 +739,22 @@ check('capability: /sensors is unsupported on a save without a column a loader c
   }
 })
 
-check('reduction (save): an engine rebuilt at its own tech levels reproduces its stored power', async (m) => {
+check('reduction (save): an engine rebuilt at its own tech levels reproduces its stored power, but for the pinned engines', async (m) => {
   if (!SAVES.length) {
     return skipped('no save in saves/')
   }
 
   const lines = []
+  const unexplained = []
   let total = 0
 
   for (const save of SAVES) {
     let rebuilt = 0
+    let pinned = 0
     let ratings = 0
 
     for (const { GameID, RaceID } of await racesOf(save)) {
+      const saved = await savedAs(save, GameID)
       const { techs } = await m.dd.loadThermalReduction(save.database, { GameID, RaceID })
       const classes = await m.dd.loadSignatureClasses(save.database, { GameID, RaceID })
 
@@ -755,7 +766,14 @@ check('reduction (save): an engine rebuilt at its own tech levels reproduces its
 
           const design = m.dr.engineDesign({ sizeHS: part.sizeHS, thrust: part.thrust, engineTech: engineTech.info, fuelTech: fuelTech.info, thermalTech: thermalTech.info, thermalCost: thermalTech.info2 })
 
-          assert.ok(m.dr.agrees(part.power, design.power), `${save.file} ${cls.name}: ${part.name} stores ${part.power} EP, the rule gives ${design.power}`)
+          if (!m.dr.agrees(part.power, design.power)) {
+            if (explainsPower(saved, GameID, part.id, part.power, design.power)) {
+              pinned++
+            } else {
+              unexplained.push(`${save.file} game ${GameID} ${cls.name}: ${part.name} (${part.id}) stores ${part.power} EP, the rule gives ${design.power}`)
+            }
+          }
+
           rebuilt++
           ratings += sameFigure(part.thermalRating, thermalTech.info) ? 0 : 1
         }
@@ -763,12 +781,81 @@ check('reduction (save): an engine rebuilt at its own tech levels reproduces its
     }
 
     total += rebuilt
-    lines.push(`${save.file}: ${rebuilt} engine mounts rebuilt, 0 differing in power${ratings ? `, ${ratings} storing a thermal rating other than their thermal tech's (a modded save; not a figure of the three reconciled)` : ''}`)
+    lines.push(`${save.file}: ${rebuilt} engine mounts rebuilt, ${pinned} differing in power and pinned${ratings ? `, ${ratings} storing a thermal rating other than their thermal tech's (a modded save; not a figure of the three reconciled)` : ''}`)
   }
 
   assert.ok(total > 0, 'no engine was rebuilt')
 
+  try {
+    assert.deepEqual(unexplained, [], 'engine mounts whose stored power the rule does not give and no pinned engine explains')
+  } catch (error) {
+    error.lines = lines
+    throw error
+  }
+
   return { lines }
+})
+
+check('reduction (save): the pinned engines store the pinned power and the rule gives the pinned figure at their own tech rows', async (m) => {
+  const powers = PINNED_ENGINES.filter((pin) => pin.field === 'power')
+  const holders = new Map()
+
+  for (const pin of powers) {
+    for (const save of SAVES) {
+      if (!holders.has(pin) && await savedAs(save, pin.game) === pin.save) {
+        holders.set(pin, save)
+      }
+    }
+  }
+
+  const present = powers.filter((pin) => holders.has(pin))
+
+  if (!present.length) {
+    return skipped(`no save in saves/ is the pinned save ${[...new Set(powers.map((pin) => pin.save))].join(' or ')}`)
+  }
+
+  const lines = []
+
+  for (const pin of present) {
+    const save = holders.get(pin)
+    const [[row]] = await save.database.query('select Name, Size, EnginePowerMod, ComponentValue, BGTech1, BGTech2, BGTech3 from FCT_ShipDesignComponents where GameID = :game and SDComponentID = :id', { replacements: { game: pin.game, id: pin.id } })
+
+    assert.ok(row, `engine ${pin.id} of ${save.file}`)
+    assert.equal(row.ComponentValue, pin.stored, `${row.Name}: stored`)
+
+    const [tech] = await save.database.query('select TechSystemID, AdditionalInfo, AdditionalInfo2 from FCT_TechSystem where TechSystemID in (:engine, :fuel, :thermal)', { replacements: { engine: row.BGTech1, fuel: row.BGTech2, thermal: row.BGTech3 } })
+    const at = (id) => tech.find((item) => item.TechSystemID === id)
+    const design = m.dr.engineDesign({ sizeHS: row.Size, thrust: row.EnginePowerMod, engineTech: at(row.BGTech1).AdditionalInfo, fuelTech: at(row.BGTech2).AdditionalInfo, thermalTech: at(row.BGTech3).AdditionalInfo, thermalCost: at(row.BGTech3).AdditionalInfo2 })
+
+    close(design.power, pin.computed, `${row.Name}: rebuilt`)
+    assert.equal(m.dr.agrees(row.ComponentValue, design.power), false, `${row.Name}: the disagreement is shown, not hidden`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, row.ComponentValue, design.power), true, `${row.Name}: the stored and rebuilt power of its own saved state are the pinned engine`)
+    lines.push(`${save.file}: game ${pin.game} engine ${pin.id} ${row.Name}: power stored ${pin.stored}, rebuilt ${pin.computed}`)
+  }
+
+  return { lines }
+})
+
+check('reduction: a pinned engine explains a difference only at its saved state, game, component and figures', () => {
+  const powers = PINNED_ENGINES.filter((pin) => pin.field === 'power')
+
+  assert.ok(powers.length > 0, 'the engines are pinned')
+  assert.ok(Object.keys(PINNED_SAVES).length > 1, 'there is a save other than the pinned one to read the pin on')
+
+  for (const pin of powers) {
+    const elsewhere = Object.keys(PINNED_SAVES).find((key) => !PINNED_ENGINES.some((other) => other.save === key && other.id === pin.id))
+
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, pin.stored, pin.computed), true, `${pin.id}: its own saved state, game, stored and rebuilt power`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, pin.stored + 1, pin.computed), false, `${pin.id}: a changed stored power is no pinned engine`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, pin.stored, pin.computed + 1), false, `${pin.id}: a changed rebuilt power is no pinned engine`)
+    assert.equal(explainsPower(pin.save, pin.game + 1, pin.id, pin.stored, pin.computed), false, `${pin.id}: the same engine of another game is no pinned engine`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id + 1, pin.stored, pin.computed), false, `${pin.id}: another component is no pinned engine`)
+    assert.equal(explainsPower(elsewhere, pin.game, pin.id, pin.stored, pin.computed), false, `${pin.id}: the same game, component and figures of ${elsewhere} are no pinned engine`)
+    assert.equal(explainsPower(null, pin.game, pin.id, pin.stored, pin.computed), false, `${pin.id}: a save that is none of the pinned saves has no pinned engine`)
+  }
+
+  assert.equal(new Set(PINNED_ENGINES.map((pin) => pin.save)).size > 1, true, 'the engines are pinned in more than one saved state')
+  assert.equal(PINNED_ENGINES.filter((pin) => pin.save === 'modded-g140').map((pin) => `${pin.id} ${pin.field}`).join() === PINNED_ENGINES.filter((pin) => pin.save === 'modded-270-g140').map((pin) => `${pin.id} ${pin.field}`).join(), true, 'the two saved states of the modded campaign hold the same engine pins')
 })
 
 // ----- em
@@ -922,6 +1009,7 @@ const MUTATIONS = [
   { name: 'a hard-coded cost factor of 1.25', file: 'signatures.js', find: 'thermalCost: level.costFactor', replace: 'thermalCost: 1.25', fails: ['reduction: the cost factor'] },
   { name: 'the multiplier of the level ignored', file: 'signatures.js', find: 'thermalTech: level.multiplier, thermalCost', replace: 'thermalTech: 1, thermalCost', fails: ['reduction: each level', 'reduction: the cost factor'] },
   { name: 'the engine and fuel techs swapped', file: 'signatures.js', find: 'engineTech, fuelTech, thermalTech: level.multiplier', replace: 'engineTech: fuelTech, fuelTech: engineTech, thermalTech: level.multiplier', fails: ['reduction: each level', 'reduction: the cost factor'] },
+  { name: 'the engine power one over the rule', file: 'design-rules.js', find: 'const power = roundHalfEven(engineTech * sizeHS * thrust, 2)\n  const fuelPerEph = fuelTech * thrust ** THRUST_EXPONENT * Math.sqrt(10 / sizeHS)', replace: 'const power = roundHalfEven(engineTech * sizeHS * thrust, 2) + 1\n  const fuelPerEph = fuelTech * thrust ** THRUST_EXPONENT * Math.sqrt(10 / sizeHS)', fails: ['reduction (save): the pinned engines', 'reduction (save): an engine'] },
   { name: 'the current level never marked', file: 'signatures.js', find: 'const current = cls.engines.every((engine) => engine.techIds.thermal === level.id)', replace: 'const current = false', fails: ['reduction: each level'] },
   { name: 'the class engine cost without the engine count', file: 'signatures.js', find: 'value: costs[index].value * entry.engine.count', replace: 'value: costs[index].value', fails: ['reduction: the cost factor', 'reduction: the class cost'] },
   { name: 'the thermal of a level without the engine count', file: 'signatures.js', find: 'value: entry.design.thermal * entry.engine.count', replace: 'value: entry.design.thermal', fails: ['reduction: each level', 'reduction: the class cost'] },

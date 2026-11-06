@@ -752,7 +752,7 @@ export const MISSILE_TECH = Object.freeze({ warhead: 12, thermal: 19, active: 20
 export const MISSILE_TECH_TYPES = Object.freeze(Object.values(MISSILE_TECH).sort((a, b) => a - b))
 
 // The columns of FCT_MissileType the missile rules read.
-export const MISSILE_COLUMNS = Object.freeze(['Name', 'EngineID', 'NumEngines', 'Cost', 'Size', 'Speed', 'RadDamage', 'FuelRequired', 'Endurance', 'MaxRange', 'WarheadStrength', 'SensorStrength', 'SensorResolution', 'SensorRange', 'ThermalStrength', 'EMStrength', 'Geostrength', 'TotalFlightTime', 'SecondStageID', 'NumSS', 'Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite', 'MSPReactor', 'MSPWarhead', 'MSPEngine', 'MSPFuel', 'MSPActive', 'MSPThermal', 'MSPEM', 'MSPGeo', 'ECCM', 'EMSensitivity', 'GroundShots', 'PowerMod', 'ATG', 'Retargeting', 'LaserWarhead', 'LaserWarheadRangeModifier', 'NumDecoys', 'MSPDecoys', 'MissileECM', 'MultipleWarheads', 'MSPMultipleWarheads', 'ShipDecoy'])
+export const MISSILE_COLUMNS = Object.freeze(['Name', 'EngineID', 'NumEngines', 'Cost', 'Size', 'Speed', 'RadDamage', 'FuelRequired', 'Endurance', 'MaxRange', 'WarheadStrength', 'SensorStrength', 'SensorResolution', 'SensorRange', 'ThermalStrength', 'EMStrength', 'Geostrength', 'TotalFlightTime', 'SecondStageID', 'NumSS', 'Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite', 'MSPReactor', 'MSPWarhead', 'MSPEngine', 'MSPFuel', 'MSPActive', 'MSPThermal', 'MSPEM', 'MSPGeo', 'ECCM', 'EMSensitivity', 'GroundShots', 'PowerMod', 'ATG', 'Retargeting', 'Lurker', 'LaserWarhead', 'LaserWarheadRangeModifier', 'NumDecoys', 'MSPDecoys', 'MissileECM', 'MultipleWarheads', 'MSPMultipleWarheads', 'ShipDecoy'])
 
 const MISSILES_SQL = `select FCT_MissileType.MissileID, ${MISSILE_COLUMNS.map((column) => `FCT_MissileType.${column}`).join(', ')}, FCT_TechSystem.RaceID as OwnerID from FCT_MissileType left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :game`
 
@@ -850,8 +850,8 @@ export const LINE_STATE = Object.freeze({ UNUSED: 'unused', RESOLVED: 'resolved'
 
 const line = (state, level, reason, extra = {}) => ({ state, level: level || null, reason: reason || null, ...extra })
 
-// What a stored design says it used, as the options a candidate takes.
-export const missileOptionsOf = (row) => ({ eccm: row.ECCM, terminal: row.ATG, retarget: row.Retargeting, laser: row.LaserWarhead > 0 })
+// What a stored design says it used, as the options a candidate takes. The lurker is the game's `FCT_MissileType.Lurker` (1 when the design was made with Lurker Mode on); a row recorded in a fixture before the column existed has none and is no lurker.
+export const missileOptionsOf = (row) => ({ eccm: row.ECCM, terminal: row.ATG, retarget: row.Retargeting, lurker: row.Lurker > 0, laser: row.LaserWarhead > 0 })
 
 // Whether a stored design has a warhead whose radiation damage differs from its strength: an enhanced radiation warhead, the multiplier of which is a design choice the rules do not cover.
 const hasEnhancedRadiation = (row) => row.RadDamage > 0 && row.WarheadStrength > 0 && !agrees(row.RadDamage, row.WarheadStrength) && row.ShipDecoy !== 1
@@ -990,7 +990,7 @@ export const missileCandidateOf = (fixture, design, { sizeLimit = 0 } = {}) => s
 
 registerRule({
   id: 'design.missileLevels',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'tech level',
   verification: 'estimated',
   structure: ['FCT_RaceTech.TechID', 'FCT_TechSystem.TechTypeID, AdditionalInfo, DevelopCost', 'FCT_MissileType'],

@@ -534,6 +534,13 @@ const presetChecks = (m) => {
 
       return out.every(Boolean) ? true : short(out)
     }],
+    ['presets: no preset, requirement, axis, preference, field error or word of the brief names a ground pod, a pod of ground troops being no part of a missile the game designs', () => {
+      const named = { presets: mb.PRESETS, requirements: mb.REQUIREMENTS, axes: mb.AXES, words: mb.BRIEF_WORDS, errors: mb.FIELD_ERRORS }
+      const found = Object.entries(named).filter(([, value]) => /ground[ -]?pod|groundshots|ground troop/i.test(JSON.stringify(value))).map(([key]) => key)
+      const noted = mb.PRESET_KEYS.flatMap((key) => mb.PRESETS[key].unmodelled.map((note) => note.key))
+
+      return Object.keys(named).every((key) => JSON.stringify(named[key]).length > 2) && noted.length >= 4 && !noted.some((key) => /pod/i.test(key)) && found.length === 0 ? true : short(found)
+    }],
     ['presets: a blank name is filled and a name given is kept, and a preset is never applied to the draft by previewing it', () => {
       const blankName = mb.previewPreset(blank(), 'survey')
       const named = mb.previewPreset({ ...blank(), name: 'Mine' }, 'survey')
@@ -1588,6 +1595,9 @@ const MUTATIONS = [
   { name: 'the draft changed in place by a preset', find: 'export const applyPreview = (draft, preview, accepted) => {\n  const brief = copyOf(normaliseBrief(draft))', replace: 'export const applyPreview = (draft, preview, accepted) => {\n  const brief = draft', file: 'mission-briefs.js', fails: ['presets: only the ticked fields are applied'] },
   { name: 'a preset recorded on a draft it changed nothing in', find: 'if (applied.length) {\n    brief.preset = preview.preset', replace: 'if (true) {\n    brief.preset = preview.preset', file: 'mission-briefs.js', fails: ['presets: nothing ticked changes nothing'] },
   { name: 'the fighter preset the same as the survey one', find: 'requirements: Object.freeze({ maxSizeHS: 10, minSpeedKmS: 8000, minEnduranceDays: 2, minPayloadHS: 3, classification: \'military\' })', replace: 'requirements: Object.freeze({ maxSizeHS: 200, minSpeedKmS: 3000, minRangeKm: 20 * KM_PER_BN, minEnduranceDays: 90, minDeploymentMonths: 24 })', file: 'mission-briefs.js', fails: ['presets: survey and fighter give different visible requirements'] },
+  { name: 'a note of the fighter preset naming a ground pod', find: "note: 'The weapons and fire control a fighter carries are not part of a propulsion set or read from a saved class here, so they are not evaluated.'", replace: "note: 'A ground pod on a fighter missile is not part of a propulsion set, so it is not evaluated.'", file: 'mission-briefs.js', fails: ['presets: no preset, requirement, axis'] },
+  { name: 'a ground pod preset note key', find: "key: 'carrierHangar', label: 'Hangar space on a carrier'", replace: "key: 'groundPod', label: 'Hangar space on a carrier'", file: 'mission-briefs.js', fails: ['presets: no preset, requirement, axis'] },
+  { name: 'a word of the brief naming a ground pod', find: "unsaved: 'Unsaved changes',", replace: "unsaved: 'Unsaved ground pod changes',", file: 'mission-briefs.js', fails: ['presets: no preset, requirement, axis'] },
   { name: 'the notes of a preset made requirements', find: 'preset.unmodelled.filter((note) => !current.unmodelled.some((have) => have.key === note.key)).forEach((note) => items.push({ key: `note:$' + '{note.key}`, label: note.label, from: null, to: note.note, kind: \'add\' }))', replace: '', file: 'mission-briefs.js', fails: ['presets: what a preset cannot model stays an unknown note'] },
   { name: 'a name given overwritten by a preset', find: 'if (!isText(current.name)) {', replace: 'if (true) {', file: 'mission-briefs.js', fails: ['presets: a blank name is filled'] },
   { name: 'a set passing cargo', find: 'unknownFigure(SET_WITHOUT.cargoTons, \'tons\')', replace: 'ofRule({ rule: \'brief.classCargo\', value: 1e9, units: \'tons\', inputs: { present: [\'assumed\'] } })', file: 'mission-briefs.js', fails: ['alternative: a propulsion set is unknown for cargo', 'alternative: a cargo capacity equal to the requirement passes'] },

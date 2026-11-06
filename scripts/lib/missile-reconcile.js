@@ -8,6 +8,9 @@
 
 const isKnown = (value) => value !== null && value !== undefined && !Number.isNaN(value)
 
+// A figure as a report shows it: to 10 significant digits, so a sum of decimals does not print its rounding.
+const figure = (value) => (typeof value === 'number' && !Number.isInteger(value) ? Number(value.toPrecision(10)) : value)
+
 // What a comparison rests on: `reproduced` (the figure is rebuilt from inputs the design stores and compared with another stored figure) or `resolved-from-stored` (the technology level behind it was itself picked by matching the stored figure being compared, so agreement says that some held level gives it, not that the rule gives it independently).
 export const BASIS = Object.freeze({ REPRODUCED: 'reproduced', RESOLVED: 'resolved-from-stored' })
 
@@ -18,7 +21,8 @@ export const LEVEL_STORED = Object.freeze({ warhead: 'WarheadStrength', shipDeco
 export const createMissileReconciler = ({ rules, data }) => {
   const { agrees, roundHalfEven, CONTRIBUTIONS, MIN_SENSOR_MSP, MISSILE_STORED_MINERALS, missileAccounting, missileEngineDesign, missileSensorRange, thrustOfMissileEngine } = rules
   const { LINE_STATE, MISSILE_TECH, heldMissileLevels, matchLevels, missileEngineOf, missileLevelRecord, missileLevelsOfType, missileStageOf, resolveMissileLevels, savedMissileCandidate, storedMineralTotal } = data
-  const pinned = (audited, found) => agrees(audited, found)
+  // Whether the scope found a pin's audited figure: both figures must be there (a stored NULL is not the audited 0) and agree at the reproduction tolerance.
+  const pinned = (audited, found) => isKnown(audited) && isKnown(found) && agrees(audited, found)
 
   // What a comparison says: 'unsupported' when it names a case the rules do not cover (never agreement), 'unknown' when the stored or the computed figure is missing (never zero), else 'agree' or 'differ' at the reproduction tolerance (an 'integer' figure exactly).
   const judge = (comparison) => {
@@ -35,11 +39,77 @@ export const createMissileReconciler = ({ rules, data }) => {
     return same ? 'agree' : 'differ'
   }
 
-  // A pinned difference is a hand-audited discrepancy of one design of one game: `{ game, id, field, stored, computed, reason }`. It explains a difference only while the design's stored and computed figures are the audited ones at the reproduction tolerance, so a changed figure, or another save that reuses the id, is not covered.
+  // A pinned difference is a hand-audited discrepancy of one design of one game of one save: `{ save, game, id, field, stored, computed, reason }`. It explains a difference only while the design's stored and computed figures are the audited ones at the reproduction tolerance, so a changed figure, or another save that reuses the id, is not covered.
+  const pinFor = (known, game, id, entry) => known.find((candidate) => candidate.game === game && candidate.id === id && candidate.field === entry.field && pinned(candidate.stored, entry.stored) && pinned(candidate.computed, entry.computed)) || null
+
   const knownDifference = (known, game, id, entry) => {
-    const row = known.find((candidate) => candidate.game === game && candidate.id === id && candidate.field === entry.field && pinned(candidate.stored, entry.stored) && pinned(candidate.computed, entry.computed))
+    const row = pinFor(known, game, id, entry)
 
     return row ? row.reason : null
+  }
+
+  // Why a pin no comparison of the scope used: that the scope is another game than the pin's, what the scope saw of its row and field, or that it saw none (the row is not in the scope read, or the game has none).
+  const pinState = (pin, sight, game, absent) => {
+    if (pin.game !== game) {
+      return `the pin is of game ${pin.game} and the scope read is of game ${game}`
+    }
+
+    if (!sight) {
+      return absent ? 'the game has no such row' : 'the save has no such row in the scope read'
+    }
+
+    if (sight.verdict === 'agree') {
+      return `the stored ${figure(sight.stored)} now agrees with the computed ${figure(sight.computed)}`
+    }
+
+    if (sight.verdict !== 'differ') {
+      return `the figure is ${sight.verdict} now`
+    }
+
+    const changed = [...(pinned(pin.stored, sight.stored) ? [] : [`stored ${figure(sight.stored)}, pinned ${figure(pin.stored)}`]), ...(pinned(pin.computed, sight.computed) ? [] : [`computed ${figure(sight.computed)}, pinned ${figure(pin.computed)}`])]
+
+    return `a figure changed: ${changed.join('; ')}`
+  }
+
+  // The pins of one pinned save (`save`, a key of scripts/lib/pinned-saves.js, or null for a save no pin belongs to) and the account of what the comparisons of a scope made of them. `see` takes every comparison of the scope, whatever its verdict, and gives the pin that explains a difference (marking it used); `read` takes a row the scope read but could not compare, whose pinned fields are then unknown. `stale` is each pin of the save that no comparison used: where the scope is `complete` (every row of the game was read) that includes a pin of a row the save no longer has; where it is not, a pin of a row that was read, and a pin of a row `present` (the ids of the rows the game holds, or null where that is not read) lacks. `unread` counts the pins of the rest: rows of the game that this scope did not read.
+  const createPinLedger = (known, { save, game, complete, present = null }) => {
+    const mine = known.filter((pin) => pin.save === save)
+    const keys = new Set(mine.map((pin) => `${pin.id}|${pin.field}`))
+    const used = new Set()
+    const seen = new Map()
+    const keyOf = (pin) => `${pin.id}|${pin.field}`
+    const isStale = (pin) => !used.has(pin) && (complete || seen.has(keyOf(pin)) || (present !== null && !present.has(pin.id)))
+
+    return Object.freeze({
+      pins: mine,
+      see: (row, field, verdict, stored, computed) => {
+        const key = `${row.id}|${field}`
+
+        if (!keys.has(key)) {
+          return null
+        }
+
+        seen.set(key, { name: row.name, verdict, stored, computed })
+
+        const pin = verdict === 'differ' ? pinFor(mine, game, row.id, { field, stored, computed }) : null
+
+        if (pin) {
+          used.add(pin)
+        }
+
+        return pin
+      },
+      // A row the scope read but could not compare (skipped for a missing tech row, or another reason outside the rules): every pinned field of it is observed as unknown, so a pin of it is stale — the row was read and its figure could not be checked — and never one of a row this run does not read. The report calls it before it skips the row, since a skip ends the row's comparisons.
+      read: (row) => {
+        for (const key of keys) {
+          if (key.startsWith(`${row.id}|`)) {
+            seen.set(key, { name: row.name, verdict: 'unknown', stored: null, computed: null })
+          }
+        }
+      },
+      stale: () => mine.filter(isStale).map((pin) => ({ pin, name: seen.has(keyOf(pin)) ? seen.get(keyOf(pin)).name : '(not in the save)', why: pinState(pin, seen.get(keyOf(pin)), game, present !== null && !present.has(pin.id)) })),
+      unread: () => mine.filter((pin) => !used.has(pin) && !isStale(pin)).length,
+    })
   }
 
   // The verdict of a comparison and, for a difference, the reason it is explained by (its own or a pinned one); a difference with no reason is a mismatch.
@@ -154,5 +224,5 @@ export const createMissileReconciler = ({ rules, data }) => {
     return { id: design.id, name: row.Name, race: design.race, lines, limited, ledger: built.contributions, figures, comparisons }
   }
 
-  return { judge, knownDifference, classify, comparison, BASIS, LEVEL_STORED, reconcileEngine, reconcileMissile }
+  return { judge, pinFor, knownDifference, classify, createPinLedger, comparison, BASIS, LEVEL_STORED, reconcileEngine, reconcileMissile }
 }

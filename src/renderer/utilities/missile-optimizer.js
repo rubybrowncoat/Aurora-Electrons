@@ -268,11 +268,12 @@ export const baseOfDraft = (draft, tech) => {
   const resolution = blank(draft.resolution) ? null : read('resolution', 'Sensor resolution', {})
   const carried = draft.carried || {}
   const retarget = draft.options && draft.options.retarget && levelOf(tech.retarget) !== null ? levelOf(tech.retarget) : 0
+  const lurker = Boolean(draft.options && draft.options.lurker)
 
-  return { ok: Object.keys(errors).length === 0, errors, base: { decoys, activeMsp, thermalMsp, emMsp, geoMsp, sizeLimit, resolution, retarget, shipDecoy: Boolean(carried.shipDecoy), groundPod: Boolean(carried.groundPod), enhancedRadiation: Boolean(carried.enhancedRadiation), stages: Number(carried.stages) > 0 ? Number(carried.stages) : 0 } }
+  return { ok: Object.keys(errors).length === 0, errors, base: { decoys, activeMsp, thermalMsp, emMsp, geoMsp, sizeLimit, resolution, retarget, lurker, shipDecoy: Boolean(carried.shipDecoy), enhancedRadiation: Boolean(carried.enhancedRadiation), stages: Number(carried.stages) > 0 ? Number(carried.stages) : 0 } }
 }
 
-export const NO_BASE = Object.freeze({ decoys: 0, activeMsp: 0, thermalMsp: 0, emMsp: 0, geoMsp: 0, sizeLimit: 0, resolution: null, retarget: 0, shipDecoy: false, groundPod: false, enhancedRadiation: false, stages: 0 })
+export const NO_BASE = Object.freeze({ decoys: 0, activeMsp: 0, thermalMsp: 0, emMsp: 0, geoMsp: 0, sizeLimit: 0, resolution: null, retarget: 0, lurker: false, shipDecoy: false, enhancedRadiation: false, stages: 0 })
 
 // The second stage of a seeded draft as the search reads it: null for a draft with none, the stage of the fixture when the save is open, or a missing marker (its figures are unknown) when it is not.
 export const stageOfDraft = (fixture, draft) => {
@@ -516,10 +517,9 @@ export const candidateOfEntry = (input, values) => {
     sizeLimit: base.sizeLimit,
     stage: input.stage || null,
     stages: input.stage ? base.stages : 0,
-    options: { eccm: values.eccm, terminal: values.terminal, retarget: base.retarget, laser: values.laser },
+    options: { eccm: values.eccm, terminal: values.terminal, retarget: base.retarget, lurker: base.lurker, laser: values.laser },
     tech: { warhead: tech.warhead, laserEfficiency: tech.laserEfficiency, reactor: tech.reactor, active: tech.active, thermal: tech.thermal, em: tech.em, geo: tech.geo },
     sensor: { resolution: base.resolution, emSensitivity: tech.em },
-    groundPod: base.groundPod,
     enhancedRadiation: base.enhancedRadiation,
   }
 }
@@ -689,7 +689,7 @@ export function* searchMissiles({ plan = null, maxCandidates = null, slice = SLI
   const engineOf = (sizeMsp, thrust) => ({ sizeMsp, ...missileEngineDesign({ sizeMsp, thrust, engineTech: tech.engine, fuelTech: tech.fuel, maxThrust: tech.maxThrust }) })
 
   // The input the accounting reads, one object the loop changes in place.
-  const probeInput = (values, engine) => ({ warheadMsp: values.warheadMsp, warheads: values.warheadMsp > 0 ? values.warheads : 1, shipDecoy: probe.shipDecoy, decoys: probe.decoys, fuelMsp: values.fuelMsp, activeMsp: probe.activeMsp, thermalMsp: probe.thermalMsp, emMsp: probe.emMsp, geoMsp: probe.geoMsp, sizeLimit: probe.sizeLimit, engine, engines: values.engines, stage: probe.stage, stages: probe.stages, options: { eccm: values.eccm, terminal: values.terminal, retarget: probe.options.retarget, laser: values.laser }, tech: probe.tech, unsupported: {} })
+  const probeInput = (values, engine) => ({ warheadMsp: values.warheadMsp, warheads: values.warheadMsp > 0 ? values.warheads : 1, shipDecoy: probe.shipDecoy, decoys: probe.decoys, fuelMsp: values.fuelMsp, activeMsp: probe.activeMsp, thermalMsp: probe.thermalMsp, emMsp: probe.emMsp, geoMsp: probe.geoMsp, sizeLimit: probe.sizeLimit, engine, engines: values.engines, stage: probe.stage, stages: probe.stages, options: { eccm: values.eccm, terminal: values.terminal, retarget: probe.options.retarget, lurker: probe.options.lurker, laser: values.laser }, tech: probe.tech, unsupported: {} })
 
   const sensor = sensorOf()
 
@@ -777,7 +777,7 @@ export function* searchMissiles({ plan = null, maxCandidates = null, slice = SLI
     return resultOf(TERMINATION.EXHAUSTED)
   }
 
-  // The options of the probe the rules do not cover (a ground pod, an enhanced radiation warhead, a retargeting level they have no saved design for) are the base's, the same for every candidate: the whole domain is outside the rules.
+  // The options of the probe the rules do not cover (an enhanced radiation warhead, a retargeting level they have no saved design for) are the base's, the same for every candidate: the whole domain is outside the rules.
   if (evaluateMissile(candidateOfEntry(input, probeValues)).verdict === 'unsupported') {
     return dropAll('unsupported')
   }
@@ -944,7 +944,7 @@ const numberText = (value) => (typeof value === 'number' && Number.isFinite(valu
 export const nominationDraft = (entry, { baseDraft = null, name = '' } = {}) => {
   const draft = JSON.parse(JSON.stringify(baseDraft || emptyDraft('')))
   const { values } = entry
-  const options = { eccm: values.eccm > 0, terminal: values.terminal > 1, retarget: Boolean(draft.options && draft.options.retarget), laser: values.laser }
+  const options = { eccm: values.eccm > 0, terminal: values.terminal > 1, retarget: Boolean(draft.options && draft.options.retarget), lurker: Boolean(draft.options && draft.options.lurker), laser: values.laser }
 
   return Object.assign(draft, { kind: 'designed', key: '', name: name.slice(0, NAME_LENGTH), techMode: 'page', engines: String(values.engines), engineMsp: numberText(values.engineMsp), thrust: numberText(values.thrust), fuelMsp: numberText(values.fuelMsp), warheadMsp: numberText(values.warheadMsp), warheads: String(values.warheads), options })
 }
@@ -1132,7 +1132,7 @@ export const describeInfeasible = (result, format = defaultFormat) => {
   const request = result.reach.requestedHit
 
   switch (kind) {
-    case 'unsupported': return 'No candidate was evaluated: an option of the base (a ground pod, an enhanced radiation warhead or a retargeting level above the validated ones) is outside the missile rules.'
+    case 'unsupported': return 'No candidate was evaluated: an option of the base (an enhanced radiation warhead or a retargeting level above the validated ones) is outside the missile rules.'
     case 'hit-cap': return `Infeasible: a hit chance of ${format(request)}% can never be reached, as the combat model limits a hit chance to ${HIT_CAP}%.`
     case 'hit-unknown': return 'Infeasible: the hit chance is not known for this base and scenario (a missile on a second stage or with a decoy warhead has none, and the target speed, jammer and modifier must be numbers), so no candidate can meet a requested hit chance.'
     case 'hit-unreachable': return `Infeasible: no candidate reaches the requested hit chance of ${format(request)}%. The best among the candidates that meet the other limits is ${format(bestHit)}%.`

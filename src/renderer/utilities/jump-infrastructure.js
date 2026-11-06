@@ -27,8 +27,8 @@ registerRule({
   versions: VERSIONS,
   units: 'salvos',
   verification: 'estimated',
-  structure: ['FCT_MissileSalvo.MissileSalvoID', 'FCT_MissileSalvo.RaceID', 'FCT_MissileSalvo.MissileSpeed', 'FCT_MissileSalvo.SystemID', 'FCT_MissileSalvo.Xcor', 'FCT_MissileSalvo.Ycor', 'FCT_MissileType.SecondStageID', ...STRUCTURE_POINT],
-  note: 'Mines and sensor buoys have no table of their own: they are the race\'s stationary missile salvos, one count per salvo ID. A salvo of a design with a second stage is taken as a mine and one without as a buoy; that split matches the designs\' names in a save but is not confirmed by the game\'s rules. A salvo counts at a point when it is in the same system within 1 km of it on each axis. A salvo counts as one object, not as the missiles in it.',
+  structure: ['FCT_MissileSalvo.MissileSalvoID', 'FCT_MissileSalvo.RaceID', 'FCT_MissileSalvo.MissileSpeed', 'FCT_MissileSalvo.LurkerMode', 'FCT_MissileSalvo.SystemID', 'FCT_MissileSalvo.Xcor', 'FCT_MissileSalvo.Ycor', 'FCT_MissileType.SecondStageID', ...STRUCTURE_POINT],
+  note: 'Mines and sensor buoys have no table of their own: they are the race\'s stationary missile salvos, one count per salvo ID. A salvo is stationary when its speed is 0 or when it lurks, a lurking salvo holding its place until it finds a target whatever its speed. A salvo of a design with a second stage is taken as a mine and one without as a buoy; that split matches the designs\' names in a save but is not confirmed by the game\'s rules. A salvo counts at a point when it is in the same system within 1 km of it on each axis. A salvo counts as one object, not as the missiles in it.',
   assumptions: ['a stationary salvo of a design with a second stage is a mine', 'a stationary salvo of a design without a second stage is a buoy'],
 })
 
@@ -110,7 +110,7 @@ where FCT_MoveOrders.GameID = ${GameID} and FCT_MoveOrders.RaceID = ${RaceID} an
     database.query(`select FCT_MissileSalvo.MissileSalvoID, FCT_MissileSalvo.SystemID, FCT_MissileSalvo.Xcor, FCT_MissileSalvo.Ycor, FCT_MissileType.SecondStageID
 from FCT_MissileSalvo
 left join FCT_MissileType on FCT_MissileType.MissileID = FCT_MissileSalvo.MissileID and FCT_MissileType.GameID = FCT_MissileSalvo.GameID
-where FCT_MissileSalvo.GameID = ${GameID} and FCT_MissileSalvo.RaceID = ${RaceID} and FCT_MissileSalvo.MissileSpeed = 0`),
+where FCT_MissileSalvo.GameID = ${GameID} and FCT_MissileSalvo.RaceID = ${RaceID} and (FCT_MissileSalvo.MissileSpeed = 0 or FCT_MissileSalvo.LurkerMode = 1)`),
     database.query(`select FCT_Contacts.ContactID, FCT_Contacts.SystemID, FCT_Contacts.Xcor, FCT_Contacts.Ycor, FCT_Contacts.LastUpdate
 from FCT_Contacts
 where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactType = 3 and FCT_Contacts.Speed = 0`),

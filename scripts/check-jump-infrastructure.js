@@ -88,8 +88,8 @@ const fixtureStatements = async (file) => {
     const salvoColumns = await columnsOf(raw, 'FCT_MissileSalvo')
     const [orderOf] = await all(raw, `select MoveOrderID as id from FCT_MoveOrders where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and MoveActionID = ${STABILISE}`)
     const [contactOf] = await all(raw, `select UniqueID as id from FCT_Contacts where GameID = ${IDS.GameID} and DetectRaceID = ${IDS.RaceID} and ContactType = 1`)
-    const [salvoOf] = await all(raw, `select MissileSalvoID as id from FCT_MissileSalvo where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and MissileSpeed = 0`)
-    const [own] = await all(raw, `select m.MissileSalvoID as id from FCT_MissileSalvo m inner join FCT_JumpPoint p on p.WarpPointID = ${POINT.queued} where m.GameID = ${IDS.GameID} and m.RaceID = ${IDS.RaceID} and m.MissileSpeed = 0 and m.SystemID = p.SystemID and abs(m.Xcor - p.Xcor) < 1 and abs(m.Ycor - p.Ycor) < 1 order by m.MissileSalvoID`)
+    const [salvoOf] = await all(raw, `select MissileSalvoID as id from FCT_MissileSalvo where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and (MissileSpeed = 0 or LurkerMode = 1)`)
+    const [own] = await all(raw, `select m.MissileSalvoID as id from FCT_MissileSalvo m inner join FCT_JumpPoint p on p.WarpPointID = ${POINT.queued} where m.GameID = ${IDS.GameID} and m.RaceID = ${IDS.RaceID} and (m.MissileSpeed = 0 or m.LurkerMode = 1) and m.SystemID = p.SystemID and abs(m.Xcor - p.Xcor) < 1 and abs(m.Ycor - p.Ycor) < 1 order by m.MissileSalvoID`)
 
     assert.ok(orderOf && contactOf && salvoOf && own, 'the save holds an order, a contact and a stationary salvo of the race to copy, and a salvo of the race at the queued point')
 
@@ -147,12 +147,18 @@ const saveCopy = async (prefix, statements, from) => {
 
 // ---------- the datasets ----------
 
+// The column of the salvos the module reads for a salvo that lurks, which a recorded 2.x save lacks: given the default of the game, no salvo lurking, so that the recorded campaign still holds the counts it was written for.
+const LURKER_COLUMN = ['FCT_MissileSalvo', 'LurkerMode', 'INTEGER default 0']
+
+// The anchor columns of the life pods and wrecks that the Galaxy Map's recovery ledger reads (scripts/check-recovery-ledger.js `ANCHOR_COLUMNS`), which a recorded 2.x save lacks and the page of the campaign would otherwise fail to read: only the copy the browser reads gets them, with the defaults of the game.
+const ANCHOR_COLUMNS = [['FCT_Lifepods', 'OrbitBodyID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0']]
+
 // What the checks read of a dataset: `ids` (GameID, RaceID), `names` (the game and the race as the Empires page lists them), `point` (the points of the cases: queued, unrecorded, contacts, other, awaiting, fleets, unexplored, uncharted; null where the save holds none), `systems` (gates, awaiting, fleets, uncharted), `shown` (the systems the page is shown), `source` (the file the copy the browser reads is made from), `base` and `statements(base)` (the statements written into the copy), `cases` (which of the cases the oracle tells apart the save holds: the checks assert the whole spread of states and counts only where it does) and `missing` (the cases printed as skipped: { name, checks, reason }).
 const campaignDataset = () => ({
   key: 'campaign',
   label: 'the recorded campaign (a regression input, not a fixture run)',
-  source: convertedSave(CAMPAIGN_SAVE, { line: true }),
-  base: convertedSave(CAMPAIGN_SAVE),
+  source: convertedSave(CAMPAIGN_SAVE, { line: true, columns: [LURKER_COLUMN, ...ANCHOR_COLUMNS] }),
+  base: convertedSave(CAMPAIGN_SAVE, { columns: [LURKER_COLUMN] }),
   ids: IDS,
   names: NAMES,
   point: POINT,
@@ -187,7 +193,7 @@ const fixtureDataset = () => {
   const awaiting = first(`select p.WarpPointID as id, p.SystemID as system ${charted(`p.JumpGateStrength = 0 and s.Explored = 1 and p.SystemID not in (${gates.system}, ${unexplored.system})`)} order by p.SystemID, p.WarpPointID limit 1`, 'charted point with no gate, in a third system')
   const uncharted = first(`select u.WarpPointID as id, u.SystemID as system from FCT_JumpPoint u left join FCT_RaceJumpPointSurvey v on v.GameID = u.GameID and v.WarpPointID = u.WarpPointID and v.RaceID = ${RaceID} where u.GameID = ${GameID} and coalesce(v.Charted, 0) = 0 and u.SystemID in (select p.SystemID ${CHARTED}) and u.SystemID not in (${gates.system}, ${unexplored.system}, ${awaiting.system}) order by u.SystemID, u.WarpPointID limit 1`, 'point the race has not charted, in a system where it has charted another')
   const orders = count(`select count(*) as n from FCT_MoveOrders where GameID = ${GameID} and RaceID = ${RaceID} and MoveActionID = ${STABILISE} and DestinationType = 1`)
-  const salvos = count(`select count(*) as n from FCT_MissileSalvo where GameID = ${GameID} and RaceID = ${RaceID} and MissileSpeed = 0`)
+  const salvos = count(`select count(*) as n from FCT_MissileSalvo where GameID = ${GameID} and RaceID = ${RaceID} and (MissileSpeed = 0 or LurkerMode = 1)`)
   const objects = count(`select count(*) as n from FCT_Contacts where GameID = ${GameID} and DetectRaceID = ${RaceID} and ContactType = 3 and Speed = 0`)
   const [gateCounts] = fixtureRows(`select count(*) as charted, coalesce(sum(p.JumpGateStrength > 0), 0) as gates, coalesce(sum(p.JumpGateStrength > 0 and p.JumpGateRaceID = ${RaceID}), 0) as own, coalesce(sum(p.JumpGateStrength > 0 and p.JumpGateRaceID > 0 and p.JumpGateRaceID <> ${RaceID}), 0) as other, coalesce(sum(p.JumpGateStrength > 0 and coalesce(p.JumpGateRaceID, 0) = 0), 0) as unrecorded ${CHARTED}`)
   const farUncharted = count(`select count(*) as n ${charted(`s.Explored = 1 and not ${farCharted}`)}`)
@@ -226,11 +232,11 @@ const sqlOf = ({ GameID: G, RaceID: R }) => {
     G,
     R,
     NEAR,
-    OWN: `select MissileSalvoID from FCT_MissileSalvo where GameID = ${G} and RaceID = ${R} and MissileSpeed = 0`,
+    OWN: `select MissileSalvoID from FCT_MissileSalvo where GameID = ${G} and RaceID = ${R} and (MissileSpeed = 0 or LurkerMode = 1)`,
     CONTACTS: `GameID = ${G} and DetectRaceID = ${R} and ContactType = 3 and Speed = 0`,
     NOW: `(select GameTime from FCT_Game where GameID = ${G})`,
     CHARTED: `from FCT_JumpPoint p inner join FCT_RaceJumpPointSurvey s on s.GameID = p.GameID and s.WarpPointID = p.WarpPointID and s.RaceID = ${R} where p.GameID = ${G} and s.Charted = 1 and p.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${G} and RaceID = ${R})`,
-    SALVOS: (test) => `(select count(distinct m.MissileSalvoID) from FCT_MissileSalvo m inner join FCT_MissileType t on t.GameID = m.GameID and t.MissileID = m.MissileID where m.GameID = ${G} and m.RaceID = ${R} and m.MissileSpeed = 0 and ${NEAR('m')} and ${test})`,
+    SALVOS: (test) => `(select count(distinct m.MissileSalvoID) from FCT_MissileSalvo m inner join FCT_MissileType t on t.GameID = m.GameID and t.MissileID = m.MissileID where m.GameID = ${G} and m.RaceID = ${R} and (m.MissileSpeed = 0 or m.LurkerMode = 1) and ${NEAR('m')} and ${test})`,
   }
 }
 
@@ -307,13 +313,14 @@ const SMALL = [
   'create table FCT_Fleet (FleetID integer, FleetName text)',
   'create table FCT_MoveOrders (MoveOrderID integer, GameID integer, RaceID integer, FleetID integer, MoveActionID integer, DestinationType integer, DestinationID integer, Arrived integer, TimeRequired real)',
   'create table FCT_MissileType (MissileID integer, GameID integer, SecondStageID integer)',
-  'create table FCT_MissileSalvo (MissileSalvoID integer, GameID integer, RaceID integer, MissileID integer, MissileSpeed real, SystemID integer, Xcor real, Ycor real)',
+  'create table FCT_MissileSalvo (MissileSalvoID integer, GameID integer, RaceID integer, MissileID integer, MissileSpeed real, SystemID integer, Xcor real, Ycor real, LurkerMode integer default 0)',
   'create table FCT_Contacts (ContactID integer, GameID integer, DetectRaceID integer, ContactType integer, Speed real, SystemID integer, Xcor real, Ycor real, LastUpdate real)',
   'insert into FCT_Game values (1, 1000)',
   "insert into FCT_Fleet values (10, 'Alpha'), (11, 'Bravo')",
   'insert into FCT_MoveOrders values (1, 1, 2, 10, 64, 1, 1, 1, 500), (1, 1, 2, 10, 64, 1, 1, 1, 500), (2, 1, 2, 10, 64, 1, 1, 0, 0), (3, 1, 2, 11, 64, 1, 2, 0, 0), (4, 1, 2, 11, 64, 1, 2, 1, 0), (5, 1, 3, 10, 64, 1, 1, 1, 500), (6, 1, 2, 10, 217, 1, 1, 1, 500), (7, 1, 2, 10, 64, 2, 1, 1, 500), (8, 1, 2, 11, 64, 1, 4, 1, NULL), (9, 1, 2, 11, 64, 1, 6, NULL, 500)',
   'insert into FCT_MissileType values (70, 1, 7), (71, 1, 0)',
-  'insert into FCT_MissileSalvo values (501, 1, 2, 70, 0, 10, 100.5, 100), (501, 1, 2, 70, 0, 10, 100.5, 100), (502, 1, 2, 70, 0, 10, 100, 100.9), (503, 1, 2, 71, 0, 10, 99.2, 100), (504, 1, 2, 71, 0, 10, 101, 100), (505, 1, 2, 70, 5, 10, 100, 100), (506, 1, 3, 70, 0, 10, 100, 100), (507, 1, 2, 70, 0, 11, 100, 100), (508, 1, 2, 70, 0, 10, 5000, 5000), (509, 1, 2, 99, 0, 10, 5000.2, 5000), (510, 1, 2, 70, 0, 13, NULL, 200)',
+  'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, MissileID, MissileSpeed, SystemID, Xcor, Ycor) values (501, 1, 2, 70, 0, 10, 100.5, 100), (501, 1, 2, 70, 0, 10, 100.5, 100), (502, 1, 2, 70, 0, 10, 100, 100.9), (503, 1, 2, 71, 0, 10, 99.2, 100), (504, 1, 2, 71, 0, 10, 101, 100), (505, 1, 2, 70, 5, 10, 100, 100), (506, 1, 3, 70, 0, 10, 100, 100), (507, 1, 2, 70, 0, 11, 100, 100), (508, 1, 2, 70, 0, 10, 5000, 5000), (509, 1, 2, 99, 0, 10, 5000.2, 5000), (510, 1, 2, 70, 0, 13, NULL, 200)',
+  'insert into FCT_MissileSalvo values (511, 1, 2, 71, 5, 10, 100.2, 100.2, 1), (511, 1, 2, 71, 5, 10, 100.2, 100.2, 1), (513, 1, 3, 71, 5, 10, 100, 100.1, 1), (514, 1, 2, 70, 5, 10, 100.1, 99.9, 1), (515, 1, 2, 71, 5, 10, 100.1, 99.9, 0)',
   'insert into FCT_Contacts values (601, 1, 2, 3, 0, 10, 100, 100, 1000), (601, 1, 2, 3, 0, 10, 100, 100, 1000), (602, 1, 2, 3, 0, 10, 100.2, 100, 500), (503, 1, 2, 3, 0, 10, 99.2, 100, 1000), (603, 1, 3, 3, 0, 10, 100, 100, 1000), (604, 1, 2, 3, 7, 10, 100, 100, 1000), (605, 1, 2, 4, 0, 10, 100, 100, 1000), (606, 1, 2, 3, 0, 10, 5000, 5000, 1000), (607, 1, 2, 3, 0, 10, 100, 100, 1000), (607, 1, 2, 3, 0, 10, 100, 100, 400), (608, 1, 2, 3, 0, 13, NULL, 200, 1000), (609, 1, 2, 3, 0, 15, 400, 400, NULL), (610, 1, 2, 3, 0, 16, 500, 500, NULL), (610, 1, 2, 3, 0, 16, 500, 500, 1000)',
 ]
 const SMALL_POINTS = [
@@ -406,10 +413,10 @@ const MODULE_CHECKS = [
     return (wrong.length === 0 && (!t.dataset.cases.contacts || t.dataset.key !== 'campaign' || (valueOf(at[t.dataset.point.contacts].detected) === 1 && at[t.dataset.point.contacts].earlier === 1 && valueOf(at[t.dataset.point.queued].detected) === 0))) || short(wrong.slice(0, 3))
   }],
   ['m-probes', 'the probe count of every row is unknown, as the save marks no probe', (o) => o.rows.concat(o.small).every((row) => row.probes.status === 'unavailable' && row.probes.value === null) || short(o.rows.filter((row) => row.probes.status !== 'unavailable').slice(0, 2).map((row) => row.probes))],
-  ['m-small-counts', 'on the small save each salvo counts once however many rows, a salvo or a contact a kilometre away or more, moving, of another race, in another system or of another kind counts nowhere, and a count of nothing is 0', (o) => {
+  ['m-small-counts', 'on the small save each salvo counts once however many rows, a salvo or a contact a kilometre away or more, moving, of another race, in another system or of another kind counts nowhere, a salvo that lurks counts as stationary whatever its speed and a count of nothing is 0', (o) => {
     const [a, b, , d] = o.small
     const got = [valueOf(a.minefields), valueOf(a.buoys), valueOf(a.detected), a.earlier, valueOf(d.minefields), valueOf(d.buoys), valueOf(d.detected), d.earlier, valueOf(b.detected), b.earlier]
-    const want = [2, 1, 2, 1, 0, 0, 0, 0, 1, 0]
+    const want = [3, 2, 2, 1, 0, 0, 0, 0, 1, 0]
 
     return JSON.stringify(got) === JSON.stringify(want) || short({ got, want })
   }],
@@ -423,10 +430,10 @@ const MODULE_CHECKS = [
   ['m-small-unknown', 'on the small save a figure the save cannot give is unknown and never 0: a salvo of no known design, a point with no position, a missing game time, and every figure when the save is withheld', (o) => {
     const [a, b, c, d] = o.small
     const got = [valueOf(b.minefields), valueOf(b.buoys), valueOf(c.minefields), valueOf(c.buoys), valueOf(c.detected), c.earlier, valueOf(o.timeless[0].detected), o.timeless[0].earlier, valueOf(o.timeless[0].minefields), ...o.withheld.flatMap((row) => [valueOf(row.stabilisation), valueOf(row.minefields), valueOf(row.buoys), valueOf(row.detected), row.earlier])]
-    const want = ['unknown', 'unknown', 'unknown', 'unknown', 'unknown', null, 'unknown', null, 2, ...o.withheld.flatMap(() => ['unknown', 'unknown', 'unknown', 'unknown', null])]
+    const want = ['unknown', 'unknown', 'unknown', 'unknown', 'unknown', null, 'unknown', null, 3, ...o.withheld.flatMap(() => ['unknown', 'unknown', 'unknown', 'unknown', null])]
     const named = o.withheld.every((row) => row.minefields.inputs.missing.includes('the save lacks FCT_Contacts.Speed'))
 
-    return (JSON.stringify(got) === JSON.stringify(want) && named && valueOf(a.minefields) === 2 && valueOf(d.stabilisation) === 'unknown') || short({ got, want, named })
+    return (JSON.stringify(got) === JSON.stringify(want) && named && valueOf(a.minefields) === 3 && valueOf(d.stabilisation) === 'unknown') || short({ got, want, named })
   }],
   ['m-small-gates', 'on the small save the gate is read from the strength and the builders alone, a missing strength is not a gate, a gate whose builder is not read is built by none recorded, and the far side of a point is known only when it is explored', (o) => {
     const got = [...o.small.map((row) => row.gate), ...o.withheld.map((row) => row.gate), ...o.unbuilt.map((row) => row.gate), ...o.small.map((row) => row.beyondSystemID)]
@@ -440,7 +447,7 @@ const MODULE_CHECKS = [
     const want = ['unknown', 'unknown', 'unknown', null]
     const reasoned = [e.minefields, e.buoys, e.detected].every((result) => result.inputs.missing.length > 0)
 
-    return (JSON.stringify(got) === JSON.stringify(want) && reasoned && valueOf(o.small[0].minefields) === 2 && valueOf(o.small[0].detected) === 2) || short({ got, want, reasoned })
+    return (JSON.stringify(got) === JSON.stringify(want) && reasoned && valueOf(o.small[0].minefields) === 3 && valueOf(o.small[0].detected) === 2) || short({ got, want, reasoned })
   }],
   ['m-small-arrival', 'on the small save an order with no arrival flag is not a queued one: its point has an unknown stabilisation with a reason given, and the counts there stay known', (o) => {
     const f = o.small[5]
@@ -835,6 +842,8 @@ const MODULE_FAULTS = [
   { name: 'an order not yet at the point is being stabilised', file: MODULE, change: swap("!arrived ? 'queued' : order.TimeRequired > 0", "!arrived ? 'running' : order.TimeRequired > 0"), fails: ['m-orders', 'm-small-orders'] },
   { name: 'the orders of every race are read', file: MODULE, change: swap(' and FCT_MoveOrders.RaceID = ${RaceID}', ''), fails: ['m-orders'] },
   { name: 'the salvos of every race are read', file: MODULE, change: swap('FCT_MissileSalvo.RaceID = ${RaceID} and ', ''), fails: ['m-small-counts'] },
+  { name: 'a salvo that lurks is read as moving', file: MODULE, change: swap(' or FCT_MissileSalvo.LurkerMode = 1)', ')'), fails: ['m-small-counts', 'm-small-unknown', 'm-small-positions'] },
+  { name: 'a salvo that moves is read as lurking', file: MODULE, change: swap('FCT_MissileSalvo.LurkerMode = 1)', 'FCT_MissileSalvo.MissileSpeed > 0)'), fails: ['m-small-counts', 'm-small-unknown', 'm-small-positions'] },
   { name: 'the contacts of every kind are read', file: MODULE, change: swap('and FCT_Contacts.ContactType = 3 and ', 'and '), fails: ['m-detected', 'm-small-counts'] },
   { name: 'the contacts that move are read', file: MODULE, change: swap(' and FCT_Contacts.Speed = 0`', '`'), fails: ['m-detected', 'm-small-counts'] },
   { name: 'the points the race has not charted are read', file: GRAPH, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1\ninner join FCT_RaceSysSurvey', '\ninner join FCT_RaceSysSurvey'), fails: ['m-charted'] },

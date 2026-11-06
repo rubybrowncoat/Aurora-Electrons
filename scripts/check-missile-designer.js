@@ -97,6 +97,7 @@ const loadAll = async (directory = utilitiesDirectory) => {
 
 const FIXTURES = require('./lib/missile-fixtures.json').fixtures
 const { fixtureTriple } = require('./lib/fixtures')
+const { plantLurker } = require('./lib/planted-lurker')
 
 const STOCK = { label: 'stock-271-g138', race: 785 }
 const MODDED = { label: 'modded-g140', race: 784 }
@@ -136,6 +137,7 @@ const MODDED_CONTEXT = (m, overrides) => contextOf(m, MODDED, overrides)
 
 const ORDINARY = 154630
 const LASER = 500724
+const ARROW = 154261
 
 const columnOf = (m, context, id, scenario = {}) => m.md.compareDesigns(context, { baselineId: id, alternatives: [], scenario }).columns[0]
 
@@ -740,6 +742,47 @@ const gatingChecks = (m) => [
 
     return column.gated.find((entry) => entry.id === 'groundPod').state === 'recorded' && column.gated.filter((entry) => entry.state === 'recorded').length >= 1 ? true : short(column.gated.map((entry) => [entry.id, entry.state]))
   }],
+  ['gating: the designer offers no ground pod: a draft seeded from a stored pod row is a plain missile, a blank draft carries none, and a designed column lists the pod as not offered', () => {
+    const fixture = copy(fixtureOf(STOCK))
+
+    fixture.designs.find((entry) => entry.id === ORDINARY).row.GroundShots = 2
+
+    const ctx = contextOf(m, STOCK, {}, fixture)
+    const seeded = m.md.seedAlternative(ctx, ORDINARY).draft
+    const result = compareOf(m, ctx, ORDINARY, withKeys([seeded, m.md.emptyDraft('Blank')]))
+    const states = result.columns.map((column) => column.gated.find((entry) => entry.id === 'groundPod').state)
+    const pod = m.md.GATED_OPTIONS.find((option) => option.id === 'groundPod')
+
+    return !('groundPod' in seeded.carried) && !('groundPod' in m.md.emptyDraft('Blank').carried) && equal(states, ['recorded', 'not-offered', 'not-offered']) && Number.isFinite(valueOf(result.columns[1], 'sizeSum')) && /no longer designs/.test(pod.reason) ? true : short([states, Object.keys(seeded.carried), valueOf(result.columns[1], 'sizeSum')])
+  }],
+  ['lurker: a stored lurker design reconciles its size, cost and speed, shows the lurker input and seeds a draft with the lurker on, and a plain design does not', () => {
+    const { copy: fixture, design } = plantLurker(fixtureOf(STOCK), ORDINARY)
+    const ctx = contextOf(m, STOCK, {}, fixture)
+    const column = columnOf(m, ctx, ORDINARY)
+    const seeded = m.md.seedAlternative(ctx, ORDINARY).draft
+    const plain = m.md.seedAlternative(STOCK_CONTEXT(m), ORDINARY).draft
+    const verdicts = ['size', 'cost', 'speed', 'maxRange'].map((id) => column.figures[id].verdict)
+
+    return verdicts.every((verdict) => verdict === 'agree') && valueOf(column, 'size') === design.row.Size && close(valueOf(column, 'cost'), design.row.Cost) && column.inputs.lurker.value === 1 && columnOf(m, STOCK_CONTEXT(m), ORDINARY).inputs.lurker.value === 0 && seeded.options.lurker === true && plain.options.lurker === false ? true : short([verdicts, valueOf(column, 'size'), design.row.Size, valueOf(column, 'cost'), design.row.Cost, column.inputs.lurker.value, seeded.options, plain.options])
+  }],
+  ['lurker: a designed alternative with the lurker adds 0.5 MSP and 0.5 BP to the same design without it, and no tech line', () => {
+    const ctx = contextOf(m, { ...MODDED, race: 786 })
+    const seeded = draftOf(m, ctx, ARROW)
+    const [plain, lurking] = compareOf(m, ctx, ARROW, withKeys([seeded, { ...seeded, options: { ...seeded.options, lurker: true } }])).columns.slice(1)
+
+    return close(valueOf(lurking, 'sizeSum') - valueOf(plain, 'sizeSum'), 0.5) && close(valueOf(lurking, 'cost') - valueOf(plain, 'cost'), 0.5) && lurking.inputs.lurker.value === 1 && plain.inputs.lurker.value === 0 && equal(lurking.tech, plain.tech) && lurking.blocked.length === 0 ? true : short([valueOf(lurking, 'sizeSum'), valueOf(plain, 'sizeSum'), valueOf(lurking, 'cost'), valueOf(plain, 'cost'), lurking.tech, plain.tech])
+  }],
+  ['lurker: the comparison record of the earlier schema is migrated to one with the lurker off and no ground pod carried, and is valid; the earlier shape is not', () => {
+    const ctx = STOCK_CONTEXT(m)
+    const older = (entry) => ({ ...entry, options: Object.fromEntries(Object.entries(entry.options).filter(([name]) => name !== 'lurker')), carried: { ...entry.carried, groundPod: true } })
+    const alternatives = withKeys([draftOf(m, ctx, ORDINARY), m.md.savedAlternative(154678)]).map((entry) => (entry.kind === 'designed' ? older(entry) : entry))
+    const payload = payloadOf(m, 'Earlier', { alternatives })
+    const migrated = m.md.designerAdapter.migrate(copy(payload), 2)
+    const current = m.md.designerAdapter.migrate(copy(payload), 3)
+    const entry = migrated.alternatives.find((item) => item.kind === 'designed')
+
+    return m.md.DESIGNER_SCHEMA === 3 && m.md.designerAdapter.schema === 3 && m.md.problemsOf(payload).length > 0 && m.md.problemsOf(migrated).length === 0 && entry.options.lurker === false && !('groundPod' in entry.carried) && migrated.alternatives.find((item) => item.kind === 'saved').savedId === 154678 && equal(current, payload) ? true : short([m.md.problemsOf(payload), m.md.problemsOf(migrated), entry.options, entry.carried])
+  }],
   ['gating: the states are described in words', () => (['not-offered', 'carried', 'recorded', 'blocked'].every((state) => m.md.gatedStateText(state) && m.md.gatedStateText(state) !== state) ? true : 'a state with no words')],
 ]
 
@@ -1083,7 +1126,7 @@ const recordChecks = (m) => {
       const edited = await md.saveDesign(repository, scopeIn(), designs, { entry, payload: payloadOf(m, 'Old', { scenario: { ...payloadOf(m).scenario, pd: '3' } }) })
       const stored = repository.list(scopeIn(), { kind: md.DESIGNER_KIND })[0].record
 
-      return md.DESIGNER_SCHEMA === 2 && read.entries.length === 1 && read.notes.length === 0 && entry && equal(entry.payload.tech, { choices: {} }) && edited.ok && stored.schema === md.DESIGNER_SCHEMA && stored.payload.tech && equal(stored.payload.tech, { choices: {} }) ? true : short([read.entries.length, read.notes, edited, stored.schema])
+      return md.DESIGNER_SCHEMA === 3 && read.entries.length === 1 && read.notes.length === 0 && entry && equal(entry.payload.tech, { choices: {} }) && edited.ok && stored.schema === md.DESIGNER_SCHEMA && stored.payload.tech && equal(stored.payload.tech, { choices: {} }) ? true : short([read.entries.length, read.notes, edited, stored.schema])
     }],
   ]
 }
@@ -1190,6 +1233,23 @@ const pageStatements = async (mutate, m) => {
       vm.addSaved(154192)
 
       return seeded.columns.length === 2 && seeded.columns[1].kind === 'designed' && seeded.columns[1].seededFrom === ORDINARY && equal(seeded.columns[0].figures, before) && full === 3 && vm.alternatives.length === 3 && /At most 3/.test(vm.alternativeMessage) && vm.comparison.columns.length === 4 && vm.comparison.columns[0].role === 'baseline' && vm.comparison.columns[0].savedId === ORDINARY ? true : short([seeded.columns.length, full, vm.alternatives.length, vm.alternativeMessage])
+    }],
+    ['page: the designer opens on a save whose row keeps GroundShots and offers no ground pod: the baseline records it, the design seeded from it has none and the editor lists the lurker and no pod', async () => {
+      const editor = await loadPage('components/missiles/MissileDraftEditor', { stubs: STUBS })
+      const offered = editor.data.call({}).options.map((option) => option.id)
+      const podded = copy(designs)
+
+      podded.fixture.designs.find((entry) => entry.id === ORDINARY).row.GroundShots = 2
+
+      const vm = page({ designs: podded, baselineId: ORDINARY, alternatives: [] })
+
+      vm.seedFromBaseline()
+
+      const columns = vm.comparison.columns
+      const draft = vm.alternatives[0]
+      const carried = editor.computed.carried.call({ draft })
+
+      return offered.includes('lurker') && !offered.some((id) => /pod/i.test(id)) && equal(columns.map((column) => column.gated.find((entry) => entry.id === 'groundPod').state), ['recorded', 'not-offered']) && !('groundPod' in draft.carried) && !carried.some((text) => /pod/.test(text)) && draft.options.lurker === false ? true : short([offered, columns.map((column) => column.gated.find((entry) => entry.id === 'groundPod').state), draft.carried, carried])
     }],
     ['page: a PD below 0 is a field error and the planner figure is unavailable, never negative', () => {
       const vm = page({ baselineId: ORDINARY, alternatives: [], pd: '-1' })
@@ -1566,7 +1626,15 @@ const MUTATIONS = [
   { name: 'a choice kept with no link is linked to the open save by a save', file: 'missile-designer.js', find: 'return kept.fingerprint ? { type, id, fingerprint: kept.fingerprint } : null', replace: 'return kept.fingerprint ? { type, id, fingerprint: kept.fingerprint } : (row ? { type, id, row } : null)', fails: ['record: a tech choice kept with no link'] },
   { name: 'a tech choice with no link is not carried as one', file: 'missile-designer.js', find: '.filter((choice) => !stored.some((link) => link.type === TECH_LINK_TYPE && link.id === choice.techId))', replace: '.filter(() => false)', fails: ['record: a tech choice kept with no link'] },
   { name: 'a payload with a tech choice that is not valid is kept', file: 'missile-designer.js', find: 'problems.push(...techProblems(payload.tech))', replace: 'void techProblems', fails: ['record: a tech choice that is not'] },
-  { name: 'a comparison of the earlier schema is not migrated', file: 'missile-designer.js', find: 'migrate: (payload, fromSchema) => (fromSchema < 2 ? { ...payload, tech: { choices: {} } } : payload),', replace: 'migrate: (payload) => payload,', fails: ['record: a comparison saved before'] },
+  { name: 'a comparison of the earlier schema is not migrated', file: 'missile-designer.js', find: 'migrate: (payload, fromSchema) => migrated(payload, fromSchema),', replace: 'migrate: (payload) => payload,', fails: ['record: a comparison saved before', 'lurker: the comparison record'] },
+  { name: 'a comparison of schema 1 given no tech choices', file: 'missile-designer.js', find: 'const next = fromSchema < 2 ? { ...payload, tech: { choices: {} } } : payload', replace: 'const next = payload', fails: ['record: a comparison saved before'] },
+  { name: 'the lurker of an earlier comparison not set off', file: 'missile-designer.js', find: 'options: { ...entry.options, lurker: false }', replace: 'options: entry.options', fails: ['lurker: the comparison record'] },
+  { name: 'the ground pod of an earlier comparison kept', file: 'missile-designer.js', find: "carried: Object.fromEntries(Object.entries(entry.carried).filter(([name]) => name !== 'groundPod'))", replace: 'carried: entry.carried', fails: ['lurker: the comparison record'] },
+  { name: 'the lurker of a stored design not seeded into a draft', file: 'missile-designer.js', find: 'retarget: row.Retargeting > 0, lurker: row.Lurker > 0, laser: row.LaserWarhead > 0 },', replace: 'retarget: row.Retargeting > 0, lurker: false, laser: row.LaserWarhead > 0 },', fails: ['lurker: a stored lurker design'] },
+  { name: 'the lurker of a draft not applied to its candidate', file: 'missile-designer.js', find: 'lurker: Boolean(asked.lurker), laser },', replace: 'lurker: false, laser },', fails: ['lurker: a designed alternative'] },
+  { name: 'the lurker input of a stored design not shown', file: 'missile-designer.js', find: "lurker: inputCell('lurker', row.Lurker > 0 ? 1 : 0, basis),", replace: "lurker: inputCell('lurker', 0, basis),", fails: ['lurker: a stored lurker design'] },
+  { name: 'a ground pod carried by a seeded draft', file: 'missile-designer.js', find: 'shipDecoy: row.ShipDecoy === 1, enhancedRadiation: saved.enhancedRadiation },', replace: 'shipDecoy: row.ShipDecoy === 1, groundPod: row.GroundShots > 0, enhancedRadiation: saved.enhancedRadiation },', fails: ['gating: the designer offers no ground pod'] },
+  { name: 'a stored ground pod not recorded', file: 'missile-designer.js', find: 'shipDecoy: row.ShipDecoy === 1, groundPod: ground, enhancedRadiation: saved.enhancedRadiation,', replace: 'shipDecoy: row.ShipDecoy === 1, groundPod: false, enhancedRadiation: saved.enhancedRadiation,', fails: ['gating: a ground pod or an enhanced radiation warhead', 'gating: the designer offers no ground pod'] },
   { name: 'a column with an option not applied still shows the figures of the design without it', file: 'missile-designer.js', find: 'withheld ? NO_FIGURE(DESIGNER_RULES.plannerFigure, withheld, definition.unit) : mark(figures[definition.id])', replace: 'mark(figures[definition.id])', fails: ['gating: a column with an option not applied', 'gating: a laser warhead asked for'] },
 ]
 

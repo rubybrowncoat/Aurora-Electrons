@@ -109,7 +109,7 @@
             </div>
           </div>
           <div class="panel-foot caption text--secondary">
-            Use it to try another engine, warhead or option and to read why an option cannot be applied. Text that is not a figure stays on its field with its error, and no number replaces it. An option that needs a tech line with no level is not applied. It is marked with its reason beside the option and on the column, and no figure of that column is shown, because any figure would be that of a missile without the option. A second stage, a ship decoy, a ground pod and an enhanced radiation warhead are carried from a seeded design and not built.
+            Use it to try another engine, warhead or option and to read why an option cannot be applied. Text that is not a figure stays on its field with its error, and no number replaces it. An option that needs a tech line with no level is not applied. It is marked with its reason beside the option and on the column, and no figure of that column is shown, because any figure would be that of a missile without the option. A second stage, a ship decoy and an enhanced radiation warhead are carried from a seeded design and not built. The game no longer designs a ground pod, so none is offered: a saved design that stores one is shown as it was saved, and a design seeded from it has none.
           </div>
         </v-card>
 

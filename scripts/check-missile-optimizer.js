@@ -163,7 +163,7 @@ const candidateOf = (tech, v) => ({
   sizeLimit: 0,
   stage: null,
   stages: 0,
-  options: { eccm: v.eccm, terminal: v.terminal, retarget: 0, laser: v.laser },
+  options: { eccm: v.eccm, terminal: v.terminal, retarget: 0, lurker: false, laser: v.laser },
   tech: { warhead: tech.warhead, laserEfficiency: tech.laserEfficiency, reactor: tech.reactor, active: tech.active, thermal: tech.thermal, em: tech.em, geo: tech.geo },
   sensor: { resolution: null, emSensitivity: tech.em },
   groundPod: false,
@@ -752,7 +752,7 @@ const unknownChecks = (m) => [
   ['unknown: a base with an option outside the rules evaluates nothing and says so', () => {
     const draft = m.md.emptyDraft('')
 
-    draft.carried = { ...draft.carried, groundPod: true }
+    draft.carried = { ...draft.carried, enhancedRadiation: true }
 
     const outcome = finish(m, inputOf(m, { goal: 'fastest', hitChance: '', keep: '5' }, { baseDraft: draft }))
     const result = outcome.result
@@ -1051,6 +1051,28 @@ const nominateChecks = (m) => [
     const entry = outcome.result.entries[0]
 
     return draft.techMode === 'page' && draft.kind === 'designed' && draft.options.eccm === (entry.values.eccm > 0) && draft.carried.stages === seeded.draft.carried.stages && draft.activeMsp === seeded.draft.activeMsp && Number(draft.engineMsp) === entry.values.engineMsp && Number(draft.fuelMsp) === entry.values.fuelMsp ? true : short([draft.techMode, draft.options, draft.engineMsp, entry.values])
+  }],
+  ['nominate: a base with the lurker carries it into every candidate, half an MSP and half a BP over the same candidate without it, and into the drafts nominated, which the designer reproduces', () => {
+    const plain = reoptimise(m, { goal: 'fastest', hitChance: '', maxMsp: '40', keep: '200' })
+    const draft = { ...plain.seeded.draft, options: { ...plain.seeded.draft.options, lurker: true } }
+    const request = m.opt.readRequest({ fields: plain.fields, scenario: SCENARIO, tech: plain.tech, reference: m.opt.referenceOfColumn(plain.baseline), baseDraft: draft, stage: m.opt.stageOfDraft(designs().fixture, draft) })
+
+    if (!plain.request.ok || !request.ok) {
+      return short([plain.request.errors, request.errors])
+    }
+
+    const without = finish(m, plain.request.input)
+    const lurking = finish(m, request.input)
+    const keyOf = (entry) => JSON.stringify(entry.values)
+    const bare = new Map(without.result.entries.map((entry) => [keyOf(entry), entry]))
+    const matched = lurking.result.entries.filter((entry) => bare.has(keyOf(entry)))
+    const nominated = m.opt.nominations(lurking, { baseDraft: draft })
+    const alternatives = nominated.reduce((list, entry) => m.md.addAlternative(list, entry).list, [])
+    const compared = m.md.compareDesigns(plain.context, { ...plain.spec, alternatives })
+    const wrong = matched.filter((entry) => !close(entry.figures.size - bare.get(keyOf(entry)).figures.size, 0.5, 1e-9) || !close(entry.figures.cost - bare.get(keyOf(entry)).figures.cost, 0.5, 1e-9))
+    const unreproduced = compared.columns.slice(1).filter((column, at) => !close(column.figures.size.value, lurking.result.entries[at].figures.size, 1e-9) || !close(column.figures.cost.value, lurking.result.entries[at].figures.cost, 1e-9))
+
+    return request.ok && plain.seeded.draft.options.lurker === false && matched.length >= 3 && wrong.length === 0 && nominated.length === 3 && nominated.every((entry) => entry.options.lurker === true) && unreproduced.length === 0 && compared.columns.slice(1).every((column) => column.inputs.lurker.value === 1) ? true : short([request.ok, matched.length, wrong.length, nominated.map((entry) => entry.options), unreproduced.length])
   }],
 ]
 
@@ -1542,6 +1564,9 @@ const MUTATIONS = [
   { name: 'the deviation from a reference is an absolute figure', file: 'missile-optimizer.js', find: 'const part = Math.abs(figures[of] - reference[name]) / reference[name]', replace: 'const part = Math.abs(figures[of] - reference[name])', fails: ['goals: the match of a reference missile'] },
   { name: 'the size limit of a reference is twice its size', file: 'missile-optimizer.js', find: 'limits.maxMsp = { value: reference.size, error: \'\' }', replace: 'limits.maxMsp = { value: reference.size * 2, error: \'\' }', fails: ['nominate: the match of a reference defaults the size limit'] },
   { name: 'more than three are nominated', file: 'missile-optimizer.js', find: 'Math.min(limit, MAX_ALTERNATIVES)', replace: 'limit', fails: ['nominate: no more than three are nominated'] },
+  { name: 'the lurker of the base not read from the draft', file: 'missile-optimizer.js', find: 'const lurker = Boolean(draft.options && draft.options.lurker)', replace: 'const lurker = false', fails: ['nominate: a base with the lurker carries it'] },
+  { name: 'the lurker of the base not given to a candidate', file: 'missile-optimizer.js', find: 'retarget: base.retarget, lurker: base.lurker, laser: values.laser }', replace: 'retarget: base.retarget, lurker: false, laser: values.laser }', fails: ['nominate: a base with the lurker carries it'] },
+  { name: 'the lurker of the base not kept in the drafts nominated', file: 'missile-optimizer.js', find: 'lurker: Boolean(draft.options && draft.options.lurker), laser: values.laser }', replace: 'lurker: false, laser: values.laser }', fails: ['nominate: a base with the lurker carries it'] },
   { name: 'a candidate has a name that is not its figures', file: 'missile-optimizer.js', find: 'Math.round(thrust * 1000)}', replace: 'Math.round(thrust * 100)}', fails: ['domain: a candidate has one name'] },
   { name: 'the greatest number of results to keep is cut to 20', file: 'missile-optimizer.js', find: 'export const KEEP_MAX = 1000', replace: 'export const KEEP_MAX = 20', fails: ['keep: more than the greatest number is refused'] },
   { name: 'an ECCM the sensor lacks is read as 0', file: 'launcher-coverage.js', find: 'eccm: counter.value, problems', replace: 'eccm: counter.value || 0, problems', fails: ['coverage: a figure the sensor lacks is unknown'] },
