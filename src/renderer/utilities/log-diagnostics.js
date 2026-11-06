@@ -129,6 +129,17 @@ export const readListedTypes = async (database) => {
   }
 }
 
+// The event types the open save flags as interrupting the player (`DIM_EventType.PlayerInterrupt`), as a Set, or null when the table could not be read (unknown, never none). The flags are the save's own, so the save that carries a changed flag marks by it, and nothing is kept from a save the app has replaced.
+export const readInterruptTypes = async (database) => {
+  try {
+    const [rows] = await database.query('select DIM_EventType.EventTypeID from DIM_EventType where coalesce(DIM_EventType.PlayerInterrupt, 0) = 1')
+
+    return new Set(rows.map((row) => Number(row.EventTypeID)))
+  } catch (error) {
+    return null
+  }
+}
+
 // What one diagnostic needs from the open save, read once for a race: { capture, failed, archive, hidden, listed, GameTime }. `window` is the log's window when the page has it, `archive` the race's archived record or null, `GameTime` the save's game time.
 export const readDiagnostic = async (database, { GameID, RaceID, GameTime, window = null, archive = null }) => {
   const [read, hidden, listed] = await Promise.all([

@@ -235,13 +235,16 @@ export const EVENT_ICONS = Object.freeze({
   365: 'mdi-car-arrow-right', // Successful Ramming Attack
   366: 'mdi-car-arrow-left', // Ship Rammed
   367: 'mdi-account-search', // Interrogation Update
+  370: 'mdi-flask-outline', // Scientist Experience
+  371: 'mdi-account-tie-outline', // Administrator Experience
+  372: 'mdi-account-question-outline', // Unassigned Experience
   373: 'mdi-magnify-scan', // Xenoarchaeology Research
   374: 'mdi-diamond-stone', // Artifacts Recovered
   375: 'mdi-radar', // Aether Gate Detected
   376: 'mdi-diamond-outline', // All Minerals Exhausted
-  377: 'mdi-account-question', // New Neutral Alien Ship
-  378: 'mdi-account-check', // New Friendly Alien Ship
-  379: 'mdi-account-multiple', // New Allied Alien Ship
+  377: 'mdi-rocket', // New Neutral Alien Ship
+  378: 'mdi-rocket', // New Friendly Alien Ship
+  379: 'mdi-rocket', // New Allied Alien Ship
   380: 'mdi-mine', // Mining Colony Update
   381: 'mdi-wrench', // Incomplete Salvage
   382: 'mdi-content-save', // Game Saved
