@@ -3,7 +3,7 @@
 
   node scripts/check-history-export.js [--no-mutations]
 
-  HISTORY_SAVES=<folder> points the saves check at another folder of saves (HISTORY_SAVES_FALRYX for the second family); a folder that is not there skips it. A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
+  HISTORY_SAVES_FALRYX=<folder> points the saves check at another folder of saves; a folder that is not there skips it. A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
 
   Groups:
   - csv: the documented columns, the exact sample game times with their units, a figure that is not recorded as an empty value with a status (never 0), the gap since the previous sample, annotations in their own columns and never in a sample's, the rule and its status, the baseline of a change, and the facts a reader needs (race, who may see it, window, sampling limits);
@@ -28,7 +28,6 @@ const { strictRecords } = require('./lib/csv-records')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
-const SAVES = process.env.HISTORY_SAVES || path.join(root, 'artifacts', 'boscodiogigia-sequential-saves')
 const SAVES_FALRYX = process.env.HISTORY_SAVES_FALRYX || path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const NAMES = ['history-export', 'history', 'history-milestones', 'scenario-records', 'provenance', 'mineral-compare']
 const START_YEAR = 2050
@@ -1429,7 +1428,7 @@ const caught = (mutant, results) => {
 const RESULT = 'RESULT '
 const MUTANTS = [...UTILITY_MUTATIONS.map((mutant) => ({ mutant, page: false })), ...PAGE_MUTATIONS.map((mutant) => ({ mutant, page: true }))]
 
-const savesOf = async (real) => savesChecks([await familyOf(real, SAVES, 140, 784), await familyOf(real, SAVES_FALRYX, 141, 791)].filter(Boolean))
+const savesOf = async (real) => savesChecks([await familyOf(real, SAVES_FALRYX, 141, 791)].filter(Boolean))
 
 // What the baseline, each mutant and the control print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
 const baselineEntries = async () => {

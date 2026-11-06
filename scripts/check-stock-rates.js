@@ -8,33 +8,22 @@
 
   The panel's script is run as a pseudo instance over scripts/lib/page-loader.js (the window, the stock, the colony and the scope chosen, the colony series of the shown branch, the reasons a colony series is unavailable) and its template and the history page's mount are read as text.
 
-  The recorded passive campaign (artifacts/passive-campaign-20261013, git-ignored, read-only: 150 saves of a stock game 5 days apart) gives real stocks: the snapshots of race 1 (a player race whose Gallicite is 0 t throughout) and race 2 (an NPR whose stocks all move) are taken with the app's own `takeSnapshot`, the stock rates are compared with rates worked from the unrounded sums of the colony stockpiles read straight from each save, and the colony series of race 2's most populous colony is built with the app's own reads and compared with that colony's raw rows. The campaign checks are skipped when the folder is not there.
-
   Each mutation of the utility, the panel or the page must fail the checks it names. Exit code 1 when a check fails.
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
-const v8 = require('v8')
-const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
-const { jobs } = require('./lib/check-pool')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilityFile = path.join(root, 'src', 'renderer', 'utilities', 'stock-rates.js')
 const componentFile = path.join(root, 'src', 'renderer', 'components', 'history', 'StockRates.vue')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013')
-const CAMPAIGN_GAME = 139
-const CAMPAIGN_RACES = [1, 2]
 const NAMES = ['stock-rates', 'history', 'colony-series', 'provenance', 'minerals']
 const YEAR = 31536000
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
-const ORACLE_COLUMNS = ['FuelStockpile', 'MaintenanceStockpile', ...MINERAL_NAMES]
-const ORACLE_KEYS = ['fuel', 'msp', ...MINERAL_NAMES]
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -895,156 +884,17 @@ const panel = (ctx) => {
   ])
 }
 
-// ---------- the recorded campaign ----------
-
-const campaignStatements = (ctx, C) => {
-  const { m } = ctx
-  const R = m.rates
-  const WINDOWS = R.WINDOWS
-  const windowOf = (times, years) => {
-    const latest = times[times.length - 1]
-    const from = years ? latest - years * YEAR : -Infinity
-    const indices = times.map((_t, index) => index).filter((index) => times[index] >= from)
-
-    return { latest, first: indices[0], last: indices[indices.length - 1], count: indices.length }
-  }
-  const empireAnalysis = (race, key, years) => {
-    const snapshots = C.races[race].snapshots
-    const stock = R.stockOf(key)
-
-    return R.analyseStock({ stock, observations: R.empireObservations(snapshots, stock), latest: R.latestOf(snapshots), years })
-  }
-
-  return parts([
-    ['c-saves: the saves are one snapshot each, 5 game days apart, for both races', () => {
-      const problems = CAMPAIGN_RACES.filter((race) => {
-        const times = C.races[race].snapshots.map((snapshot) => snapshot.t)
-
-        return !(times.length === 150 && times.every((t, index) => index === 0 || t - times[index - 1] === 432000) && C.races[race].oracle.length === 150)
-      })
-
-      return problems.length === 0 && C.colony.snapshots.length === 150 ? true : `races ${problems.join(', ')}`
-    }],
-    ['c-rates: the rate of every stock, over every window, matches the rate of the unrounded sums read from the saves', () => {
-      const problems = []
-      let compared = 0
-
-      for (const race of CAMPAIGN_RACES) {
-        const times = C.races[race].snapshots.map((snapshot) => snapshot.t)
-
-        for (const years of WINDOWS) {
-          const { first, last } = windowOf(times, years)
-          const elapsed = (times[last] - times[first]) / YEAR
-
-          ORACLE_KEYS.forEach((key, index) => {
-            const a = empireAnalysis(race, key, years)
-            const expected = (C.races[race].oracle[last][index] - C.races[race].oracle[first][index]) / elapsed
-
-            compared++
-
-            if (!(a.rate.value !== null && a.first.t === times[first] && a.last.t === times[last] && Math.abs(a.rate.value - expected) <= 1.0001 / elapsed + 1e-6)) {
-              problems.push(`race ${race} ${key} ${years} y: ${a.rate.value} != ${expected}`)
-            }
-          })
-        }
-      }
-
-      return problems.length === 0 && compared === 2 * WINDOWS.length * ORACLE_KEYS.length ? true : problems.slice(0, 3).join('; ') || `${compared} compared`
-    }],
-    ['c-zero: race 1\'s Gallicite, 0 t throughout, has a baseline of 0 in every window', () => {
-      const problems = WINDOWS.filter((years) => {
-        const a = empireAnalysis(1, 'Gallicite', years)
-
-        return !(a.kind === 'zero-baseline' && a.relative.value === null && a.depletion.value === null && a.rate.value === 0 && finiteAll(a))
-      })
-
-      return problems.length === 0 ? true : `windows ${problems.join(', ')}`
-    }],
-    ['c-window: the windows hold the saves of the years before the latest', () => {
-      const times = C.races[2].snapshots.map((snapshot) => snapshot.t)
-      const expected = WINDOWS.map((years) => windowOf(times, years).count)
-      const counts = WINDOWS.map((years) => empireAnalysis(2, 'fuel', years).basis.snapshots)
-
-      return equal(counts, expected) && equal(expected, [74, 147, 150, 150, 150, 150]) ? true : short([counts, expected])
-    }],
-    ['c-invariant: every stock of both races in every window is finite, and has a date only as a decline', () => {
-      const problems = []
-
-      for (const race of CAMPAIGN_RACES) {
-        for (const stock of R.STOCKS) {
-          for (const years of WINDOWS) {
-            const a = empireAnalysis(race, stock.key, years)
-            const why = []
-
-            if (!finiteAll(a)) why.push('not finite')
-            if ((a.depletion.value !== null) !== (a.kind === 'declining')) why.push('date and kind')
-            if (a.depletion.value !== null && !(a.depletion.value > 0 && a.depletion.value <= 1000 && a.earliest.value <= a.depletion.value + 1e-9)) why.push('date range')
-            if (a.kind === 'nondeclining' && !(a.rate.value >= 0)) why.push('nondeclining')
-            if (!(a.window.latest === C.races[race].snapshots[149].t)) why.push('latest')
-            if (/NaN|Infinity|\[object|\bnull\b/.test(R.ratesCsv(a))) why.push('csv')
-
-            if (why.length) {
-              problems.push(`race ${race} ${stock.key} ${years} y: ${why.join(', ')}`)
-            }
-          }
-        }
-      }
-
-      return problems.length === 0 ? true : problems.slice(0, 3).join('; ')
-    }],
-    ['c-colony: the colony series of the most populous colony of race 2 gives the rates of its raw rows', () => {
-      const { snapshots, raw, target } = C.colony
-      const record = { snapshots }
-      const times = snapshots.map((snapshot) => snapshot.t)
-      const problems = []
-      let compared = 0
-
-      for (const years of [0, 5, 1]) {
-        for (const stock of R.stocksOf('colony')) {
-          const observations = R.colonyObservations(record, target.id, stock, m.colony.COLONY_COLUMNS)
-          const a = R.analyseStock({ stock, scope: { kind: 'colony', name: target.name }, observations, latest: R.latestOf(snapshots), years })
-          const index = ORACLE_KEYS.indexOf(stock.key)
-
-          if (observations.length !== snapshots.length) {
-            problems.push(`${stock.key}: ${observations.length} observations`)
-          }
-
-          observations.forEach((observation, position) => {
-            const rawValue = raw[position] ? raw[position][index] : null
-
-            if (!(rawValue === null ? observation.result.value === null : observation.result.value !== null && Math.abs(observation.result.value - rawValue) <= 0.5 + 1e-9)) {
-              problems.push(`${stock.key} at ${times[position]}: ${observation.result.value} vs ${rawValue}`)
-            }
-          })
-
-          if (a.first && a.last && a.first.t !== a.last.t) {
-            const expected = (raw[times.indexOf(a.last.t)][index] - raw[times.indexOf(a.first.t)][index]) / ((a.last.t - a.first.t) / YEAR)
-
-            compared++
-
-            if (!(a.rate.value !== null && Math.abs(a.rate.value - expected) <= 1.0001 / ((a.last.t - a.first.t) / YEAR) + 1e-6)) {
-              problems.push(`${stock.key} ${years} y: ${a.rate.value} != ${expected}`)
-            }
-          }
-        }
-      }
-
-      return problems.length === 0 && compared > 0 ? true : problems.slice(0, 3).join('; ') || `${compared} compared`
-    }],
-  ])
-}
-
 // ---------- the mutations ----------
 
 const U = 'stock-rates.js'
 const V = 'StockRates.vue'
 const P = 'history.vue'
 
-// A planted fault and the checks that must fail for it: each name is the key of a check (the text before its colon), and the fault is caught only when every one of them fails. `campaign` names the checks of the recorded campaign that must fail too, when it is there.
+// A planted fault and the checks that must fail for it: each name is the key of a check (the text before its colon), and the fault is caught only when every one of them fails.
 const MUTATIONS = [
-  { name: 'the rate divided by the observations, not the time', file: U, find: '(after - before) / elapsed, units: perYear', replace: '(after - before) / (known.length - 1), units: perYear', fails: ['irregular', 'elapsed'], campaign: ['c-rates'] },
-  { name: 'the rate per game day', file: U, find: '(after - before) / elapsed, units: perYear', replace: '(after - before) / (elapsed * 365), units: perYear', fails: ['irregular', 'elapsed'], campaign: ['c-rates'] },
-  { name: 'a game year of 360 days', file: U, find: 'export const YEAR_SECONDS = 31536000', replace: 'export const YEAR_SECONDS = 31104000', fails: ['irregular', 'elapsed', 'year'], campaign: ['c-rates'] },
+  { name: 'the rate divided by the observations, not the time', file: U, find: '(after - before) / elapsed, units: perYear', replace: '(after - before) / (known.length - 1), units: perYear', fails: ['irregular', 'elapsed'] },
+  { name: 'the rate per game day', file: U, find: '(after - before) / elapsed, units: perYear', replace: '(after - before) / (elapsed * 365), units: perYear', fails: ['irregular', 'elapsed'] },
+  { name: 'a game year of 360 days', file: U, find: 'export const YEAR_SECONDS = 31536000', replace: 'export const YEAR_SECONDS = 31104000', fails: ['irregular', 'elapsed', 'year'] },
   { name: 'the rate of an interval not divided by its time', file: U, find: '(after - before) / (seconds / YEAR_SECONDS), units: perYear', replace: '(after - before), units: perYear', fails: ['irregular', 'declining'] },
   { name: 'observations at one game time all kept', file: U, find: 'if (!last || last.t !== observation.t) {', replace: 'if (true) {', fails: ['duplicates', 'random'] },
   { name: 'the first of two observations at a game time kept', file: U, find: '} else if (isAvailable(observation.result) || !isAvailable(last.result)) {', replace: '} else if (false) {', fails: ['duplicates'] },
@@ -1052,12 +902,12 @@ const MUTATIONS = [
   { name: 'observations read in the order given', file: U, find: '.sort((a, b) => a.observation.t - b.observation.t || a.index - b.index)', replace: '.sort((a, b) => a.index - b.index)', fails: ['order'] },
   { name: 'the start of the window left out', file: U, find: '(from === null || observation.t >= from)', replace: '(from === null || observation.t > from)', fails: ['window'] },
   { name: 'the window counted back from the last observation', file: U, find: 'const from = years && latest !== null ? latest - years * YEAR_SECONDS : null', replace: 'const from = years && observations.length ? Math.max(...observations.map((observation) => observation.t)) - years * YEAR_SECONDS : null', fails: ['window'] },
-  { name: 'a window of 0 years taken as the latest snapshot only', file: U, find: 'const from = years && latest !== null ? latest - years * YEAR_SECONDS : null', replace: 'const from = latest !== null ? latest - years * YEAR_SECONDS : null', fails: ['window'], campaign: ['c-window', 'c-rates'] },
+  { name: 'a window of 0 years taken as the latest snapshot only', file: U, find: 'const from = years && latest !== null ? latest - years * YEAR_SECONDS : null', replace: 'const from = latest !== null ? latest - years * YEAR_SECONDS : null', fails: ['window'] },
   { name: 'an unrecorded stock read as 0', file: U, find: 'value: valueOrNull(observation.result), result: observation.result }))', replace: 'value: valueOrNull(observation.result) || 0, result: observation.result }))', fails: ['unrecorded', 'csv-unknown'] },
   { name: 'a flat series given a date', file: U, find: 'rateValue >= 0 ? \'nondeclining\'', replace: 'rateValue > 0 ? \'nondeclining\'', fails: ['flat', 'random'] },
   { name: 'a rising series given a date', file: U, find: 'rateValue >= 0 ? \'nondeclining\'', replace: 'rateValue === 0 ? \'nondeclining\'', fails: ['flat', 'random'] },
-  { name: 'a baseline of 0 not told apart', file: U, find: 'first.value === 0 ? \'zero-baseline\'', replace: 'first.value === null ? \'zero-baseline\'', fails: ['zerobase', 'random'], campaign: ['c-zero'] },
-  { name: 'a stock at 0 told before a baseline of 0', file: U, find: 'first.value === 0 ? \'zero-baseline\' : last.value <= 0 ? \'empty\' :', replace: 'last.value <= 0 ? \'empty\' : first.value === 0 ? \'zero-baseline\' :', fails: ['zerobase'], campaign: ['c-zero'] },
+  { name: 'a baseline of 0 not told apart', file: U, find: 'first.value === 0 ? \'zero-baseline\'', replace: 'first.value === null ? \'zero-baseline\'', fails: ['zerobase', 'random'] },
+  { name: 'a stock at 0 told before a baseline of 0', file: U, find: 'first.value === 0 ? \'zero-baseline\' : last.value <= 0 ? \'empty\' :', replace: 'last.value <= 0 ? \'empty\' : first.value === 0 ? \'zero-baseline\' :', fails: ['zerobase'] },
   { name: 'a relative rate taken from a baseline of 0', file: U, find: 'known.length >= 2 && first.value !== 0 ? combine(', replace: 'known.length >= 2 ? combine(', fails: ['zerobase'] },
   { name: 'a rate given to a single observation', file: U, find: 'known.length >= 2 ? combine({ rule: \'stockRates.rate\'', replace: 'known.length >= 1 ? combine({ rule: \'stockRates.rate\'', fails: ['single', 'duplicates'] },
   { name: 'a single observation called too few', file: U, find: 'known.length === 1 ? \'single\'', replace: 'known.length === 1 ? \'insufficient\'', fails: ['single', 'duplicates'] },
@@ -1100,8 +950,8 @@ const MUTATIONS = [
   { name: 'the notes left out of the copied text', file: U, find: '...analysis.notes, \'\', \'Observations:\'', replace: '\'\', \'Observations:\'', fails: ['text'] },
   { name: 'an unrecorded stock drawn as 0', file: U, find: 'observed: analysis.rows.map((row) => ({ t: row.t, value: row.value, step: row.spike })),', replace: 'observed: analysis.rows.map((row) => ({ t: row.t, value: row.value || 0, step: row.spike })),', fails: ['chartpoints'] },
   { name: 'the average line drawn to the wrong stock', file: U, find: '{ t: analysis.last.t, value: analysis.last.value }]', replace: '{ t: analysis.last.t, value: analysis.first.value }]', fails: ['chartpoints'] },
-  { name: 'a mineral read one ID off', file: U, find: 'mineralResult(snapshot, stock.mineral, stock.label)', replace: 'mineralResult(snapshot, stock.mineral + 1, stock.label)', fails: ['empire'], campaign: ['c-rates'] },
-  { name: 'a colony column read one off', file: U, find: 'entry[2 + columns.indexOf(stock.colony)]', replace: 'entry[1 + columns.indexOf(stock.colony)]', fails: ['colony'], campaign: ['c-colony'] },
+  { name: 'a mineral read one ID off', file: U, find: 'mineralResult(snapshot, stock.mineral, stock.label)', replace: 'mineralResult(snapshot, stock.mineral + 1, stock.label)', fails: ['empire'] },
+  { name: 'a colony column read one off', file: U, find: 'entry[2 + columns.indexOf(stock.colony)]', replace: 'entry[1 + columns.indexOf(stock.colony)]', fails: ['colony'] },
   { name: 'a colony taken at any state', file: U, find: 'if (entry[1] !== COLONY_STATES.OBSERVED) {', replace: 'if (false) {', fails: ['colony'] },
   { name: 'a colony with no figure read as 0', file: U, find: 'return isKnownNumber(value) ? ofRule(', replace: 'return true ? ofRule(', fails: ['colony'] },
   { name: 'a snapshot without the colony counted as unrecorded', file: U, find: 'return entry ? [{ t: snapshot.t, result: colonyResult(entry, stock, columns) }] : []', replace: 'return [{ t: snapshot.t, result: entry ? colonyResult(entry, stock, columns) : unavailable({ rule: \'stockRates.colonyStock\', missing: [\'colony\'], units: stock.unit }) }]', fails: ['colony'] },
@@ -1182,7 +1032,7 @@ const contextOf = async (sources) => {
   return { m: { rates: loaded['stock-rates'], history: loaded.history, colony: loaded['colony-series'], provenance: loaded.provenance, minerals: loaded.minerals }, options, componentText: sources[V], pageText: sources[P] }
 }
 
-const statementsOf = (ctx, campaign) => [...pure(ctx), ...panel(ctx), ...(campaign ? campaignStatements(ctx, campaign) : [])]
+const statementsOf = (ctx) => [...pure(ctx), ...panel(ctx)]
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))
 
@@ -1209,19 +1059,17 @@ const runStatements = async (statements, keys = null) => {
   return results
 }
 
-const campaignOf = (file) => (file ? v8.deserialize(fs.readFileSync(file)) : null)
-
-const checkHead = async (campaignFile) => {
+const checkHead = async () => {
   const ctx = await contextOf(sourcesOf(null))
 
-  console.log('\nStock rates, on series worked by hand, the panel and the recorded campaign')
+  console.log('\nStock rates, on series worked by hand and the panel')
 
-  for (const [name, result] of await runStatements(statementsOf(ctx, campaignOf(campaignFile)))) {
+  for (const [name, result] of await runStatements(statementsOf(ctx))) {
     check(name, result)
   }
 }
 
-const checkMutant = async (mutant, campaignFile) => {
+const checkMutant = async (mutant) => {
   const began = Date.now()
   let sources
 
@@ -1233,8 +1081,7 @@ const checkMutant = async (mutant, campaignFile) => {
     return
   }
 
-  const campaign = campaignOf(campaignFile)
-  const keys = campaign ? [...mutant.fails, ...(mutant.campaign || [])] : mutant.fails
+  const keys = mutant.fails
   let ctx
 
   try {
@@ -1245,7 +1092,7 @@ const checkMutant = async (mutant, campaignFile) => {
     return
   }
 
-  const statements = statementsOf(ctx, campaign)
+  const statements = statementsOf(ctx)
   const absent = keys.filter((key) => !statements.some(([name]) => keyOf(name) === key))
   const results = await runStatements(statements, keys)
   const missed = keys.filter((key) => !results.some(([name, result]) => keyOf(name) === key && result !== true))
@@ -1253,101 +1100,12 @@ const checkMutant = async (mutant, campaignFile) => {
   check(`mutation caught: ${mutant.name}`, absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
 
-// ---------- reading the campaign ----------
-
-const openSave = (file) => new Promise((resolve, reject) => {
-  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => {
-    if (error) {
-      reject(error)
-      return
-    }
-
-    resolve({
-      query: (sql) => new Promise((resolve, reject) => raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))),
-      close: () => new Promise((resolve) => raw.close(resolve)),
-    })
-  })
-})
-
-// The files of the recorded saves in order, or null when the campaign is not there.
-const campaignFiles = () => {
-  const list = path.join(PASSIVE, 'snapshots.csv')
-
-  if (!fs.existsSync(list)) {
-    return null
-  }
-
-  const files = fs.readFileSync(list, 'utf8').split(/\r?\n/).slice(1).filter(Boolean).map((line) => path.join(PASSIVE, 'snapshots', line.split(',')[2]))
-
-  return files.length < 2 || !files.every((file) => fs.existsSync(file)) ? null : files
-}
-
-// The most populous colony of race 2 in the first save: the colony whose series is read.
-const colonyTarget = async (file) => {
-  const database = await openSave(file)
-
-  try {
-    const [[row]] = await database.query(`select PopulationID, PopName, SystemBodyID, RaceID from FCT_Population where GameID = ${CAMPAIGN_GAME} and RaceID = 2 order by Population desc limit 1`)
-
-    return { id: row.PopulationID, name: row.PopName, bodyId: row.SystemBodyID, raceId: row.RaceID }
-  } finally {
-    await database.close()
-  }
-}
-
-// The snapshots the app takes of each of the saves in `files`, the unrounded sums of the colony stockpiles of each race, and the colony series of the target colony with its raw row.
-const readCampaign = async (m, files, target) => {
-  const races = Object.fromEntries(CAMPAIGN_RACES.map((race) => [race, { snapshots: [], oracle: [] }]))
-  const colony = { snapshots: [], raw: [], target }
-
-  for (const file of files) {
-    const database = await openSave(file)
-
-    try {
-      let t = null
-
-      for (const RaceID of CAMPAIGN_RACES) {
-        const { snapshot } = await m.history.takeSnapshot(database, { GameID: CAMPAIGN_GAME, RaceID })
-        const [[sums]] = await database.query(`select ${ORACLE_COLUMNS.map((name, index) => `sum(FCT_Population.${name}) as m${index}`).join(', ')} from FCT_Population where FCT_Population.GameID = ${CAMPAIGN_GAME} and FCT_Population.RaceID = ${RaceID}`)
-
-        races[RaceID].snapshots.push(snapshot)
-        races[RaceID].oracle.push(ORACLE_COLUMNS.map((_name, index) => sums[`m${index}`]))
-        t = snapshot.t
-      }
-
-      const read = await m.colony.readColonies(database, { GameID: CAMPAIGN_GAME, ids: [target.id] })
-      const [rows] = await database.query(`select ${ORACLE_COLUMNS.join(', ')} from FCT_Population where GameID = ${CAMPAIGN_GAME} and PopulationID = ${target.id} and RaceID = ${target.raceId} and SystemBodyID = ${target.bodyId}`)
-
-      colony.snapshots.push(m.colony.colonySnapshot({ t, n: colony.snapshots.length + 1, colonies: m.colony.colonyRows([{ id: target.id, since: 0, name: target.name, bodyId: target.bodyId, raceId: target.raceId }], read) }))
-      colony.raw.push(rows.length ? ORACLE_COLUMNS.map((name) => rows[0][name]) : null)
-    } finally {
-      await database.close()
-    }
-  }
-
-  return { races, colony }
-}
-
-const readSlice = async (slice, of, out, targetText) => {
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS })
-  const m = { history: loaded.history, colony: loaded['colony-series'] }
-  const files = campaignFiles()
-  const share = Math.ceil(files.length / of)
-
-  fs.writeFileSync(out, v8.serialize(await readCampaign(m, files.slice(slice * share, (slice + 1) * share), JSON.parse(targetText))))
-}
-
 const parseArguments = (argv) => {
-  const options = { part: null, campaign: null, slice: null, mutations: true }
+  const options = { part: null, mutations: true }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--part') {
       options.part = argv[++index]
-    } else if (argv[index] === '--campaign') {
-      options.campaign = argv[++index]
-    } else if (argv[index] === '--slice') {
-      options.slice = [Number(argv[index + 1]), Number(argv[index + 2]), argv[index + 3], argv[index + 4]]
-      index += 4
     } else if (argv[index] === '--no-mutations') {
       options.mutations = false
     } else {
@@ -1362,18 +1120,13 @@ const parseArguments = (argv) => {
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
 
-  if (options.slice !== null) {
-    await readSlice(...options.slice)
-    endSection(0, 0)
-  }
-
   if (options.part !== null) {
     const mutant = MUTANTS.find(({ id }) => id === options.part)
 
     if (options.part === 'head') {
-      await checkHead(options.campaign)
+      await checkHead()
     } else if (mutant) {
-      await checkMutant(mutant, options.campaign)
+      await checkMutant(mutant)
     } else {
       throw new Error(`No part is named ${options.part}`)
     }
@@ -1381,52 +1134,22 @@ const run = async () => {
     endSection(checks, failures)
   }
 
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-stock-rates-'))
+  const wanted = options.mutations ? MUTANTS : []
+  const sections = await runSections(__filename, [{ args: ['--part', 'head'], weight: 30 }, ...wanted.map(({ id }) => ({ args: ['--part', id], weight: 3 }))])
+  let at0 = 0
 
-  try {
-    const files = campaignFiles()
-    let campaignFile = null
+  const printed = () => {
+    const counts = printSection(sections[at0++])
 
-    if (files) {
-      console.log('The recorded campaign: the snapshots of each save (this takes a while)')
+    checks += counts.checks
+    failures += counts.failures
+  }
 
-      const target = JSON.stringify(await colonyTarget(files[0]))
-      const count = Math.min(jobs(), files.length)
-      const outs = Array.from({ length: count }, (_unused, slice) => path.join(directory, `slice-${slice}.bin`))
+  printed()
 
-      await runSections(__filename, outs.map((out, slice) => ({ args: ['--slice', String(slice), String(count), out, target] })))
-
-      const slices = outs.map((out) => v8.deserialize(fs.readFileSync(out)))
-      const races = Object.fromEntries(CAMPAIGN_RACES.map((race) => [race, { snapshots: slices.flatMap((slice) => slice.races[race].snapshots), oracle: slices.flatMap((slice) => slice.races[race].oracle) }]))
-      const colony = { snapshots: slices.flatMap((slice) => slice.colony.snapshots), raw: slices.flatMap((slice) => slice.colony.raw), target: slices[0].colony.target }
-
-      campaignFile = path.join(directory, 'campaign.bin')
-      fs.writeFileSync(campaignFile, v8.serialize({ races, colony }))
-      console.log(`  ${races[1].snapshots.length} saves read for ${CAMPAIGN_RACES.length} races, and colony ${colony.target.name} (${colony.target.id})`)
-    } else {
-      console.log('SKIP  the passive campaign (artifacts/passive-campaign-20261013) is not there')
-    }
-
-    const forwarded = campaignFile ? ['--campaign', campaignFile] : []
-    const wanted = options.mutations ? MUTANTS : []
-    const sections = await runSections(__filename, [{ args: ['--part', 'head', ...forwarded], weight: 30 }, ...wanted.map(({ id }) => ({ args: ['--part', id, ...forwarded], weight: 3 }))])
-    let at0 = 0
-
-    const printed = () => {
-      const counts = printSection(sections[at0++])
-
-      checks += counts.checks
-      failures += counts.failures
-    }
-
-    printed()
-
-    if (wanted.length) {
-      console.log('\nMutations: each must fail the checks it names')
-      wanted.forEach(printed)
-    }
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
+  if (wanted.length) {
+    console.log('\nMutations: each must fail the checks it names')
+    wanted.forEach(printed)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

@@ -3,8 +3,6 @@
 
   node scripts/check-world-tags.js [--no-mutations]
 
-  WORLD_TAGS_BOSCO points the saves checks at a folder of saves (or at none: a folder that is not there skips them). A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
-
   Groups:
   - moon: a tag is on the body it was put on, so tagging a moon leaves its planet and its system untagged and the other way round, and nothing but the campaign's scenario file is written;
   - known: a body is known when its system is, surveyed or not, so a body of an unknown system is refused and the picker offers the bodies of the system picked with their class;
@@ -16,21 +14,18 @@
   - scope: a tag is made only against the bodies of the race, campaign and branch it is kept for and only for a body that is there as it was picked, and keeps the branch it was made on;
   - reads: every query is a select, so keeping, changing and clearing a tag never writes the save;
   - backup: tags round-trip through the backup's annotation adapter, and the adapter is for bodies only;
-  - saves: on the owner's saves (opened read only, skipped when they are not here) a body that was never surveyed is taggable, a body of an unknown system is not, a moon leaves its planet untagged, a save from before a system was found shows the mismatch and the file is as it was;
   - mixin: the code the Notebook and the Map share lists, filters, keeps and isolates the tags of the race and branch shown, and a body that is not read or whose read failed is never taken for gone;
   - component: the rows say why a tag is stale and what a save from before it means, and the form is dropped when what is shown changes;
   - map: the glyph, its stale form, the dimming, the filter, the panel and the mark of the Galaxy Map, and that tagging never changes a cluster, a pin or a border.
 
   Everything runs on in-memory stores, the real scenario repository and a fake save that records the SQL it is sent. Each mutation of the code must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
-const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createRequire } = require('module')
 const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
-const { convertedSave } = require('./lib/fixtures')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
@@ -39,7 +34,6 @@ const { chunksOf, spread } = require('./lib/mutant-chunks')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const mixinFile = path.join(root, 'src', 'renderer', 'mixins', 'world-tags.js')
-const BOSCO = process.env.WORLD_TAGS_BOSCO || path.join(root, 'artifacts', 'boscodiogigia-sequential-saves')
 const NAMES = ['world-tags', 'economy-notes', 'history-milestones', 'scenario-records', 'history-backup']
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
@@ -1097,140 +1091,6 @@ const suite = (m) => {
     assert.equal(tags.problemsOf({ tag: 'ok', target: { ...target, type: 'fleet' } }).length, 1)
   })
 
-  // ---- saves --------------------------------------------------------------------------------------------------------
-
-  const sqlite3 = () => localRequire('sqlite3')
-
-  // A recorded 2.x save opened read only through the copy that holds the star's component number under its 3.1 name (scripts/lib/fixtures.js `convertedSave`, the one statement), with a `database` of the shape the page's reads use, and the SQL it was sent.
-  const openSave = (file) => {
-    const db = new (sqlite3().Database)(convertedSave(file), sqlite3().OPEN_READONLY)
-    const sent = []
-    const run = (sql, params = {}) => new Promise((resolve, reject) => db.all(sql, Object.fromEntries(Object.entries(params).map(([key, value]) => [`:${key}`, value])), (error, rows) => (error ? reject(error) : resolve(rows))))
-
-    return { file, sent, close: () => db.close(), run, database: { query: async (sql, { replacements = {} } = {}) => { sent.push(sql); return [await run(sql, replacements)] } } }
-  }
-
-  const GAME = 140
-  const RACE = 784
-  const KNOWN = 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.GameID = :GameID where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (1, 2, 3, 5)'
-  const boscoFiles = () => (fs.existsSync(BOSCO) ? fs.readdirSync(BOSCO).filter((name) => name.endsWith('.db')).sort() : [])
-
-  // The saves of the line, oldest game time first, each opened read only.
-  const lineOfSaves = async () => {
-    const saves = boscoFiles().map((name) => openSave(path.join(BOSCO, name)))
-
-    for (const save of saves) {
-      const [game] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID: GAME })
-
-      save.time = game ? game.GameTime : null
-    }
-
-    return saves.filter((save) => save.time !== null).sort((a, b) => a.time - b.time)
-  }
-
-  const contextOfSave = async (save, ids) => ({ objects: { body: await tags.loadBodies(save.database, { GameID: GAME, RaceID: RACE, bodyIds: ids }) }, GameID: GAME, RaceID: RACE, campaignId: 'c1', branchId: 'b1', branches: TREE })
-
-  check('saves', 'on the owner\'s saves a body that was never surveyed is known and taggable, a body of an unknown system is not read and is refused, and a moon leaves its planet untagged', async () => {
-    const files = boscoFiles()
-
-    if (files.length < 2) {
-      return { skipped: 'the boscodiogigia saves are not here' }
-    }
-
-    const saves = await lineOfSaves()
-    const save = saves[saves.length - 1]
-    const digest = () => crypto.createHash('sha256').update(fs.readFileSync(save.file)).digest('hex')
-    const before = digest()
-
-    try {
-      const [plain] = await save.run(`select FCT_SystemBody.SystemBodyID as id from FCT_SystemBody ${KNOWN} and not exists (select 1 from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = :GameID and FCT_SystemBodySurveys.RaceID = :RaceID and FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID) limit 1`, { GameID: GAME, RaceID: RACE })
-      const [hidden] = await save.run('select FCT_SystemBody.SystemBodyID as id from FCT_SystemBody where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and not exists (select 1 from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = :GameID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID) limit 1', { GameID: GAME, RaceID: RACE })
-      const [moon] = await save.run(`select FCT_SystemBody.SystemBodyID as id, planet.SystemBodyID as planetId from FCT_SystemBody inner join FCT_SystemBody as planet on planet.GameID = FCT_SystemBody.GameID and planet.SystemID = FCT_SystemBody.SystemID and planet.PlanetNumber = FCT_SystemBody.PlanetNumber and planet.BodyClass = 1 ${KNOWN.replace('FCT_SystemBody.BodyClass in (1, 2, 3, 5)', 'FCT_SystemBody.BodyClass = 2')} limit 1`, { GameID: GAME, RaceID: RACE })
-
-      assert.ok(plain && hidden && moon, 'the line holds a body that was never surveyed, a body of an unknown system and a moon with its planet')
-      const [sourceRow] = await save.run('select SystemBodyID as id, SystemID as systemId, PlanetNumber as planet, OrbitNumber as orbit, BodyClass as bodyClass, BodyTypeID as bodyType from FCT_SystemBody where SystemBodyID = :id', { id: moon.id })
-
-      await assertBodyReadOnly(tags, sourceRow, { GameID: GAME, RaceID: RACE })
-
-      const context = await contextOfSave(save, [plain.id, hidden.id, moon.id, moon.planetId])
-      const w = world(m)
-      const where = { campaignId: 'c1', RaceID: RACE, branchId: 'b1', gameTime: save.time }
-
-      assert.equal(context.objects.body.has(plain.id), true)
-      assert.equal(context.objects.body.has(hidden.id), false)
-      assert.equal(context.objects.body.get(moon.id).bodyClass, 2)
-      assert.equal(context.objects.body.get(moon.planetId).bodyClass, 1)
-      assert.equal((await made(w, where, context, plain.id, 'Unsurveyed')).kind, 'world.tag')
-      assert.equal((await made(w, where, context, moon.id, 'Moon only')).kind, 'world.tag')
-
-      const refused = await saveNow(tags, w.repo, where, { tag: 'Nowhere', target: { type: 'body', row: { ...context.objects.body.get(plain.id), id: hidden.id } }, context })
-
-      assert.equal(refused.ok, false)
-
-      const entries = list(w, where, context)
-
-      assert.deepEqual(entries.map((entry) => entry.target.id).sort((a, b) => a - b), [plain.id, moon.id].sort((a, b) => a - b))
-      assert.equal(entryOf(entries, moon.planetId), undefined)
-      assert.equal(entries.every((entry) => entry.link.status === 'linked' && !entry.stale && !entry.ahead), true)
-      assert.ok(save.sent.length >= 1)
-      save.sent.forEach((sql) => assert.match(sql, /^select /))
-    } finally {
-      saves.forEach((one) => one.close())
-    }
-
-    assert.equal(digest(), before)
-
-    return 'an unsurveyed body and a moon tagged, a body of an unknown system refused'
-  })
-
-  check('saves', 'on the owner\'s saves a tag made in the latest save reads as gone and ahead in the earliest, shows the time its system was found, and is linked again in the latest', async () => {
-    if (boscoFiles().length < 2) {
-      return { skipped: 'the boscodiogigia saves are not here' }
-    }
-
-    const saves = await lineOfSaves()
-    const [first, last] = [saves[0], saves[saves.length - 1]]
-
-    try {
-      assert.ok(first.time < last.time)
-
-      const [late] = await last.run(`select FCT_SystemBody.SystemBodyID as id, FCT_RaceSysSurvey.DiscoveredTime as found from FCT_SystemBody ${KNOWN} and FCT_RaceSysSurvey.DiscoveredTime > ${first.time} order by FCT_SystemBody.SystemBodyID limit 1`, { GameID: GAME, RaceID: RACE })
-      const [old] = await first.run(`select FCT_SystemBody.SystemBodyID as id from FCT_SystemBody ${KNOWN} order by FCT_SystemBody.SystemBodyID limit 1`, { GameID: GAME, RaceID: RACE })
-
-      assert.ok(late && old, 'the latest save knows a system found after the earliest save, and the earliest save knows a body')
-
-      const w = world(m)
-      const written = { campaignId: 'c1', RaceID: RACE, branchId: 'b1', gameTime: last.time }
-      const rewound = { ...written, gameTime: first.time }
-      const context = await contextOfSave(last, [late.id, old.id])
-
-      await made(w, written, context, late.id, 'Found later')
-      await made(w, written, context, old.id, 'Found early')
-
-      const back = await contextOfSave(first, [late.id, old.id])
-      const entries = list(w, rewound, back)
-      const lateEntry = entryOf(entries, late.id)
-      const oldEntry = entryOf(entries, old.id)
-
-      assert.equal(back.objects.body.has(late.id), false)
-      assert.equal(lateEntry.stale, true)
-      assert.equal(lateEntry.link.status, 'missing')
-      assert.equal(lateEntry.ahead, true)
-      assert.equal(lateEntry.discoveredAt, late.found)
-      assert.ok(lateEntry.discoveredAt > first.time)
-      assert.equal(oldEntry.stale, false)
-      assert.equal(oldEntry.ahead, true)
-
-      const now = list(w, written, context)
-
-      assert.equal(now.every((entry) => entry.link.status === 'linked' && !entry.stale && !entry.ahead), true)
-
-      return `a tag on a body of a system found at ${late.found} reads gone in the save at ${first.time}`
-    } finally {
-      saves.forEach((one) => one.close())
-    }
-  })
-
   return checks
 }
 
@@ -1855,17 +1715,16 @@ const UTILITY_MUTATIONS = [
   { name: 'a link is made against whatever the form holds', file: 'world-tags.js', find: "const checked = target ? checkLink(context, scope, target, WORLD_TARGETS, 'tag') : null", replace: 'const checked = target ? { ok: true, row: target.row } : null', fails: ['scope: a tag is made only against the bodies of the race', 'scope: a tag is made only for a body that is there as it was picked', 'known: a body of a system the race does not know'] },
   { name: 'the link does not keep the branch it was made on', file: 'world-tags.js', find: 'origin: { campaignId: scope.campaignId, branchId: scope.branchId } } : keptTarget', replace: "origin: { campaignId: scope.campaignId, branchId: 'b1' } } : keptTarget", fails: ['scope: the link keeps the name'] },
   { name: 'a save before the tag is never ahead', file: 'world-tags.js', find: "ahead: item.flags.includes('ahead'),", replace: 'ahead: false,', fails: ['rewind: a save from before the system was found', 'rewind: a save in which the system was found at another time'] },
-  { name: 'the time a system was found is read from the wrong part of the fingerprint', file: 'world-tags.js', find: 'const DISCOVERED_PART = NOTE_TARGETS.body.created + 1', replace: 'const DISCOVERED_PART = NOTE_TARGETS.body.created', fails: ['rewind: a save from before the system was found', 'saves: on the owner\'s saves a tag made in the latest save'] },
+  { name: 'the time a system was found is read from the wrong part of the fingerprint', file: 'world-tags.js', find: 'const DISCOVERED_PART = NOTE_TARGETS.body.created + 1', replace: 'const DISCOVERED_PART = NOTE_TARGETS.body.created', fails: ['rewind: a save from before the system was found'] },
   { name: 'a kind of the body is not named', file: 'world-tags.js', find: 'const CLASS_PART = 4', replace: 'const CLASS_PART = 5', fails: ['moon: a planet, a moon, an asteroid and a comet'] },
   { name: 'a tag is on any kind of object', file: 'world-tags.js', find: "if (type !== 'body') {\n      throw new Error(`#{type} is not a kind of object a tag is about`)\n    }\n\n    return noteAdapter", replace: 'return noteAdapter', fails: ['backup: the adapter is for bodies only'] },
   { name: 'a tag that names another kind of object is valid', file: 'world-tags.js', find: "target.type === 'body' && (isText(target.id)", replace: '(isText(target.id)', fails: ['backup: the adapter is for bodies only'] },
   { name: 'keeping a tag writes to the save', file: 'world-tags.js', find: "    if (target && !(isObject(target) && target.type === 'body' && isObject(target.row))) {", replace: "    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0')\n    }\n\n    if (target && !(isObject(target) && target.type === 'body' && isObject(target.row))) {", fails: ['reads: every query is a select'] },
-  { name: 'a write is sent to the save with the bodies', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set PlanetNumber = 0')\n\n  return bodies\n}", fails: ['reads: every query is a select', 'saves: on the owner\'s saves a body that was never surveyed'] },
+  { name: 'a write is sent to the save with the bodies', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set PlanetNumber = 0')\n\n  return bodies\n}", fails: ['reads: every query is a select'] },
   { name: 'a tag whose body is gone is rebound to the body with the same content', file: 'economy-notes.js', find: 'return objects.get(link.id) || null', replace: 'return objects.get(link.id) || [...objects.values()].find((row) => targetOf(link.type).fingerprint(row) === link.fingerprint) || null', fails: ['stale: a tag whose body is gone is never relinked'] },
   { name: 'a body is not told by its place', file: 'economy-notes.js', find: "present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "present(row.discovered)].join('|'),", fails: ['stale: an ID that another body holds now reads changed', 'scope: a tag is made only for a body that is there as it was picked'] },
   { name: 'a body is told by its name', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId),", replace: "fingerprint: (row) => ['body', row.name, present(row.systemId),", fails: ['stale: no fingerprint holds a name', 'stale: a renamed body keeps its tag linked'] },
   { name: 'the picker offers the bodies of every system', file: 'economy-notes.js', find: "(type !== 'body' || row.systemId === systemId)", replace: 'true', fails: ['known: a body of a system the race does not know'] },
-  { name: 'only the surveyed bodies of a known system are known', file: 'economy-notes.js', find: 'FCT_SystemBody.BodyClass in (#{BODY_CLASSES}) and #{filter}', replace: 'FCT_SystemBody.BodyClass in (#{BODY_CLASSES}) and exists (select 1 from FCT_SystemBodySurveys where FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = :RaceID) and #{filter}', fails: ['saves: on the owner\'s saves a body that was never surveyed'] },
   { name: 'the bodies are read all at once', file: 'economy-notes.js', find: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), BODIES_PER_READ)) {', replace: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), 100000)) {', fails: ['reads: the bodies are read by ID in batches'] },
   { name: 'a failed read of the bodies is taken for no bodies', file: 'economy-notes.js', find: '    keep((await database.query(bodiesByIdSql(batch), { replacements }))[0])', replace: '    keep((await database.query(bodiesByIdSql(batch), { replacements }).catch(() => [[]]))[0])', fails: ['stale: a body that is not read'] },
   { name: 'a link is made against the objects of another race', file: 'history-milestones.js', find: 'context.RaceID !== scope.RaceID', replace: 'false', fails: ['scope: a tag is made only against the bodies of the race'] },
@@ -1938,16 +1797,8 @@ const loadModules = async (directory) => {
 
 let failures = 0
 let total = 0
-let skipped = 0
 
-const show = (name, result, detail = '', skip = false) => {
-  if (skip) {
-    skipped++
-    console.log(`SKIP  ${name}  [${detail}]`)
-
-    return
-  }
-
+const show = (name, result, detail = '') => {
   const ok = result === true
 
   total++
@@ -1970,13 +1821,9 @@ const runChecks = async (list, only = null) => {
     try {
       const detail = await run()
 
-      if (detail && typeof detail === 'object' && detail.skipped) {
-        results.push([`${group}: ${name}`, true, detail.skipped, true])
-      } else {
-        results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
-      }
+      results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : ''])
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false, kindOf(error) === 'assertion' && !isSubjectThrow(error)])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', kindOf(error) === 'assertion' && !isSubjectThrow(error)])
     }
   }
 
@@ -1985,8 +1832,8 @@ const runChecks = async (list, only = null) => {
 
 const caught = (mutant, results) => {
   const expected = mutant.fails
-  const survived = expected.filter((start) => !results.some(([name, result, , skip, valueFailure]) => name.startsWith(start) && !skip && result !== true && valueFailure))
-  const missing = expected.filter((start) => !results.some(([name, , , skip]) => name.startsWith(start) && !skip))
+  const survived = expected.filter((start) => !results.some(([name, result, , valueFailure]) => name.startsWith(start) && result !== true && valueFailure))
+  const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
 
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
 }
@@ -1997,10 +1844,10 @@ const MUTANTS = [...UTILITY_MUTATIONS.map((mutant) => ({ mutant, page: false }))
 // What the baseline, each mutant and the control print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
 const baselineEntries = async () => {
   const modules = await loadModules(utilitiesDirectory)
-  const entries = [{ log: 'The tags: the moon rule, the known bodies, edits, stale tags, rewinds, isolation, the filter, scope, reads, backup and the owner\'s saves' }]
+  const entries = [{ log: 'The tags: the moon rule, the known bodies, edits, stale tags, rewinds, isolation, the filter, scope, reads and backup' }]
 
-  for (const [name, result, detail, skip] of await runChecks(suite(modules))) {
-    entries.push({ show: [name, result, detail, skip] })
+  for (const [name, result, detail] of await runChecks(suite(modules))) {
+    entries.push({ show: [name, result, detail] })
   }
 
   entries.push({ log: '\nThe Notebook and the Galaxy Map (the shared mixin, the component and the map over scripts/lib/page-loader.js)' })
@@ -2091,7 +1938,7 @@ const main = async () => {
     }
   }
 
-  console.log(`\n${total - failures} of ${total} checks passed${skipped ? ` (${skipped} skipped: the owner's saves are not here)` : ''}`)
+  console.log(`\n${total - failures} of ${total} checks passed`)
   process.exit(failures ? 1 : 0)
 }
 

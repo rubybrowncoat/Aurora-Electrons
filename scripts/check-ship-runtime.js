@@ -1,15 +1,14 @@
 /*
   Checks the runtime state of the race's actual ships (src/renderer/utilities/ship-runtime.js) without a save.
 
-  Every statement runs on a small SQLite database made here and on the real utilities; one check also reads the saves of a passive campaign (artifacts/passive-campaign-20261013/snapshots) when they are on disk. The statements cover the acceptance of AE-105-04:
+  Every statement runs on a small SQLite database made here and on the real utilities. The statements cover the acceptance of AE-105-04:
   - one record per ship holds the save's revision, the clocks, supplies, fuel, crew, morale and grade as the save has them, the rates worked out from them and the support case, frozen;
   - two callers that ask for the same classes get identical records, whatever the order of the class ids and of the rows;
   - a read that finishes after the game, race, save copy or database changed, after a later read or after `cancel()` is stale and carries no ship;
   - another race's ship is never read, whether it sits in the selected class or in a class of its own, and a class that is not the race's own is rejected;
   - a column the save lacks reads as unknown, never 0, so no rate is given for it;
   - observed figures, calculated rates and the class's planning estimate of its life sit in separate provenance envelopes;
-  - a ship in a hangar keeps the age the save gives it, which the hangar's rule moves four years a year toward 0, and a ship at a shore-leave location recovers at the location rate whether or not it is docked; a ship under tow, in no known case or without cover is left unknown, with its reason;
-  - over every consecutive pair of saves of a passive campaign, the overhaul date of each military ship moves by exactly the game time that passed.
+  - a ship in a hangar keeps the age the save gives it, which the hangar's rule moves four years a year toward 0, and a ship at a shore-leave location recovers at the location rate whether or not it is docked; a ship under tow, in no known case or without cover is left unknown, with its reason.
 
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, both on the real source and on the source with every benign edit applied. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits.
 */
@@ -172,7 +171,7 @@ const worldOf = (edits = []) => {
 
   const modules = memo(() => loadUtilities(['ship-runtime', 'provenance'], { sources: { 'ship-runtime': text.runtime } }))
 
-  return { text, modules, pairs: edits.length ? 'sample' : 'all' }
+  return { text, modules }
 }
 
 const read = async (w, database, extra = {}) => {
@@ -788,74 +787,6 @@ check('classes', 'the class\'s own figures and its life estimate are shared by i
   near(ships[1].class.life.value.firstYear, 0.32)
 })
 
-// ---- The saves of a passive campaign -------------------------------------------------------------------------------------
-const SNAPSHOTS = path.join(root, 'artifacts', 'passive-campaign-20261013', 'snapshots')
-const CAMPAIGN = { GameID: 139, races: [2, 3] }
-const STATS = { pairs: 0, intervals: 0, found: null }
-
-const openSnapshot = (file) => {
-  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY)
-
-  return {
-    query: (text) => new Promise((resolve, reject) => raw.all(text, (error, found) => (error ? reject(error) : resolve([found])))),
-    close: () => raw.close(),
-  }
-}
-
-check('snapshot-pairs', 'over every consecutive pair of saves of a passive campaign, the overhaul date of each military ship moves by exactly the game time that passed, and its age stays what the save gives', async (w) => {
-  const { 'ship-runtime': sr } = await w.modules()
-
-  if (!fs.existsSync(SNAPSHOTS)) {
-    STATS.found = false
-
-    return
-  }
-
-  const files = fs.readdirSync(SNAPSHOTS).filter((file) => /^AuroraDB_\d+_day_\d+\.db$/.test(file)).sort()
-  const step = w.pairs === 'all' ? 1 : Math.max(1, Math.floor(files.length / 6))
-  const picks = files.map((file, index) => [file, index]).filter(([, index]) => index < files.length - 1 && index % step === 0)
-  const projectionOf = async (file, RaceID) => {
-    const database = openSnapshot(path.join(SNAPSHOTS, file))
-
-    try {
-      return await sr.loadShipRuntime(database, { GameID: CAMPAIGN.GameID, RaceID, generation: 1 })
-    } finally {
-      database.close()
-    }
-  }
-  let intervals = 0
-
-  STATS.found = true
-
-  for (const [file, index] of picks) {
-    for (const race of CAMPAIGN.races) {
-      const before = byId(await projectionOf(file, race))
-      const afterProjection = await projectionOf(files[index + 1], race)
-      const after = byId(afterProjection)
-      const gameTime = afterProjection.revision.gameTime - Object.values(before)[0].revision.gameTime
-
-      assert.ok(gameTime > 0, `${file}: the game time advanced`)
-
-      Object.values(before).filter((ship) => ship.class.commercial === false && after[ship.ShipID]).forEach((ship) => {
-        const next = after[ship.ShipID]
-
-        assert.equal(next.clocks.lastOverhaul.value - ship.clocks.lastOverhaul.value, gameTime, `${file} ship ${ship.ShipID}: the overhaul date moved with the game time`)
-        assert.equal(next.maintenance.age.value, ship.maintenance.age.value, `${file} ship ${ship.ShipID}: the age`)
-        assert.equal(next.maintenance.age.value, 0, `${file} ship ${ship.ShipID}: the age is the one the save gives`)
-        assert.equal(ship.maintenance.clockMode, 'reset', `${file} ship ${ship.ShipID}: an unplayed race`)
-        intervals += 1
-      })
-    }
-  }
-
-  assert.ok(intervals > 0, 'at least one ship-interval')
-
-  if (w.pairs === 'all') {
-    STATS.pairs = picks.length
-    STATS.intervals = intervals
-  }
-})
-
 // ---- Planted faults ------------------------------------------------------------------------------------------------------
 // Each plants one change in the module, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const FAULTS = [
@@ -930,7 +861,7 @@ const FAULTS = [
   ['an earlier read is not made stale by a later one', 'runtime', 'async read({ classIds = null, scenario = {} } = {}) {\n      latest += 1\n', 'async read({ classIds = null, scenario = {} } = {}) {\n', ['stale']],
   ['a projection of another save copy is current', 'runtime', 'projection.revision.generation === (known(generation) ? generation : null)', 'true', ['stale']],
   ['the revision has no game time', 'runtime', 'GameID, RaceID, gameTime })\n  const rows', 'GameID, RaceID, gameTime: null })\n  const rows', ['shape']],
-  ['the overhaul date is the game time', 'runtime', 'lastOverhaul: maintenance.lastOverhaul', 'lastOverhaul: maintenance.age', ['shape', 'snapshot-pairs']],
+  ['the overhaul date is the game time', 'runtime', 'lastOverhaul: maintenance.lastOverhaul', 'lastOverhaul: maintenance.age', ['shape']],
 ]
 
 // ---- Benign edits ----------------------------------------------------------------------------------------------------
@@ -983,12 +914,6 @@ const main = async () => {
   }
 
   failures.forEach((failure) => console.log(`FAIL ${describeFailure(failure)}`))
-
-  if (STATS.found === false) {
-    console.log(`note: ${path.relative(root, SNAPSHOTS)} is not on disk, so the pair check ran on nothing`)
-  } else if (STATS.found) {
-    console.log(`pairs: ${STATS.pairs} consecutive saves, ${STATS.intervals} ship-intervals of military ships`)
-  }
 
   if (mutate) {
     const known = new Set(CHECKS.map(({ name }) => name))

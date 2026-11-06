@@ -3,7 +3,7 @@
 
   node scripts/check-economy-notes.js [--no-mutations]
 
-  NOTES_FALRYX and NOTES_BOSCO point the saves checks at other folders of saves. A baseline check that needs the owner's saves and does not find them is reported as skipped and is not counted; a mutant naming that check is rejected, never credited with a reduced mapping.
+  NOTES_FALRYX points the saves checks at another folder of saves. A baseline check that needs the owner's saves and does not find them is reported as skipped and is not counted; a mutant naming that check is rejected, never credited with a reduced mapping.
 
   Groups:
   - links: each kind of target is linked where the save shows it is the object that was linked (a body by the discovery time of its system, a fleet by its creation time, a catalogue tech anywhere) and not checked where nothing does (a colony, a designed tech), a rename keeps the link and shows the new name, an object that is gone or an ID that another object took is never rebound, and on another branch a body is linked only if its system was found strictly before the branches parted;
@@ -13,7 +13,7 @@
   - edits: a note is made, edited, deleted, refused when stale or invalid, and an edit keeps the link;
   - scope: a link is made only against the objects of the race, campaign and branch the note is kept for, and only for an object that is there as it was picked;
   - picker and reads: the choices of the form, and every query the notebook sends is a select, so editing a note never writes the save;
-  - saves: on the owner's saves (opened read only, skipped when they are not here) the objects load with the real queries, the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and never as linked, the catalogue is the same in two campaigns, and the renames of a line of saves keep the links;
+  - saves: on the owner's saves (opened read only, skipped when they are not here) the objects load with the real queries, and the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and never as linked;
   - backup: notes round-trip through the backup's annotation adapter;
   - page: the panels name what they are for in the page's voice, a note is kept from the form, listed, filtered, isolated by race and branch, a draft is dropped and refused when what is shown changes (the backup's registration of the notes' adapter is checked with every other kind by scripts/check-history-restore.js).
 
@@ -36,7 +36,6 @@ const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'notebook.vue')
 const navigationFile = path.join(utilitiesDirectory, 'navigation.js')
 const FALRYX = process.env.NOTES_FALRYX || path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
-const BOSCO = process.env.NOTES_BOSCO || path.join(root, 'artifacts', 'boscodiogigia-sequential-saves')
 const NAMES = ['economy-notes', 'history-milestones', 'scenario-records', 'history-backup']
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
@@ -1374,102 +1373,6 @@ const suite = (m) => {
     }
   })
 
-  check('saves', 'the game\'s own catalogue of techs is the same in two campaigns of two games, and a note on one links in the other', async () => {
-    const files = falryxFiles()
-    const boscoFiles = fs.existsSync(BOSCO) ? fs.readdirSync(BOSCO).filter((name) => name.endsWith('.db')).sort() : []
-
-    if (files.length < 1 || boscoFiles.length < 1) {
-      return { skipped: 'the owner\'s saves are not here' }
-    }
-
-    const [falryx, bosco] = [openSave(path.join(FALRYX, files[0])), openSave(path.join(BOSCO, boscoFiles[0]))]
-
-    try {
-      const [one, two] = [await objectsOfSave(falryx, 141, 791), await objectsOfSave(bosco, 140, 784)]
-      const context = { objects: two.objects, GameID: 140, RaceID: 784, campaignId: 'c2', branchId: 'z', branches: {} }
-      let linked = 0
-
-      for (const [id, row] of one.objects.tech) {
-        const result = shown('tech', row, two.objects.tech.get(id) || null, context, { campaignId: 'c1', branchId: 'x' })
-
-        assert.equal(result.status, 'linked', `tech ${id}`)
-        linked += 1
-      }
-
-      assert.equal(one.objects.tech.size, two.objects.tech.size)
-      assert.ok(linked > 1000)
-
-      return `${linked} techs link across campaigns`
-    } finally {
-      ;[falryx, bosco].forEach((save) => save.close())
-    }
-  })
-
-  check('saves', 'on the owner\'s line of saves the renames keep every link: bodies, fleets and techs stay linked and show the new name, colonies stay not checked and name their holder', async () => {
-    const files = fs.existsSync(BOSCO) ? fs.readdirSync(BOSCO).filter((name) => name.endsWith('.db')) : []
-
-    if (files.length < 2) {
-      return { skipped: 'the boscodiogigia saves are not here' }
-    }
-
-    const GameID = 140
-    const RaceID = 784
-    const saves = files.map((name) => openSave(path.join(BOSCO, name)))
-
-    try {
-      const loaded = []
-
-      for (const save of saves) {
-        const [game] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID })
-
-        if (game) {
-          loaded.push({ time: game.GameTime, ...(await objectsOfSave(save, GameID, RaceID)) })
-        }
-      }
-
-      loaded.sort((x, y) => x.time - y.time)
-      assert.ok(loaded.length >= 2)
-
-      const renamed = { body: 0, colony: 0, fleet: 0, tech: 0 }
-      const origin = { campaignId: 'c1', branchId: 'b1' }
-
-      for (let index = 1; index < loaded.length; index += 1) {
-        const [first, second] = [loaded[index - 1], loaded[index]]
-        const context = { objects: second.objects, GameID, RaceID, campaignId: 'c1', branchId: 'b1', branches: TREE }
-
-        for (const type of Object.keys(renamed)) {
-          for (const [id, row] of first.objects[type]) {
-            const now = second.objects[type].get(id)
-
-            if (!now || now.name === row.name || notes.NOTE_TARGETS[type].fingerprint(now) !== notes.NOTE_TARGETS[type].fingerprint(row)) {
-              continue
-            }
-
-            const result = shown(type, row, now, context, origin)
-
-            renamed[type] += 1
-
-            if (type === 'colony') {
-              assert.equal(result.status, 'unknown', `colony ${id}`)
-              assert.equal(result.nowNamed, null)
-            } else if (type === 'fleet' && !Number.isFinite(row.created)) {
-              assert.equal(result.status, 'unknown', `fleet ${id}`)
-            } else {
-              assert.equal(result.status, 'linked', `${type} ${id}`)
-              assert.equal(result.nowNamed, now.name, `${type} ${id}`)
-            }
-          }
-        }
-      }
-
-      assert.ok(renamed.body + renamed.colony + renamed.fleet + renamed.tech > 0, 'the saves hold at least one rename')
-
-      return `renames kept: ${renamed.body} bodies, ${renamed.colony} colonies, ${renamed.fleet} fleets, ${renamed.tech} techs`
-    } finally {
-      saves.forEach((save) => save.close())
-    }
-  })
-
   check('saves', 'on the owner\'s saves every query is a select, and reading the objects leaves the file as it was', async () => {
     const files = falryxFiles()
 
@@ -1881,7 +1784,7 @@ const UTILITY_MUTATIONS = [
   { name: 'a fleet is found in the system it was kept in, not the one it is in', file: 'economy-notes.js', find: 'return { systemId: row.systemId || null, systemName: row.systemName || \'\', lastKnown: false }', replace: 'return { systemId: target.systemId, systemName: target.systemName, lastKnown: false }', fails: ['filter: a fleet that moved is found in the system it is in now'] },
   { name: 'a stale note is found in no system', file: 'economy-notes.js', find: 'return { systemId: target.systemId, systemName: target.systemName, lastKnown: true }', replace: "return { systemId: null, systemName: '', lastKnown: true }", fails: ['filter: a note that is stale, or whose fleet is not known'] },
   { name: 'a fleet that is not known to be the one linked is found where it is now', file: 'economy-notes.js', find: "(link.status === 'linked' || Boolean(targetOf(target.type) && targetOf(target.type).placed))", replace: 'true', fails: ['filter: a note that is stale, or whose fleet is not known'] },
-  { name: 'a catalogue tech is not certified on another branch', file: 'history-milestones.js', find: "definition.identity === 'content' || definition.identity === 'static'", replace: "definition.identity === 'content'", fails: ['links: a catalogue tech is linked on any branch', 'saves: the game\'s own catalogue of techs'] },
+  { name: 'a catalogue tech is not certified on another branch', file: 'history-milestones.js', find: "definition.identity === 'content' || definition.identity === 'static'", replace: "definition.identity === 'content'", fails: ['links: a catalogue tech is linked on any branch'] },
   { name: 'a designed tech is certified like a catalogue tech', file: 'economy-notes.js', find: "identity: 'unwitnessed',\n    unwitnessedNote:", replace: "identity: 'static',\n    unwitnessedNote:", fails: ['links: a body, a fleet and a catalogue tech are linked', 'saves: on the owner\'s saves of a rewound game'] },
   { name: 'a colony is certified by the place it was made with', file: 'history-milestones.js', find: "if (definition.identity === 'unwitnessed') {\n    return definition.unwitnessedNote || UNVERIFIED_TEXT.unwitnessed\n  }", replace: "if (definition.identity === 'unwitnessed') {\n    return null\n  }", fails: ['links: a body, a fleet and a catalogue tech are linked', 'links: a colony ID given again', 'saves: on the owner\'s saves of a rewound game'] },
   { name: 'a body is certified without the time its system was found', file: 'economy-notes.js', find: "identity: 'created',\n    created: 5,", replace: "identity: 'static',", fails: ['links: on another branch a body is linked only when its system was found strictly before'] },

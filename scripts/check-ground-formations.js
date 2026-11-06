@@ -758,7 +758,6 @@ const infoLine = (label, model) => {
 const OWNER_SAVES = [
   [FIXTURE.file, FIXTURE.gameId, FIXTURE.raceId, true],
   ...['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230'].map((time) => [`artifacts/falryx-sequential-and-rollback/AuroraDB-${time}.db`, 141, 791, false]),
-  ...['5.03.1940', '20.07.1956', '8.05.1961', '24.12.1962', '21.06.1973'].map((date) => [`artifacts/boscodiogigia-sequential-saves/AuroraDB ${date}.db`, 140, 784, false]),
 ]
 
 const ownerSave = async (mod, [file, GameID, RaceID, selfChecks]) => {

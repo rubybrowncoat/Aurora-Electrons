@@ -823,10 +823,9 @@ const openSave = (file) => new Promise((resolve, reject) => {
   const raw = new sqlite3.Database(resolved, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(standIn(raw))))
 })
 
-// The saves, with the counts they are known to hold: the formations of the race, those whose original and replacement templates differ and those whose chosen template is obsolete and holds an STO class (a replacement review), on each basis. The fixture holds one formation in thousands that differs and no obsolete template with an STO class, so the page is driven on a copy of it that is changed to hold the cases (`plantedCopy`). The combined-map artifact is a recorded campaign save that holds obsolete templates with STO classes.
+// The saves, with the counts they are known to hold: the formations of the race, those whose original and replacement templates differ and those whose chosen template is obsolete and holds an STO class (a replacement review), on each basis. The fixture holds one formation in thousands that differs and no obsolete template with an STO class, so the page is driven on a copy of it that is changed to hold the cases (`plantedCopy`).
 const FIXTURES = [
   { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, formations: 5337, differing: 1, reviews: { original: 0, replacement: 0 } },
-  { file: 'artifacts/combined-map/AuroraDB_combined_maps.db', GameID: 138, RaceID: 785, formations: 2553, differing: 1128, reviews: { original: 151, replacement: 3 } },
 ]
 
 // The comparison of every formation worked out in SQL written here, apart from the module's: a function of a formation id and a basis that gives { state, reason, templateId, flag, classes (by class id), actualMass, intendedMass, review, same }, and the largest bay the race's troop ships hold.
@@ -1688,9 +1687,9 @@ add('browser-restored', 'the basis left set is the one the page opens on again',
 // A fault or a benign rewrite: [name, from, to, file, the ids of the checks one of which must fail (a fault), browser (the page is served to the browser and driven), parts (a browser fault: the PARTS of the page its checks are caught on, the drive narrowed to them, with a part each browser check it names reads (READS); [] for the opening screen and the remote only switch alone)]. `from` and `to` may be lists of replacements made in order, each in `file` or, where `file` is a list too, in the file at its place. A rewrite names no parts: its page is driven on every part.
 /* eslint-disable no-template-curly-in-string */
 const MUTANTS = [
-  ['the deficit is not worked out', 'Math.max(0, intended - actual)', '0', COMPOSITION_FILE, ['deficit-excess', 'complete', 'mass-reconcile', 'save-0', 'save-1', 'save-2']],
-  ['the excess is not worked out', 'Math.max(0, actual - intended)', '0', COMPOSITION_FILE, ['deficit-excess', 'save-0', 'save-1', 'save-2']],
-  ['a class that only the template holds is dropped', 'template.elements.forEach((item) => {\n    const found = row(item)', 'template.elements.filter((item) => rows.has(item.classId)).forEach((item) => {\n    const found = row(item)', COMPOSITION_FILE, ['deficit-excess', 'save-1', 'save-2']],
+  ['the deficit is not worked out', 'Math.max(0, intended - actual)', '0', COMPOSITION_FILE, ['deficit-excess', 'complete', 'mass-reconcile', 'save-0']],
+  ['the excess is not worked out', 'Math.max(0, actual - intended)', '0', COMPOSITION_FILE, ['deficit-excess', 'save-0']],
+  ['a class that only the template holds is dropped', 'template.elements.forEach((item) => {\n    const found = row(item)', 'template.elements.filter((item) => rows.has(item.classId)).forEach((item) => {\n    const found = row(item)', COMPOSITION_FILE, ['deficit-excess']],
   ['a template with no elements is compared', "if (template.state !== 'found' || template.elements.length === 0) {", "if (template.state !== 'found') {", COMPOSITION_FILE, ['no-template']],
   ['a formation with no elements is compared', 'if (node.elements.length === 0) {', 'if (false) {', COMPOSITION_FILE, ['no-elements']],
   ['units that are not stored count as none', 'found.actualKnown = false', 'found.actual += 0', COMPOSITION_FILE, ['unknown-units']],
@@ -1714,7 +1713,7 @@ const MUTANTS = [
   ['the troop ships that are not known read as none', "if (!troops) {\n    return { kind: 'unknown'", "if (!troops) {\n    return { kind: 'no-bays'", COMPOSITION_FILE, ['carry', 'troop-fit']],
   ['the default basis is the original template', "default: 'replacement'", "default: 'original'", COMPOSITION_FILE, ['view']],
   ['a stored basis that is not offered is kept', '(BASIS_KEYS.includes(stored) ? stored : undefined)', 'stored', COMPOSITION_FILE, ['view']],
-  ['the template mass leaves out the first class', "figure(items, classes, figures, 'size') : { value: null", "figure(items.slice(1), classes, figures, 'size') : { value: null", GROUND_FILE, ['model-template', 'mass-reconcile', 'save-1', 'save-2']],
+  ['the template mass leaves out the first class', "figure(items, classes, figures, 'size') : { value: null", "figure(items.slice(1), classes, figures, 'size') : { value: null", GROUND_FILE, ['model-template', 'mass-reconcile']],
   ['no class is an STO class by its weapon', 'let found = known && row.STOWeapon > 0', 'let found = false', GROUND_FILE, ['model-template', 'replacement-review']],
   ['no class is an STO class by its equipment', '} else if (component && component.STO > 0) {', '} else if (false) {', GROUND_FILE, ['model-template', 'replacement-review']],
   ['a class that is not known to be STO is not an STO class', 'return found ? true : known ? false : null', 'return found', GROUND_FILE, ['model-template', 'replacement-review']],

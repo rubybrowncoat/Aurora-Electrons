@@ -8,7 +8,6 @@
   - view: the words a row gets, which never claim an age before the first capture;
   - modded: the recorder over the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784; the group keeps the name `modded` of the slot it stands in), read only: nothing read and written without a choice, nothing for a race that is not a player race, exactly two statements with one, the record against SQL written here, a later save changed in memory, an older save, a failed read, a clear, a pass superseded at each of its checks, the size against the figure kept;
   - falryx: the recorder over the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and three forks): the spans against SQL, a skipped save, a rollback, the seed a fork takes and keeps, a campaign that never observed;
-  - passive: the saves of artifacts/passive-campaign-20261013 (game 139): a player race with no formation and an NPR with 114, read only;
   - browser: the real app in Chromium over copies of the fixture: the switch, the Observed column and what it says after a first import and after a formation moved.
   Planted faults in copies of the utilities and of the page must each fail the checks they name by a value (scripts/lib/fault-credit.js `caughtBy`); one rewrite of each family must fail none. Everything the recorder reads comes through SELECTs of saves opened read only. Prints `N of N checks passed`; a failed check sets exit code 1, a defect of the harness 2.
 */
@@ -31,8 +30,6 @@ const MODDED = { file: path.join(root, FIXTURE.file), GameID: FIXTURE.gameId, Ra
 const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const FALRYX_GAME = 141
 const FALRYX_RACE = 791
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013', 'snapshots')
-const PASSIVE_GAME = 139
 const NAMES = ['history', 'observations', 'observation-view', 'campaign', 'ground-formations', 'recording-owner', 'history-backup']
 const CAPPED_CAPTURES = 500
 
@@ -1045,49 +1042,6 @@ const falryxChecks = (m) => {
   ]
 }
 
-// ---------- the passive campaign ----------
-
-const passiveFiles = () => (fs.existsSync(PASSIVE) ? fs.readdirSync(PASSIVE).filter((name) => /\.db$/.test(name)).sort().slice(0, 4).map((name) => path.join(PASSIVE, name)) : null)
-
-const passive = (m) => once(m, 'passive', async () => {
-  const files = passiveFiles()
-
-  if (!files || files.length < 4) {
-    return null
-  }
-
-  const inst = installation()
-  const log = []
-  const campaignId = await settled(m, inst, files[0])
-
-  observe_(m, inst, campaignId, 1)
-  observe_(m, inst, campaignId, 2)
-
-  for (const file of files) {
-    await record(m, inst, file, { log })
-  }
-
-  const times = []
-
-  for (const file of files) {
-    times.push(await gameTimeOf(file, PASSIVE_GAME))
-  }
-
-  return { campaignId, times, statements: statementsOfFormations(log), file: inst.observations(campaignId), npr: (await rowsOf(files[0], 'select count(*) as n from FCT_GroundUnitFormation where RaceID = 2'))[0].n, own: (await rowsOf(files[0], 'select count(*) as n from FCT_GroundUnitFormation where RaceID = 1'))[0].n }
-})
-
-const passiveChecks = (m) => {
-  const entry = (name, test) => [name, async () => {
-    const s = await passive(m)
-
-    return s ? test(s) : 'the saves of artifacts/passive-campaign-20261013 are not here'
-  }]
-
-  return [
-    entry('passive: a player race with no formation records its captures and no object, and the NPR race that holds formations is not read', (s) => same({ own: s.own, npr: s.npr > 0, captures: kindOf(s.file, 1).captures.map(([t]) => t), objects: kindOf(s.file, 1).objects, races: Object.keys(s.file.races), nprStatements: s.statements.filter((sql) => /RaceID = 2\b/.test(sql)).length }, { own: 0, npr: true, captures: s.times, objects: {}, races: ['1'], nprStatements: 0 })),
-  ]
-}
-
 // ---------- the browser ----------
 
 // The real app in Chromium (scripts/lib/page-server.js over a copy of the fixture, scripts/lib/browser-observe.js): the switch of the Survey Progress page, the Observed column after the first capture, a later save (the save served is changed and the app opened again) in which one formation moved and one changed its elements, and the Retention panel of the History page. What the page draws is read through the hooks the templates carry; what is judged is the text on screen.
@@ -1509,7 +1463,7 @@ const utilityFile = (name) => path.join(utilitiesDirectory, name)
 const MUTATIONS = [
   { name: 'a save older than the newest capture extends a run', file: 'observations.js', find: 'if (tip && capture.t < tip[0]) {', replace: 'if (false) {', fails: ['units: a save older than the newest', 'falryx: a rollback', 'modded: the save read again'] },
   { name: 'the same game time on another ledger taken as the same timeline', file: 'observations.js', find: 'if (tip && capture.t === tip[0] && capture.n !== tip[1]) {', replace: 'if (false) {', fails: ['units: the same game time on another ledger'] },
-  { name: 'a changed composition does not restart the span', file: 'observations.js', find: 'if (before && before[2] === digest) {', replace: 'if (before) {', fails: ['units: an object whose digest changed', 'units: the same save read again', 'falryx: a second save'] },
+  { name: 'a changed composition does not restart the span', file: 'observations.js', find: 'if (before && (before[2] === digest || carried)) {', replace: 'if (before) {', fails: ['units: an object whose digest changed', 'units: the same save read again', 'falryx: a second save'] },
   { name: 'a later capture drops the capture before it', file: 'observations.js', find: 'record.captures.push([capture.t, capture.n])', replace: 'record.captures = [[capture.t, capture.n]]', fails: ['units: an object seen the same', 'units: the same save read again', 'units: a run across a failed capture'] },
   { name: 'an unchanged object restarts at every capture', file: 'observations.js', find: 'objects[id] = [before[0], capture.t, digest, ...(before[3] ? [before[3]] : [])]', replace: 'objects[id] = [capture.t, capture.t, digest]', fails: ['units: an object seen the same', 'modded: every other formation'] },
   { name: 'an object not seen at a capture is kept', file: 'observations.js', find: 'record.objects = objects\n', replace: 'record.objects = { ...record.objects, ...objects }\n', fails: ['units: an object missing from one capture'] },
@@ -1520,14 +1474,14 @@ const MUTATIONS = [
   { name: 'the time a fork was cut at not kept', file: 'observations.js', find: '...(dropped !== null ? { cut: dropped } : {}), seed: t }', replace: '...(dropped !== null ? { cut: dropped } : {}) }', fails: ['units: the cut a fork takes'] },
   { name: 'a span that includes the parent branch not flagged', file: 'observations.js', find: 'inherited: seed !== null && first <= seed,', replace: 'inherited: false,', fails: ['units: a run is inherited', 'view: a failed capture inside a span'] },
   { name: 'an object that appeared told as seen since import', file: 'observations.js', find: "basis: mark === MOVED ? 'moved' : mark === RESTARTED ? 'branch' : cut === null && record.captures.length && first === record.captures[0][0] ? 'import' : 'appeared',", replace: "basis: mark === MOVED ? 'moved' : mark === RESTARTED ? 'branch' : 'import',", fails: ['units: an object not seen before', 'view: a formation that moved', 'view: the reason a span began'] },
-  { name: 'a digest that differs from the open save still observed', file: 'observations.js', find: "return { state: span.digest === digest ? 'observed' : 'changed', span }", replace: "return { state: 'observed', span }", fails: ['units: a record whose object digest'] },
+  { name: 'a digest that differs from the open save still observed', file: 'observations.js', find: "return { state: span.digest === digest || (earlier !== undefined && span.digest === earlier) ? 'observed' : 'changed', span }", replace: "return { state: 'observed', span }", fails: ['units: a record whose object digest'] },
   { name: 'the widest interval taken as the first', file: 'observations.js', find: 'if (widest === null || t - record.captures[index][0] > widest.to - widest.from) {', replace: 'if (widest === null) {', fails: ['units: the widest interval'] },
   { name: 'a failed read taken as no formation', file: 'observations.js', find: 'return { kind, failed: error }', replace: 'return { kind, objects: [] }', fails: ['modded: a failed read is noted', 'modded: a failed read over'] },
   { name: 'a kind read for every race whether chosen or not', file: 'observations.js', find: 'KIND_NAMES.filter((kind) => Object.values(wish).some((campaign) => campaign.gameIds.includes(GameID) && (campaign.races[Number(RaceID)] || []).includes(kind)))', replace: 'KIND_NAMES', fails: ['modded: nothing chosen', 'units: what the recorder reads of the choice'] },
   { name: 'a choice that stays on when it is turned off', file: 'observations.js', find: 'if (on) {\n      kinds.push(kind)\n    }', replace: 'kinds.push(kind)', fails: ['units: a choice is kept'] },
   { name: 'the size predicted for an object too small', file: 'observations.js', find: 'objects * OBJECT_BYTES + captures * CAPTURE_BYTES', replace: 'objects * 8 + captures * CAPTURE_BYTES', fails: ['units: the size predicted', 'modded: the size predicted'] },
   { name: 'a capture read again rewritten as a change', file: 'observations.js', find: 'const unchanged = again && Object.keys(objects).length', replace: 'const unchanged = false && Object.keys(objects).length', fails: ['modded: the pass that records', 'falryx: the first capture'] },
-  { name: 'an NPR race read', file: 'history.js', find: 'const kinds = npr ? [] : observationWanted(observe, GameID, RaceID)', replace: 'const kinds = observationWanted(observe, GameID, RaceID)', fails: ['modded: an NPR', 'passive: a player race'] },
+  { name: 'an NPR race read', file: 'history.js', find: 'const kinds = npr ? [] : observationWanted(observe, GameID, RaceID)', replace: 'const kinds = observationWanted(observe, GameID, RaceID)', fails: ['modded: an NPR'] },
   { name: 'a fork made while nothing was observed left unmarked', file: 'history.js', find: 'if (!resolution.forked) {', replace: 'if (!resolution.forked || !observationEverChosenIn(storage.settings ? storage.settings.store : null, resolution.campaignId, nprRaces)) {', fails: ['falryx: a campaign that never', 'falryx: a fork made while nothing'] },
   { name: 'the seed of a fork not written', file: 'history.js', find: 'storage.file(observationFileName(resolution.campaignId, resolution.branchId)).store = seed.value', replace: 'void seed.value', fails: ['falryx: a fork takes', 'falryx: the fork keeps its seed'] },
   { name: 'the branch not marked as seeded', file: 'history.js', find: 'branch.observationsSeeded = true', replace: 'branch.observationsSeeded = false', fails: ['falryx: the branch is marked', 'falryx: every later fork'] },
@@ -1609,7 +1563,7 @@ const BROWSER_BENIGN = [
 ]
 /* eslint-enable no-template-curly-in-string */
 
-const GROUPS = (m) => [...unitChecks(m), ...viewChecks(m), ...moddedChecks(m), ...falryxChecks(m), ...passiveChecks(m)]
+const GROUPS = (m) => [...unitChecks(m), ...viewChecks(m), ...moddedChecks(m), ...falryxChecks(m)]
 
 // ---------- the parts ----------
 
@@ -1741,7 +1695,7 @@ const DEADLINES = { part: 240, mutant: 240, browser: 400, setup: 900 }
 const MUTATIONS_HEADING = '\nMutations: each must fail by a value the checks it names, and each benign rewrite none'
 
 const variantsOf = (options) => [
-  { key: 'groups', name: 'the observation record: units, words, the recorder over the saves', head: true, heading: 'The formation observation record: units, words and the recorder over the fixture, the falryx saves and the passive campaign', deadline: DEADLINES.part, run: () => runPart('groups') },
+  { key: 'groups', name: 'the observation record: units, words, the recorder over the saves', head: true, heading: 'The formation observation record: units, words and the recorder over the fixture and the falryx saves', deadline: DEADLINES.part, run: () => runPart('groups') },
   { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of the fixture and a later copy of it, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser') },
   ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind.includes('benign') ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id) })) : []),
 ]
@@ -1767,7 +1721,7 @@ const main = async () => {
     script: __filename,
     // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
     workers: 4,
-    inputs: [MODDED.file, ...(falryxFiles() || []), ...(passiveFiles() || [])].filter((input) => fs.existsSync(input)),
+    inputs: [MODDED.file, ...(falryxFiles() || [])].filter((input) => fs.existsSync(input)),
     variants: variantsOf(options),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

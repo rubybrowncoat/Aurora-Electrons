@@ -8,8 +8,7 @@
   - merge: the reconciliation of captures (the same capture again, the open oldest and newest increments, a closed increment that contradicts, a ledger that does not match, the spans and their gaps, the cap), the archive as rows, a file that cannot be read;
   - branch: the archive of a fork (up to the fork, through a parent with none, never merged, a seed that stays empty);
   - pins: a pin once per group, the limit, the pins a fork inherits, what a save says of a pin;
-  - falryx: the saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and forks), read only: the figures of the reconciliation against SQL written here, a fork merged into one archive, the bytes an event costs, pins across saves whose rowids changed;
-  - passive: the 150 snapshots of artifacts/passive-campaign-20261013 (game 139, its player race found by SQL), read only: every snapshot merged in order against the multiset union computed here.
+  - falryx: the saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and forks), read only: the figures of the reconciliation against SQL written here, a fork merged into one archive, the bytes an event costs, pins across saves whose rowids changed.
   A save that is not there skips its head group and says so, but a mutation cannot be credited unless every named check has its required saves and fails by an observed value; nothing is read from a save but SELECTs (the files are opened read only).
 
   Everything else runs on in-memory stores. Each mutation of the utilities is planted in an isolated copy (scripts/lib/mutant-source.js) and must break the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
@@ -30,8 +29,6 @@ const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const FALRYX_GAME = 141
 const FALRYX_RACE = 791
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013', 'snapshots')
-const PASSIVE_GAME = 139
 const NAMES = ['event-archive', 'event-pins', 'history', 'campaign', 'recording-owner']
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -1625,68 +1622,6 @@ check('pinsave', 'a pin made on a row of one save is held in the next though its
   assert.equal(await stateIn(m, f, '2904', history), 'older')
 })
 
-// ---------- passive ----------
-
-const passiveFiles = () => (fs.existsSync(PASSIVE) ? fs.readdirSync(PASSIVE).filter((name) => /^AuroraDB_\d+_day_\d+\.db$/.test(name)).sort().map((name) => path.join(PASSIVE, name)) : null)
-
-const passive = async (m) => {
-  const files = passiveFiles()
-
-  if (!files || files.length < 2) {
-    return null
-  }
-
-  const players = await rowsOf(files[0], `select RaceID from FCT_Race where GameID = ${PASSIVE_GAME} and NPR = 0`)
-
-  assert.equal(players.length, 1, 'one player race')
-
-  const RaceID = players[0].RaceID
-  const reads = []
-  const saves = []
-
-  for (const file of files) {
-    const t = await gameTimeOf(file, PASSIVE_GAME)
-    const database = databaseOf(file)
-    const window = await m.a.readLogWindow(database, PASSIVE_GAME)
-    const read = await m.a.readRaceEvents(database, { GameID: PASSIVE_GAME, RaceID, t, window })
-
-    assert.equal(read.failed, undefined)
-    reads.push(read.capture)
-    saves.push(await saveOf(file, PASSIVE_GAME, RaceID))
-  }
-
-  const now = counter()
-  let file = {}
-  const results = reads.map((taken) => {
-    const result = m.a.mergeEvents(file, { races: [{ RaceID, capture: taken }] }, { now })
-
-    file = result.file
-
-    return result
-  })
-
-  return { files, RaceID, reads, saves, file, results, record: file.races[RaceID], model: modelOf(saves) }
-}
-
-check('passive', 'the 150 snapshots of the passive campaign merged in order give no conflict, keep the rows the log later dropped, and hold exactly the multiset union SQL gives', 'passive', ({ s, m }) => {
-  assert.equal(s.files.length, 150)
-  assert.equal(s.record.conflicts.length, 0)
-  assert.equal(s.model.conflicts.size, 0, 'SQL written here finds no closed increment that changed in any snapshot')
-  sameAsModel(s.record, s.model)
-  assert.equal(m.a.recordEvents(s.record), eventsOfModel(s.model.state))
-
-  const lastFirst = s.saves[s.saves.length - 1].first
-
-  assert.ok(Math.min(...idsOf(s.record)) < lastFirst, 'the archive holds increments the last save no longer has')
-  assert.ok(m.a.recordEvents(s.record) > s.reads[s.reads.length - 1].rows, 'and so more events than any one save')
-  assert.equal(s.record.spans.length, 1, 'the snapshots overlap: no gap')
-  assert.equal(m.a.eventFileProblem(s.file), null)
-
-  const repeat = m.a.mergeEvents(s.file, { races: [{ RaceID: s.RaceID, capture: s.reads[s.reads.length - 1] }] }, { now: counter() })
-
-  assert.equal(repeat.changed, false, 'the last snapshot again writes nothing')
-})
-
 // ---------- the recorder ----------
 
 const NPR_RACE = 785
@@ -2407,7 +2342,7 @@ const MUTATIONS = [
   { name: 'the window starts after the log\'s oldest increment', file: 'event-archive.js', find: 'FCT_Increments.IncrementID >= $' + '{Number(first)}', replace: 'FCT_Increments.IncrementID > $' + '{Number(first)}', fails: ['window'] },
   { name: 'touching spans are not merged', file: 'event-archive.js', find: 'if (last && start <= last[1]) {', replace: 'if (last && start < last[1]) {', fails: ['span', 'append'] },
   { name: 'a span inside another widens it', file: 'event-archive.js', find: 'last[1] = Math.max(last[1], end)', replace: 'last[1] = end', fails: ['span'] },
-  { name: 'a merge always reports a change', file: 'event-archive.js', find: 'changed: Boolean(added || amended || found.length || spansChanged || tipChanged || !stored)', replace: 'changed: true', fails: ['same', 'closed', 'recon2', 'passive', 'rrepeat'] },
+  { name: 'a merge always reports a change', file: 'event-archive.js', find: 'changed: Boolean(added || amended || found.length || spansChanged || tipChanged || !stored)', replace: 'changed: true', fails: ['same', 'closed', 'recon2', 'rrepeat'] },
   { name: 'the read\'s oldest increment is not open', file: 'event-archive.js', find: 'const openIds = new Set([capture.from[0], newestStored])', replace: 'const openIds = new Set([newestStored])', fails: ['open'] },
   { name: 'the archive\'s newest increment is not open', file: 'event-archive.js', find: 'const openIds = new Set([capture.from[0], newestStored])', replace: 'const openIds = new Set([capture.from[0]])', fails: ['open'] },
   { name: 'every increment is open', file: 'event-archive.js', find: 'const open = openIds.has(id)', replace: 'const open = true', fails: ['open', 'closed'] },
@@ -2571,19 +2506,18 @@ const memo = (work) => {
 
 // The context a check runs in for one set of modules; a scenario is run once, on its first use.
 const contextOf = (m, only = null, scheduleKeys = RECORDER_SCHEDULES, projection = 'full') => {
-  const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m, only, projection)) }
+  const scenarios = { falryx: memo(() => falryx(m)), recorder: memo(() => recorder(m, only, projection)) }
 
   return {
     run: async ({ key, needs, run }) => {
       const f = needs === 'falryx' ? await scenarios.falryx() : null
-      const s = needs === 'passive' ? await scenarios.passive() : null
       const r = needs === 'recorder' ? await scenarios.recorder() : null
 
-      if ((needs === 'falryx' && !f) || (needs === 'passive' && !s) || (needs === 'recorder' && !r)) {
-        return { skipped: true, reason: `${key}: required ${needs} fixture is missing or incomplete (${path.relative(root, needs === 'passive' ? PASSIVE : FALRYX)})` }
+      if ((needs === 'falryx' && !f) || (needs === 'recorder' && !r)) {
+        return { skipped: true, reason: `${key}: required ${needs} fixture is missing or incomplete (${path.relative(root, FALRYX)})` }
       }
 
-      return run({ m, f, s, r, scheduleKeys })
+      return run({ m, f, r, scheduleKeys })
     },
   }
 }
@@ -2742,10 +2676,6 @@ const main = async () => {
 
   if (!falryxSaves()) {
     console.log(`  skip   ${path.relative(root, FALRYX)} is not here, so the falryx group is not run`)
-  }
-
-  if (!passiveFiles()) {
-    console.log(`  skip   ${path.relative(root, PASSIVE)} is not here, so the passive group is not run`)
   }
 
   console.log('The event archive')

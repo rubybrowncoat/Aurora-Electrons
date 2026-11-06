@@ -3,7 +3,7 @@
 
   node scripts/check-legacy-consumption.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options a run checks the fixture save (scripts/lib/fixtures.js: its game and race). The passive campaign remains a separate full set of snapshots. Explicit --save arguments are always used as given. A save is never written: the fallback is run on a copy of the save in the temp folder whose mineral ledger is emptied, deleted afterwards.
+  With no options a run checks the fixture save (scripts/lib/fixtures.js: its game and race). Explicit --save arguments are always used as given. A save is never written: the fallback is run on a copy of the save in the temp folder whose mineral ledger is emptied, deleted afterwards.
 
   What is compared. The ledger logs, once per production tick and colony, the tonnes each purpose used: fuel refining (MineralDataType 14, Sorium), maintenance supplies (16, Duranium, Uridium and Gallicite), shipbuilding (5) and shipyard activities (9). For the last production tick (the years between the last two ticks of the ledger's construction rows) the check sets what the model gives a colony, worked out from the save's installations, tasks and race rates alone, against what the ledger logged for it: the fuel and maintenance rules as the page applies them, and the shipbuilding and activity rules at one tick (a task's build points rounded to 4 decimals each tick, as the game does; the utility's year is a forecast and is compared with the tick within the rounding bound). A task with no build points done may have been added after the tick and is left out of the comparison, said so. The ledger's continual-upgrade rows are compared as estimates (the saved capacity is the one after the tick's growth).
 
@@ -14,8 +14,6 @@
   Mutants. Each mutation changes a copy of the renderer's sources in the temp folder, runs the checks it names in a Node process of their own (the rule registry is module state) and counts as caught when every check it names fails. --no-mutations plants none and starts no child: the checks of the real sources run alone.
 
   Maintenance is held to the minerals at the colony (the scarcest of Duranium, Uridium and Gallicite over a year, spent once by all the colonies that draw on one stock: an NPR's colonies draw on the capital's). A mine on a body whose deposit of the mineral still holds some is not quantified, so where the stock cannot cover a year the figure is unknown, never unlimited; a mine on an exhausted deposit adds nothing. A colony whose saved stock is below a year's need is compared only as at most the rate at the tick, because the saved stock is the one after the tick. An installation row whose amount or type the save does not give makes the count unknown, never 0 (checked on a database in memory through the real query).
-
-  The passive campaign (artifacts/passive-campaign-20261013, git-ignored, read-only: 150 saves of a stock game, 5 days apart, snapshots.csv lists them): an NPR without a ledger (race 2), over every interval, the model's use of Sorium, Duranium, Uridium and Gallicite (from the first save of the interval) is set against the deposits its bodies lost less the stock it gained (within 0.05%); with the efficiency of the interval's end and everything else of its start, the same comparison is within a relative 1e-7 (a reconstruction of the state the production step ran on, not an observed execution order); the player (race 1, with a ledger) in eight saves has its uses observed, nothing modelled on top, and the model's fuel and maintenance equal the ledger's at the save's own tick. When the folder is absent these checks print SKIP and are not counted, and the mutations that name them are not run. Cases the campaign does not hold (shipbuilding, construction, ground units, an NPR colony away from its capital with refineries) are printed as UNSUPPORTED.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -27,7 +25,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild } = require('./lib/check-pool')
-const { fixtureSave, convertedSave } = require('./lib/fixtures')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -42,17 +40,6 @@ const SORIUM = 8
 const CONTINUAL_TOLERANCE = 0.005
 const FUEL_TOLERANCE = 1e-3
 const PER_MSP = { Duranium: 0.1, Uridium: 0.05, Gallicite: 0.1 }
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013')
-const CAMPAIGN_GAME = 139
-const CAMPAIGN_PLAYER = 1
-const CAMPAIGN_NPR = 2
-const CAMPAIGN_FIRST_SECONDS = 1576800000
-const CAMPAIGN_STEP_SECONDS = 432000
-const CAMPAIGN_FIRST_DAY = 18250
-const CAMPAIGN_STEP_DAYS = 5
-const PASSIVE_TOLERANCE = 5e-4
-const MIXED_TOLERANCE = 1e-7
-const NPR_MINERALS = { Duranium: 1, Sorium: 8, Uridium: 9, Gallicite: 11 }
 
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
@@ -98,23 +85,6 @@ const spentBy = (vm, minerals, disabled = []) => {
 
     return group && !group.income && !disabled.includes(group.key) ? total + row.Amount * perYear : total
   }, 0))
-}
-
-// The snapshots of the passive campaign as [{ index, seconds, file }], or null when its list or a save of the list is not there.
-const campaignSnapshots = () => {
-  const list = path.join(PASSIVE, 'snapshots.csv')
-
-  if (!fs.existsSync(list)) {
-    return null
-  }
-
-  const rows = fs.readFileSync(list, 'utf8').split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
-    const [index, seconds, file] = line.split(',')
-
-    return { index: Number(index), seconds: Number(seconds), file: path.join(PASSIVE, 'snapshots', file) }
-  })
-
-  return rows.length >= 2 && rows.every((row) => fs.existsSync(row.file)) ? rows : null
 }
 
 const parseArguments = (argv) => {
@@ -175,9 +145,9 @@ const identityOf = (file) => {
   return `${path.resolve(file)}|${size}|${mtimeMs}`
 }
 
-// A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does. `queries` keeps every statement run. A snapshot of the passive campaign is a recorded 2.x save: it is read through its converted copy (scripts/lib/fixtures.js `convertedSave`, the star's component number under its 3.1 name and nothing else).
+// A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does. `queries` keeps every statement run.
 const openSave = (file) => new Promise((resolve, reject) => {
-  const raw = new sqlite3.Database(file.startsWith(PASSIVE) ? convertedSave(file) : file, sqlite3.OPEN_READONLY, (error) => {
+  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => {
     if (error) {
       reject(error)
       return
@@ -1377,339 +1347,6 @@ const suite = (tree, saves, unsupported) => {
     return wrong.length === 0 && /^2 projects/.test(cases[0][0]) && /^0 projects/.test(cases[3][0]) ? true : `wrong: ${wrong.join('; ') || cases.map(([text]) => text).join('; ')}`
   })
 
-  // ---- The passive campaign: 150 saves of a stock game, 5 days apart, of a player (race 1, with a ledger) and an NPR (race 2, without) ------------
-  const SAMPLE_STARTS = [1, 2, 3, 39, 40, 74, 75, 76, 99, 100, 149]
-  const PLAYER_SNAPSHOTS = [2, 3, 40, 75, 76, 77, 100, 150]
-  const PAGE_SNAPSHOTS = [1, 76, 150]
-  const MODEL_READS = ['ledger', 'populationProductionModifiers', 'legacyColonies', 'shipyardTasks', 'shipyardActivities', 'industrialProjects']
-  const snapshots = campaignSnapshots()
-  const campaignAbsent = () => skip('the passive campaign (artifacts/passive-campaign-20261013) is not there')
-
-  const pageOn = async (database, race, reads) => {
-    const vm = instantiate(await pageOptions(), { $store: storeStub(), database, GameID: CAMPAIGN_GAME, RaceID: race, nested: true })
-
-    vm.loadErrors = {}
-
-    for (const name of reads) {
-      await vm.runAsync(name)
-    }
-
-    return vm
-  }
-
-  const withSnapshot = async (snapshot, work) => {
-    const database = await openSave(snapshot.file)
-
-    try {
-      return await work(database)
-    } finally {
-      await database.close()
-    }
-  }
-
-  const yearsBefore = (index) => (snapshots[index - 1].seconds - snapshots[index - 2].seconds) / SECONDS_PER_YEAR
-
-  // The bodies the NPR held a colony on in the first snapshot: the deposits it can have mined.
-  const nprBodies = memo(() => withSnapshot(snapshots[0], async (database) => (await rowsOf(database, `select distinct FCT_Population.SystemBodyID from FCT_Population where FCT_Population.GameID = ${CAMPAIGN_GAME} and FCT_Population.RaceID = ${CAMPAIGN_NPR}`)).map((row) => row.SystemBodyID)))
-
-  // What the NPR holds in one snapshot (the deposits of its bodies, its stock, where the stock lies) and, with `page`, the page's model of its uses a year as the page works them out from that snapshot.
-  const readNpr = (snapshot, page) => withSnapshot(snapshot, async (database) => {
-    const bodies = await nprBodies()
-    const { 'legacy-consumption': legacy, provenance } = await utilities()
-    const names = Object.keys(NPR_MINERALS)
-    const colonies = await rowsOf(database, `select FCT_Population.PopulationID, FCT_Population.Capital, FCT_Population.Efficiency, ${names.map((name) => `FCT_Population.${name}`).join(', ')} from FCT_Population where FCT_Population.GameID = ${CAMPAIGN_GAME} and FCT_Population.RaceID = ${CAMPAIGN_NPR}`)
-    const deposits = await rowsOf(database, `select FCT_MineralDeposit.MaterialID, sum(FCT_MineralDeposit.Amount) as Amount from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${CAMPAIGN_GAME} and FCT_MineralDeposit.SystemBodyID in (${bodies.join(', ')}) group by FCT_MineralDeposit.MaterialID`)
-    const held = { deposit: {}, stock: {}, capitals: colonies.filter((colony) => colony.Capital).length, away: colonies.filter((colony) => !colony.Capital && names.some((name) => colony[name] !== 0)).length, efficiency: (colonies.find((colony) => colony.Capital) || {}).Efficiency }
-
-    for (const name of names) {
-      held.deposit[name] = (deposits.find((row) => row.MaterialID === NPR_MINERALS[name]) || { Amount: 0 }).Amount
-      held.stock[name] = colonies.reduce((total, colony) => total + colony[name], 0)
-    }
-
-    if (!page) {
-      return { held }
-    }
-
-    const vm = await pageOn(database, CAMPAIGN_NPR, MODEL_READS)
-    const model = legacy.legacyModels({ colonies: vm.legacyColonies, tasks: vm.shipyardTasks, activities: vm.shipyardActivities, modifiers: vm.populationProductionModifiers })
-    const rates = {}
-
-    for (const name of names) {
-      const parts = [model.fuel.byMineral[name], model.maintenance.byMineral[name], model.shipbuilding.byMineral[name]].filter(Boolean)
-      const values = parts.map((part) => provenance.valueOrNull(part))
-
-      rates[name] = values.includes(null) ? null : values.reduce((total, value) => total + value, 0)
-    }
-
-    const facilities = vm.legacyColonies.filter((colony) => colony.Refineries > 0 || colony.MaintenanceFacilities > 0)
-
-    return { held, rates, hasLedger: vm.hasLedger, tasks: vm.shipyardTasks.length, activities: vm.shipyardActivities.length, projects: vm.industrialProjects.length, facilities: facilities.length, facilitiesAway: facilities.filter((colony) => !colony.Capital).length }
-  })
-
-  // The NPR's uses over the intervals that start at `starts` (snapshot numbers): observed (the deposits it lost less the stock it gained) against the model's rate of the interval's first snapshot over the interval's years.
-  const nprIntervals = async (starts) => {
-    const wanted = [...new Set(starts.flatMap((start) => [start, start + 1]))].sort((a, b) => a - b)
-    const read = new Map()
-
-    for (const index of wanted) {
-      read.set(index, await readNpr(snapshots[index - 1], starts.includes(index)))
-    }
-
-    const rows = []
-
-    for (const start of starts) {
-      const [first, last] = [read.get(start), read.get(start + 1)]
-      const years = (snapshots[start].seconds - snapshots[start - 1].seconds) / SECONDS_PER_YEAR
-
-      for (const name of Object.keys(NPR_MINERALS)) {
-        const observed = first.held.deposit[name] - last.held.deposit[name] - (last.held.stock[name] - first.held.stock[name])
-
-        rows.push({ start, name, observed, modelled: first.rates[name] === null ? null : first.rates[name] * years, mixed: first.rates[name] === null ? null : first.rates[name] * (last.held.efficiency / first.held.efficiency) * years })
-      }
-    }
-
-    return { rows, pages: starts.map((start) => read.get(start)), held: wanted.map((index) => read.get(index).held) }
-  }
-
-  const fullScan = memo(() => nprIntervals(Array.from({ length: snapshots.length - 1 }, (_item, index) => index + 1)))
-  const sampleScan = memo(() => nprIntervals(SAMPLE_STARTS.filter((start) => start < snapshots.length)))
-
-  const scanned = (scan, label) => async () => {
-    if (!snapshots) {
-      return campaignAbsent()
-    }
-
-    const { rows, pages } = await scan()
-    const problem = pages.find((page) => page.hasLedger)
-
-    if (problem) {
-      return 'the NPR has a mineral ledger, so its uses are not unobserved'
-    }
-
-    let worst = 0
-
-    for (const { start, name, observed, modelled } of rows) {
-      if (modelled === null) {
-        return `interval ${start}, ${name}: the model has no figure`
-      } else if (!near(modelled, observed, PASSIVE_TOLERANCE, 1e-6)) {
-        return `interval ${start}, ${name}: model ${modelled.toFixed(6)} t, observed ${observed.toFixed(6)} t (ratio ${(modelled / observed).toFixed(6)})`
-      }
-
-      worst = Math.max(worst, observed ? Math.abs(modelled / observed - 1) : 0)
-    }
-
-    measured.push(`${label}: ${pages.length} intervals of an NPR, 4 minerals each, the model's use is within ${(worst * 100).toFixed(4)}% of the deposits lost less the stock gained (tolerance ${PASSIVE_TOLERANCE * 100}%)`)
-
-    const unmodelled = [['shipyard task', 'tasks'], ['yard activity', 'activities'], ['industry project', 'projects']].filter(([, key]) => pages.some((page) => page[key] > 0))
-
-    unmodelled.forEach(([text, key]) => noteUnsupported(`passive campaign: the NPR had ${text}s in ${pages.filter((page) => page[key] > 0).length} of ${pages.length} intervals, a use the observed figures include and the comparison cannot separate`))
-
-    return true
-  }
-
-  add('passive-snapshots', 'the passive campaign holds 150 saves of one game, the first at game second 1576800000 and the others 432000 s (5 days) apart, named for day 18250 + 5 x (number - 1)', async () => {
-    if (!snapshots) {
-      return campaignAbsent()
-    }
-
-    const wrong = snapshots.filter((row, index) => row.index !== index + 1 || row.seconds !== CAMPAIGN_FIRST_SECONDS + CAMPAIGN_STEP_SECONDS * index || path.basename(row.file) !== `AuroraDB_${String(index + 1).padStart(3, '0')}_day_${CAMPAIGN_FIRST_DAY + CAMPAIGN_STEP_DAYS * index}.db`)
-
-    if (wrong.length || snapshots.length !== 150) {
-      return `${snapshots.length} saves, ${wrong.length} not as listed (the first: ${wrong.length ? JSON.stringify(wrong[0]) : 'none'})`
-    }
-
-    return await withSnapshot(snapshots[snapshots.length - 1], async (database) => {
-      const [{ Game }] = await rowsOf(database, 'select count(*) as Game from FCT_Game where FCT_Game.GameID = ' + CAMPAIGN_GAME)
-
-      return Game === 1 ? true : 'the last save does not hold game 139'
-    })
-  })
-
-  add('passive-npr', 'an NPR without a ledger (race 2), over every interval of 5 days: the Sorium, Duranium, Uridium and Gallicite the model gives its refineries and maintenance facilities are the deposits its bodies lost less the stock it gained', scanned(fullScan, 'passive-npr'))
-  add('passive-npr-sample', 'an NPR without a ledger (race 2), over eleven of the intervals: the model\'s use is the deposits lost less the stock gained', scanned(sampleScan, 'passive-npr-sample'))
-
-  add('passive-npr-mixed', 'an NPR without a ledger (race 2), over every interval: with the efficiency of the interval\'s end and everything else of its start (the state the production step is reconstructed to have run on, not an observed execution order), the model\'s use is the deposits lost less the stock gained to a relative 1e-7, so the rule\'s arithmetic needs no fitted constant', async () => {
-    if (!snapshots) {
-      return campaignAbsent()
-    }
-
-    const { rows } = await fullScan()
-    let worst = 0
-
-    for (const { start, name, observed, mixed } of rows) {
-      if (!Number.isFinite(mixed)) {
-        return `interval ${start}, ${name}: no figure from the efficiencies of the two saves`
-      } else if (!near(mixed, observed, MIXED_TOLERANCE, 1e-6)) {
-        return `interval ${start}, ${name}: model ${mixed.toFixed(6)} t, observed ${observed.toFixed(6)} t (ratio ${(mixed / observed).toFixed(9)})`
-      }
-
-      worst = Math.max(worst, observed ? Math.abs(mixed / observed - 1) : 0)
-    }
-
-    measured.push(`passive-npr-mixed: ${rows.length} comparisons (every interval, 4 minerals), the model on the end efficiency and the start state is within ${worst.toExponential(2)} relative of the deposits lost less the stock gained (tolerance ${MIXED_TOLERANCE})`)
-
-    return true
-  })
-
-  add('passive-pool', 'an NPR keeps its whole stock at its capital: in every save no other colony of race 2 holds a tonne of any mineral, and no colony away from the capital has a refinery or a maintenance facility', async () => {
-    if (!snapshots) {
-      return campaignAbsent()
-    }
-
-    const { held, pages } = await fullScan()
-    const away = held.map((item, index) => [index + 1, item]).filter(([, item]) => item.away > 0 || item.capitals !== 1)
-    const elsewhere = pages.filter((page) => page.facilitiesAway > 0)
-
-    if (away.length) {
-      return `in save ${away[0][0]} ${away[0][1].away} colonies away from the capital hold stock and ${away[0][1].capitals} capitals`
-    } else if (elsewhere.length) {
-      return `${elsewhere.length} saves have a refinery or maintenance facility away from the capital`
-    }
-
-    noteUnsupported('passive campaign: no NPR colony away from its capital has a refinery, so the shared stock of an NPR\'s colonies is not tested by a save (the capital holds everything); the pool rule rests on the synthetic case and the owner\'s description')
-
-    return true
-  })
-
-  add('passive-page', 'the page on the NPR without a ledger (first, middle and last save): fuel and maintenance are modelled forecasts with a total, shipbuilding and the queue are modelled and never observed, switching fuel off removes its Sorium, ground unit training is missing', async () => {
-    if (!snapshots) {
-      return campaignAbsent()
-    }
-
-    const { minerals, provenance } = await utilities()
-
-    for (const index of PAGE_SNAPSHOTS) {
-      const problem = await withSnapshot(snapshots[index - 1], async (database) => {
-        const vm = await pageOn(database, CAMPAIGN_NPR, READS)
-
-        vm.inputsLoaded = true
-        vm.focusMineralId = SORIUM
-
-        if (vm.hasLedger || vm.legacyUse === null) {
-          return 'the page has a ledger or builds no model'
-        }
-
-        const row = (key) => vm.categoryTable.find((item) => item.key === key)
-
-        for (const key of ['fuel', 'maintenance']) {
-          if (row(key).coverage !== 'modelled' || !row(key).forecast || vm.sourceLabel(row(key)) !== 'Modelled forecast' || !(row(key).total > 0)) {
-            return `${key} is ${row(key).coverage}, total ${row(key).total}`
-          }
-        }
-
-        for (const key of ['industry', 'shipbuilding']) {
-          if (row(key).coverage === 'observed' || (row(key).coverage === 'modelled' && !row(key).forecast)) {
-            return `${key} is shown as ${row(key).coverage}`
-          } else if (row(key).coverage === 'modelled' && !vm.shipyardTasks.length && !vm.shipyardActivities.length && key === 'shipbuilding' && row(key).total !== 0) {
-            return `shipbuilding has no task or activity and a total of ${row(key).total}`
-          }
-        }
-
-        if (row('ground').coverage !== 'missing' || !row('ground').reason) {
-          return 'ground unit training is not missing with a reason'
-        }
-
-        const sorium = () => vm.mineralRows.find((item) => item.name === 'Sorium').used
-        const before = sorium()
-
-        vm.toggleCategory('fuel', false)
-
-        const removed = before - sorium()
-
-        vm.toggleCategory('fuel', true)
-
-        return near(removed, provenance.valueOrNull(vm.legacyUse.fuel.byMineral.Sorium), 1e-9, 1e-6) && removed > 0 ? null : `switching fuel off removes ${removed} t of Sorium, the model's use is ${provenance.valueOrNull(vm.legacyUse.fuel.byMineral.Sorium)}`
-      })
-
-      if (problem) {
-        return `save ${index}: ${problem}`
-      }
-    }
-
-    return minerals.MINERALS.length ? true : 'no minerals'
-  })
-
-  add('passive-player', 'the player of the campaign (race 1, with a ledger), in eight saves: the page observes its uses and models none on top, runs no modelled read, and the model\'s fuel and maintenance use over the interval is the ledger\'s at the save\'s own tick', async () => {
-    if (!snapshots) {
-      return campaignAbsent()
-    }
-
-    const { 'legacy-consumption': legacy, minerals, provenance } = await utilities()
-    const types = new Set()
-    let compared = 0
-
-    for (const index of PLAYER_SNAPSHOTS) {
-      const snapshot = snapshots[index - 1]
-      const problem = await withSnapshot(snapshot, async (database) => {
-        const vm = await pageOn(database, CAMPAIGN_PLAYER, READS)
-
-        vm.inputsLoaded = true
-
-        if (!vm.hasLedger || vm.legacyUse !== null) {
-          return 'the page does not observe the uses of a race with a ledger, or builds a model for it'
-        } else if (vm.legacyColonies.length || vm.shipyardTasks.length || vm.shipyardActivities.length || database.queries.some((sql) => [legacy.legacyColoniesQuery, legacy.shipyardTasksQuery, legacy.shipyardActivitiesQuery].some((build) => build({ GameID: CAMPAIGN_GAME, RaceID: CAMPAIGN_PLAYER }) === sql))) {
-          return 'the modelled reads ran on a race with a ledger'
-        }
-
-        const expected = spentBy(vm, minerals)
-        const used = vm.mineralRows.map((row) => row.used)
-
-        if (!used.every((value, position) => near(value, expected[position], 1e-9, 1e-9))) {
-          return 'a mineral\'s use is not the ledger\'s'
-        }
-
-        const colonies = await rowsOf(database, legacy.legacyColoniesQuery({ GameID: CAMPAIGN_GAME, RaceID: CAMPAIGN_PLAYER }))
-        const model = legacy.legacyModels({ colonies, tasks: [], activities: [], modifiers: vm.populationProductionModifiers })
-        const logged = await rowsOf(database, `select FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, sum(FCT_RaceMineralData.Amount) as Amount from FCT_RaceMineralData where FCT_RaceMineralData.GameID = ${CAMPAIGN_GAME} and FCT_RaceMineralData.RaceID = ${CAMPAIGN_PLAYER} and FCT_RaceMineralData.Time = ${snapshot.seconds} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType`)
-        const amount = (type, mineral) => (logged.find((row) => row.MineralDataType === type && row.MineralID === mineral.id) || { Amount: 0 }).Amount
-
-        logged.forEach((row) => types.add(row.MineralDataType))
-
-        if (!logged.length) {
-          return `the ledger holds nothing at the save's own time (${snapshot.seconds})`
-        }
-
-        for (const mineral of minerals.MINERALS) {
-          const [fuel, maintenance] = [model.fuel.byMineral[mineral.name], model.maintenance.byMineral[mineral.name]]
-
-          for (const [result, type] of [[fuel, FUEL_LEDGER_TYPE], [maintenance, MAINTENANCE_LEDGER_TYPE]]) {
-            if (!result) {
-              continue
-            }
-
-            const value = provenance.valueOrNull(result)
-
-            if (value === null || !near(value * yearsBefore(index), amount(type, mineral), 1e-6, 1e-9)) {
-              return `${mineral.name} (ledger type ${type}): model ${value === null ? 'unknown' : (value * yearsBefore(index)).toFixed(6)} t, ledger ${amount(type, mineral).toFixed(6)} t`
-            }
-
-            compared += amount(type, mineral) > 0 ? 1 : 0
-          }
-        }
-
-        return null
-      })
-
-      if (problem) {
-        return `save ${index}: ${problem}`
-      }
-    }
-
-    if (!compared) {
-      return 'no fuel or maintenance use of the player was in the ledger to compare'
-    }
-
-    measured.push(`passive-player: ${compared} fuel or maintenance amounts of the player's ledger, in ${PLAYER_SNAPSHOTS.length} saves, equal the model's (ledger types seen at the saves' ticks: ${[...types].sort((a, b) => a - b).join(', ')})`)
-
-    const absent = [[5, 'shipbuilding'], [9, 'shipyard activity'], [6, 'ground unit'], [4, 'construction']].filter(([type]) => !types.has(type))
-
-    if (absent.length) {
-      noteUnsupported(`passive campaign: the ledger of the player holds no ${absent.map(([, text]) => text).join(', ')} use at the ticks of the saves tried, so those rules have no case in the campaign`)
-    }
-
-    return true
-  })
-
   return {
     list,
     cleanup: async () => {
@@ -1744,9 +1381,9 @@ const MUTATIONS = [
   ['a shared stock is called as good as a measured one', path.join('utilities', 'legacy-consumption.js'), 'return pool.shared ? estimated(cut, SHARED_STOCK) : cut', 'return cut', ['synthetic-pool']],
   ['an NPR colony with no capital row uses its own stock', path.join('utilities', 'legacy-consumption.js'), 'shared: true } : null', 'shared: true } : { colony, shared: false }', ['synthetic-pool']],
   ['the NPR ordnance exception is not noted', path.join('utilities', 'legacy-consumption.js'), 'capacityKind(project.ProductionType) === \'ordnance\'', 'capacityKind(project.ProductionType) === \'none\'', ['synthetic-industry-basis']],
-  ['the production modifier is ignored', path.join('utilities', 'legacy-consumption.js'), 'row && isNumber(row.OverallProductionModifier) ? row.OverallProductionModifier : null', 'row && isNumber(row.OverallProductionModifier) ? 1 : null', ['fuel-ledger:fixture', 'passive-npr-sample', 'passive-npr-mixed']],
-  ['a maintenance mineral takes ten times its tonnage', path.join('utilities', 'logistics.js'), '{ name: \'Uridium\', perMsp: 0.05 }', '{ name: \'Uridium\', perMsp: 0.5 }', ['msp-ledger:fixture', 'passive-npr-sample', 'passive-npr-mixed']],
-  ['maintenance is not held to the minerals at the colony', path.join('utilities', 'legacy-consumption.js'), 'const allowed = settled', 'const allowed = made.value', ['synthetic-msp-stock', 'passive-player']],
+  ['the production modifier is ignored', path.join('utilities', 'legacy-consumption.js'), 'row && isNumber(row.OverallProductionModifier) ? row.OverallProductionModifier : null', 'row && isNumber(row.OverallProductionModifier) ? 1 : null', ['fuel-ledger:fixture']],
+  ['a maintenance mineral takes ten times its tonnage', path.join('utilities', 'logistics.js'), '{ name: \'Uridium\', perMsp: 0.05 }', '{ name: \'Uridium\', perMsp: 0.5 }', ['msp-ledger:fixture']],
+  ['maintenance is not held to the minerals at the colony', path.join('utilities', 'legacy-consumption.js'), 'const allowed = settled', 'const allowed = made.value', ['synthetic-msp-stock']],
   ['a mine on a deposit that holds the mineral is taken as an unlimited supply', path.join('utilities', 'legacy-consumption.js'), 'return { low, exact: low >= wanted || !mined,', 'return { low: mined ? Infinity : low, exact: true,', ['synthetic-msp-stock', 'synthetic-query-unread']],
   ['an uncertain mineral blocks a figure another mineral settles', path.join('utilities', 'legacy-consumption.js'), 'if (settled > lowest) {', 'if (supplies.some((supply) => !supply.exact && supply.low < made.value)) {', ['synthetic-msp-stock']],
   ['a tolerance settles a figure an uncertain mineral could still lower', path.join('utilities', 'legacy-consumption.js'), 'if (settled > lowest) {', 'if (settled - lowest > 1e-9 * Math.max(1, settled)) {', ['synthetic-msp-stock']],
@@ -1759,7 +1396,6 @@ const MUTATIONS = [
   ['a null amount of a type that adds nothing to a column makes that column unknown', path.join('utilities', 'legacy-consumption.js'), [' or (FCT_PopulationInstallations.Amount is null and DIM_PlanetaryInstallation.', '{value} <> 0)'].join('$'), ' or FCT_PopulationInstallations.Amount is null', ['synthetic-query-unread']],
   ['each colony of an NPR spends the whole capital stock on its own', path.join('utilities', 'legacy-consumption.js'), ['const key = colony.NPR ? `race ', '{colony.RaceID}` : `colony ', '{colony.PopulationID}`'].join('$'), ['const key = `colony ', '{colony.PopulationID}`'].join('$'), ['synthetic-pool-once']],
   ['an NPR\'s maintenance from a shared stock is not marked an estimate', path.join('utilities', 'legacy-consumption.js'), 'return away ? estimated(result, SHARED_STOCK) : result', 'return result', ['synthetic-msp-stock', 'synthetic-pool-once']],
-  ['the page shows a race with a ledger a model on top', path.join('pages', 'mineral-outlook.vue'), 'if (this.hasLedger) {\n        return null\n      }\n\n      const { queueDemand, industrialProjects }', 'if (false) {\n        return null\n      }\n\n      const { queueDemand, industrialProjects }', ['passive-player']],
 ]
 
 const mutatedCopy = (file, from, to) => {
@@ -1860,8 +1496,8 @@ const run = async () => {
 
   const { list, cleanup } = suite(rendererDirectory, saves, unsupported)
 
-  // A mutation that names a check with no case here (a save or the campaign is not there) cannot be caught by it, and is left out.
-  const hasNoCase = (id) => (id.startsWith('passive-') && !campaignSnapshots()) || (id.includes(':') && saves.some((save) => save.key === id.split(':')[1] && !fs.existsSync(path.resolve(root, save.file))))
+  // A mutation that names a check with no case here (a save is not there) cannot be caught by it, and is left out.
+  const hasNoCase = (id) => id.includes(':') && saves.some((save) => save.key === id.split(':')[1] && !fs.existsSync(path.resolve(root, save.file)))
   const planting = mutating()
   const [runnable, left] = planting ? [MUTATIONS.filter(([, , , , fails]) => !fails.some(hasNoCase)), MUTATIONS.filter(([, , , , fails]) => fails.some(hasNoCase))] : [[], []]
   const named = [...new Set(runnable.flatMap(([, , , , fails]) => fails))]

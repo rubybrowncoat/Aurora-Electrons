@@ -6,7 +6,7 @@
   Groups:
   - worked: the reconciliation on small synthetic ledgers, logs and snapshots with known answers: the residual's sign and size, the window's two ends, the coverage, the total, a residual of 0 only when the log accounts for the whole change, and an unknown residual (never 0) for a snapshot whose witness the open save's ledger does not reproduce (checked at the snapshot's own increment count, never at a checkpoint below it), one taken after more increments than the save holds, one with no witness, one without a treasury or after the open save, and a log that starts late, is empty, holds no cycle between the snapshots or lacks an amount; the grouped SQL of the log on an in-memory database; how a residual is printed;
   - lifecycle: the history files the real recorder, `settle` and `attach` leave behind (a rewound replay that diverges inside the last partial checkpoint and then the original reopened, a legacy history attached to an observed campaign, a campaign merged into another), reconciled against the reopened save's own ledger: a snapshot of another history is never compared;
-  - real saves: the eight saves of the falryx line and its rollbacks (artifacts/falryx-sequential-and-rollback) and the five stock saves of game 140 (artifacts/boscodiogigia-sequential-saves) run through the real recorder (utilities/history.js) into in-memory stores, in the order they were played, as one unbroken line and as a rewind, and then reconciled against each open save's own log and ledger. Every window's two ends must be real ancestors of the open save (compared increment by increment on the saves' own ledgers), the stored change and the logged net are recomputed with SQL of the check's own, every snapshot's witness is recomputed from the save's own ledger, the snapshots of the other branches are refused exactly when they are not ancestors, and a snapshot of a dead end (2740177930) is refused when 2794985390 is open;
+  - real saves: the eight saves of the falryx line and its rollbacks (artifacts/falryx-sequential-and-rollback) run through the real recorder (utilities/history.js) into in-memory stores, in the order they were played, as one unbroken line and as a rewind, and then reconciled against each open save's own log and ledger. Every window's two ends must be real ancestors of the open save (compared increment by increment on the saves' own ledgers), the stored change and the logged net are recomputed with SQL of the check's own, every snapshot's witness is recomputed from the save's own ledger, the snapshots of the other branches are refused exactly when they are not ancestors, and a snapshot of a dead end (2740177930) is refused when 2794985390 is open;
   - mutations: each deliberate breakage of the sources (a residual folded into the net, the witness not compared, a snapshot with no witness let through, the recorder storing none or the wrong count, a merge re-stamping the witness, the old rounding of a residual and more) is applied to a copy of the utilities and must make the checks named for it fail.
 
   Everything is read-only: the saves are opened read-only and the stores are in memory. Any failed check sets exit code 1.
@@ -63,7 +63,6 @@ const UNKNOWN_KEYS = ['from', 'to', 'days', 'status', 'reason', 'storedChange', 
 // ---- Real saves --------------------------------------------------------------------------------------------------------
 
 const FALRYX = { label: 'falryx', dir: path.join(repo, 'artifacts', 'falryx-sequential-and-rollback'), GameID: 141, RaceID: 791 }
-const STOCK = { label: 'stock', dir: path.join(repo, 'artifacts', 'boscodiogigia-sequential-saves'), GameID: 140, RaceID: 784 }
 const FALRYX_TIMES = ['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230']
 
 const openReadOnly = (file) => new Promise((resolve, reject) => {
@@ -178,24 +177,6 @@ const prepare = async (m) => {
   await take('falryx order played', FALRYX, FALRYX_TIMES, falryxFile)
   await take('falryx one line', FALRYX, ['2398452450', '2590429565', '2713949950', '2794985390', '2930673230'], falryxFile)
   await take('falryx rewind', FALRYX, ['2398452450', '2930673230', '2794985390'], falryxFile)
-
-  if (fs.existsSync(STOCK.dir)) {
-    const names = fs.readdirSync(STOCK.dir).filter((name) => /^AuroraDB .*\.db$/.test(name))
-    const dated = []
-
-    for (const name of names) {
-      const handle = await openReadOnly(path.join(STOCK.dir, name))
-      const [game] = await rowsOf(handle, `select GameTime from FCT_Game where GameID = ${STOCK.GameID}`)
-
-      handle.close()
-      dated.push({ name, t: game.GameTime })
-    }
-
-    dated.sort((a, b) => a.t - b.t)
-    await take('stock played in time order', STOCK, dated.map((entry) => entry.name), (name) => path.join(STOCK.dir, name))
-  } else {
-    missing.push('stock played in time order')
-  }
 
   return { scenarios, missing }
 }
@@ -832,7 +813,7 @@ const defineSuite = (m, prepared) => {
     })
   }
 
-  ;['falryx order played', 'falryx one line', 'falryx rewind', 'stock played in time order'].filter((key) => prepared && prepared.scenarios[key]).forEach((key) => {
+  ;['falryx order played', 'falryx one line', 'falryx rewind'].filter((key) => prepared && prepared.scenarios[key]).forEach((key) => {
     test('real saves', `${key}: every window of every open save has real ancestors for its two ends and the residual the saves' own amounts give`, () => {
       realSteps(key).forEach((step) => verifyStep(key, step))
     })

@@ -48,7 +48,7 @@ registerRule({
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_Game.GameTime', 'FCT_Ship.LastOverhaul'],
-  note: 'The maintenance age of a ship: the game time less the time of its last overhaul, in years of 365 days. Reproduced for one thing only: in 149 intervals of a passive campaign the overhaul date of every military ship moved by exactly the game time that passed.',
+  note: 'The maintenance age of a ship: the game time less the time of its last overhaul, in years of 365 days.',
   assumptions: ['the saved overhaul time is the ship\'s clock now, so the age is the one the game would use in its next maintenance pass'],
 })
 

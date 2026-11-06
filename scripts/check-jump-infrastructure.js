@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-jump-infrastructure.js [--no-mutations] [--no-lacking] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  Two datasets, each with its own oracle, read from the save by SQL written here and never from the module. The fixture (scripts/lib/fixtures.js `FIXTURE`, the race Shogunate of game 141, a save of the present line) is run as it is (a copy of the file, which is never written): the system with gates and the points of the cases are chosen from it by SQL (a gate whose far side the race has charted, a point whose far side is not charted, a point of a known system that the race has not charted), and every case the fixture can exercise runs on it: the rows of the charted points with their numbers, systems, far sides and gates (the race's own), the stabilisation, the minefield and buoy counts and the objects detected as the save has them (none), the probe figure, the whole list once the system is cleared, the link to the map, the side panel, the System view, a point a link names that its system lacks, and the two saves lacking a column. What the fixture cannot exercise is printed as SKIP, with what the save holds counted by SQL (needs tier b): it holds no stabilisation order (move action 64), no salvo of any race, no stationary contact of the race, no gate built by another race or by none recorded and no explored point whose far side is not charted; the cases that need one, and the planted faults and rewrites that need them, run on the recorded campaign. The recorded campaign (artifacts/boscodiogigia-sequential-saves, the race Axis, a save of an earlier release) is a regression input and not a fixture run, and every line it prints says so: scripts/lib/fixtures.js `convertedSave` gives the star's component number under its present name and, for the copy the browser reads, the seven columns the app looks for to accept a save as of the present line (the statements are documented there; the app refuses the recorded save without them), and into the copy the cases the save does not hold are written by SQL here: queued, running and arrived stabilisation orders, a point with two fleets and a fleet with two orders at one point, an order of another race and an order of another kind, gates built by another race and by none recorded, stationary contacts of the race (current, earlier, twice for one object, of its own salvo, moving, of another kind, of another race, in another system, beyond a kilometre) and objects at a point the race has not charted. The rules of the module wait on AE-303-04 and list the earlier line only: the fixture gives them no case of their own for the stabilisation, the objects of the race and the objects detected.
+  One dataset, with its oracle, read from the save by SQL written here and never from the module. The fixture (scripts/lib/fixtures.js `FIXTURE`, the race Shogunate of game 141, a save of the present line) is run as it is (a copy of the file, which is never written): the system with gates and the points of the cases are chosen from it by SQL (a gate whose far side the race has charted, a point whose far side is not charted, a point of a known system that the race has not charted), and every case the fixture can exercise runs on it: the rows of the charted points with their numbers, systems, far sides and gates (the race's own), the stabilisation, the minefield and buoy counts and the objects detected as the save has them (none), the probe figure, the whole list once the system is cleared, the link to the map, the side panel, the System view, a point a link names that its system lacks, and the two saves lacking a column. What the fixture cannot exercise is printed as SKIP, with what the save holds counted by SQL (needs tier b): it holds no stabilisation order (move action 64), no salvo of any race, no stationary contact of the race, no gate built by another race or by none recorded and no explored point whose far side is not charted; the cases that need one, and the planted faults that need them, are not run on the page and are judged by the small save written here alone where they name a check of it. The rules of the module wait on AE-303-04 and list the earlier line only: the fixture gives them no case of their own for the stabilisation, the objects of the race and the objects detected.
   - module: the rows of every charted point of the race hold the figures SQL gives (the number of the point, its gate, its orders, each count once for each observed object id), a point the race has not charted has no row, a figure the save cannot support is unknown and never 0, and the probe count is never given; the same on a small save written here for the cases of duplicate rows, a salvo of no known design, a point with no position, a missing game time and an order with no time;
   - page: the table of /lagrange?system=<id> draws a row for each charted point of the system and for no other, each row's number, system, far side, gate, stabilisation with its fleets, minefield and buoy counts, probe figure and detected objects as the oracle says (words read back through the module's own tables), gate and stabilisation apart, and the whole list once the system is cleared; a row's link opens the map with the system and the point in the route, the side panel naming that point, and the System view opened from it is told that point;
   - a save lacking a column the infrastructure reads (the speed of the salvos, or the builder of the gates) still draws every point, a gate whose builder is not read as built by none recorded, and every figure that rests on the missing column reads as unknown, never 0;
@@ -16,20 +16,15 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
 const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, failureLine, describe, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
-const { convertedSave, FIXTURE, fixturePath, fixtureRows } = require('./lib/fixtures')
+const { FIXTURE, fixturePath, fixtureRows } = require('./lib/fixtures')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
-// The recorded campaign, a regression input: the save the cases below were first written for, with the game and the race it names.
-const CAMPAIGN_SAVE = 'artifacts/boscodiogigia-sequential-saves/AuroraDB 21.06.1973.db'
-const IDS = { GameID: 140, RaceID: 784 }
-const NAMES = { game: 'Nazi Era', race: 'Axis' }
 const TIMEOUT = 120000
 const STEP = 45000
 const PAGE = 'src/renderer/pages/lagrange.vue'
@@ -39,15 +34,7 @@ const MODULE = 'src/renderer/utilities/jump-infrastructure.js'
 const PLACES = 'src/renderer/utilities/places.js'
 const DETAIL = process.argv.includes('--detail')
 
-// The points of the recorded campaign. In system 21756 four gates: 59876 (the race's own, a queued order, an object of its own at it that a contact names), 59879 (a gate with no builder recorded, a contact), 59877 (the race's own, two contacts of one object and one of an earlier time, an order of another race), 59878 (built by another race, an order of another kind). 59907 of system 21768 holds no gate and an order that has arrived with nothing left to do. 60143 of system 21858 holds two fleets and a fleet with two orders. Of system 21792 the point 59967 is not charted by the race.
-// 60144 of system 21858 is charted by the race with its far side not charted, and has no name for the system beyond.
-const POINT = { queued: 59876, unrecorded: 59879, contacts: 59877, other: 59878, awaiting: 59907, fleets: 60143, unexplored: 60144, uncharted: 59967 }
-const SYSTEMS = { gates: 21756, awaiting: 21768, fleets: 21858, uncharted: 21792 }
-const SHOWN = [SYSTEMS.gates, SYSTEMS.awaiting, SYSTEMS.fleets, SYSTEMS.uncharted]
 const STABILISE = 64
-const FLEET = { first: 460100, second: 460101, third: 459992, fourth: 459993 }
-const GAME_TIME = 1277161332
-const EARLIER = GAME_TIME - 86400
 
 const short = (value) => {
   const text = JSON.stringify(value)
@@ -63,67 +50,6 @@ const open = (file, mode = sqlite3.OPEN_READONLY) => new Promise((resolve, rejec
 const all = (raw, sql) => new Promise((resolve, reject) => raw.all(sql, (error, rows) => (error ? reject(error) : resolve(rows))))
 const run = (raw, sql) => new Promise((resolve, reject) => raw.run(sql, (error) => (error ? reject(error) : resolve())))
 const adapter = (raw) => ({ query: async (sql) => [await all(raw, sql)] })
-
-// The columns of a table but its primary key, for the rows written by copying one.
-const columnsOf = async (raw, table) => (await all(raw, `pragma table_info(${table})`)).filter((column) => !column.pk).map((column) => column.name)
-
-// An INSERT of a copy of the row of `table` that `where` names, with the columns of `over` (SQL values) put in place.
-const copyOf = (table, columns, where, over) => `insert into ${table} (${columns.join(', ')}) select ${columns.map((column) => (column in over ? over[column] : column)).join(', ')} from ${table} where ${where}`
-
-// The statements that write the cases the save does not hold, from what the save says of its own points.
-const fixtureStatements = async (file) => {
-  const raw = await open(file)
-
-  try {
-    const place = async (id) => (await all(raw, `select SystemID as system, Xcor as x, Ycor as y from FCT_JumpPoint where GameID = ${IDS.GameID} and WarpPointID = ${id}`))[0]
-    const at = {}
-
-    for (const [key, id] of Object.entries(POINT)) {
-      at[key] = await place(id)
-      assert.ok(at[key], `the save holds the point ${id}`)
-    }
-
-    const orderColumns = await columnsOf(raw, 'FCT_MoveOrders')
-    const contactColumns = await columnsOf(raw, 'FCT_Contacts')
-    const salvoColumns = await columnsOf(raw, 'FCT_MissileSalvo')
-    const [orderOf] = await all(raw, `select MoveOrderID as id from FCT_MoveOrders where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and MoveActionID = ${STABILISE}`)
-    const [contactOf] = await all(raw, `select UniqueID as id from FCT_Contacts where GameID = ${IDS.GameID} and DetectRaceID = ${IDS.RaceID} and ContactType = 1`)
-    const [salvoOf] = await all(raw, `select MissileSalvoID as id from FCT_MissileSalvo where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and (MissileSpeed = 0 or LurkerMode = 1)`)
-    const [own] = await all(raw, `select m.MissileSalvoID as id from FCT_MissileSalvo m inner join FCT_JumpPoint p on p.WarpPointID = ${POINT.queued} where m.GameID = ${IDS.GameID} and m.RaceID = ${IDS.RaceID} and (m.MissileSpeed = 0 or m.LurkerMode = 1) and m.SystemID = p.SystemID and abs(m.Xcor - p.Xcor) < 1 and abs(m.Ycor - p.Ycor) < 1 order by m.MissileSalvoID`)
-
-    assert.ok(orderOf && contactOf && salvoOf && own, 'the save holds an order, a contact and a stationary salvo of the race to copy, and a salvo of the race at the queued point')
-
-    const order = (point, fleet, arrived, time, over = {}) => copyOf('FCT_MoveOrders', orderColumns, `MoveOrderID = ${orderOf.id}`, { DestinationID: point, FleetID: fleet, Arrived: arrived, TimeRequired: time, MoveActionID: STABILISE, DestinationType: 1, ...over })
-    // A contact of the race of the kind a salvo gives, standing still, at `where`'s place or 0.5 km from it; `over` changes the rest.
-    const contact = (id, where, over = {}) => copyOf('FCT_Contacts', contactColumns, `UniqueID = ${contactOf.id}`, { ContactID: id, SystemID: where.system, Xcor: where.x + (over.shift || 0), Ycor: where.y, ContactType: 3, Speed: 0, LastUpdate: GAME_TIME, DetectRaceID: IDS.RaceID, ...Object.fromEntries(Object.entries(over).filter(([key]) => key !== 'shift')) })
-
-    return [
-      order(POINT.fleets, FLEET.second, 0, 0),
-      order(POINT.queued, FLEET.first, 0, 0),
-      order(POINT.awaiting, FLEET.third, 1, 0),
-      order(POINT.fleets, FLEET.fourth, 1, 5000),
-      order(POINT.contacts, FLEET.first, 1, 7000, { RaceID: 786 }),
-      order(POINT.other, FLEET.first, 1, 7000, { MoveActionID: 1 }),
-      `update FCT_JumpPoint set JumpGateRaceID = 786 where GameID = ${IDS.GameID} and WarpPointID = ${POINT.other}`,
-      `update FCT_JumpPoint set JumpGateRaceID = 0 where GameID = ${IDS.GameID} and WarpPointID = ${POINT.unrecorded}`,
-      contact(9000001, at.contacts, { ContactMethod: 2 }),
-      contact(9000001, at.contacts, { ContactMethod: 3 }),
-      contact(9000002, at.contacts, { LastUpdate: EARLIER }),
-      contact(9000003, at.unrecorded, { shift: 0.5 }),
-      contact(9000004, { ...at.unrecorded, system: SYSTEMS.awaiting }),
-      contact(9000005, at.unrecorded, { shift: 5 }),
-      contact(own.id, at.queued),
-      contact(9000007, at.uncharted),
-      contact(9000008, at.other, { DetectRaceID: 787 }),
-      contact(9000009, at.queued, { Speed: 5 }),
-      contact(9000010, at.contacts, { ContactType: 4 }),
-      copyOf('FCT_MissileSalvo', salvoColumns, `MissileSalvoID = ${salvoOf.id}`, { SystemID: at.uncharted.system, Xcor: at.uncharted.x, Ycor: at.uncharted.y }),
-      copyOf('FCT_MissileSalvo', salvoColumns, `MissileSalvoID = ${salvoOf.id}`, { SystemID: at.queued.system, Xcor: at.queued.x + 50, Ycor: at.queued.y }),
-    ]
-  } finally {
-    raw.close()
-  }
-}
 
 // A copy of the save in a folder of its own, with `statements` run on it.
 const saveCopy = async (prefix, statements, from) => {
@@ -145,30 +71,9 @@ const saveCopy = async (prefix, statements, from) => {
   return { folder, file }
 }
 
-// ---------- the datasets ----------
+// ---------- the dataset ----------
 
-// The column of the salvos the module reads for a salvo that lurks, which a recorded 2.x save lacks: given the default of the game, no salvo lurking, so that the recorded campaign still holds the counts it was written for.
-const LURKER_COLUMN = ['FCT_MissileSalvo', 'LurkerMode', 'INTEGER default 0']
-
-// The anchor columns of the life pods and wrecks that the Galaxy Map's recovery ledger reads (scripts/check-recovery-ledger.js `ANCHOR_COLUMNS`), which a recorded 2.x save lacks and the page of the campaign would otherwise fail to read: only the copy the browser reads gets them, with the defaults of the game.
-const ANCHOR_COLUMNS = [['FCT_Lifepods', 'OrbitBodyID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0']]
-
-// What the checks read of a dataset: `ids` (GameID, RaceID), `names` (the game and the race as the Empires page lists them), `point` (the points of the cases: queued, unrecorded, contacts, other, awaiting, fleets, unexplored, uncharted; null where the save holds none), `systems` (gates, awaiting, fleets, uncharted), `shown` (the systems the page is shown), `source` (the file the copy the browser reads is made from), `base` and `statements(base)` (the statements written into the copy), `cases` (which of the cases the oracle tells apart the save holds: the checks assert the whole spread of states and counts only where it does) and `missing` (the cases printed as skipped: { name, checks, reason }).
-const campaignDataset = () => ({
-  key: 'campaign',
-  label: 'the recorded campaign (a regression input, not a fixture run)',
-  source: convertedSave(CAMPAIGN_SAVE, { line: true, columns: [LURKER_COLUMN, ...ANCHOR_COLUMNS] }),
-  base: convertedSave(CAMPAIGN_SAVE, { columns: [LURKER_COLUMN] }),
-  ids: IDS,
-  names: NAMES,
-  point: POINT,
-  systems: SYSTEMS,
-  shown: SHOWN,
-  cases: { orders: true, salvos: true, contacts: true, builders: true, farUncharted: true },
-  statements: fixtureStatements,
-  missing: [],
-})
-
+// What the checks read of the dataset: `ids` (GameID, RaceID), `names` (the game and the race as the Empires page lists them), `point` (the points of the cases: queued, contacts, awaiting, unexplored, uncharted), `systems` (gates, awaiting, fleets, uncharted), `shown` (the systems the page is shown), `source` (the file the copy the browser reads is made from), `cases` (which of the cases the oracle tells apart the save holds: the checks assert the whole spread of states and counts only where it does) and `missing` (the cases printed as skipped: { name, checks, reason }).
 // The fixture, as it is: the system, the points and the cases it lacks are found in it by SQL, so that the check holds on the save the fixture stands for and says so when it does not.
 const fixtureDataset = () => {
   const ids = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
@@ -207,22 +112,17 @@ const fixtureDataset = () => {
   ].filter(Boolean)
 
   return {
-    key: 'fixture',
     label: 'the fixture',
     source: fixturePath(),
-    base: fixturePath(),
     ids,
     names: { game: FIXTURE.gameName, race: FIXTURE.raceName },
-    point: { queued: queued.id, unrecorded: null, contacts: contacts.id, other: null, awaiting: awaiting.id, fleets: null, unexplored: unexplored.id, uncharted: uncharted.id },
+    point: { queued: queued.id, contacts: contacts.id, awaiting: awaiting.id, unexplored: unexplored.id, uncharted: uncharted.id },
     systems: { gates: gates.system, awaiting: awaiting.system, fleets: unexplored.system, uncharted: uncharted.system },
     shown: [...new Set([gates.system, awaiting.system, unexplored.system, uncharted.system])],
     cases,
-    statements: async () => [],
     missing,
   }
 }
-
-const DATASETS = { fixture: fixtureDataset, campaign: campaignDataset }
 
 // The pieces of SQL the oracle is written from, for the game and the race of a dataset.
 const sqlOf = ({ GameID: G, RaceID: R }) => {
@@ -370,8 +270,6 @@ const observeModule = async (changes) => {
   }
 }
 
-const byId = (rows) => Object.fromEntries(rows.map((row) => [row.WarpPointID, row]))
-
 // The problems of `rows` set against the oracle's rows by the identity of the point.
 const sameRows = (rows, truth) => {
   const { pairs, problems } = pairedBy('the rows', rows, [...truth.points.values()], (row) => String(row.WarpPointID), (row) => String(row.id))
@@ -408,9 +306,8 @@ const MODULE_CHECKS = [
   }],
   ['m-detected', 'the objects detected of each row are the distinct stationary salvos the race holds a contact of, once for each object however many contacts, those of its own salvos left out, the earlier ones counted apart', (o, t) => {
     const wrong = sameRows(o.rows, t).pairs.filter(([truth, row]) => valueOf(row.detected) !== truth.detected || row.earlier !== truth.earlier).map(([truth, row]) => [truth.id, valueOf(row.detected), truth.detected, row.earlier, truth.earlier])
-    const at = byId(o.rows)
 
-    return (wrong.length === 0 && (!t.dataset.cases.contacts || t.dataset.key !== 'campaign' || (valueOf(at[t.dataset.point.contacts].detected) === 1 && at[t.dataset.point.contacts].earlier === 1 && valueOf(at[t.dataset.point.queued].detected) === 0))) || short(wrong.slice(0, 3))
+    return wrong.length === 0 || short(wrong.slice(0, 3))
   }],
   ['m-probes', 'the probe count of every row is unknown, as the save marks no probe', (o) => o.rows.concat(o.small).every((row) => row.probes.status === 'unavailable' && row.probes.value === null) || short(o.rows.filter((row) => row.probes.status !== 'unavailable').slice(0, 2).map((row) => row.probes))],
   ['m-small-counts', 'on the small save each salvo counts once however many rows, a salvo or a contact a kilometre away or more, moving, of another race, in another system or of another kind counts nowhere, a salvo that lurks counts as stationary whatever its speed and a count of nothing is 0', (o) => {
@@ -934,7 +831,7 @@ const LACKS = {
 }
 /* eslint-enable no-template-curly-in-string */
 
-// The cases a planted fault is only told from the page as it is where the dataset holds them: the figure the fault changes is the same with it and without it when the save holds none of the case. A dataset that lacks one has the fault run on the recorded campaign alone, and the head of the dataset says so.
+// The cases a planted fault is only told from the page as it is where the dataset holds them: the figure the fault changes is the same with it and without it when the save holds none of the case. A fault that needs a case the fixture lacks is judged by its checks of the small save written here alone, and is not run when it names none, and the head of the fixture says so.
 const NEEDS = {
   orders: ['the order that is further along gives way to the earlier', 'an order not yet at the point is being stabilised', 'the orders of every race are read', 'an order on its way draws as being stabilised', 'the fleets of a point list one fleet twice and leave another out'],
   salvos: ['a buoy counts as a mine', 'an object 100 km away is at the point', 'the minefields cell draws the buoys'],
@@ -960,8 +857,8 @@ const applyNeeds = () => {
   }
 }
 
-// The checks a fault is judged by on a dataset with the cases `cases`: the checks it names that the run on the dataset holds (the checks of the small save written here are the same on every dataset, and run on the recorded campaign), none when it needs a case the dataset lacks.
-const failsOn = (fault, cases) => ((fault.needs || []).every((key) => cases[key]) ? fault.fails.filter((id) => !id.startsWith('m-small-')) : [])
+// The checks a fault is judged by on a dataset with the cases `cases`: all it names when the dataset holds the cases it needs, else its checks of the small save written here alone (they are the same on every dataset), none when it names no such check.
+const failsOn = (fault, cases) => ((fault.needs || []).every((key) => cases[key]) ? fault.fails : fault.fails.filter((id) => id.startsWith('m-small-')))
 
 // ---------- the results ----------
 
@@ -1012,8 +909,8 @@ const report = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `\n         ${typeof result === 'string' ? result : 'false'}`}`)
 }
 
-// What a report says of the dataset it ran on: nothing on the recorded campaign (whose reports keep their names), the label of the dataset on the fixture.
-const datasetNote = () => (ENV.dataset.key === 'campaign' ? '' : ` (on ${ENV.dataset.label})`)
+// What a report says of the dataset it ran on: its label.
+const datasetNote = () => ` (on ${ENV.dataset.label})`
 
 const reportFault = (fault, results) => {
   report(`fault caught: ${fault.name}${datasetNote()}`, caughtAll(results, { name: fault.name }) ? true : notCaught(results), `fails ${fault.fails.join(', ')}`)
@@ -1048,7 +945,7 @@ const view = async (fault, options = {}) => {
 
 const moduleView = (fault) => observeModule(fault ? { [fault.file]: fault.change } : {})
 
-// The controls of the readers the checks use: they hold whatever the dataset, and are run on the recorded campaign.
+// The controls of the readers the checks use: they hold whatever the dataset.
 const checkControls = (o) => {
   const control = judge(o, ENV.truth, [['planted', 'a check that fails by its own value', () => 'what was seen']])
 
@@ -1075,39 +972,32 @@ const checkControls = (o) => {
   report('control: the reader of the fleets under a stabilisation takes each expected name the number of times it is expected, whatever the separators, and no other text', JSON.stringify(fleets) === JSON.stringify([['Alpha', 'Bravo'], ['Alpha', 'Bravo'], ['Alpha, Alpha'], ['Bravo, Bravo'], ['Alpha'], ['Alpha', 'Alpha 2'], ['Alpha', 'Alpha']]) ? true : `read ${JSON.stringify(fleets)}`)
 }
 
-// What the fixture cannot exercise, printed as skipped: each case the save does not hold with the checks left without it, and the planted faults that are run on the recorded campaign alone.
+// What the fixture cannot exercise, printed as skipped: each case the save does not hold with the checks left without it, and the planted faults that need a case it does not hold.
 const printSkips = (dataset, where) => {
   for (const lack of dataset.missing) {
     console.log(`SKIP  ${where}: ${lack.name}: needs tier b: ${lack.reason}; no case of it for the checks ${lack.checks.join(', ')}, which still compare each figure with SQL`)
   }
 
   const faults = [...MODULE_FAULTS, ...PAGE_FAULTS, ...LACKING_FAULTS, ...BUILDER_FAULTS]
-  const small = faults.filter((fault) => fault.fails.every((id) => id.startsWith('m-small-')))
-  const needing = faults.filter((fault) => !small.includes(fault) && failsOn(fault, dataset.cases).length === 0)
+  const needing = faults.filter((fault) => (fault.needs || []).some((key) => !dataset.cases[key]))
+  const unjudged = needing.filter((fault) => failsOn(fault, dataset.cases).length === 0)
 
-  console.log(`SKIP  ${where}: ${needing.length} of the ${faults.length} planted faults need a case this save does not hold (${[...new Set(needing.flatMap((fault) => fault.needs.filter((key) => !dataset.cases[key])))].join(', ')}) and ${small.length} are judged on the small save written here alone, so they run on the recorded campaign`)
+  console.log(`SKIP  ${where}: ${needing.length} of the ${faults.length} planted faults need a case this save does not hold (${[...new Set(needing.flatMap((fault) => fault.needs.filter((key) => !dataset.cases[key])))].join(', ')}): ${unjudged.length} of them are not run and ${needing.length - unjudged.length} are judged on the small save written here alone`)
 }
 
 const checkHead = async () => {
   const { dataset } = ENV.truth
-  const campaign = dataset.key === 'campaign'
   const where = `on ${dataset.label}`
   const o = await observeModule({})
 
-  judge(o, ENV.truth, MODULE_CHECKS.filter(([id]) => campaign || !id.startsWith('m-small-'))).forEach(({ name, result }) => report(`${name} (${where})`, result))
-
-  if (campaign) {
-    checkControls(o)
-  }
+  judge(o, ENV.truth, MODULE_CHECKS).forEach(({ name, result }) => report(`${name} (${where})`, result))
+  checkControls(o)
 
   const seen = await view(null)
 
   pageResults(seen, ENV.truth, { strict: false, label: `the page ${where}` }).forEach(({ name, result }) => report(`${name} (${where})`, result))
-
-  if (!campaign) {
-    console.log(`INFO  ${where}: the tables are read for the systems ${dataset.shown.join(', ')} (the system ${dataset.systems.gates} holds ${wanted(ENV.truth, dataset.systems.gates).length} charted points, ${wanted(ENV.truth, dataset.systems.gates).filter((row) => row.gate !== 'none').length} with a gate); the map cases use the points ${dataset.point.contacts} (a gate whose far side is charted), ${dataset.point.unexplored} (far side not charted) and ${dataset.point.awaiting} (no gate, in another system), and ${dataset.point.uncharted} is a point of a known system that the race has not charted (${ENV.truth.charted} charted points in all)`)
-    printSkips(dataset, where)
-  }
+  console.log(`INFO  ${where}: the tables are read for the systems ${dataset.shown.join(', ')} (the system ${dataset.systems.gates} holds ${wanted(ENV.truth, dataset.systems.gates).length} charted points, ${wanted(ENV.truth, dataset.systems.gates).filter((row) => row.gate !== 'none').length} with a gate); the map cases use the points ${dataset.point.contacts} (a gate whose far side is charted), ${dataset.point.unexplored} (far side not charted) and ${dataset.point.awaiting} (no gate, in another system), and ${dataset.point.uncharted} is a point of a known system that the race has not charted (${ENV.truth.charted} charted points in all)`)
+  printSkips(dataset, where)
 }
 
 const checkModuleFault = async (fault) => {
@@ -1118,7 +1008,7 @@ const checkModuleFault = async (fault) => {
 const checkModuleBenign = async (rewrite) => {
   const wrong = judge(await moduleView(rewrite), ENV.truth, MODULE_CHECKS).filter(({ result }) => result !== true).map(({ id }) => id)
 
-  report(`variant passes: ${rewrite.name}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
+  report(`variant passes: ${rewrite.name}${datasetNote()}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
 }
 
 const checkFault = async (fault) => {
@@ -1148,7 +1038,7 @@ const checkBenign = async (rewrite) => {
   const shape = (value) => JSON.stringify(Object.values(value.systems).map((table) => table.cells.map((entry) => [entry.id, entry.cell, entry.on])))
   const same = rewrite.words ? shape(seen.value) === shape(ENV.baseline.value) : JSON.stringify(seen.value) === JSON.stringify(ENV.baseline.value)
 
-  report(`variant passes: ${rewrite.name}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
+  report(`variant passes: ${rewrite.name}${datasetNote()}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
 }
 
 const composeBenign = (rewrites) => {
@@ -1287,7 +1177,7 @@ const lackingView = async (kind, fault) => {
   const lack = LACKS[kind]
 
   if (!ENV.lackingFiles[kind]) {
-    const lacking = await saveCopy(`ae-jump-infrastructure-lacking-${kind}-`, [...ENV.statements, lack.drop], ENV.dataset.source)
+    const lacking = await saveCopy(`ae-jump-infrastructure-lacking-${kind}-`, [lack.drop], ENV.dataset.source)
 
     cleanups.push(async () => fs.rmSync(lacking.folder, { recursive: true, force: true }))
     ENV.lackingFiles[kind] = lacking.file
@@ -1317,15 +1207,14 @@ const checkLackingFault = async (kind, fault) => {
   reportFault(fault, pageResults(await lackingView(kind, fault), ENV.truth, { ids: fault.fails, label: `the save lacking ${LACKS[kind].label} with the fault "${fault.name}"`, list: LACKS[kind].checks }))
 }
 
-// What a worker sets up once before its first variant: the copy of the save of its dataset with the cases written into it (the recorded campaign only), the oracle's reading of it, the words of the module's tables, the texts of the files a variant may change, and one page server over the copy, warmed, with one Chromium.
+// What a worker sets up once before its first variant: the copy of the save of its dataset, the oracle's reading of it, the words of the module's tables, the texts of the files a variant may change, and one page server over the copy, warmed, with one Chromium.
 const setUp = async (dataset) => {
   const { startPageServer } = require('./lib/page-server')
-  const statements = await dataset.statements(dataset.base)
-  const copy = await saveCopy('ae-jump-infrastructure-', statements, dataset.source)
+  const copy = await saveCopy('ae-jump-infrastructure-', [], dataset.source)
 
   cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
 
-  const env = { dataset, statements, copy, truth: await truthOf(copy.file, dataset), words: wordsOf(await loadModules()), original: {}, lackingFiles: {}, baseline: null }
+  const env = { dataset, copy, truth: await truthOf(copy.file, dataset), words: wordsOf(await loadModules()), original: {}, lackingFiles: {}, baseline: null }
 
   for (const file of [PAGE, MAP, GRAPH, MODULE, PLACES]) {
     env.original[file] = source(file)
@@ -1345,9 +1234,9 @@ const setUp = async (dataset) => {
 
 // The deadlines, in seconds.
 const DEADLINES = { head: 300, module: 120, view: 240, setup: 900 + 180 }
-const CONTROL_FAULT = 'the minefields cell draws the buoys'
+const CONTROL_FAULT = 'the minefields cell is hidden with v-show'
 
-// A variant on the dataset `key`: the dataset is its pool, so that a worker (which keeps one page server, for the one save the page-server middleware is loaded for) runs variants of one dataset only.
+// A variant on the dataset `key`: the dataset is its pool, so that a worker (which keeps one page server, for the one save the page-server middleware is loaded for) runs the variants of one dataset.
 const on = (key, variant) => ({ ...variant, pool: key })
 
 const variantsOf = (doMutations, lacking, explicitSelection) => {
@@ -1356,29 +1245,19 @@ const variantsOf = (doMutations, lacking, explicitSelection) => {
   const cases = doMutations ? fixtureDataset().cases : null
   // The faults of a list that the fixture's run judges, each with the checks it is judged by there and the place it has in its list.
   const there = (list) => list.map((fault, index) => ({ fault, index, fails: failsOn(fault, cases) })).filter(({ fails }) => fails.length > 0)
-  const pageBenign = doMutations ? explicitSelection ? [
-    ...PAGE_BENIGN.map((rewrite, index) => on('campaign', { key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nvariants that say the same thing', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(rewrite) })),
-    on('campaign', { key: PAGE_COMPOSITE_A.key, name: `variant passes: ${PAGE_COMPOSITE_A.name}`, heading: '\ncomposed variants that say the same thing', deadline: DEADLINES.view, baseline: true, run: checkPageComposite }),
-  ] : [
-    on('campaign', { key: PAGE_COMPOSITE_A.key, name: `variant passes: ${PAGE_COMPOSITE_A.name}`, heading: '\ncomposed variants that say the same thing', deadline: DEADLINES.view, baseline: true, run: checkPageComposite }),
-    on('campaign', { key: 'benign:4', name: `variant passes: ${PAGE_BENIGN[4].name}`, heading: '\nvariants that say the same thing', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(PAGE_BENIGN[4]) }),
-  ] : []
+  const benign = (rewrite, index) => on('fixture', { key: `fixture-benign:${index}`, name: `variant passes: ${rewrite.name} (on the fixture)`, heading: '\nvariants that say the same thing, on the fixture', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(rewrite) })
+  const pageBenign = doMutations ? (explicitSelection ? PAGE_BENIGN.map(benign) : [benign(PAGE_BENIGN[4], 4)]) : []
   const moduleBenign = doMutations ? MODULE_BENIGN : []
 
   return [
     on('fixture', { key: 'head:fixture', name: 'the head on the fixture: the module and the table on the page as they are', head: true, heading: 'The jump point infrastructure table on the fixture (scripts/lib/page-server.js over a copy of the save of scripts/lib/fixtures.js)', deadline: DEADLINES.head, run: checkHead }),
     ...(doMutations ? there(MODULE_FAULTS).map(({ fault, index, fails }) => on('fixture', { key: `fixture-module-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: '\nplanted faults of the module, on the fixture', deadline: DEADLINES.module, run: () => checkModuleFault({ ...fault, fails }) })) : []),
+    ...moduleBenign.map((rewrite, index) => on('fixture', { key: `fixture-module-benign:${index}`, name: `variant passes: ${rewrite.name} (on the fixture)`, heading: '\nrewrites of the module that say the same thing, on the fixture', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })),
     ...(doMutations ? there(PAGE_FAULTS).map(({ fault, index, fails }) => on('fixture', { key: `fixture-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: '\nplanted faults of the page, on the fixture', deadline: DEADLINES.view, run: () => checkFault({ ...fault, fails }) })) : []),
     ...(doMutations ? [on('fixture', { key: `fixture-${PAGE_COMPOSITE_A.key}`, name: `variant passes: ${PAGE_COMPOSITE_A.name} (on the fixture)`, heading: '\ncomposed variants that say the same thing, on the fixture', deadline: DEADLINES.view, baseline: true, run: checkPageComposite })] : []),
+    ...pageBenign,
     ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => on('fixture', { key: `fixture-${lack.key}`, name: `the head on the fixture: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}, on the fixture`, deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
     ...(lacking && doMutations ? Object.entries(LACKS).flatMap(([kind, lack]) => there(lack.faults).map(({ fault, index, fails }) => on('fixture', { key: `fixture-${lack.key}-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: `\nA save lacking ${lack.label}, on the fixture`, deadline: DEADLINES.view, run: () => checkLackingFault(kind, { ...fault, fails }) }))) : []),
-    on('campaign', { key: 'head:campaign', name: 'the head on the recorded campaign: the module and the table on the page as they are (a regression input, not a fixture run)', head: true, heading: '\nThe jump point infrastructure table on the recorded campaign (the cases of the table written into a copy of it)', deadline: DEADLINES.head, run: checkHead }),
-    ...(doMutations ? MODULE_FAULTS.map((fault, index) => on('campaign', { key: `module-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the module', deadline: DEADLINES.module, run: () => checkModuleFault(fault) })) : []),
-    ...moduleBenign.map((rewrite, index) => on('campaign', { key: `module-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the module that say the same thing', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })),
-    ...(doMutations ? PAGE_FAULTS.map((fault, index) => on('campaign', { key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', deadline: DEADLINES.view, run: () => checkFault(fault) })) : []),
-    ...pageBenign,
-    ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => on('campaign', { key: lack.key, name: `the head: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}`, deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
-    ...(lacking && doMutations ? Object.entries(LACKS).flatMap(([kind, lack]) => lack.faults.map((fault, index) => on('campaign', { key: `${lack.key}-fault:${index}`, name: `fault caught: ${fault.name}`, heading: `\nA save lacking ${lack.label}`, deadline: DEADLINES.view, run: () => checkLackingFault(kind, fault) }))) : []),
   ]
 }
 
@@ -1388,11 +1267,11 @@ const main = async () => {
   const totals = await runSuite({
     script: __filename,
     workers: 4,
-    inputs: [CAMPAIGN_SAVE, FIXTURE.file],
+    inputs: [FIXTURE.file],
     variants: variantsOf(doMutations, !process.argv.includes('--no-lacking'), explicitSelection),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
-      ENV = await setUp(DATASETS[queue[0].pool]())
+      ENV = await setUp(fixtureDataset())
 
       if (queue.some((variant) => variant.baseline)) {
         ENV.baseline = await view(null, { map: false })
@@ -1414,7 +1293,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: doMutations ? { fault: `fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head:campaign', heading: '\nthe control of the warm page server' } : null,
+    control: doMutations ? { fault: `fixture-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head:fixture', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 
