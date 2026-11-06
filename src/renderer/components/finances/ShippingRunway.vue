@@ -32,6 +32,10 @@
             <td>Shipping taxes taken</td>
             <td class="text-right text-no-wrap">{{ money(model.flows.taxes.value) }}<provenance-mark :result="model.flows.taxes" /></td>
           </tr>
+          <tr v-if="model.flows.fuel.value">
+            <td>Civilian fuel sale income, not a shipping tax</td>
+            <td class="text-right text-no-wrap">{{ money(model.flows.fuel.value) }}<provenance-mark :result="model.flows.fuel" /></td>
+          </tr>
           <tr v-if="model.flows.legacy.value">
             <td>Other civilian spending uses</td>
             <td class="text-right text-no-wrap">{{ money(model.flows.legacy.value) }}<provenance-mark :result="model.flows.legacy" /></td>
@@ -186,7 +190,7 @@
 
       <div class="caption text--secondary mt-3">The observed past rate of the treasury is the Stock rates panel of <router-link to="/history">Empire History</router-link>{{ historyRecorded ? '' : ', which is empty while history does not record the race' }}; it is not repeated here.</div>
     </div>
-    <div class="panel-foot caption text--secondary">Compare each scenario with the no-change runway and non-shipping budget obligations. Each scenario keeps the window's rates constant from now on, replaces the civilian shipping flows as stated and keeps every other logged flow. Logged amounts remain separate from scenario estimates. The calculation uses the current tax rate because the save keeps no earlier rate. A rate change within the window therefore gives an incorrect split of logged contracts. Unlogged changes and the treasury cap of twice annual wealth are excluded, as shown in Treasury against the log. New contract fares come from the Civilian shipping-line payouts panel. Enter the running cost of government transports. They are not assumed to be free, and a blank cost gives no estimate. The spread shows how far the exhaustion moves with the window the rates are scaled from. It is not a probability.</div>
+    <div class="panel-foot caption text--secondary">Compare each scenario with the no-change runway and non-shipping budget obligations. Each scenario keeps the window's rates constant from now on, replaces the civilian shipping flows as stated and keeps every other logged flow. Logged amounts remain separate from scenario estimates. The calculation uses the current tax rate because the save keeps no earlier rate. A rate change within the window therefore gives an incorrect split of logged contracts. The civilian fuel sale's income is the race's fifth of a civilian harvester's fuel sale, not a levy on a shipping fare, so it is shown apart from the shipping taxes and still counts in the civilian net. Unlogged changes and the treasury cap of twice annual wealth are excluded, as shown in Treasury against the log. New contract fares come from the Civilian shipping-line payouts panel. Enter the running cost of government transports. They are not assumed to be free, and a blank cost gives no estimate. The spread shows how far the exhaustion moves with the window the rates are scaled from. It is not a probability.</div>
   </v-card>
 </template>
 

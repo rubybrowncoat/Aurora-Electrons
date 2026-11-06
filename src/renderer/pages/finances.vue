@@ -128,7 +128,7 @@
             <v-row>
               <v-col cols="12" lg="6">
                 <div class="subtitle-2 mb-1">Rate by category, per unit carried and per billion km travelled</div>
-                <v-simple-table dense class="tariff-table">
+                <v-simple-table v-if="!tariffGap" dense class="tariff-table">
                   <thead>
                     <tr>
                       <th>Category</th>
@@ -144,6 +144,7 @@
                     </tr>
                   </tbody>
                 </v-simple-table>
+                <div v-else class="caption text--secondary">{{ tariffGap }}</div>
               </v-col>
               <v-col cols="12" lg="6">
                 <div class="subtitle-2 mb-1">Worked estimate of a payout</div>
@@ -158,8 +159,9 @@
                     <v-text-field v-model="tariffDistance" type="number" min="0" label="One-way loaded distance, billion km" aria-label="One-way loaded distance in billion km" dense outlined hide-details />
                   </v-col>
                 </v-row>
-                <div class="mt-3">Payout to the shipping line: <span class="font-weight-medium">{{ amountText(estimate.value) }}</span><provenance-mark :result="estimate" label /></div>
-                <div class="caption text--secondary">{{ estimate.value === null ? limitationText(estimate) : estimateBasis }}</div>
+                <div class="mt-3">Fare at the published rates, before the race's shipping-line tax: <span class="font-weight-medium">{{ amountText(fare.value) }}</span><provenance-mark :result="fare" label /></div>
+                <div class="mt-1">Paid to the line: <span class="font-weight-medium">{{ amountText(estimate.value) }}</span><provenance-mark :result="estimate" label /></div>
+                <div class="caption text--secondary">{{ estimate.value === null ? estimateLimitation : estimateBasis }}</div>
               </v-col>
             </v-row>
 
@@ -187,17 +189,17 @@
             <div class="mt-1">Net cost of shipping-line payouts to the treasury: <span class="font-weight-medium">{{ netCost.value === null ? '—' : signed(netCost.value) }}</span><provenance-mark :result="netCost" label /></div>
             <div class="caption text--secondary">{{ netCost.value === null ? limitationText(netCost) : 'The window\'s logged payout uses less the logged taxes on them.' }}</div>
           </div>
-          <div class="panel-foot caption text--secondary">Use it to read a payout against the logged civilian flows without mixing the two. A shipping-line payout is what a line earns for a trip at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. A computer-run empire's lines are paid half of it. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them. Nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending and no net cost is worked out. The estimate is shown only where the rates are published.</div>
+          <div class="panel-foot caption text--secondary">Use it to read a payout against the logged civilian flows without mixing the two. A shipping-line payout is charged at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. The race's shipping-line tax comes out of the fare before the line is paid, and a computer-run empire's line takes half of what is left. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them. Nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending and no net cost is worked out. The fare and the receipt are shown only where the rates are published.</div>
         </v-card>
 
-        <shipping-runway :ledger="ledger" :treasury="treasury" :wealth="wealth" :window-days="windowDays" :window-options="windowOptions" :formula-version="formulaVersion" :npr="shippingTax ? shippingTax.npr : null" :tax="shippingTax" :tax-state="shippingTaxState" :date="date" :separator="separator" :history-recorded="historyRecorded" @retry="retryShippingTax" />
+        <shipping-runway :ledger="ledger" :treasury="treasury" :wealth="wealth" :window-days="windowDays" :window-options="windowOptions" :formula-version="saveRules" :npr="shippingTaxState.value ? shippingTaxState.value.npr : null" :tax="shippingTaxState.value" :tax-state="shippingTaxState" :date="date" :separator="separator" :history-recorded="historyRecorded" @retry="retryShippingTax" />
       </template>
     </v-container>
   </div>
 </template>
 
 <script>
-import { mapGetters, mapState } from 'vuex'
+import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
@@ -210,14 +212,14 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { ledgerSql } from '../utilities/campaign'
-import { loadFormulaVersion } from '../utilities/capabilities'
-import { CATEGORIES, amountText, civilianCategories, describeTariffVersion, netCostResult, payoutEstimate, rateOf, treasuryMapping } from '../utilities/civilian-tariff'
+import { loadFormulaResult } from '../utilities/capabilities'
+import { CATEGORIES, amountText, civilianCategories, describeTariffVersion, netCostResult, payoutEstimate, rateOf, receiptEstimate, treasuryMapping } from '../utilities/civilian-tariff'
 import { HISTORY_DAYS, SECONDS_PER_DAY, buildLedger, reasonText, statusText } from '../utilities/finances'
 import { branchStore } from '../utilities/history'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
-import { valueOrNull } from '../utilities/provenance'
+import { ruleSupports, valueOrNull } from '../utilities/provenance'
 import { loadShippingTax } from '../utilities/shipping-runway'
 import { ledgerEvidence, recordedAnchors, reconcileTreasury, residualLabel, wealthLogSql } from '../utilities/treasury-anchors'
 
@@ -284,7 +286,6 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'historyRecorded']),
-    ...mapState(['RaceNPR']),
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -312,11 +313,20 @@ export default {
       return allLoaded(this.loadErrors, CORE_INPUTS)
     },
 
-    // The shipping runway panel's read: loading until it has settled, else the words naming it with its message. The panel shows no figure from a read that is in flight or failed.
+    // The race's shipping-line tax as the worked payout and the shipping runway panel may state it, `{ loading, failed, error, value }`: a value only from the latest read settled for the race and the copy of the save now open, so the previous race's rate and kind, or another copy's, are never shown as this one's while a reread runs; a null value with neither loading nor failure is the save storing no rate or kind (`loadShippingTax`). `failed` names the read for the load state, as this page's other reads do, and is empty while it is in or in flight.
     shippingTaxState() {
-      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+      const read = this.loadErrors.shippingTax
+      const held = this.shippingTax
+      const generation = this.$store.state.freshness.generation
+      const current = held && held.GameID === this.GameID && held.RaceID === this.RaceID && held.generation === generation
 
-      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+      if (typeof read === 'string') {
+        const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+
+        return { loading: false, failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: read, value: null }
+      }
+
+      return read === null && current ? { loading: false, failed: '', error: '', value: held.value } : { loading: true, failed: '', error: '', value: null }
     },
 
     ledger() {
@@ -442,23 +452,66 @@ export default {
       ]
     },
 
+    // The save's formula version as text (`formulaVersion` is its result), null while the save states none.
+    saveRules() {
+      return valueOrNull(this.formulaVersion)
+    },
+
     tariffVersionText() {
-      return describeTariffVersion(this.formulaVersion)
+      return describeTariffVersion(this.saveRules)
+    },
+
+    // Where the rate table is unavailable: null while the published rates hold for the save's game rules, else the read that is missing, in words. A save of the line that lacks a column the rules rest on states no game version, so no rate is listed and the table gives way to this.
+    tariffGap() {
+      if (ruleSupports('civilianTariff.rates', this.saveRules) === true) {
+        return null
+      }
+
+      const missing = this.formulaVersion && this.formulaVersion.inputs ? this.formulaVersion.inputs.missing : []
+
+      return missing.length ? `No payout rates are listed: the save's schema does not state the game rules it was played under, and ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not in it.` : 'No payout rates are listed: the save\'s schema does not state the game rules it was played under.'
     },
 
     // Each category's published rate for the save's game version.
     tariffRows() {
-      return CATEGORIES.map((category) => ({ category, rate: rateOf(this.formulaVersion, category.id) }))
+      return CATEGORIES.map((category) => ({ category, rate: rateOf(this.saveRules, category.id) }))
     },
 
-    // The payout the worked estimate's fields stand for, for the selected race's kind (a computer-run empire is paid at half).
+    // The fare the worked estimate's fields stand for at the published rates, before the race's shipping-line tax.
+    fare() {
+      return payoutEstimate({ version: this.saveRules, category: this.tariffCategory, quantity: typed(this.tariffQuantity), billionKm: typed(this.tariffDistance) })
+    },
+
+    // What the line is paid: the fare less the race's shipping-line tax read from the save, halved for a computer-run empire. The rate and the kind come only from `shippingTaxState`, so a read in flight, a failed read or a save without them gives no figure, never the previous race's rate or kind.
     estimate() {
-      return payoutEstimate({ version: this.formulaVersion, category: this.tariffCategory, quantity: typed(this.tariffQuantity), billionKm: typed(this.tariffDistance), npr: this.RaceNPR })
+      const shippingTax = this.shippingTaxState.value
+
+      return receiptEstimate({ version: this.saveRules, category: this.tariffCategory, quantity: typed(this.tariffQuantity), billionKm: typed(this.tariffDistance), taxRate: shippingTax ? shippingTax.rate : null, npr: shippingTax ? shippingTax.npr : null })
     },
 
-    // How the estimate is worked out, said beside it.
+    // How the fare and the receipt are worked out, said beside them: the fare's arithmetic, then the race's tax out of the whole fare and the computer-run halving, which is never applied twice.
     estimateBasis() {
-      return `Units carried times the rate times the one-way loaded route distance in billion km, with every unit carried the whole leg${this.RaceNPR ? ', times 0.5 for a computer-run empire' : ''}.`
+      const shippingTax = this.shippingTaxState.value
+      const halving = shippingTax && shippingTax.npr ? ' A computer-run empire\'s line is then paid half of what is left.' : ''
+
+      return `Units carried times the rate times the one-way loaded route distance in billion km, with every unit carried the whole leg. The race's shipping-line tax is taken out of the whole fare before the line is paid, at the rate the save holds now, so the line's receipt is the fare less that tax.${halving}`
+    },
+
+    // Why the worked payout gives no receipt figure, in the words the Transport page's payout note gives the same states: a read of the race's shipping-line tax still running, one that failed with its message, or the input the receipt needs. A read in flight or failed leaves no figure, so the previous race's receipt never stands.
+    estimateLimitation() {
+      const { estimate, fare, shippingTaxState } = this
+
+      if (shippingTaxState.loading) {
+        return 'Reading the race\'s shipping-line tax, so no amount paid to the line is estimated yet.'
+      } else if (shippingTaxState.failed) {
+        return `No amount paid to the line is estimated: the race's shipping-line tax could not be read (${shippingTaxState.error}).`
+      } else if (fare.value === null) {
+        return this.limitationText(estimate)
+      }
+
+      const { missing } = estimate.inputs
+
+      return missing.length ? `No amount paid to the line is estimated: the save does not hold ${missing.join(' and ')}.` : 'No amount paid to the line is estimated.'
     },
 
     // The ledger's civilian uses, listed as logged.
@@ -479,7 +532,7 @@ export default {
 
     // No source places the civilian uses against a shipping-line payout, so this stays unavailable.
     netCost() {
-      return netCostResult({ version: this.formulaVersion, mapping: TARIFF_MAPPING, totals: Object.fromEntries(this.ledger.categories.map((category) => [category.id, category.total])) })
+      return netCostResult({ version: this.saveRules, mapping: TARIFF_MAPPING, totals: Object.fromEntries(this.ledger.categories.map((category) => [category.id, category.total])) })
     },
 
     tiles() {
@@ -745,25 +798,28 @@ export default {
       }),
       default: null,
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a save that has the formula columns, null for a save without them. The civilian payout rates hold for that version only.
+    // The formula version the save's schema stands for, as its result (`loadFormulaResult`, utilities/capabilities.js): the stated one for a save that has the formula columns, unavailable (naming the columns that are not there) for a save without them. The civilian payout rates hold for that version only.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {
           return null
         }
 
-        return await loadFormulaVersion(this.database)
+        return await loadFormulaResult(this.database)
       }),
       default: null,
     },
-    // The race's shipping-line tax rate and kind (utilities/shipping-runway.js `loadShippingTax`), read for the shipping runway panel alone: a save without the column or with no value stored gives no rate and no kind, never 0% nor a player's race. The kind is the stored value, not the selection's flag, which turns an unstored kind into a player's.
+    // The race's shipping-line tax rate and kind (utilities/shipping-runway.js `loadShippingTax`), read for the worked payout, which takes the tax out of the fare, and for the shipping runway panel: a save without the column or with no value stored gives no rate and no kind, never 0% nor a player's race. The kind is the stored value, not the selection's flag, which turns an unstored kind into a player's. Tagged with the race, the game and the copy of the save it was read for, because the plugin keeps the previous value until a reread settles and that value is never the one shown (`shippingTaxState`). Optional, so the page renders without it and the panel and the estimate name the missing read.
     shippingTax: {
       get: tracked('shippingTax', async function () {
-        if (!this.database || !this.GameID || !this.RaceID) {
+        const { GameID, RaceID } = this
+        const generation = this.$store.state.freshness.generation
+
+        if (!this.database || !GameID || !RaceID) {
           return null
         }
 
-        return await loadShippingTax(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return { GameID, RaceID, generation, value: await loadShippingTax(this.database, { GameID, RaceID }) }
       }),
       default: null,
     },

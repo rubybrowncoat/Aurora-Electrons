@@ -3,7 +3,7 @@
 
   bun scripts/check-shipping-runway.js [--no-mutations] [--no-saves]
 
-  The checks that need no save run the utility on wealth logs worked by hand: a year of 5-day cycles whose per-cycle amounts make every yearly figure a whole number, so each expected figure is written out below from the amounts, not read from the module. They prove: the no-change scenario is the Finances runway itself (the same object of the ledger, and the same value as the treasury over the loss worked by hand, for every window and for a treasury that lasts, one that is never exhausted, a net of exactly 0 and a treasury that is empty); the exhaustion of piecewise nets (two stretches, the first with a surplus, an exhaustion inside the first stretch, one reached in the second) and the balance at a year; the verdict over a horizon (exhausted within it, past it, never, now, unknown) and the date of an exhaustion; contracts delayed, at the tax rate of now, at a rate of 0 and at a changed rate, for a player and for a computer-run empire (whose receipt is halved); government transports, which are never taken as free (a blank running cost gives no figure, a running cost of 0 is a figure) and whose break-even running cost leaves the net as it is; planned contracts of each category (installation cargo pays the line its receipt after the tax, the others carry the tax only), a blank line ignored, no line entered giving no figure, a start after the delay; every blank or unreadable field giving no figure; an unsupported game version, a tax rate that is not stored, a tax rate of 100 %, a logged tax below what the contracts imply and a civilian use on the wrong side of the wealth use table; the saved tax rate read from the save by a loader that checks the column; actual figures (logged, scaled) kept apart from estimates and assumptions; the spread across the windows; and the panel and the page (the optional read that never holds the page back, the summary, the marks, the table beside the chart, no first or second person, no source name of the game).
+  The checks that need no save run the utility on wealth logs worked by hand: a year of 5-day cycles whose per-cycle amounts make every yearly figure a whole number, so each expected figure is written out below from the amounts, not read from the module. They prove: the logged civilian flows keep the fuel sale's income apart from the shipping taxes (a window of fuel income is not tax); the no-change scenario is the Finances runway itself (the same object of the ledger, and the same value as the treasury over the loss worked by hand, for every window and for a treasury that lasts, one that is never exhausted, a net of exactly 0 and a treasury that is empty); the exhaustion of piecewise nets (two stretches, the first with a surplus, an exhaustion inside the first stretch, one reached in the second) and the balance at a year; the verdict over a horizon (exhausted within it, past it, never, now, unknown) and the date of an exhaustion; contracts delayed, at the tax rate of now, at a rate of 0 and at a changed rate, for a player and for a computer-run empire (whose receipt is halved); government transports, which are never taken as free (a blank running cost gives no figure, a running cost of 0 is a figure) and whose break-even running cost leaves the net as it is; planned contracts of each category (installation cargo pays the line its receipt after the tax, the others carry the tax only), a blank line ignored, no line entered giving no figure, a start after the delay; every blank or unreadable field giving no figure; an unsupported game version, a tax rate that is not stored, a tax rate of 100 %, a logged tax below what the contracts imply and a civilian use on the wrong side of the wealth use table; the saved tax rate read from the save by a loader that checks the column; actual figures (logged, scaled) kept apart from estimates and assumptions; the spread across the windows; and the panel and the page (the optional read that never holds the page back, the summary, the marks, the table beside the chart, no first or second person, no source name of the game).
 
   Each planted fault (a change of the utility, of the Finances utility, of the panel or of the page, made in an isolated copy by scripts/lib/mutant-source.js) must fail every group it declares, including each declared save witness. A save witness that did not run rejects the variant, even when its save-free group failed. Ordinary mutants retain their save mappings; composed replants declare only their save-free groups and deliberately do not read saves. Each fault is located by structure (the attribute, key or state it belongs to and its whole value), never by wording or a default. Benign edits must leave every save-free check green, one at a time and all together, and every planted fault must still apply exactly once and fail its declared checks on the source with every benign edit applied.
 
@@ -45,7 +45,7 @@ const STUBS = {
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: ["#a1", "#a2", "#a3", "#a4"], primary: "#p0", ink: "", inkMuted: "" }); export const withAlpha = (color) => color'
-const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
+const STORE = { getters: { config: { get: () => 'Tick' } }, state: { freshness: { generation: 0 } } }
 
 let failures = 0
 let checks = 0
@@ -176,6 +176,7 @@ const SAVED_TAX = { rate: 0.2, missing: '' }
 const USES = {
   44: ['Civilian Contracts', 0],
   32: ['Tax on Shipping Trade Goods', 1],
+  34: ['Tax on Shipping Colonists', 1],
   47: ['Tax on Civilian Fuel', 1],
   11: ['Worker Taxes', 1],
   5: ['Shipbuilding', 0],
@@ -208,7 +209,7 @@ const world = (m, { perCycle = PLAYER, balance = BALANCE, windowDays = 365, shap
 
 const inputsOf = (over = {}) => ({ horizon: 25, futureTax: null, pauseYears: '2', governmentCost: '', planStart: '0', lines: [], ...over })
 
-const buildOf = (m, w, { version = '2.7.x', npr = false, tax = SAVED_TAX, ...over } = {}) => m.sr.buildScenarios({ ledger: w.ledger, version, npr, tax, inputs: inputsOf(over) })
+const buildOf = (m, w, { version = '3.2.x', npr = false, tax = SAVED_TAX, ...over } = {}) => m.sr.buildScenarios({ ledger: w.ledger, version, npr, tax, inputs: inputsOf(over) })
 
 const scenarioOf = (built, id) => built.scenarios.find((scenario) => scenario.id === id)
 
@@ -223,7 +224,7 @@ const gap = (result) => !result.inputs.missing.length ? 'names nothing missing' 
 
 const lasts = (years) => ({ state: 'lasts', years })
 
-// The published 2.7 rates, written apart from the module.
+// The published rates, written apart from the module.
 const RATE = { cargoPoint: 0.00015, tradeGood: 0.375, colonist: 0.00015, passenger: 0.006 }
 
 const runs = (m) => {
@@ -244,7 +245,7 @@ const runs = (m) => {
   // ----- the no-change scenario is the Finances runway -----
   add('parity: the no-change scenario is the ledger\'s own net and runway, for every window', () => [30, 90, 180, 365].map((days) => {
     const w = world(m, { windowDays: days })
-    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: days, ledger: w.ledger, options: [30, 90, 180, 365] }), windowDays: days, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
+    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: days, ledger: w.ledger, options: [30, 90, 180, 365] }), windowDays: days, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
     const first = none(built)
 
     return first.exhaustion === w.ledger.runway && first.net === w.ledger.net ? true : `window ${days}: not the ledger's own results`
@@ -566,9 +567,9 @@ const runs = (m) => {
     return value(delay.exhaustion) === null && gap(delay.exhaustion) === true ? true : short(delay.exhaustion.inputs)
   })
   add('inputs: the tax paired with the contracts is held against the logged tax of installation deliveries alone: another logged civilian tax does not make up for it, and covers it only when the installation tax itself does', () => {
-    const masked = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 47: 25, 11: 40, 5: 60 } })), 'delay')
-    const own = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 32: 25, 47: 25, 11: 40, 5: 60 } })), 'delay')
-    const maskedGross = buildOf(m, world(m, { perCycle: { 44: 100, 47: 25, 11: 40, 5: 60 } })).pieces.gross
+    const masked = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 34: 25, 11: 40, 5: 60 } })), 'delay')
+    const own = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 32: 25, 34: 25, 11: 40, 5: 60 } })), 'delay')
+    const maskedGross = buildOf(m, world(m, { perCycle: { 44: 100, 34: 25, 11: 40, 5: 60 } })).pieces.gross
 
     return value(masked.exhaustion) === null && gap(masked.exhaustion) === true && value(maskedGross) === null && value(own.exhaustion) !== null ? true : short([masked.exhaustion.inputs, value(own.exhaustion)])
   })
@@ -591,7 +592,7 @@ const runs = (m) => {
     const wrong = w.wealth.map((row) => (row.UseID === 44 ? { ...row, Income: 1 } : row))
     const ledger = m.finances.buildLedger({ treasury: w.treasury, wealth: wrong, windowDays: 365 })
     const flows = sr.civilianFlows(ledger)
-    const built = sr.buildScenarios({ ledger, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
+    const built = sr.buildScenarios({ ledger, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
 
     return value(flows.contracts) === null && value(flows.net) === null && flows.net.inputs.missing.join().includes(USES[44][0]) && value(scenarioOf(built, 'delay').exhaustion) === null && scenarioOf(built, 'none').exhaustion === ledger.runway ? true : short(flows.net.inputs)
   })
@@ -612,12 +613,21 @@ const runs = (m) => {
 
     return same(rest.uses.map((use) => [use.id, use.income]), [[6, false], [5, false], [11, true]])
   })
-  add('roles: every civilian use of the log has a role, the taxes are income and the contract and the uses nothing books are spending', () => {
+  add('roles: every civilian use of the log has a role, the taxes and the fuel sale are income and the contract and the uses nothing books are spending', () => {
     const ids = m.tariff.CIVILIAN_USES.map((use) => use.id).sort((a, b) => a - b)
     const roles = Object.keys(sr.ROLES).map(Number).sort((a, b) => a - b)
-    const sides = m.tariff.CIVILIAN_USES.every((use) => (sr.ROLES[use.id] === 'tax') === (use.side === 'income'))
+    const sides = m.tariff.CIVILIAN_USES.every((use) => ['tax', 'fuel'].includes(sr.ROLES[use.id]) === (use.side === 'income'))
 
-    return same(roles, ids) === true && sides && sr.ROLES[sr.CONTRACT_USE] === 'contract' ? true : short([roles, ids, sides])
+    return same(roles, ids) === true && sides && sr.ROLES[sr.CONTRACT_USE] === 'contract' && sr.ROLES[47] === 'fuel' ? true : short([roles, ids, sides])
+  })
+  add('flows: a fuel sale in the log is income of its own, not a shipping tax: the taxes are unchanged, the sale is its own flow, and the civilian net and the ledger both keep it', () => {
+    const plain = world(m)
+    const fuelled = world(m, { perCycle: { ...PLAYER, 47: 10 } })
+    const flows = sr.civilianFlows(fuelled.ledger)
+    const bare = sr.civilianFlows(plain.ledger)
+    const rest = sr.obligations(fuelled.ledger, flows)
+
+    return same([value(flows.taxes), value(bare.taxes), value(flows.contracts)], [1825, 1825, 7300]) === true && near(value(flows.fuel), 730) && near(value(flows.net), 1825 + 730 - 7300) && near(value(fuelled.ledger.net), NET_PLAYER + 730) && near(value(rest.rest), REST) ? true : short([value(flows.taxes), value(flows.fuel), value(flows.net), value(fuelled.ledger.net), value(rest.rest)])
   })
 
   // ----- the saved tax rate -----
@@ -681,7 +691,12 @@ const runs = (m) => {
 
     return rules.every((id) => provenance.getRule(id) && provenance.getRule(id).verification === 'estimated') && provenance.getRule('shippingRunway.assumption').verification === 'assumed' && provenance.getRule('shippingRunway.windowTax').verification === 'assumed' ? true : 'a rule is registered above what it is'
   })
-  add('actual: the breaks of the shipping contracts rule cover the versions the payout rates are published for, and no other', () => ['2.7.x'].every((version) => provenance.ruleSupports('shippingRunway.contractFlow', version) === true) && ['2.6.0', null, 'x'].every((version) => provenance.ruleSupports('shippingRunway.contractFlow', version) !== true) ? true : 'the gate')
+  add('actual: the breaks of the shipping contracts rule cover the versions the payout rates are published for, and no other', () => {
+    const published = provenance.getRule('civilianTariff.rates').versions
+    const holds = (version) => provenance.ruleSupports('shippingRunway.contractFlow', version) === true
+
+    return published.length && published.every(holds) && ['2.6.0', '2.7.1', '3.0.0', null, 'x'].every((version) => !holds(version)) ? true : 'the gate'
+  })
 
   // ----- the windows -----
   const spreadWorld = () => {
@@ -689,7 +704,7 @@ const runs = (m) => {
 
     return w
   }
-  const spreadOf = (w, id = 'none', options = [30, 90, 180, 365]) => sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: w.windowDays, ledger: w.ledger, options }), windowDays: w.windowDays, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf({ governmentCost: '0' }) }).spread[id]
+  const spreadOf = (w, id = 'none', options = [30, 90, 180, 365]) => sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: w.windowDays, ledger: w.ledger, options }), windowDays: w.windowDays, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf({ governmentCost: '0' }) }).spread[id]
   add('window: the spread names the earliest and the latest exhaustion across the windows, with the window each comes from', () => {
     const spread = spreadOf(spreadWorld())
 
@@ -698,7 +713,7 @@ const runs = (m) => {
   add('window: a window changes the figures, and the selected window is what the scenarios show', () => {
     const w = spreadWorld()
     const small = world(m, { perCycle: { 11: 40, 5: 20 }, balance: 11680, shape: { 5: [200, 20, 6] }, windowDays: 30 })
-    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: small.treasury, wealth: small.wealth, windowDays: 30, ledger: small.ledger, options: [30, 90, 180, 365] }), windowDays: 30, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
+    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: small.treasury, wealth: small.wealth, windowDays: 30, ledger: small.ledger, options: [30, 90, 180, 365] }), windowDays: 30, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
 
     return same([built.windowDays, value(scenarioOf(built, 'none').exhaustion), value(w.ledger.runway)], [30, lasts(1), { state: 'covered', years: null }])
   })
@@ -736,7 +751,7 @@ const componentChecks = (ctx) => {
   const w = world(m)
   const fake = fakeDatabase
   const date = (seconds) => String(Math.round(seconds)).replace(/\d/g, (digit) => 'abcdefghij'[digit])
-  const props = (over = {}) => ({ ledger: w.ledger, treasury: w.treasury, wealth: w.wealth, windowDays: 365, windowOptions: [30, 90, 180, 365], formulaVersion: '2.7.x', npr: false, tax: SAVED_TAX, taxState: { loading: false, failed: '', error: '' }, date, separator: '', historyRecorded: true, ...over })
+  const props = (over = {}) => ({ ledger: w.ledger, treasury: w.treasury, wealth: w.wealth, windowDays: 365, windowOptions: [30, 90, 180, 365], formulaVersion: '3.2.x', npr: false, tax: SAVED_TAX, taxState: { loading: false, failed: '', error: '' }, date, separator: '', historyRecorded: true, ...over })
   // Every input of the panel at a value of its own, so that no check rests on the default the panel starts with.
   const INPUT_DATA = { horizon: 25, futureTax: null, pauseYears: '2', governmentCost: '', planStart: '0', view: 'chart' }
   const mount = (over = {}, data = {}) => instantiate(componentOptions, { boundary, $store: STORE, data: { ...props(over), ...INPUT_DATA, ...data } })
@@ -912,6 +927,13 @@ const componentChecks = (ctx) => {
 
     return bare.length === 0 && figures.length > 4 && heads.length === 2 && heads.every(hasMark) ? true : short([bare, figures.length, heads.length])
   })
+  add('component: the fuel sale income is a row of its own, marked, apart from the shipping taxes', () => {
+    const ast = panelAst()
+    const rows = elementsOf(ast, (el) => el.tag === 'tr' && el.if === 'model.flows.fuel.value')
+    const marked = rows.length === 1 && nodesOf(rows[0], (node) => node.type === 1 && node.tag === 'provenance-mark').length === 1
+
+    return rows.length === 1 && marked && nodesOf(rows[0], (node) => node.type === 2 && node.text.includes('model.flows.fuel.value')).length === 1 ? true : 'the fuel row'
+  })
   add('component: the chart has a table of the same balances beside it, behind a toggle, with a column for the log\'s balances and one for each scenario', () => {
     const ast = panelAst()
     const toggle = elementsOf(ast, (el) => el.tag === 'v-btn' && attrOf(el, 'value') === 'table')
@@ -966,12 +988,12 @@ const componentChecks = (ctx) => {
   const mountTag = (pageText.match(/<shipping-runway\b[^>]*>/) || [''])[0]
   const READ = 'shippingTax'
   const mountPage = (data = {}) => instantiate(pageOptions, { boundary, $store: STORE, data: { loadErrors: {}, ...data } })
-  const mountReal = (data = {}) => instantiate({ mixins: [pageReal], methods: { inputSettled() {} } }, { boundary, $store: STORE, data: { loadErrors: {}, treasury: w.treasury, wealth: w.wealth, formulaVersion: '2.7.x', ...data } })
+  const mountReal = (data = {}) => instantiate({ mixins: [pageReal], methods: { inputSettled() {} } }, { boundary, $store: STORE, data: { loadErrors: {}, treasury: w.treasury, wealth: w.wealth, formulaVersion: { value: '3.2.x', status: 'assumed', inputs: { present: [], missing: [] } }, ...data } })
   const coreSettled = () => Object.assign({}, ...labelKeys.filter((key) => key !== READ).map((key) => ({ [key]: null })))
 
   add('page: the panel is mounted once with the ledger, the treasury row, the wealth rows, the window, the version, the race kind, the tax read and its state, and registered', () => {
     const bound = attributesOf(mountTag)
-    const wanted = { ':ledger': 'ledger', ':treasury': 'treasury', ':wealth': 'wealth', ':window-days': 'windowDays', ':window-options': 'windowOptions', ':formula-version': 'formulaVersion', ':tax': 'shippingTax', ':tax-state': 'shippingTaxState', ':date': 'date', ':separator': 'separator', '@retry': 'retryShippingTax' }
+    const wanted = { ':ledger': 'ledger', ':treasury': 'treasury', ':wealth': 'wealth', ':window-days': 'windowDays', ':window-options': 'windowOptions', ':formula-version': 'saveRules', ':tax': 'shippingTaxState.value', ':tax-state': 'shippingTaxState', ':date': 'date', ':separator': 'separator', '@retry': 'retryShippingTax' }
 
     return Object.entries(wanted).every(([name, expression]) => bound[name] === expression) && isText(bound[':npr']) && !/RaceNPR/.test(bound[':npr']) && (pageText.match(/<shipping-runway\b/g) || []).length === 1 && 'ShippingRunway' in pageOptions.components ? true : `${mountTag} ${Object.keys(pageOptions.components)}`
   })
@@ -1020,7 +1042,7 @@ const componentChecks = (ctx) => {
     const full = mountPage({ database, GameID: 7, RaceID: 9 })
     const read = await full.runAsync(READ)
 
-    return none === null && noRace === null && noGame === null && read.rate === 0.3 && full.loadErrors[READ] === null && /GameID = 7/.test(sqls.join()) && /RaceID = 9/.test(sqls.join()) ? true : short([none, noRace, noGame, read])
+    return none === null && noRace === null && noGame === null && read.value.rate === 0.3 && read.GameID === 7 && read.RaceID === 9 && full.loadErrors[READ] === null && /GameID = 7/.test(sqls.join()) && /RaceID = 9/.test(sqls.join()) ? true : short([none, noRace, noGame, read])
   })
   add('page: the runway page does not wait for the tax read, and a failure of it is shown on the panel alone', async () => {
     const busyError = new Error('SQLITE_BUSY')
@@ -1037,6 +1059,7 @@ const componentChecks = (ctx) => {
     const failed = [vm.ready, vm.failedInputs.length, vm.failedInputsText, vm.shippingTaxState.failed !== '', vm.shippingTaxState.loading, vm.shippingTaxState.error]
 
     vm.loadErrors[READ] = null
+    vm.shippingTax = { GameID: 1, RaceID: 2, generation: 0, value: { rate: 0.25, missing: '', npr: false } }
 
     return same([before, failed, [vm.ready, vm.shippingTaxState.loading, vm.shippingTaxState.failed]], [[true, true, true], [true, 0, '', true, false, 'SQLITE_BUSY'], [true, false, '']])
   })
@@ -1048,6 +1071,14 @@ const componentChecks = (ctx) => {
     return same([vm.ready, vm.failedInputs, alone.failed !== '', alone.loading, again.failed, again.loading], [false, ['treasury'], true, false, '', true])
   })
   add('page: the page without a treasury row is not ready, even with every read in', () => same(mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, treasury: null }).ready, false))
+  add('page: a tax read made for another race or another copy of the save is not taken as this race\'s, so the panel waits for its own read', () => {
+    const read = { rate: 0.25, missing: '', npr: true }
+    const other = mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, GameID: 1, RaceID: 2, shippingTax: { GameID: 1, RaceID: 3, generation: 0, value: read } }).shippingTaxState
+    const older = mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, GameID: 1, RaceID: 2, shippingTax: { GameID: 1, RaceID: 2, generation: 4, value: read } }).shippingTaxState
+    const here = mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, GameID: 1, RaceID: 2, shippingTax: { GameID: 1, RaceID: 2, generation: 0, value: read } }).shippingTaxState
+
+    return same([other.loading, other.value, older.loading, older.value, here.loading, here.value], [true, null, true, null, false, read])
+  })
   add('page: the optional read is named in the words of the load state: its own label, which no other read has', () => {
     const labelOf = (key) => (labels.match(new RegExp(`^ {2}${key}:\\s*'([^']*)'`, 'm')) || [])[1]
     const own = labelOf(READ)
@@ -1105,22 +1136,22 @@ const saveStatements = async (ctx, save) => {
   const { m, pageOptions } = ctx
   const statements = []
   const add = (name, test) => statements.push([name, test])
-  const vm = instantiate(pageOptions, { boundary, $store: STORE, database, GameID: save.game, RaceID: save.race, data: { loadErrors: {}, formulaVersion: '2.7.x' } })
+  const vm = instantiate(pageOptions, { boundary, $store: STORE, database, GameID: save.game, RaceID: save.race, data: { loadErrors: {}, formulaVersion: { value: '3.2.x', status: 'assumed', inputs: { present: [], missing: [] } } } })
 
   await Promise.all(['treasury', 'wealth', 'shippingTax'].map((key) => vm.runAsync(key)))
 
   const [tax] = (await database.query(`select ShippingLineTax from FCT_Race where GameID = ${save.game} and RaceID = ${save.race}`))[0]
   const tag = path.basename(save.file)
 
-  add(`save-tax: ${tag}: the page's read of the tax rate is the stored rate`, () => same(vm.shippingTax.rate, tax.ShippingLineTax === null ? null : Number(tax.ShippingLineTax)))
+  add(`save-tax: ${tag}: the page's read of the tax rate is the stored rate`, () => same(vm.shippingTax.value.rate, tax.ShippingLineTax === null ? null : Number(tax.ShippingLineTax)))
   add(`save-kind: ${tag}: the page's read of the race kind is the stored NPR, unknown for NULL`, async () => {
     const [row] = (await database.query(`select NPR from FCT_Race where GameID = ${save.game} and RaceID = ${save.race}`))[0]
 
-    return same(vm.shippingTax.npr, row.NPR === null ? null : Number(row.NPR) !== 0)
+    return same(vm.shippingTax.value.npr, row.NPR === null ? null : Number(row.NPR) !== 0)
   })
   add(`save-parity: ${tag}: the no-change scenario of every window is the page's ledger runway`, () => [30, 90, 180, 365].map((days) => {
     const ledger = m.finances.buildLedger({ treasury: vm.treasury, wealth: vm.wealth, windowDays: days })
-    const built = m.sr.buildScenarios({ ledger, version: '2.7.x', npr: false, tax: vm.shippingTax, inputs: inputsOf() })
+    const built = m.sr.buildScenarios({ ledger, version: '3.2.x', npr: false, tax: vm.shippingTax.value, inputs: inputsOf() })
 
     return scenarioOf(built, 'none').exhaustion === ledger.runway && same(value(scenarioOf(built, 'none').exhaustion), value(ledger.runway)) === true ? true : `window ${days}`
   }).find((result) => result !== true) || true)
@@ -1135,7 +1166,7 @@ const saveStatements = async (ctx, save) => {
   })
   add(`save-delay: ${tag}: with the stored tax rate the pause adds the contracts less the paired tax to the net`, () => {
     const ledger = m.finances.buildLedger({ treasury: vm.treasury, wealth: vm.wealth, windowDays: 365 })
-    const built = m.sr.buildScenarios({ ledger, version: '2.7.x', npr: false, tax: vm.shippingTax, inputs: inputsOf() })
+    const built = m.sr.buildScenarios({ ledger, version: '3.2.x', npr: false, tax: vm.shippingTax.value, inputs: inputsOf() })
     const flows = m.sr.civilianFlows(ledger)
     const delay = scenarioOf(built, 'delay')
     const paired = value(built.pieces.pairedTax)
@@ -1181,7 +1212,7 @@ const MUTATIONS = [
   { name: 'a future tax over 100 % is accepted', file: U, find: 'percent !== null && percent >= 0 && percent <= 100', replace: 'percent !== null && percent >= 0', fails: ['blank'] },
   { name: 'a blank future tax is the rate now', file: U, at: /blank\(FUTURE_TAX_MISSING\)/, to: () => 'combine({ rule: \'shippingRunway.assumption\', parts: { x: taxRate }, compute: (values) => values.x })', fails: ['blank'] },
   { name: 'every game version has the shipping rules', file: U, find: 'const gated = (version) => ruleSupports(\'shippingRunway.contractFlow\', version) !== true', replace: 'const gated = (version) => false', fails: ['inputs'] },
-  { name: 'the shipping rules hold for any 2.x version', file: U, at: /const VERSIONS = \[[^\]]*\]/, to: () => 'const VERSIONS = [\'2.x\']', fails: ['actual', 'inputs'] },
+  { name: 'the shipping rules hold for any 3.x version', file: U, at: /const VERSIONS = \[[^\]]*\]/, to: () => 'const VERSIONS = [\'3.x\']', fails: ['actual', 'inputs'] },
   { name: 'a logged tax below the implied tax is accepted', file: U, at: /raw\.value \* taxBelowOne\.value > flows\.contractTax\.value \* \(1 \+ 1e-9\) \+ 1e-9/, to: () => 'false', fails: ['inputs'] },
   { name: 'the implied tax is held against every logged civilian tax, not the tax on installation deliveries', file: U, at: /flows\.contractTax\.value \* \(1 \+ 1e-9\)/, to: () => 'flows.taxes.value * (1 + 1e-9)', fails: ['inputs'] },
   // Only at exactly 100 %, admit the rate and divide by the tax itself to produce a finite wrong figure; all other rates keep their healthy guard and denominator, so another inputs statement cannot supply this fault's credit.
@@ -1195,14 +1226,16 @@ const MUTATIONS = [
   { name: 'the race kind is not read', file: U, at: /const RACE_COLUMNS = \[[^\]]*\]/, to: () => 'const RACE_COLUMNS = [\'ShippingLineTax\']', fails: ['load', 'page', 'save-kind'] },
   { name: 'a race kind stored as NULL is a player\'s', file: U, at: /(const raceKindOf = [\s\S]*?)return null/, to: (m) => `${m[1]}return false`, fails: ['load', 'page'] },
   { name: 'the tax rate is read for any race', file: U, at: / and RaceID = \$\{Number\(RaceID\)\}/, to: () => '', fails: ['load'] },
-  { name: 'installation cargo costs the line nothing', file: U, find: '(installation ? gross * values.kind * (1 - values.futureTax) : 0)', replace: '0', fails: ['plan'] },
+  { name: 'installation cargo costs the line nothing', file: U, find: 'receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind })', replace: '0', fails: ['plan'] },
   { name: 'trade goods are charged the line\'s receipt', file: U, find: 'const installation = line.category === \'cargoPoint\'', replace: 'const installation = true', fails: ['plan'] },
   { name: 'the tax of a planned contract is paid, not earned', file: U, find: 'return gross * values.futureTax - (', replace: 'return -gross * values.futureTax - (', fails: ['plan'] },
-  { name: 'a planned contract is priced at a computer-run empire\'s halved fare', file: U, find: 'billionKm: typedNumber(line.distance), npr: false })', replace: 'billionKm: typedNumber(line.distance), npr: true })', fails: ['plan'] },
+  { name: 'a planned contract\'s receipt is halved twice', file: U, find: 'receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind })', replace: 'receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind * values.kind })', fails: ['plan'] },
   { name: 'a blank line is a line with nothing in it', file: U, find: 'inputs.lines.filter((line) => !isBlankLine(line))', replace: 'inputs.lines', fails: ['plan'] },
   { name: 'no contract entered is a plan of nothing', file: U, at: /: unavailable\(\{ rule: 'shippingRunway\.planLine', missing: \[[^\]]*\] \}\)/, to: () => ': ofRule({ rule: \'shippingRunway.planLine\', value: 0, inputs: { present: [\'none\'] } })', fails: ['plan'] },
   { name: 'the break-even adds the tax', file: U, find: '(values) => values.contracts - values.pairedTax })', replace: '(values) => values.contracts + values.pairedTax })', fails: ['gov'] },
-  { name: 'the civilian net adds the contracts', file: U, find: 'values.taxes - values.contracts - values.legacy', replace: 'values.taxes + values.contracts - values.legacy', fails: ['flows'] },
+  { name: 'the civilian net adds the contracts', file: U, find: 'values.taxes + values.fuel - values.contracts - values.legacy', replace: 'values.taxes + values.fuel + values.contracts - values.legacy', fails: ['flows'] },
+  { name: 'the fuel sale counts as a shipping tax', file: U, find: "47: 'fuel'", replace: "47: 'tax'", fails: ['flows', 'roles'] },
+  { name: 'the fuel sale is left out of the civilian net', file: U, find: 'values.taxes + values.fuel - values.contracts - values.legacy', replace: 'values.taxes - values.contracts - values.legacy', fails: ['flows'] },
   { name: 'the contract use books like a legacy use', file: U, find: '44: \'contract\'', replace: '44: \'legacy\'', fails: ['flows', 'roles'] },
   { name: 'a use nothing books is a tax', file: U, find: '46: \'legacy\'', replace: '46: \'tax\'', fails: ['roles'] },
   { name: 'a use of the wrong side is flowed anyway', file: U, find: 'return category && category.income !== (use.side === \'income\')', replace: 'return false', fails: ['flows'] },
@@ -1246,8 +1279,9 @@ const MUTATIONS = [
   { name: 'the page is ready once every read is in, the tax read included', file: P, find: 'return allLoaded(this.loadErrors, CORE_INPUTS)', replace: 'return allLoaded(this.loadErrors, Object.keys(INPUT_LABELS))', fails: ['page'] },
   { name: 'a failed tax read holds the page back', file: P, find: 'return CORE_INPUTS.filter((key) => this.loadErrors[key])', replace: 'return Object.keys(INPUT_LABELS).filter((key) => this.loadErrors[key])', fails: ['page'] },
   { name: 'the tax read is untracked', file: P, find: 'shippingTax: {\n      get: tracked(\'shippingTax\', async function () {', replace: 'shippingTax: {\n      get: tracked(\'shippingRate\', async function () {', fails: ['page'] },
-  { name: 'the tax read ignores the race selected', file: P, find: 'loadShippingTax(this.database, { GameID: this.GameID, RaceID: this.RaceID })', replace: 'loadShippingTax(this.database, { GameID: this.GameID, RaceID: 1 })', fails: ['page'] },
-  { name: 'the tax read runs with no race selected', file: P, find: 'if (!this.database || !this.GameID || !this.RaceID) {\n          return null\n        }\n\n        return await loadShippingTax', replace: 'if (!this.database) {\n          return null\n        }\n\n        return await loadShippingTax', fails: ['page'] },
+  { name: 'the tax read ignores the race selected', file: P, find: 'loadShippingTax(this.database, { GameID, RaceID })', replace: 'loadShippingTax(this.database, { GameID, RaceID: 1 })', fails: ['page'] },
+  { name: 'the tax read runs with no race selected', file: P, find: 'if (!this.database || !GameID || !RaceID) {\n          return null\n        }\n\n        return { GameID, RaceID, generation, value: await loadShippingTax', replace: 'if (!this.database) {\n          return null\n        }\n\n        return { GameID, RaceID, generation, value: await loadShippingTax', fails: ['page'] },
+  { name: 'the tax state takes a read made for another race', file: P, find: 'const current = held && held.GameID === this.GameID && held.RaceID === this.RaceID && held.generation === generation', replace: 'const current = !!held', fails: ['page'] },
   { name: 'the panel is given a fixed race kind', file: P, tag: { name: 'shipping-runway', has: { ':npr': isText } }, to: (text) => setAttribute(text, ':npr', 'false'), fails: ['page'] },
   { name: 'the panel is given the race kind of the selection, which makes an unstored kind a player\'s', file: P, tag: { name: 'shipping-runway', has: { ':npr': isText } }, to: (text) => setAttribute(text, ':npr', '!!RaceNPR'), fails: ['page'] },
   { name: 'the panel is given no tax state', file: P, tag: { name: 'shipping-runway', has: { ':tax-state': isText } }, to: (text) => dropAttribute(text, ':tax-state'), fails: ['page'] },

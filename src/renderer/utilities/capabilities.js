@@ -59,7 +59,7 @@ const OPTIONAL = Object.freeze({
   '/finances': (key) => key === 'shippingTax',
   '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'summarySources' || key === 'FleetStations' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves' || key === 'FuelReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
-  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'fuelSites' || key === 'FuelReserveReader' || key === 'positionFacts' || key === 'orbitFacts',
+  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'fuelSites' || key === 'shippingTax' || key === 'FuelReserveReader' || key === 'positionFacts' || key === 'orbitFacts',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
   '/map': (key) => key === 'groundFormations' || key === 'habitability' || key === 'recoveryObjects' || key === 'observationRead',
   // The life pods and wrecks of the recovery ledger of the Galaxy Map (`recoveryObjects`) are read only when the ledger is opened: a save that lacks a table or column of them leaves the ledger without them, and the ledger says so in place. The formations read for an observation (`observationRead`) are reached through the choice of the ledger's observation, which names every observed kind; the map reads no formation for it.
@@ -210,7 +210,7 @@ const EXTRA_READS = Object.freeze({
   '/routes': Object.freeze({ page: START_DELAY_READS }),
   '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_MineralDeposit(Accessibility Amount) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
   '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS }),
-  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
+  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS, shippingTax: 'FCT_Race(GameID RaceID ShippingLineTax NPR)' }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
     classUsage: 'FCT_Ship(ShipClassID GameID RaceID Destroyed)',
@@ -443,12 +443,15 @@ export const lineResult = (schema) => {
 }
 
 // The formula version the save's schema stands for: the stated one ('3.2.x') for a save with every column of the line's signature, null for any other shape, and the landing rule is then not settled (`landingThreshold`). The signature spans four tables, so all of them are read here.
-export const loadFormulaVersion = async (database) => {
+export const loadFormulaResult = async (database) => {
   const tables = [...new Set(FORMULA_COLUMNS.map((field) => field.split('.')[0]))]
   const [rows] = await database.query(schemaSql(tables))
 
-  return valueOrNull(formulaResult(schemaOf(rows)))
+  return formulaResult(schemaOf(rows))
 }
+
+// The same read as the version alone, null when the save states none, for the reports that need only the string.
+export const loadFormulaVersion = async (database) => valueOrNull(await loadFormulaResult(database))
 
 const fieldText = (gap) => (gap.column ? `${gap.table}.${gap.column}` : `${gap.table} (table)`)
 

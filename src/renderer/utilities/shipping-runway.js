@@ -4,11 +4,11 @@
 //
 // Evidence: docs/plans/backlog/detailed/FINDINGS.md R-ECO-06 and R-ECO-08 and docs/plans/backlog/evidence/AE-077-01.md.
 
-import { CIVILIAN_USES, NPR_PAYOUT_MODIFIER, payoutEstimate } from './civilian-tariff'
+import { CIVILIAN_USES, NPR_PAYOUT_MODIFIER, payoutEstimate, receiptOf } from './civilian-tariff'
 import { HISTORY_DAYS, SECONDS_PER_DAY, buildLedger, runwayOf } from './finances'
 import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, ruleSupports, sumResults, unavailable, valueOrNull, weakestStatus } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const WEALTH_STRUCTURE = ['FCT_WealthData.UseID, TimeUsed, Amount', 'DIM_WealthUse.Description, Income', 'FCT_Game.GameTime']
 
 export const SECONDS_PER_YEAR = HISTORY_DAYS * SECONDS_PER_DAY
@@ -17,13 +17,14 @@ export const SECONDS_PER_YEAR = HISTORY_DAYS * SECONDS_PER_DAY
 export const HORIZONS = Object.freeze([5, 10, 25, 50, 100])
 export const DEFAULT_HORIZON = 25
 
-// How each civilian wealth use of the log (utilities/civilian-tariff.js `CIVILIAN_USES`) enters the treasury: 'contract' is what the race pays a shipping line for an installation delivery, 'tax' what the race takes of a delivery's fare, 'legacy' a use no current rule is found to book.
-export const ROLES = Object.freeze({ 29: 'legacy', 32: 'tax', 34: 'tax', 42: 'legacy', 43: 'tax', 44: 'contract', 46: 'legacy', 47: 'tax' })
+// How each civilian wealth use of the log (utilities/civilian-tariff.js `CIVILIAN_USES`) enters the treasury: 'contract' is what the race pays a shipping line for an installation delivery, 'tax' what the race takes of a delivery's fare, 'fuel' the race's share of a civilian harvester's fuel sale (income from the fuel, not a tax on a shipping fare), 'legacy' a use no current rule is found to book. The fuel sale is booked as one fifth of the sale value when the harvester's tanks cannot hold the fuel it drew, so it is counted apart from the shipping taxes and still in the civilian net.
+export const ROLES = Object.freeze({ 29: 'legacy', 32: 'tax', 34: 'tax', 42: 'legacy', 43: 'tax', 44: 'contract', 46: 'legacy', 47: 'fuel' })
 export const CONTRACT_USE = 44
 export const CONTRACT_TAX_USE = 32
 
 const usesOf = (role) => Object.keys(ROLES).filter((id) => ROLES[id] === role).map(Number)
 const TAX_USES = usesOf('tax')
+const FUEL_USES = usesOf('fuel')
 const LEGACY_USES = usesOf('legacy')
 
 // The categories a planned contract can be priced in: the ones the published rates cover.
@@ -77,7 +78,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'A civilian use\'s logged amounts in the window scaled to a year by the time the window spans, as the Finances page scales every use (the Finances yearly rate). A use with no row in the window logged nothing there, which is 0 for the use; an amount missing from a logged row leaves the whole ledger without a figure. These are the actual flows of the window.',
+  note: 'A civilian use\'s logged amounts in the window scaled to a year by the time the window spans, as the Finances page scales every use (the Finances yearly rate). A use with no row in the window logged nothing there, which is 0 for the use; an amount missing from a logged row leaves the whole ledger without a figure. These are the actual flows of the window. The civilian fuel use is the race\'s fifth of a civilian harvester\'s fuel sale: income from the fuel, not a tax on a shipping fare, so it is shown apart from the shipping taxes and still counted in the civilian net.',
   assumptions: ['the rate over the window holds for a year'],
 })
 
@@ -96,7 +97,7 @@ registerRule({
   versions: VERSIONS,
   units: 'wealth/yr',
   verification: 'estimated',
-  structure: ['civilianTariff.payout', 'FCT_Race.ShippingLineTax'],
+  structure: ['civilianTariff.payout', 'civilianTariff.receipt', 'FCT_Race.ShippingLineTax'],
   note: 'The yearly effect on the treasury of a planned contract: the gross fare (quantity times the published rate times the one-way loaded distance in billion km, as the payout rule gives it, never halved) times the contracts a year; the race takes the tax on it, and for installation cargo it also pays the line\'s receipt, the fare less the tax (halved for a computer-run empire). Trade goods, colonists and passengers carry the tax only.',
   assumptions: ['every unit is carried the whole route one way, loaded', 'the contracts recur at the same rate every year'],
 })
@@ -108,7 +109,7 @@ registerRule({
   verification: 'estimated',
   structure: ['finances.netPerYear', 'shippingRunway.windowFlow'],
   note: 'The window\'s yearly net with the civilian shipping flows replaced as the scenario states: the logged contracts and the tax paired with them out, the scenario\'s flows in. Every other flow stays as logged. With nothing replaced it is the Finances net itself.',
-  assumptions: ['income and spending other than the contracts stay at the window\'s rate', 'the taxes on trade goods, colonists, passengers and fuel stay as logged'],
+  assumptions: ['income and spending other than the contracts stay at the window\'s rate', 'the taxes on trade goods, colonists and passengers and the fuel sale income stay as logged'],
 })
 
 registerRule({
@@ -231,7 +232,7 @@ const flowOf = (ledger, id) => {
   return combine({ rule: 'shippingRunway.windowFlow', parts: { coverage: ledger.coverage }, compute: () => (category ? category.perYear : 0), inputs: { present: [category ? 'wealth history' : 'no amount of this use logged in the window'] } })
 }
 
-// The civilian uses of the window as yearly results: the contracts the race paid, the taxes it took, the uses no rule books (`legacy`), and their net (taxes less the rest). Every one is unavailable, naming the use, when the wealth use table puts a civilian use on the other side from the one the rules assume.
+// The civilian uses of the window as yearly results: the contracts the race paid, the taxes it took, the race's share of civilian fuel sales (not a shipping tax), the uses no rule books (`legacy`), and their net (taxes and fuel income less the rest). Every one is unavailable, naming the use, when the wealth use table puts a civilian use on the other side from the one the rules assume.
 export const civilianFlows = (ledger) => {
   const gaps = CIVILIAN_USES.filter((use) => {
     const category = ledger.categories.find((item) => item.id === use.id)
@@ -242,16 +243,17 @@ export const civilianFlows = (ledger) => {
   if (gaps.length) {
     const none = () => unavailable({ rule: 'shippingRunway.windowFlow', missing: gaps })
 
-    return { contracts: none(), taxes: none(), contractTax: none(), legacy: none(), net: none(), gaps }
+    return { contracts: none(), taxes: none(), fuel: none(), contractTax: none(), legacy: none(), net: none(), gaps }
   }
 
   const total = (ids) => sumResults({ rule: 'shippingRunway.windowFlow', results: ids.map((id) => flowOf(ledger, id)) })
   const contracts = flowOf(ledger, CONTRACT_USE)
   const taxes = total(TAX_USES)
+  const fuel = total(FUEL_USES)
   const legacy = total(LEGACY_USES)
-  const net = combine({ rule: 'shippingRunway.windowFlow', parts: { taxes, contracts, legacy }, compute: (values) => values.taxes - values.contracts - values.legacy })
+  const net = combine({ rule: 'shippingRunway.windowFlow', parts: { taxes, fuel, contracts, legacy }, compute: (values) => values.taxes + values.fuel - values.contracts - values.legacy })
 
-  return { contracts, taxes, contractTax: flowOf(ledger, CONTRACT_TAX_USE), legacy, net, gaps }
+  return { contracts, taxes, fuel, contractTax: flowOf(ledger, CONTRACT_TAX_USE), legacy, net, gaps }
 }
 
 // What the window logged apart from civilian shipping: each other use as { id, label, income, yearly }, spending first and the larger first, with the net of all of them (the Finances net less the civilian net).
@@ -280,7 +282,7 @@ const contractPieces = ({ flows, windowTax, futureTax, kind, version }) => {
 
 // The yearly effect of one planned contract, `line` being { category, quantity, distance, perYear } as typed: its tax, and for installation cargo the receipt the race pays.
 const lineEffect = (line, { version, futureTax, kind }) => {
-  const fare = payoutEstimate({ version, category: line.category, quantity: typedNumber(line.quantity), billionKm: typedNumber(line.distance), npr: false })
+  const fare = payoutEstimate({ version, category: line.category, quantity: typedNumber(line.quantity), billionKm: typedNumber(line.distance) })
   const count = typedNumber(line.perYear)
   const times = count !== null && count >= 0 ? assumed(count, 'the contracts a year') : blank('the number of contracts a year')
   const installation = line.category === 'cargoPoint'
@@ -291,7 +293,7 @@ const lineEffect = (line, { version, futureTax, kind }) => {
     compute: (values) => {
       const gross = values.fare * values.times
 
-      return gross * values.futureTax - (installation ? gross * values.kind * (1 - values.futureTax) : 0)
+      return gross * values.futureTax - (installation ? receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind }) : 0)
     },
   })
 }

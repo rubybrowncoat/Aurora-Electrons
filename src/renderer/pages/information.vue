@@ -298,7 +298,7 @@
 </template>
 
 <script>
-import { mapGetters, mapState } from 'vuex'
+import { mapGetters } from 'vuex'
 
 import FleetProfile from '../components/page/FleetProfile.vue'
 import FuelReserveReader from '../components/page/FuelReserveReader.vue'
@@ -325,6 +325,7 @@ import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilitie
 import { isAvailable } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { amountText, describeTariffVersion, payoutRows } from '../utilities/civilian-tariff'
+import { loadShippingTax } from '../utilities/shipping-runway'
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, handlingRows, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 import { fleetProfile, fleetTrip, fleetTripResult, loadFleetShips, participantRows } from '../utilities/fleet-profile'
@@ -343,6 +344,7 @@ const INPUT_LABELS = {
   requests: 'the installation requests',
   shipments: 'the installations in transit',
   formulaVersion: 'the save\'s schema',
+  shippingTax: 'the race\'s shipping-line tax',
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
   fleetShips: 'the ships of the fleets',
@@ -350,8 +352,8 @@ const INPUT_LABELS = {
   systemDust: 'the nebula density of the systems',
   ...POSITION_LABELS,
 }
-// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read, the ships of the fleets sailing together).
-const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips', 'fuelSites', ...POSITION_INPUTS]
+// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read, the ships of the fleets sailing together, the race's shipping-line tax the payout note takes out of the fare).
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips', 'fuelSites', 'shippingTax', ...POSITION_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
@@ -439,7 +441,6 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID', 'CivilianShippingLinesActive']),
-    ...mapState(['RaceNPR']),
 
     // The reads that hold the page back: every one but the officers' bonuses, which have their own note.
     failedInputs() {
@@ -746,42 +747,66 @@ export default {
       ]
     },
 
-    // What a shipping line is paid over the run, at the rates of the save's game version: one unit of each category over the measured route in billion km, with the result the figures rest on, or why no figure is given. Null while shipping lines are off or no destination is picked.
+    // The race's shipping-line tax read as the payout note may state it, `{ loading, failed, error, value }`: a value only from the latest read settled for the race and the copy of the save now open, so the previous race's rate and kind, or another copy's, are never shown as this one's while a reread runs; a null value with neither loading nor failure is the save storing no rate or kind (`loadShippingTax`).
+    shippingTaxState() {
+      const read = this.loadErrors.shippingTax
+      const held = this.shippingTax
+      const generation = this.$store.state.freshness.generation
+      const current = held && held.GameID === this.GameID && held.RaceID === this.RaceID && held.generation === generation
+
+      if (typeof read === 'string') {
+        return { loading: false, failed: true, error: read, value: null }
+      }
+
+      return read === null && current ? { loading: false, failed: false, error: '', value: held.value } : { loading: true, failed: false, error: '', value: null }
+    },
+
+    // What the shipping line is paid over the run, at the rates of the save's game version: one unit of each category over the measured route in billion km, the fare less the race's shipping-line tax and halved for a computer-run empire, with the result the figures rest on, or why no figure is given. Null while shipping lines are off or no destination is picked.
     payoutNote() {
-      const { destination, formulaVersion: version } = this
+      const { destination, formulaVersion: version, shippingTaxState } = this
 
       if (!destination || !this.CivilianShippingLinesActive) {
         return null
       }
 
       const kms = this.civilianRuns.filter((run) => run.status !== 'noroute' && !run.pending).map((run) => run.km)
-      const npr = this.RaceNPR
-      const unknown = payoutRows({ version, km: null, npr })
+      const shippingTax = shippingTaxState.value
+      const taxRate = shippingTax ? shippingTax.rate : null
+      const npr = shippingTax ? shippingTax.npr : null
+      const rowsAt = (km) => payoutRows({ version, km, taxRate, npr })
+      const unknown = rowsAt(null)
 
       if (!unknown.some((row) => isAvailable(row.rate))) {
-        return { text: 'No payout is estimated: the save\'s game version has no published payout rates.', result: unknown[0].payout }
+        return { text: 'No payout is estimated: the save\'s game version has no published payout rates.', result: unknown[0].receipt }
       } else if (!kms.length) {
-        return { text: 'No payout is estimated: no shipping line ship has a route to the destination, so no distance is measured.', result: unknown[0].payout }
+        return { text: 'No payout is estimated: no shipping line ship has a route to the destination, so no distance is measured.', result: unknown[0].receipt }
       }
 
       const shortest = Math.min(...kms)
       const longest = Math.max(...kms)
-      const near = payoutRows({ version, km: shortest, npr })
-      const far = payoutRows({ version, km: longest, npr })
+      const near = rowsAt(shortest)
+      const far = rowsAt(longest)
+      const gap = near.find((row) => isAvailable(row.rate) && !isAvailable(row.receipt))
+
+      if (gap) {
+        return { text: shippingTaxState.loading ? 'Reading the race\'s shipping-line tax, so no amount paid to the line is estimated yet.' : shippingTaxState.failed ? `No amount paid to the line is estimated: the race's shipping-line tax could not be read (${shippingTaxState.error}).` : `No amount paid to the line is estimated: the save does not hold ${gap.receipt.inputs.missing.join(' and ')}.`, result: gap.receipt }
+      }
+
       const parts = near.map((row, index) => {
         const { category, rate } = row
 
-        if (!isAvailable(rate) || !isAvailable(row.payout)) {
-          return `${category.label}: not estimated, needs ${(isAvailable(rate) ? row.payout : rate).inputs.missing.join(' and ')}`
+        if (!isAvailable(rate)) {
+          return `${category.label}: no published rate`
         }
 
-        const low = this.amountText(row.payout.value)
-        const high = this.amountText(far[index].payout.value)
+        const low = this.amountText(row.receipt.value)
+        const high = this.amountText(far[index].receipt.value)
 
         return `${category.label} ${this.amountText(rate.value)} a unit per billion km, ${low === high ? low : `${low} to ${high}`} a unit over the route`
       })
+      const tax = taxRate > 0 ? `, with the race's shipping-line tax of ${this.amountText(taxRate * 100)} % taken out of the fare` : ', with no shipping-line tax set'
 
-      return { text: `${describeTariffVersion(version)}${npr ? ', with a computer-run empire paid half' : ''}, over the measured route of ${shortest === longest ? this.distance(shortest) : `${this.distance(shortest)} to ${this.distance(longest)}`} one way: ${parts.join('; ')}. A payout goes to the shipping line, and no stored link ties it to a treasury use, so no cost to the race is claimed.`, result: near[0].payout }
+      return { text: `${describeTariffVersion(version)}${tax}${npr ? ' and a computer-run empire\'s line paid half of what is left' : ''}, over the measured route of ${shortest === longest ? this.distance(shortest) : `${this.distance(shortest)} to ${this.distance(longest)}`} one way: ${parts.join('; ')}. A payout goes to the shipping line as ${taxRate > 0 ? 'the fare less that tax' : 'the whole fare'}${npr ? ', halved' : ''}, and no stored link ties the receipt to a treasury use, so no cost to the race is claimed.`, result: near[0].receipt }
     },
 
     // What keeps fleets from the destination, said once for the fleets it stops: the military fleets and, while shipping lines are on, the shipping line fleets too.
@@ -1514,6 +1539,20 @@ export default {
         }
 
         return await loadFormulaVersion(this.database)
+      }),
+      default: null,
+    },
+    // The race's shipping-line tax rate and kind (`loadShippingTax`, utilities/shipping-runway.js), read for the payout note, which takes the tax out of the fare: a save without the column or with no value stored gives no rate and no kind, never 0% nor a player's race. Tagged with the race, the game and the copy of the save it was read for, because the plugin keeps the previous value until a reread settles and that value is never the one shown (`shippingTaxState`). Optional, so the page renders without it and the note names the missing read.
+    shippingTax: {
+      get: tracked('shippingTax', async function () {
+        const { GameID, RaceID } = this
+        const generation = this.$store.state.freshness.generation
+
+        if (!this.database || !GameID || !RaceID) {
+          return null
+        }
+
+        return { GameID, RaceID, generation, value: await loadShippingTax(this.database, { GameID, RaceID }) }
       }),
       default: null,
     },
