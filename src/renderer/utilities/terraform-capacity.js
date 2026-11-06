@@ -1,10 +1,13 @@
 // What a colony's terraforming capacity is made of, and what it moves on its own body: the one calculation behind the Production page's terraforming jobs and the Colonization Planner's body detail. The capacity is the installations' output plus the orbital modules' output, times the game's terraforming speed; the rate is that capacity spread over the body's surface against the Earth's. Each term is a provenance result (utilities/provenance.js): a missing factor leaves the result unavailable, naming it, and is never taken as 1 or 0. Evidence: docs/plans/backlog/evidence/AE-059-01.md and AE-072-01.md.
 
+import { fleetClaimable, fleetCountsForColony, fleetPlaced } from './colonization'
 import { crewFraction } from './crew'
 import { navalAdminChain } from './minerals'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 
 const VERSIONS = ['2.7.x']
+// The fleet term and the figures it feeds, checked on the saves of the supported line as well.
+const TERM_VERSIONS = ['2.7.x', '3.2.x']
 const TERRAFORMER_COMPONENT_TYPE = 33
 const TERRAFORMING_BONUS = 9
 const NONE = new Set()
@@ -26,19 +29,20 @@ registerRule({
   assumptions: ['A colony without a governor or a sector commander has a bonus of 1'],
 })
 
+// `Population.method_211` (Population.cs:9928-9948) sums the terraformer modules of the fleets of the colony's race within one unit of the colony's body on both axes (`Game.AreCoordinatesWithinOneUnit`, Game.cs:37170) that are assigned to the colony or to none, and the game gives an unassigned fleet to the first colony that asks; the same rule the ordnance term and the civilian mining complex exclusion read.
 registerRule({
   id: 'terraform.orbitalOutput',
-  versions: VERSIONS,
+  versions: TERM_VERSIONS,
   units: 'atm/yr (Earth-equivalent, before the game speed)',
   verification: 'estimated',
-  structure: ['FCT_Race.TerraformingRate', 'FCT_Fleet.AssignedPopulationID, ParentCommandID', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent.Number', 'FCT_Commander, FCT_CommanderBonuses (Terraforming)', 'FCT_NavalAdminCommand'],
-  note: 'The race\'s terraforming rate times the undamaged terraforming modules of the ships assigned to the colony, each ship at the share of its class crew aboard and at its captain\'s Terraforming bonus, times the naval admin chain\'s Terraforming bonus at the Industrial share. The colony\'s own modifiers do not apply to it. A ship\'s output matches the saved pressure changes of the Rin and Falryx campaigns; damaged modules, a short crew and the admin chain are read from the game\'s rules and have no saved case.',
-  assumptions: ['A ship without a captain has a bonus of 1', 'A fleet is at the colony it is assigned to'],
+  structure: ['FCT_Race.TerraformingRate', 'FCT_Fleet.RaceID, AssignedPopulationID, OrbitBodyID, Xcor, Ycor, ParentCommandID', 'FCT_Population.RaceID, SystemBodyID', 'FCT_SystemBody.Xcor, Ycor', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent.Number', 'FCT_Commander, FCT_CommanderBonuses (Terraforming)', 'FCT_NavalAdminCommand'],
+  note: 'The race\'s terraforming rate times the undamaged terraforming modules of the ships in the fleets the game counts at the colony, each ship at the share of its class crew aboard and at its captain\'s Terraforming bonus, times the naval admin chain\'s Terraforming bonus at the Industrial share. A fleet counts at the colony when it is of the colony\'s race, within one unit of the colony\'s body on both axes, and assigned to the colony or to none; a fleet assigned to another colony, or assigned to this colony but away from it, adds nothing, and a fleet the game may give to more than one colony leaves the term unavailable. The colony\'s own modifiers do not apply to it. A ship\'s output matches the saved pressure changes of the Rin and Falryx campaigns; damaged modules, a short crew, the admin chain and the fleets away from, unassigned to or shared by a colony are read from the game\'s rules and have no saved case.',
+  assumptions: ['A ship without a captain has a bonus of 1', 'A fleet or a colony body with no saved position is matched by the body the fleet orbits'],
 })
 
 registerRule({
   id: 'terraform.capacity',
-  versions: VERSIONS,
+  versions: TERM_VERSIONS,
   units: 'atm/yr (Earth-equivalent)',
   verification: 'estimated',
   structure: ['terraform.installationOutput', 'terraform.orbitalOutput', 'FCT_Game.TerraformingSpeed'],
@@ -47,7 +51,7 @@ registerRule({
 
 registerRule({
   id: 'production.terraformRate',
-  versions: VERSIONS,
+  versions: TERM_VERSIONS,
   units: 'atm/yr',
   verification: 'estimated',
   structure: ['terraform.capacity', 'FCT_SystemBody.Radius', 'crew.terraforming'],
@@ -69,7 +73,7 @@ const selectedColumns = (alias, columns, names) => names.map((name) => (columns.
 
 export const NO_TERRAFORM_SOURCES = Object.freeze({ raceRate: null, speed: null, colonies: Object.freeze({}) })
 
-// What the capacity of the race's colonies is made of, as `{ raceRate, speed, colonies: { [PopulationID]: source } }`: the race's terraforming rate and the game's terraforming speed (a percentage), and for each colony its modifier factors, installation sum and the terraformer ships assigned to it. A value the save does not hold (a column it lacks, a commander bonus its lookup row does not confirm: `blocked` has the bonus ID) is null, never a default. A colony with neither an installation nor a ship is in the map with 0 installations and no ships. Fleets are at the colony they are assigned to; the save holds the assignment the game uses.
+// What the capacity of the race's colonies is made of, as `{ raceRate, speed, colonies: { [PopulationID]: source } }`: the race's terraforming rate and the game's terraforming speed (a percentage), and for each colony its modifier factors, installation sum and the terraformer ships the game counts at it. A value the save does not hold (a column it lacks, a commander bonus its lookup row does not confirm: `blocked` has the bonus ID) is null, never a default. A colony with neither an installation nor a ship is in the map with 0 installations and no ships. A ship is listed for every colony of the race whose fleet the game counts there (colonization.js `fleetCountsForColony`: the fleet's race, within one unit of the colony's body on both axes, assigned to the colony or to none), and its `unplaced` (the save gives no place for the fleet or the body) and `contested` (the game may give its unassigned fleet to more than one colony) say where the save cannot settle it.
 export const loadTerraformSources = async (database, { GameID, RaceID, blocked = NONE }) => {
   const [population, body, survey, fleet, ship, shipClass, status, damaged, bonuses, commanders] = await Promise.all(['FCT_Population', 'FCT_SystemBody', 'FCT_RaceSysSurvey', 'FCT_Fleet', 'FCT_Ship', 'FCT_ShipClass', 'DIM_PopPoliticalStatus', 'FCT_DamagedComponent', 'FCT_CommanderBonuses', 'FCT_Commander'].map((table) => columnsOf(database, table)))
   const [[race]] = await database.query(`select FCT_Race.TerraformingRate, FCT_Game.TerraformingSpeed from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`)
@@ -77,15 +81,18 @@ export const loadTerraformSources = async (database, { GameID, RaceID, blocked =
   const bonusTable = bonusUnknown ? 'select null as CommandType, null as CommandID, null as BonusValue, null as Rows, null as Known where 0' : `select FCT_Commander.CommandType, FCT_Commander.CommandID, max(FCT_CommanderBonuses.BonusValue) as BonusValue, count(*) as Rows, count(FCT_CommanderBonuses.BonusValue) as Known from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${GameID} and FCT_Commander.RaceID = ${RaceID} and FCT_Commander.CommandType in (1, 3, 4) and FCT_CommanderBonuses.BonusID = ${TERRAFORMING_BONUS} group by FCT_Commander.CommandType, FCT_Commander.CommandID`
   const sector = survey.has('SectorID')
   const [colonies, installations, lines] = await Promise.all([
-    database.query(`with VIR_Bonuses as materialized (${bonusTable}) select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, ${selectedColumns('FCT_SystemBody', body, ['Radius', 'RadiationLevel'])}, ${selectedColumns('FCT_Population', population, ['Efficiency', 'UnrestPoints'])}, ${status.has('ProductionMod') && population.has('PoliticalStatus') ? 'DIM_PopPoliticalStatus.ProductionMod' : 'null'} as StatusModifier, VIR_Governor.BonusValue as GovernorBonus, VIR_Governor.Rows as GovernorRows, VIR_Governor.Known as GovernorKnown, ${sector ? 'FCT_RaceSysSurvey.SectorID' : 'null'} as SectorID, ${sector ? 'VIR_Sector.BonusValue' : 'null'} as SectorBonus, ${sector ? 'VIR_Sector.Rows' : 'null'} as SectorRows, ${sector ? 'VIR_Sector.Known' : 'null'} as SectorKnown, ${bonusUnknown ? 1 : 0} as BonusUnknown from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join VIR_Bonuses as VIR_Governor on VIR_Governor.CommandType = 3 and VIR_Governor.CommandID = FCT_Population.PopulationID ${sector ? 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join VIR_Bonuses as VIR_Sector on VIR_Sector.CommandType = 4 and VIR_Sector.CommandID = FCT_RaceSysSurvey.SectorID' : ''} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`).then(([rows]) => rows),
+    database.query(`with VIR_Bonuses as materialized (${bonusTable}) select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, ${selectedColumns('FCT_SystemBody', body, ['Radius', 'RadiationLevel', 'Xcor', 'Ycor'])}, ${selectedColumns('FCT_Population', population, ['Efficiency', 'UnrestPoints', 'RaceID'])}, ${status.has('ProductionMod') && population.has('PoliticalStatus') ? 'DIM_PopPoliticalStatus.ProductionMod' : 'null'} as StatusModifier, VIR_Governor.BonusValue as GovernorBonus, VIR_Governor.Rows as GovernorRows, VIR_Governor.Known as GovernorKnown, ${sector ? 'FCT_RaceSysSurvey.SectorID' : 'null'} as SectorID, ${sector ? 'VIR_Sector.BonusValue' : 'null'} as SectorBonus, ${sector ? 'VIR_Sector.Rows' : 'null'} as SectorRows, ${sector ? 'VIR_Sector.Known' : 'null'} as SectorKnown, ${bonusUnknown ? 1 : 0} as BonusUnknown from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join VIR_Bonuses as VIR_Governor on VIR_Governor.CommandType = 3 and VIR_Governor.CommandID = FCT_Population.PopulationID ${sector ? 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join VIR_Bonuses as VIR_Sector on VIR_Sector.CommandType = 4 and VIR_Sector.CommandID = FCT_RaceSysSurvey.SectorID' : ''} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`).then(([rows]) => rows),
     database.query(`select FCT_PopulationInstallations.PopID as PopulationID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.TerraformValue) as Installations, count(*) as Lines, count(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.TerraformValue) as Known from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID where FCT_PopulationInstallations.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 group by FCT_PopulationInstallations.PopID`).then(([rows]) => rows),
-    fleet.has('AssignedPopulationID') ? database.query(`with VIR_Bonuses as materialized (${bonusTable}) select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Fleet.AssignedPopulationID as PopulationID, ${fleet.has('ParentCommandID') ? 'FCT_Fleet.ParentCommandID' : 'null'} as ParentCommandID, FCT_Fleet.SystemID as FleetSystemID, ${selectedColumns('FCT_Ship', ship, ['CurrentCrew'])}, ${selectedColumns('FCT_ShipClass', shipClass, ['Crew'])}, FCT_ClassComponent.NumComponent as Designed, ${damaged.has('Number') ? '(select FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID order by FCT_DamagedComponent.rowid limit 1)' : 'null'} as Damaged, ${damaged.has('Number') ? '(select count(*) from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID)' : 'null'} as DamageRows, ${damaged.has('Number') ? 1 : 0} as DamageKnown, VIR_Captain.BonusValue as CaptainBonus, VIR_Captain.Rows as CaptainRows, VIR_Captain.Known as CaptainKnown, ${bonusUnknown ? 1 : 0} as BonusUnknown from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ClassComponent.GameID = FCT_Ship.GameID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = ${TERRAFORMER_COMPONENT_TYPE} inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join VIR_Bonuses as VIR_Captain on VIR_Captain.CommandType = 1 and VIR_Captain.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Fleet.AssignedPopulationID > 0`).then(([rows]) => rows) : [],
+    fleet.has('AssignedPopulationID') ? database.query(`with VIR_Bonuses as materialized (${bonusTable}) select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Fleet.RaceID as FleetRaceID, FCT_Fleet.AssignedPopulationID, exists (select 1 from FCT_Population as VIR_Assigned where VIR_Assigned.PopulationID = FCT_Fleet.AssignedPopulationID) as AssignedExists, ${fleet.has('OrbitBodyID') ? 'FCT_Fleet.OrbitBodyID' : 'null'} as OrbitBodyID, ${fleet.has('Xcor') ? 'FCT_Fleet.Xcor' : 'null'} as Xcor, ${fleet.has('Ycor') ? 'FCT_Fleet.Ycor' : 'null'} as Ycor, ${fleet.has('ParentCommandID') ? 'FCT_Fleet.ParentCommandID' : 'null'} as ParentCommandID, FCT_Fleet.SystemID as FleetSystemID, ${selectedColumns('FCT_Ship', ship, ['CurrentCrew'])}, ${selectedColumns('FCT_ShipClass', shipClass, ['Crew'])}, FCT_ClassComponent.NumComponent as Designed, ${damaged.has('Number') ? '(select FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID order by FCT_DamagedComponent.rowid limit 1)' : 'null'} as Damaged, ${damaged.has('Number') ? '(select count(*) from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID)' : 'null'} as DamageRows, ${damaged.has('Number') ? 1 : 0} as DamageKnown, VIR_Captain.BonusValue as CaptainBonus, VIR_Captain.Rows as CaptainRows, VIR_Captain.Known as CaptainKnown, ${bonusUnknown ? 1 : 0} as BonusUnknown from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ClassComponent.GameID = FCT_Ship.GameID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = ${TERRAFORMER_COMPONENT_TYPE} inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join VIR_Bonuses as VIR_Captain on VIR_Captain.CommandType = 1 and VIR_Captain.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID}`).then(([rows]) => rows) : [],
   ])
   const colonyMap = Object.fromEntries(colonies.map((row) => [row.PopulationID, Object.freeze({
     PopulationID: row.PopulationID,
     PopName: row.PopName,
     SystemID: row.SystemID,
     SystemBodyID: row.SystemBodyID,
+    RaceID: row.RaceID,
+    Xcor: row.Xcor,
+    Ycor: row.Ycor,
     radius: row.Radius,
     modifier: Object.freeze({ governor: row.BonusUnknown ? null : bonusOf(row.GovernorBonus, row.GovernorRows, row.GovernorKnown), sector: row.BonusUnknown || !isNumber(row.SectorID) ? null : row.SectorID === 0 ? 1 : bonusOf(row.SectorBonus, row.SectorRows, row.SectorKnown), efficiency: row.Efficiency, radiation: row.RadiationLevel, unrest: row.UnrestPoints, status: row.StatusModifier }),
     installations: 0,
@@ -101,18 +108,35 @@ export const loadTerraformSources = async (database, { GameID, RaceID, blocked =
 
   // One row per terraformer line of a ship: the line's designed modules and the damaged ones of the same design. A ship with two lines of the modules adds the lines.
   const shipMap = new Map()
+  const fleetOf = new Map()
+  const places = colonies.map((row) => ({ PopulationID: row.PopulationID, RaceID: row.RaceID, SystemBodyID: row.SystemBodyID, Xcor: row.Xcor, Ycor: row.Ycor }))
 
   lines.forEach((row) => {
-    const ship = shipMap.get(row.ShipID) || { ShipID: row.ShipID, PopulationID: row.PopulationID, ParentCommandID: row.ParentCommandID, FleetSystemID: row.FleetSystemID, crew: crewFraction({ CurrentCrew: row.CurrentCrew, ClassCrew: row.Crew }), captain: row.BonusUnknown ? null : bonusOf(row.CaptainBonus, row.CaptainRows, row.CaptainKnown), captained: isNumber(row.CaptainRows) && row.CaptainRows > 0, modules: 0 }
+    const ship = shipMap.get(row.ShipID) || { ShipID: row.ShipID, FleetID: row.FleetID, ParentCommandID: row.ParentCommandID, FleetSystemID: row.FleetSystemID, crew: crewFraction({ CurrentCrew: row.CurrentCrew, ClassCrew: row.Crew }), captain: row.BonusUnknown ? null : bonusOf(row.CaptainBonus, row.CaptainRows, row.CaptainKnown), captained: isNumber(row.CaptainRows) && row.CaptainRows > 0, modules: 0 }
 
     ship.modules = ship.modules === null || !isNumber(row.Designed) || !row.DamageKnown || (row.DamageRows > 0 && !isNumber(row.Damaged)) ? null : ship.modules + Math.max(0, row.Designed - (row.DamageRows > 0 ? row.Damaged : 0))
     shipMap.set(row.ShipID, ship)
+    fleetOf.set(row.ShipID, { RaceID: row.FleetRaceID, AssignedPopulationID: row.AssignedPopulationID, AssignedExists: row.AssignedExists, OrbitBodyID: row.OrbitBodyID, Xcor: row.Xcor, Ycor: row.Ycor })
   })
 
+  // The colonies a ship's fleet counts for: those the game's test says it does (colonization.js `fleetCountsForColony`), and those the save cannot settle (a fleet of the race that the colony may count and whose place is not given). A ship whose unassigned fleet the game may give to more than one colony is marked contested.
   shipMap.forEach((ship) => {
-    if (colonyMap[ship.PopulationID]) {
-      colonyMap[ship.PopulationID] = Object.freeze({ ...colonyMap[ship.PopulationID], ships: [...colonyMap[ship.PopulationID].ships, Object.freeze(ship)] })
-    }
+    const fleet = fleetOf.get(ship.ShipID)
+    const reach = []
+
+    places.forEach((colony) => {
+      const placed = fleetPlaced(fleet, colony)
+
+      if (placed ? fleetCountsForColony(fleet, colony) : fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {
+        reach.push({ colony, unplaced: !placed })
+      }
+    })
+
+    reach.forEach(({ colony, unplaced }) => {
+      const source = colonyMap[colony.PopulationID]
+
+      colonyMap[colony.PopulationID] = Object.freeze({ ...source, ships: [...source.ships, Object.freeze({ ...ship, unplaced, contested: reach.length > 1 })] })
+    })
   })
 
   return Object.freeze({ raceRate: race ? race.TerraformingRate : null, speed: race ? race.TerraformingSpeed : null, colonies: Object.freeze(colonyMap) })
@@ -185,7 +209,8 @@ export const terraformBreakdown = ({ raceRate, speed, source, admins = {} }) => 
   const installations = installationsMissing.length ? unavailable({ rule: 'terraform.installationOutput', missing: installationsMissing }) : ofRule({ rule: 'terraform.installationOutput', value: source.installations === 0 ? 0 : raceRate * Math.trunc(source.installations) * modifier.value, inputs: { present: source.installations === 0 ? ['no installations'] : ['the race\'s terraforming rate', 'the installations', 'the colony\'s modifiers'] } })
 
   const shipsMissing = source.shipsKnown === false ? ['the fleets assigned to the colony'] : []
-  const orbitalMissing = shipsMissing.length ? shipsMissing : groups.length === 0 ? [] : [...rateMissing, ...groups.flatMap((group) => [...(group.modules === null ? ['the modules of a terraformer ship (its class components or damage)'] : []), ...(group.staffed === null ? ['the crew of a terraformer ship or its class crew'] : []), ...(group.effective === null ? ['the captain\'s Terraforming bonus of a terraformer ship'] : []), ...(group.admin === null ? [group.adminGap || 'the naval admin chain\'s Terraforming bonus'] : [])])]
+  const placementMissing = source.ships.flatMap((ship) => (ship.modules === 0 ? [] : [...(ship.unplaced ? ['where a fleet with terraformer modules is (the save gives no position for the fleet or the colony\'s body, and no body the fleet orbits)'] : []), ...(ship.contested ? ['which colony of the race an unassigned fleet with terraformer modules goes to: it is within one unit of more than one, and the game gives it to the first that asks'] : [])]))
+  const orbitalMissing = shipsMissing.length || placementMissing.length ? [...shipsMissing, ...placementMissing] : groups.length === 0 ? [] : [...rateMissing, ...groups.flatMap((group) => [...(group.modules === null ? ['the modules of a terraformer ship (its class components or damage)'] : []), ...(group.staffed === null ? ['the crew of a terraformer ship or its class crew'] : []), ...(group.effective === null ? ['the captain\'s Terraforming bonus of a terraformer ship'] : []), ...(group.admin === null ? [group.adminGap || 'the naval admin chain\'s Terraforming bonus'] : [])])]
   const orbital = orbitalMissing.length ? unavailable({ rule: 'terraform.orbitalOutput', missing: [...new Set(orbitalMissing)] }) : ofRule({ rule: 'terraform.orbitalOutput', value: groups.length === 0 ? 0 : raceRate * sum(groups.map((group) => group.admin * group.effective)), inputs: { present: groups.length === 0 ? ['no terraformer ships'] : ['the race\'s terraforming rate', 'the ships\' undamaged modules, crews and captains', 'the naval admin chain'] }, assumptions: groups.some((group) => group.captainless) ? ['A ship without a captain has a bonus of 1'] : [] })
 
   const capacity = speedMissing.length ? unavailable({ rule: 'terraform.capacity', missing: speedMissing }) : combine({ rule: 'terraform.capacity', parts: { installations, orbital }, compute: (values) => (values.installations + values.orbital) * speed / 100, inputs: { present: ['the game\'s terraforming speed'] } })

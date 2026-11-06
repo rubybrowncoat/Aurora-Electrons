@@ -8,7 +8,8 @@
   - rate: the change of a gas on a colony with a terraforming order that stood across a pair of saves equals the capacity of the colony at the earlier save (terraformers, racial rate, commanders, installations, modifiers, the game's speed) times the elapsed years of the growth clock times the pressure of one earth-equivalent atmosphere over the body's surface. The elapsed time is read from the growth clock, not the game time: the same pair with the game time is off by percent;
   - climate: the surface temperature of every body with an atmosphere equals the app's recomputed base temperature times the greenhouse factors of the gases that are listed;
   - hidden: some bodies carry more pressure than their listed gases add up to (gases at zero are not saved);
-  - plans: the app's plan against what the player did on the same bodies.
+  - plans: the app's plan against what the player did on the same bodies;
+  - shared rule: the terraforming capacity of every colony of the fixture and of the played save equals an independent working under the fleet-at-colony rule the game applies (a fleet counts at the colony when it is of the colony's race, within one unit of the colony's body on both axes, and assigned to the colony or to none), and the planted fleets — one assigned to the colony but away from it, one assigned to none at it, one assigned to none that the game may give to two colonies — are read as the rule says.
   A save that is not there skips its group and says so; a skipped group is never counted as passed. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
@@ -16,6 +17,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { Database } = require('bun:sqlite')
 const { assert, runChecks, judged, caughtAll } = require('./lib/fault-credit')
+const { FIXTURE, PLAYED } = require('./lib/fixtures')
 const { loadUtilities } = require('./lib/utilities')
 const { plantedPatch } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
@@ -95,6 +97,69 @@ const capacityOf = async (file, game, population) => {
   }
 
   return { total: (rate * Math.trunc(installations) * modifier + orbital) * clock.TerraformingSpeed / 100, modules, installations, modifier, rate, speed: clock.TerraformingSpeed, effective }
+}
+
+// The terraforming capacity of every colony of a race under the fleet-at-colony rule the game applies, worked from the save's own rows: the installations and their modifier, and the terraformer modules of the ships in the fleets of the race within one unit of the colony's body on both axes that are assigned to the colony or to none (a fleet assigned to a colony that no longer exists counts as assigned to none), each ship at the share of its class crew aboard and at its captain's Terraforming bonus. The naval admin chain's multiplier is the one factor not re-derived here: it is the app's own chain over the commands `loadNavalAdmins` gives, so a fault confined to the chain is out of this working's reach. Returns `{ colonies, placeless }`: per colony its ships (ShipIDs), installations' output, orbital output and capacity, `ambiguous` (an unassigned fleet the game may give to either of more than one colony, whose term is unavailable) and `unknown` (a figure the save does not hold); `placeless` names the fleets with terraformer modules that have neither a position nor an orbit body, which this working does not settle.
+const sharedCapacityOf = async (database, { game, race, chainOf }) => {
+  const query = async (sql) => (await database.query(sql))[0]
+  const [rateRow] = await query(`select TerraformingRate from FCT_Race where GameID = ${game} and RaceID = ${race}`)
+  const [speedRow] = await query(`select TerraformingSpeed from FCT_Game where GameID = ${game}`)
+  const rate = rateRow ? rateRow.TerraformingRate : null
+  const speed = speedRow ? speedRow.TerraformingSpeed : null
+  const colonies = await query(`select FCT_Population.PopulationID, FCT_Population.SystemBodyID, FCT_Population.PoliticalStatus, FCT_Population.Efficiency, FCT_Population.UnrestPoints, FCT_SystemBody.SystemID, FCT_SystemBody.Xcor as BodyX, FCT_SystemBody.Ycor as BodyY, FCT_SystemBody.RadiationLevel from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${game} and FCT_Population.RaceID = ${race}`)
+  const fleetRows = await query(`select FCT_Fleet.FleetID, coalesce(FCT_Fleet.AssignedPopulationID, 0) as Assigned, exists (select 1 from FCT_Population VIR_Assigned where VIR_Assigned.PopulationID = FCT_Fleet.AssignedPopulationID) as AssignedExists, FCT_Fleet.OrbitBodyID, FCT_Fleet.Xcor as FleetX, FCT_Fleet.Ycor as FleetY, (select count(*) from FCT_Population VIR_Place inner join FCT_SystemBody VIR_Body on VIR_Body.SystemBodyID = VIR_Place.SystemBodyID where VIR_Place.GameID = ${game} and VIR_Place.RaceID = ${race} and ((FCT_Fleet.Xcor is not null and FCT_Fleet.Ycor is not null and VIR_Body.Xcor is not null and VIR_Body.Ycor is not null and abs(FCT_Fleet.Xcor - VIR_Body.Xcor) < 1 and abs(FCT_Fleet.Ycor - VIR_Body.Ycor) < 1) or ((FCT_Fleet.Xcor is null or FCT_Fleet.Ycor is null or VIR_Body.Xcor is null or VIR_Body.Ycor is null) and FCT_Fleet.OrbitBodyID = VIR_Place.SystemBodyID))) as Places from FCT_Fleet where FCT_Fleet.GameID = ${game} and FCT_Fleet.RaceID = ${race} and exists (select 1 from FCT_Ship VIR_Ship inner join FCT_ClassComponent VIR_Class on VIR_Class.ClassID = VIR_Ship.ShipClassID and VIR_Class.GameID = VIR_Ship.GameID inner join FCT_ShipDesignComponents VIR_Design on VIR_Design.SDComponentID = VIR_Class.ComponentID and VIR_Design.ComponentTypeID = 33 where VIR_Ship.FleetID = FCT_Fleet.FleetID and VIR_Ship.GameID = ${game} and VIR_Ship.RaceID = ${race})`)
+  const fleets = new Map(fleetRows.map((row) => [row.FleetID, row]))
+  const bonusOf = async (type, command) => (await query(`select max(FCT_CommanderBonuses.BonusValue) as value, count(*) as rows, count(FCT_CommanderBonuses.BonusValue) as known from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${game} and FCT_Commander.CommandType = ${type} and FCT_Commander.CommandID = ${command} and FCT_CommanderBonuses.BonusID = 9`))[0]
+  const bonusValue = (row) => (!row || !(row.rows > 0) ? 1 : row.known === row.rows && Number.isFinite(row.value) ? row.value : null)
+  const capacity = {}
+
+  for (const colony of colonies) {
+    const governor = bonusValue(await bonusOf(3, colony.PopulationID))
+    const [association] = await query(`select SectorID from FCT_RaceSysSurvey where GameID = ${game} and RaceID = ${race} and SystemID = ${colony.SystemID}`)
+    const sector = !association || association.SectorID === null ? null : association.SectorID === 0 ? 1 : bonusValue(await bonusOf(4, association.SectorID))
+    const [status] = await query(`select ProductionMod from DIM_PopPoliticalStatus where StatusID = ${colony.PoliticalStatus}`)
+    const [installation] = await query(`select coalesce(sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.TerraformValue), 0) as amount from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${game} and FCT_PopulationInstallations.PopID = ${colony.PopulationID} and DIM_PlanetaryInstallation.TerraformValue > 0`)
+    const bodyX = colony.BodyX === null ? 'null' : colony.BodyX
+    const bodyY = colony.BodyY === null ? 'null' : colony.BodyY
+    const at = `((FCT_Fleet.Xcor is not null and FCT_Fleet.Ycor is not null and ${bodyX} is not null and ${bodyY} is not null and abs(FCT_Fleet.Xcor - ${bodyX}) < 1 and abs(FCT_Fleet.Ycor - ${bodyY}) < 1) or ((FCT_Fleet.Xcor is null or FCT_Fleet.Ycor is null or ${bodyX} is null or ${bodyY} is null) and FCT_Fleet.OrbitBodyID = ${colony.SystemBodyID}))`
+    const claim = `(coalesce(FCT_Fleet.AssignedPopulationID, 0) = 0 or not exists (select 1 from FCT_Population VIR_Assigned where VIR_Assigned.PopulationID = FCT_Fleet.AssignedPopulationID) or FCT_Fleet.AssignedPopulationID = ${colony.PopulationID})`
+    const lines = await query(`select FCT_Ship.ShipID, FCT_Fleet.FleetID, FCT_Fleet.ParentCommandID, FCT_Fleet.SystemID as FleetSystemID, FCT_ShipClass.Crew as ClassCrew, FCT_Ship.CurrentCrew, FCT_ClassComponent.NumComponent as Designed, (case when FCT_ShipClass.Crew is null then null when FCT_ShipClass.Crew > 0 then min(1.0, max(0, FCT_Ship.CurrentCrew) * 1.0 / FCT_ShipClass.Crew) else 1.0 end) as CrewShare, (select FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID order by FCT_DamagedComponent.rowid limit 1) as Damaged, (select count(*) from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID) as DamageRows, max(FCT_CommanderBonuses.BonusValue) as CaptainBonus, count(FCT_CommanderBonuses.BonusValue) as CaptainKnown, count(FCT_CommanderBonuses.CommanderID) as CaptainRows from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ClassComponent.GameID = FCT_Ship.GameID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = 33 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_Commander on FCT_Commander.GameID = ${game} and FCT_Commander.CommandType = 1 and FCT_Commander.CommandID = FCT_Ship.ShipID left join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 9 where FCT_Ship.GameID = ${game} and FCT_Ship.RaceID = ${race} and FCT_Fleet.RaceID = ${race} and ${at} and ${claim} group by FCT_Ship.ShipID, FCT_ClassComponent.ComponentID`)
+    const ships = new Map()
+
+    lines.forEach((row) => {
+      const ship = ships.get(row.ShipID) || { ShipID: row.ShipID, FleetID: row.FleetID, FleetSystemID: row.FleetSystemID, ParentCommandID: row.ParentCommandID, crew: row.CrewShare, captain: row.CaptainRows > 0 ? (row.CaptainKnown === row.CaptainRows && Number.isFinite(row.CaptainBonus) ? row.CaptainBonus : null) : 1, modules: 0 }
+
+      ship.modules = ship.modules === null || !Number.isFinite(row.Designed) || (row.DamageRows > 0 && !Number.isFinite(row.Damaged)) ? null : ship.modules + Math.max(0, row.Designed - (row.DamageRows > 0 ? row.Damaged : 0))
+      ships.set(row.ShipID, ship)
+    })
+
+    const modifier = Number.isFinite(governor) && sector !== null && Number.isFinite(colony.Efficiency) && Number.isFinite(colony.UnrestPoints) && Number.isFinite(colony.RadiationLevel) && status && Number.isFinite(status.ProductionMod) ? governor * (1 + (sector - 1) / 4) * colony.Efficiency * Math.max(0, 1 - colony.RadiationLevel / 10000) * (1 - Math.min(99, Math.max(0, colony.UnrestPoints)) / 100) * status.ProductionMod : null
+    const counted = [...ships.values()]
+    let ambiguous = false
+    let unknown = !Number.isFinite(rate) || !Number.isFinite(speed) || (installation.amount > 0 && modifier === null)
+
+    counted.forEach((ship) => {
+      const fleet = fleets.get(ship.FleetID)
+      const chain = chainOf(ship.FleetSystemID, ship.ParentCommandID)
+
+      ship.chain = chain
+
+      if (!Number.isFinite(ship.modules) || !Number.isFinite(ship.crew) || !Number.isFinite(ship.captain) || !Number.isFinite(chain)) {
+        unknown = true
+      }
+
+      if ((fleet.Assigned === 0 || !fleet.AssignedExists) && fleet.Places > 1) {
+        ambiguous = true
+      }
+    })
+
+    const installations = installation.amount === 0 ? 0 : rate * Math.trunc(installation.amount) * modifier
+    const orbital = rate * counted.reduce((total, ship) => total + (Number.isFinite(ship.modules) && Number.isFinite(ship.crew) && Number.isFinite(ship.captain) && Number.isFinite(ship.chain) ? ship.modules * ship.crew * ship.captain * ship.chain : 0), 0)
+
+    capacity[colony.PopulationID] = { ships: counted.map((ship) => ship.ShipID), installations, orbital, capacity: (installations + orbital) * speed / 100, ambiguous, unknown }
+  }
+
+  return { colonies: capacity, placeless: fleetRows.filter((fleet) => !(Number.isFinite(fleet.FleetX) && Number.isFinite(fleet.FleetY)) && !(fleet.OrbitBodyID > 0)).map((fleet) => fleet.FleetID) }
 }
 
 const gasOf = async (file, game, body, gas) => {
@@ -257,6 +322,9 @@ const handExpected = () => {
 
 const near = (value, expected, tolerance, what) => assert.ok(Number.isFinite(value) && Math.abs(value / expected - 1) < tolerance, `${what}: ${value}, rule ${expected}`)
 
+const FIXTURE_CASE = Object.freeze({ game: FIXTURE.gameId, race: FIXTURE.raceId })
+const PLAYED_CASE = Object.freeze({ game: PLAYED.gameId, race: PLAYED.raceId })
+
 // The breakdown's rate on every colony of one save that terraforms, against the oracle's capacity spread over the body.
 const rateOnSave = async (modules, file, game, race) => {
   const { terraformBreakdown, hasTerraformers } = modules['terraform-capacity']
@@ -281,6 +349,67 @@ const rateOnSave = async (modules, file, game, race) => {
   }
 
   assert.ok(compared > 0, 'no colony with terraformers')
+}
+
+// The app's capacity of every colony of one save against `sharedCapacityOf`: the ships each colony counts, the installations' output, the orbital output and the capacity. A colony whose fleet the save cannot settle must be unavailable there, naming the unsettled place or claim. `database` is the save or an in-memory copy read through its `query`.
+const assertSharedRule = async (modules, database, { game, race }, label) => {
+  const { loadTerraformSources, terraformBreakdown } = modules['terraform-capacity']
+  const sources = await loadTerraformSources(database, { GameID: game, RaceID: race })
+  const admins = await modules['naval-admins'].loadNavalAdmins(database, { GameID: game, RaceID: race, bonusId: 9, share: 'Industrial' })
+  const expected = await sharedCapacityOf(database, { game, race, chainOf: (system, command) => modules.minerals.navalAdminChain(admins, system, command).bonus })
+  const breakdowns = {}
+  let compared = 0
+  let shipped = 0
+
+  assert.deepEqual(expected.placeless, [], `${label}: a terraformer fleet with neither a position nor an orbit body`)
+
+  for (const source of Object.values(sources.colonies)) {
+    const oracle = expected.colonies[source.PopulationID]
+    const breakdown = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source, admins })
+    const listed = source.ships.map((ship) => ship.ShipID).sort((left, right) => left - right)
+    const counted = [...oracle.ships].sort((left, right) => left - right)
+
+    breakdowns[source.PopulationID] = breakdown
+    assert.deepEqual(listed, counted, `${label} ${source.PopName}: the ships the colony counts`)
+    compared += 1
+    shipped += listed.length
+
+    if (oracle.ambiguous) {
+      assert.equal(breakdown.orbital.status, 'unavailable', `${label} ${source.PopName}: ${missingOf(breakdown.orbital)}`)
+      assert.ok(/which colony of the race/.test(missingOf(breakdown.orbital)), `${label} ${source.PopName}: ${missingOf(breakdown.orbital)}`)
+      assert.equal(breakdown.capacity.status, 'unavailable', `${label} ${source.PopName}`)
+      continue
+    }
+
+    if (oracle.unknown) {
+      assert.equal(breakdown.capacity.status, 'unavailable', `${label} ${source.PopName}: ${missingOf(breakdown.capacity)}`)
+      continue
+    }
+
+    assert.equal(breakdown.capacity.status, 'estimated', `${label} ${source.PopName}: ${missingOf(breakdown.capacity)}`)
+
+    if (oracle.installations === 0) {
+      assert.equal(breakdown.installations.value, 0, `${label} ${source.PopName}: installations`)
+    } else {
+      near(breakdown.installations.value, oracle.installations, 1e-12, `${label} ${source.PopName}: installations`)
+    }
+
+    if (oracle.orbital === 0) {
+      assert.equal(breakdown.orbital.value, 0, `${label} ${source.PopName}: orbital`)
+    } else {
+      near(breakdown.orbital.value, oracle.orbital, 1e-12, `${label} ${source.PopName}: orbital`)
+    }
+
+    if (oracle.capacity === 0) {
+      assert.equal(breakdown.capacity.value, 0, `${label} ${source.PopName}: capacity`)
+    } else {
+      near(breakdown.capacity.value, oracle.capacity, 1e-12, `${label} ${source.PopName}: capacity`)
+    }
+  }
+
+  assert.ok(compared > 0, `${label}: no colony compared`)
+
+  return { sources, admins, expected: expected.colonies, breakdowns, compared, shipped }
 }
 
 // The change of the ordered gas of each exact pair that starts at `before`, the breakdown's rate at the earlier save times the elapsed years against the observed change.
@@ -631,10 +760,92 @@ const BREAKDOWN_CHECKS = {
       }
     },
   },
+  'shared rule: fixture': {
+    needs: [FIXTURE.file],
+    run: (modules) => assertSharedRule(modules, databaseOf(FIXTURE.file), FIXTURE_CASE, 'fixture'),
+  },
+  'shared rule: played': {
+    needs: [PLAYED.file],
+    run: (modules) => assertSharedRule(modules, databaseOf(PLAYED.file), PLAYED_CASE, 'played'),
+  },
+  'planted: an assigned fleet away from its colony counts nothing': {
+    needs: [PLAYED.file],
+    run: async (modules) => {
+      const base = await assertSharedRule(modules, databaseOf(PLAYED.file), PLAYED_CASE, 'played')
+      const held = Object.values(base.sources.colonies).find((source) => source.ships.length > 0)
+
+      assert.ok(held && base.breakdowns[held.PopulationID].capacity.value > 0, 'the played save needs a terraformer fleet at its colony')
+
+      const away = mutatedOf(PLAYED.file, [`update FCT_Fleet set Xcor = Xcor + 1000, Ycor = Ycor + 1000 where FleetID = ${held.ships[0].FleetID}`])
+
+      try {
+        const planted = await assertSharedRule(modules, away, PLAYED_CASE, 'away')
+
+        assert.deepEqual(planted.sources.colonies[held.PopulationID].ships.map((ship) => ship.ShipID), [], 'the fleet away from its colony counted')
+        assert.equal(planted.breakdowns[held.PopulationID].orbital.value, 0, 'the fleet away from its colony')
+      } finally {
+        away.close()
+      }
+    },
+  },
+  'planted: an unassigned fleet at the colony is counted': {
+    needs: [PLAYED.file],
+    run: async (modules) => {
+      const base = await assertSharedRule(modules, databaseOf(PLAYED.file), PLAYED_CASE, 'played')
+      const held = Object.values(base.sources.colonies).find((source) => source.ships.length > 0)
+
+      assert.ok(held, 'the played save needs a terraformer fleet at its colony')
+
+      const fleetId = held.ships[0].FleetID
+      const ships = held.ships.filter((ship) => ship.FleetID === fleetId).map((ship) => ship.ShipID)
+      const free = mutatedOf(PLAYED.file, [`update FCT_Fleet set AssignedPopulationID = 0 where FleetID = ${fleetId}`])
+
+      try {
+        const planted = await assertSharedRule(modules, free, PLAYED_CASE, 'unassigned')
+        const listed = planted.sources.colonies[held.PopulationID].ships
+
+        assert.deepEqual(listed.map((ship) => ship.ShipID), ships, 'the unassigned fleet at the colony')
+        assert.ok(listed.every((ship) => !ship.contested), 'the unassigned fleet is at one colony')
+        near(planted.breakdowns[held.PopulationID].capacity.value, base.breakdowns[held.PopulationID].capacity.value, 1e-12, 'the unassigned fleet at the colony')
+      } finally {
+        free.close()
+      }
+    },
+  },
+  'planted: a fleet the game may give to two colonies leaves the term unavailable': {
+    needs: [PLAYED.file],
+    run: async (modules) => {
+      const base = await assertSharedRule(modules, databaseOf(PLAYED.file), PLAYED_CASE, 'played')
+      const held = Object.values(base.sources.colonies).find((source) => source.ships.length > 0)
+      const other = held ? Object.values(base.sources.colonies).find((source) => source.PopulationID !== held.PopulationID && Number.isFinite(source.Xcor) && Number.isFinite(source.Ycor)) : null
+
+      assert.ok(held && other, 'the played save needs a colony with a terraformer fleet and another colony of the race')
+
+      const fleetId = held.ships[0].FleetID
+      const contested = mutatedOf(PLAYED.file, [`update FCT_Fleet set AssignedPopulationID = 0 where FleetID = ${fleetId}`, `update FCT_SystemBody set Xcor = ${held.Xcor}, Ycor = ${held.Ycor} where SystemBodyID = ${other.SystemBodyID}`])
+
+      try {
+        const planted = await assertSharedRule(modules, contested, PLAYED_CASE, 'ambiguous')
+
+        for (const source of [held, other]) {
+          const breakdown = planted.breakdowns[source.PopulationID]
+
+          assert.equal(breakdown.orbital.status, 'unavailable', `${source.PopName}: ${missingOf(breakdown.orbital)}`)
+          assert.ok(/which colony of the race/.test(missingOf(breakdown.orbital)), `${source.PopName}: ${missingOf(breakdown.orbital)}`)
+          assert.ok(planted.sources.colonies[source.PopulationID].ships.some((ship) => ship.contested), `${source.PopName}: contested`)
+        }
+      } finally {
+        contested.close()
+      }
+    },
+  },
 }
 
 // Faults planted in the shared helper. `fails` names the BREAKDOWN_CHECKS each must break; a fault whose named checks all lack their saves is skipped.
 const BREAKDOWN_FAULTS = [
+  { label: 'the fleet position test dropped', from: 'if (placed ? fleetCountsForColony(fleet, colony) : fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {', to: 'if (fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {', fails: ['planted: an assigned fleet away from its colony counts nothing'] },
+  { label: 'an unassigned fleet at the colony ignored', from: 'if (placed ? fleetCountsForColony(fleet, colony) : fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {', to: 'if (fleet.AssignedPopulationID === colony.PopulationID && fleetPlaced(fleet, colony) && fleetCountsForColony(fleet, colony)) {', fails: ['planted: an unassigned fleet at the colony is counted'] },
+  { label: 'an ambiguous fleet resolved silently', from: 'contested: reach.length > 1', to: 'contested: false', fails: ['planted: a fleet the game may give to two colonies leaves the term unavailable'] },
   { label: 'installation sum not rounded down', from: 'raceRate * Math.trunc(source.installations) * modifier.value', to: 'raceRate * source.installations * modifier.value', fails: ['arith', 'truncation', 'rate Falryx'] },
   { label: 'Math.PI for the body area', from: 'export const SURFACE_PI = 3.1416', to: 'export const SURFACE_PI = Math.PI', fails: ['arith', 'rate Falryx'] },
   { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith', 'speed Falryx'] },
