@@ -3376,7 +3376,11 @@ const COMPOSED = new Set([
   267,
   268,
   272,
-  ...FAULTS.flatMap((fault, index) => fault[4].some((name) => name === 'unread-classification' || name === 'point-identity') ? [index] : []),
+  274,
+  275,
+  276,
+  277,
+  278,
   FAULTS.length - 1,
 ])
 
