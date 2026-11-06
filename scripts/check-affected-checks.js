@@ -1097,7 +1097,7 @@ const actualRepository = async (api) => {
   assert.ok(route.variants.some((entry) => entry.key === 'benign:all'))
   const anchors = route.variants.filter((entry) => entry.anchors.some((anchor) => anchor.file === 'src/renderer/pages/hauling.vue'))
   assert.equal(anchors.filter((entry) => entry.key.startsWith('fault:')).length, 55)
-  assert.equal(anchors.filter((entry) => entry.key.startsWith('composed:')).length, 139)
+  assert.equal(anchors.filter((entry) => entry.key.startsWith('composed:')).length, 140)
   return route
 }
 const rawControls = async (api) => {
