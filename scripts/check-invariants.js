@@ -463,11 +463,11 @@ const defineCases = (modules) => {
   // ---- Terraforming boundaries ---------------------------------------------------------------------------------
   const species = habitability.speciesLimits({ IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: 10, BreatheName: 'Oxygen', PopulationDensityModifier: 1 })
   const DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
-  const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, FrozenOut: 0 })
+  const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, FrozenOut: 0 })
   const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 288, BaseTemp: 255, Albedo: 0.3, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(10, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
   const airless = (extra = {}) => earthlike({ SurfaceTemp: 255, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
   // The DIM_Gases rows the plan needs: Aestusium warms, Frigusium cools, the rest are neutral. Every row holds all the figures a plan prices a gas with; a row without them makes the plan unknown (see the cases below).
-  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, ...extra })
+  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, ...extra })
   const GASES = { 10: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
   const assess = (body) => terraforming.assessTerraforming(deepFreeze(body), species, 1, (id) => GASES[id])
   const BOUNDARY_BODIES = {

@@ -25,7 +25,7 @@
         <tr v-for="item in sorted" :key="item.id" :data-body="item.id">
           <td class="name-col"><span data-cell="name">{{ item.name }}</span><div v-if="unsurveyed(item)" class="caption text--secondary note" data-note="unsurveyed">Deposits not surveyed</div></td>
           <td><span data-cell="species">{{ item.speciesName || unknown }}</span><div v-if="note(item)" class="caption text--secondary note" :data-note="item.state">{{ note(item) }}</div></td>
-          <td class="num"><span data-cell="cost">{{ cost(item.costValue) }}</span><span v-if="item.lowGravity" class="caption"> LG</span><provenance-mark :result="item.results.cost" /></td>
+          <td class="num"><span data-cell="cost">{{ cost(item.costValue) }}</span><span v-if="item.gravityClass" class="caption" :title="gravityText(item.gravityClass)" data-cell="gravity-class"> {{ item.gravityClass }}</span><provenance-mark :result="item.results.cost" /></td>
           <td class="num"><span data-cell="capacity">{{ people(item.capacityValue) }}</span><provenance-mark :result="item.results.capacity" /></td>
           <template v-for="cell in item.minerals">
             <td :key="`amount-${cell.id}`" class="num"><span :data-cell="`amount-${cell.id}`">{{ tons(cell.amount) }}</span><provenance-mark :result="cell.amountResult" /></td>
@@ -42,6 +42,7 @@
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import persistedView, { tableView } from '../../mixins/persisted-view'
 import { people } from '../../utilities/colonies'
+import { GRAVITY_CLASSES } from '../../utilities/habitability'
 import { AMOUNT_RULE, SORT_KEYS, accessKey, amountKey, sortWorksheetRows, worksheetRows } from '../../utilities/colony-worksheet'
 import { UNKNOWN_TEXT, roundToDecimal } from '../../utilities/math'
 import { MINERALS, compact } from '../../utilities/minerals'
@@ -107,6 +108,10 @@ export default {
     amountKey,
     accessKey,
     people,
+    // What a gravity class (LG, LGR or N) says.
+    gravityText(name) {
+      return GRAVITY_CLASSES[name]
+    },
     cost(value) {
       return value === null ? UNKNOWN : roundToDecimal(value, 2).toString()
     },

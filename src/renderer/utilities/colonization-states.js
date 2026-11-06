@@ -8,6 +8,7 @@
 
 import { RICH_DEPOSIT_VALUE } from './minerals'
 import { roundToDecimal } from './math'
+import { MINIMUM_TIME_NOTE, TIME_BASIS, timeWords } from './terraforming'
 
 // Upper bounds (exclusive) of the cost bands, on the cost before the colonisation skill.
 export const COST_BANDS = { cheap: 2, moderate: 3, costly: 6 }
@@ -16,6 +17,9 @@ export const costBand = (raw) => (raw <= 0 ? 'free' : raw < COST_BANDS.cheap ? '
 
 const number = (value, places = 1) => roundToDecimal(value, places).toString()
 const years = (value) => (!Number.isFinite(value) ? 'never with these terraformers' : value < 0.1 ? 'under 0.1 years' : `${number(value, value < 10 ? 1 : 0)} years`)
+// The years of a plan as the state words them, at the decimals `years` shows: a plan that drains surface water has only a minimum, and says why.
+const planTime = (plan) => timeWords(plan.years, plan.yearsBasis, years, plan.years < 10 ? 1 : 0)
+const minimumNote = (plan) => (plan.yearsBasis === TIME_BASIS.MINIMUM && Number.isFinite(plan.years) ? ` ${MINIMUM_TIME_NOTE}` : '')
 const perMillion = (infrastructure) => `${infrastructure} infrastructure per million people`
 const people = (millions) => (millions >= 1000 ? `${number(millions / 1000, 1)} billion` : `${number(millions, millions < 10 ? 2 : 0)} million`)
 
@@ -29,13 +33,14 @@ export const routeFacts = (evaluation, terraformYears) => {
     return null
   }
 
-  const plan = assessment.plan && assessment.after && evaluation.strategy === 'terraform' ? { raw: assessment.after.raw, cost: assessment.after.worst, outcome: assessment.outcome, years: terraformYears, capacity: capacityAfter, infrastructure: evaluation.afterInfrastructure } : null
+  const plan = assessment.plan && assessment.after && evaluation.strategy === 'terraform' ? { raw: assessment.after.raw, cost: assessment.after.worst, outcome: assessment.outcome, years: terraformYears, yearsBasis: assessment.timeBasis, capacity: capacityAfter, infrastructure: evaluation.afterInfrastructure } : null
 
   return {
     species: species.SpeciesName,
     raw: assessment.cost.raw,
     cost: assessment.cost.worst,
     lowGravity: assessment.cost.lowGravity,
+    gravityClass: assessment.cost.gravityClass,
     infrastructure: evaluation.nowInfrastructure,
     capacity: capacityNow,
     outcome: assessment.outcome,
@@ -121,8 +126,8 @@ export const PLAN_STATES = [
     target: true,
     rule: 'The best route is to terraform first, and the plan makes the colony cost 0 at every point of the orbit, so it needs no infrastructure afterwards.',
     when: ({ route }) => terraforms(route) && route.plan.outcome === 'yes',
-    text: ({ route }) => `Terraforming takes ${years(route.plan.years)} with the terraformers and leaves the colony free, against ${perMillion(route.infrastructure)} now. It then holds ${people(route.plan.capacity)}.`,
-    chip: ({ route }) => `To free · ${years(route.plan.years)}`,
+    text: ({ route }) => `Terraforming takes ${planTime(route.plan)} with the terraformers and leaves the colony free, against ${perMillion(route.infrastructure)} now. It then holds ${people(route.plan.capacity)}.${minimumNote(route.plan)}`,
+    chip: ({ route }) => `To free · ${planTime(route.plan)}`,
   },
   {
     id: 'terraform-partial',
@@ -133,8 +138,8 @@ export const PLAN_STATES = [
     target: true,
     rule: 'The best route is to terraform first, but the plan frees the colony at part of an eccentric orbit only, so some of the year it still costs infrastructure.',
     when: ({ route }) => terraforms(route) && route.plan.outcome === 'partial',
-    text: ({ route }) => `Terraforming takes ${years(route.plan.years)} and makes it free at part of its orbit; the worst point still costs ${number(route.plan.cost, 2)}. It then holds ${people(route.plan.capacity)}.`,
-    chip: ({ route }) => `Part free · ${years(route.plan.years)}`,
+    text: ({ route }) => `Terraforming takes ${planTime(route.plan)} and makes it free at part of its orbit; the worst point still costs ${number(route.plan.cost, 2)}. It then holds ${people(route.plan.capacity)}.${minimumNote(route.plan)}`,
+    chip: ({ route }) => `Part free · ${planTime(route.plan)}`,
   },
   {
     id: 'terraform-cheaper',
@@ -145,8 +150,8 @@ export const PLAN_STATES = [
     target: true,
     rule: 'The best route is to terraform first: the plan lowers the colony cost, but not to 0.',
     when: ({ route }) => terraforms(route),
-    text: ({ route }) => `Terraforming takes ${years(route.plan.years)} and lowers the cost from ${number(route.cost, 2)} to ${number(route.plan.cost, 2)}, ${perMillion(route.plan.infrastructure)} against ${route.infrastructure} now.`,
-    chip: ({ route }) => `Cheaper · ${years(route.plan.years)}`,
+    text: ({ route }) => `Terraforming takes ${planTime(route.plan)} and lowers the cost from ${number(route.cost, 2)} to ${number(route.plan.cost, 2)}, ${perMillion(route.plan.infrastructure)} against ${route.infrastructure} now.${minimumNote(route.plan)}`,
+    chip: ({ route }) => `Cheaper · ${planTime(route.plan)}`,
   },
   {
     id: 'free',

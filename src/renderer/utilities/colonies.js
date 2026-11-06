@@ -14,6 +14,8 @@ export const WORKER_TOLERANCE = 0.005
 const COLONY_VERSIONS = ['2.7.x']
 // The growth rule alone: check-workforce-demand runs every colony of the fixture through it against the rate the 3.1 source gives.
 const GROWTH_VERSIONS = ['3.2.x']
+// The implied colony cost alone: check-breather-cost runs every colony with people of the fixture and of a played save through it against the planner's cost for the colony's species.
+const COST_VERSIONS = ['3.2.x']
 const TOTALS = 'colonies.totals'
 
 registerRule({
@@ -81,11 +83,11 @@ registerRule({
 
 registerRule({
   id: 'colonies.colonyCost',
-  versions: COLONY_VERSIONS,
+  versions: COST_VERSIONS,
   units: 'colony cost',
   verification: 'confirmed',
   structure: ['FCT_Population.ReqInf, Population', 'FCT_Species.PopulationDensityModifier, Gravity, GravDev', 'FCT_SystemBody.Gravity'],
-  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock sample save (largest difference 0.0027), so the halving holds there.',
+  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock sample save (largest difference 0.0027), so the halving holds there. Against the planner\'s colony cost of the body, now or worst of the orbit, it agrees on every colony with people of the migrated fixture (22, oxygen breathers) and of a played save (44, oxygen, methane, ammonia and sulphur dioxide breathers), within a hundredth of the cost and five thousandths of a unit: the stored requirement is one step older than the climate and the people it is read against, and a colony of a few hundred people tells its cost only as a range.',
 })
 
 registerRule({

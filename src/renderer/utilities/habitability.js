@@ -1,6 +1,6 @@
 // What a body costs a species to live on, from the game's own rules: the colony cost now and at the extremes of its orbit, checked against the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony cost).
 //
-// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, Year, ParentOrbitalDistance, ParentEccentricity, ParentYear, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasPercentage (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen, DangerousMethane, DangerousPPMMethane, DangerousSulphur, DangerousPPMSulphur, DangerousAmmonia, DangerousPPMAmmonia }` (`gasDanger` picks the danger pair of the species' breathing gas). A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
+// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, Year, ParentOrbitalDistance, ParentEccentricity, ParentYear, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasPercentage (percent of the atmosphere), FrozenOut, FreezingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen, DangerousMethane, DangerousPPMMethane, DangerousSulphur, DangerousPPMSulphur, DangerousAmmonia, DangerousPPMAmmonia }` (`gasDanger` picks the danger pair of the species' breathing gas). A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
 
 import { ofRule, registerRule, unavailable } from './provenance'
 
@@ -47,9 +47,26 @@ export const MINIMUM_TERRAFORMING_GRAVITY = 0.1
 // Infrastructure a low-gravity colony needs per unit of colony cost.
 export const LOW_GRAVITY_INFRASTRUCTURE = 2
 
+// The suffix the game gives a colony cost by the body's gravity against the species' range (SystemBody.method_59): LG below the species' minimum and below the retention gravity, LGR below the minimum and at least the retention gravity, N above the minimum for a species whose own maximum is under the retention gravity (the tested figure is the species' maximum, as the source reads it, not the body's gravity); none otherwise.
+export const GRAVITY_CLASSES = Object.freeze({
+  LG: 'Low gravity: below the species\' minimum and too light to keep an atmosphere.',
+  LGR: 'Low gravity: below the species\' minimum, heavy enough to keep an atmosphere.',
+  N: 'Above the species\' minimum, but the species\' whole range lies below the gravity that keeps an atmosphere.',
+})
+
+export const gravityClassOf = (body, species) => {
+  if (body.Gravity >= species.MinimumGravity) {
+    return species.MaximumGravity >= MINIMUM_TERRAFORMING_GRAVITY || !(body.Gravity > species.MinimumGravity) ? null : 'N'
+  }
+
+  return body.Gravity < MINIMUM_TERRAFORMING_GRAVITY ? 'LG' : 'LGR'
+}
+
 const ICE_SHEET_ALBEDO_STEP = 0.0015
 const WATER_BOILING_KELVIN = 369
 const WATER_FREEZING_KELVIN = 245
+// Under this pressure, in atm, water above its freezing point does not stay on a body.
+const MINIMUM_WATER_PRESSURE = 0.006
 
 const VERSIONS = ['3.2.x']
 
@@ -60,7 +77,7 @@ registerRule({
   units: 'colony cost',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity, Year, StarLuminosity', 'FCT_SystemBody.ParentOrbitalDistance, ParentEccentricity, ParentYear', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species', 'FCT_Race.ColonizationSkill'],
-  note: 'The largest of six environment factors, worst of now, periapsis and apoapsis, times the race\'s colonisation skill. The temperature swing follows the dampened orbital rule: the stored climate is blended toward the circular-orbit temperature, less on a long orbit, and a moon takes its parent\'s orbit and year. Checked against the stored infrastructure requirement of the race\'s own colonies: the requirement per million people equals the cost now times the skill, times 100 (200 on low gravity), over the species\' density modifier, within 0.1% on 23 of 27 colonies of two saves and within 3.4% on the other four, all low gravity (the stored requirement may predate a change of population; not checked). Periapsis, apoapsis and the worst case have no stored value, and no unsettled body is checked.',
+  note: 'The largest of six environment factors, worst of now, periapsis and apoapsis, times the race\'s colonisation skill. The water factor follows the species\' breathing gas: an oxygen breather pays (20 - extent) / 10 below 20 % of the surface in water, whatever the water is; any other breather pays a tenth of the extent for liquid water (the whole extent for sulphur dioxide) and nothing for ice, but a sulphur dioxide breather pays 5 % of the extent for an ice sheet. Periapsis and apoapsis price the water as its state at the temperature of that point under the air the body has. Water vapour is a gas of the air, dangerous to sulphur dioxide and ammonia breathers above its limit, never a cost line of its own; the dangerous gas is the worst by the pair of the breather\'s breathing gas, a gas frozen out below its freezing point does not count, and the breathing gas is not left out. A body below the species\' minimum gravity carries LG under 0.1 g and LGR from 0.1 g, and one above the minimum carries N for a species whose own maximum gravity is under 0.1 g. The temperature swing follows the dampened orbital rule: the stored climate is blended toward the circular-orbit temperature, less on a long orbit, and a moon takes its parent\'s orbit and year. Checked against the stored infrastructure requirement of every colony with people in the migrated fixture (22, oxygen breathers) and in a played save (44, oxygen, methane, ammonia and sulphur dioxide breathers): the requirement per million people equals the cost, now or worst of the orbit, times the skill, times 100 (200 on low gravity), over the species\' density modifier, within a hundredth of the cost and five thousandths of a unit (the stored requirement is one step older than the climate and the people). No stored colony shows the liquid-water or ice terms of methane, ammonia and sulphur dioxide breathers, nor the water at periapsis and apoapsis, and no colony of the saves has the N class: those follow the game\'s source and are checked on bodies made for the purpose. The cost at periapsis and at apoapsis separately has no stored value, and no unsettled body is checked.',
 })
 
 registerRule({
@@ -69,7 +86,7 @@ registerRule({
   units: 'infrastructure per million people',
   verification: 'estimated',
   structure: ['FCT_Species.PopulationDensityModifier', 'FCT_SystemBody.Gravity'],
-  note: 'The colony cost times 100 (200 on low gravity) over the species\' density modifier, rounded up, float noise rounded off first. Before the rounding the figure matches the stored infrastructure requirement over the population for the cost now (the check of the colony cost rule); the rounding and the use of the worst cost of the orbit are the planner\'s reading and have no stored value.',
+  note: 'The colony cost times 100 (200 on LG and LGR, the gravity below the species\' minimum; N doubles nothing) over the species\' density modifier, rounded up, float noise rounded off first. Before the rounding the figure matches the stored infrastructure requirement over the population for the cost now or worst of the orbit (the check of the colony cost rule); the rounding is the planner\'s reading and has no stored value.',
 })
 
 const NOTHING = Object.freeze([])
@@ -84,7 +101,7 @@ const ECCENTRIC_INPUTS = [...SWING_INPUTS, ['OrbitalDistance', 'orbital distance
 const MOON_INPUTS = [...SWING_INPUTS, ['ParentOrbitalDistance', 'planet orbital distance', true], ['ParentEccentricity', 'planet eccentricity']]
 const DUST_INPUTS = [['DustLevel', 'dust level']]
 const DANGER_INPUTS = [['DangerousOxygen', 'danger to oxygen breathers'], ['DangerousPPMOxygen', 'danger level for oxygen breathers'], ['DangerousMethane', 'danger to methane breathers'], ['DangerousPPMMethane', 'danger level for methane breathers'], ['DangerousSulphur', 'danger to sulphur dioxide breathers'], ['DangerousPPMSulphur', 'danger level for sulphur dioxide breathers'], ['DangerousAmmonia', 'danger to ammonia breathers'], ['DangerousPPMAmmonia', 'danger level for ammonia breathers']]
-const GAS_INPUTS = [['AtmosGasID', 'gas'], ['GasAtm', 'gas pressure'], ['AtmosGasPercentage', 'gas share'], ['FrozenOut', 'frozen-out flag'], ['BoilingPoint', 'boiling point'], ['GHGas', 'greenhouse flag'], ['AntiGHGas', 'anti-greenhouse flag'], ...DANGER_INPUTS]
+const GAS_INPUTS = [['AtmosGasID', 'gas'], ['GasAtm', 'gas pressure'], ['AtmosGasPercentage', 'gas share'], ['FrozenOut', 'frozen-out flag'], ['FreezingPoint', 'freezing point'], ['GHGas', 'greenhouse flag'], ['AntiGHGas', 'anti-greenhouse flag'], ...DANGER_INPUTS]
 const SPECIES_INPUTS = [['IdealTemperature', 'ideal temperature'], ['TemperatureDeviation', 'temperature deviation', true], ['IdealBreathePressure', 'breathing gas pressure'], ['BreathePressureDeviation', 'breathing gas deviation'], ['MaximumPressure', 'maximum pressure', true], ['IdealGravity', 'ideal gravity'], ['GravityDeviation', 'gravity deviation'], ['PopulationDensityModifier', 'population density', true], ['BreatheID', 'breathing gas']]
 
 const usable = (source, [key, , positive]) => isNumber(source[key]) && (!positive || source[key] > 0)
@@ -138,8 +155,11 @@ const round4 = (value) => Math.round(value * 10000) / 10000
 
 export const hydrosphereAtTemperature = (temperature) => (temperature > WATER_BOILING_KELVIN ? HYDROSPHERE.VAPOUR : temperature > WATER_FREEZING_KELVIN ? HYDROSPHERE.LIQUID : HYDROSPHERE.ICE_SHEET)
 
-// A gas is frozen out below its boiling point. A saved body carries the game's flag; a body that doesn't exist yet (a terraforming target) gets the rule the game applies after every change.
-const frozenOut = (gas, temperature, planned) => (planned ? temperature < gas.BoilingPoint : !!gas.FrozenOut)
+// SystemBody.method_43: the water of a body at `temperature` under the air it has now: none without air, and none under 0.006 atm above the freezing point of water.
+export const hydrosphereTypeAt = (body, temperature) => (body.AtmosPress === 0 || (body.AtmosPress < MINIMUM_WATER_PRESSURE && temperature > WATER_FREEZING_KELVIN) ? HYDROSPHERE.NONE : hydrosphereAtTemperature(temperature))
+
+// A gas is frozen out below its freezing point (SystemBody.method_46 sets the flag from the surface temperature against the freezing point; the boiling point plays no part). A saved body carries the game's flag; a body that doesn't exist yet (a terraforming target) gets the rule the game applies after every change.
+const frozenOut = (gas, temperature, planned) => (planned ? temperature < gas.FreezingPoint : !!gas.FrozenOut)
 
 // SystemBody.method_1: an eccentric body's atmosphere and ocean smooth its seasons, less on a long orbit. A moon uses the planet's orbit and year, never the planet's atmosphere.
 export const orbitalTemperatureDampening = (body) => {
@@ -181,7 +201,7 @@ export const temperatureAtDistance = (body, distance) => {
     let antiGreenhouseAtm = 0
 
     body.Atmosphere.forEach((gas) => {
-      if (threshold >= gas.BoilingPoint) {
+      if (threshold >= gas.FreezingPoint) {
         greenhouseAtm += gas.GHGas ? gas.GasAtm : 0
         antiGreenhouseAtm += gas.AntiGHGas ? gas.GasAtm : 0
       }
@@ -212,15 +232,22 @@ export const temperatureAtDistance = (body, distance) => {
   return temperature
 }
 
-// The worst dangerous gas, to a breather of the species' breathing gas, that is present beyond its limit, never the species' own breathing gas.
+// Whether a gas is dangerous to a breather of the species' breathing gas at `temperature` (SystemBody.method_54): the pair of the breather rates it, it is not frozen out and its share of the air is above the limit of that pair. A gas below the limit is benign, whatever its rating. The game does not leave the breathing gas out; the table rates no gas of its own as dangerous to its breathers.
+export const isDangerousGas = (gas, species, temperature, planned) => {
+  const { dangerous, ppm } = gasDanger(gas, species.BreatheID)
+
+  return dangerous > 0 && !frozenOut(gas, temperature, planned) && gas.AtmosGasPercentage > ppm / 10000
+}
+
+// The worst dangerous gas, to a breather of the species' breathing gas, that is present beyond its limit (the highest rating among the gases `isDangerousGas` names).
 const dangerousGas = (body, species, temperature, planned) => {
   let worst = null
   let rating = 0
 
   body.Atmosphere.forEach((gas) => {
-    const { dangerous, ppm } = gasDanger(gas, species.BreatheID)
+    const { dangerous } = gasDanger(gas, species.BreatheID)
 
-    if (dangerous > rating && gas.AtmosGasID !== species.BreatheID && !frozenOut(gas, temperature, planned) && gas.AtmosGasPercentage > ppm / 10000) {
+    if (dangerous > rating && isDangerousGas(gas, species, temperature, planned)) {
       worst = gas
       rating = dangerous
     }
@@ -241,8 +268,27 @@ export const breathingFails = (body, species) => {
   return pressure < species.MinimumBreathablePressure || pressure > species.MaximumBreathablePressure || share > MAX_BREATHABLE_PERCENT
 }
 
-// The six things that add to a colony cost, each as the game's colony cost factor, and which one decides. The cost is the largest factor, not their sum (the breathable-gas rule only applies below 2). `planned` marks a body that doesn't exist yet. Returns the cost before the race's colonisation skill.
-export const costFactors = (body, species, temperature, planned = false) => {
+// The water term of the cost by the species' breathing gas (SystemBody.method_71): an oxygen breather pays (20 - extent) / 10 below an extent of 20 %, whatever the water is; any other breather pays for liquid water by the extent (a tenth of it, the whole of it for sulphur dioxide) and nothing for ice, but a sulphur dioxide breather pays 5 % of the extent for an ice sheet. `hydrosphere` is the water's state: the body's stored one for the cost now, the state at the temperature of the point for periapsis and apoapsis (`hydrosphereTypeAt`). Water vapour is no cost line: it is a gas row of the atmosphere, a danger of the sulphur dioxide and ammonia breathers.
+const hydrosphereCostOf = (body, species, hydrosphere) => {
+  const extent = body.HydroExt
+
+  if (species.BreatheID === GAS.OXYGEN) {
+    return extent < 20 ? (20 - extent) / 10 : 0
+  }
+
+  if (!(extent > 0)) {
+    return 0
+  }
+
+  if (hydrosphere === HYDROSPHERE.LIQUID) {
+    return extent * (species.BreatheID === GAS.SULPHUR_DIOXIDE ? 1 : 0.1)
+  }
+
+  return hydrosphere === HYDROSPHERE.ICE_SHEET && species.BreatheID === GAS.SULPHUR_DIOXIDE ? extent * 0.05 : 0
+}
+
+// The six things that add to a colony cost, each as the game's colony cost factor, and which one decides. The cost is the largest factor, not their sum (the breathable-gas rule only applies below 2). `planned` marks a body that doesn't exist yet; `hydrosphere` is the state of its water at this point of the orbit (the body's own, for the cost now). Returns the cost before the race's colonisation skill, with the gravity class the game suffixes to it.
+export const costFactors = (body, species, temperature, planned = false, hydrosphere = body.HydroID) => {
   const tidal = body.TidalLock && body.BodyClass !== BODY_CLASS.MOON ? 5 : 1
   let temperatureCost = 0
 
@@ -265,7 +311,7 @@ export const costFactors = (body, species, temperature, planned = false) => {
     cost = BREATHING_PENALTY
   }
 
-  const hydrosphereCost = body.HydroExt < 20 ? (20 - body.HydroExt) / 10 : 0
+  const hydrosphereCost = hydrosphereCostOf(body, species, hydrosphere)
   cost = Math.max(cost, hydrosphereCost)
 
   const lowGravity = body.Gravity < species.MinimumGravity
@@ -278,6 +324,7 @@ export const costFactors = (body, species, temperature, planned = false) => {
   return {
     cost: round4(cost),
     lowGravity,
+    gravityClass: gravityClassOf(body, species),
     dangerousGas: gas,
     factors: { temperature: temperatureCost, pressure: pressureCost, danger: dangerCost, breathable: breathableCost, hydrosphere: hydrosphereCost, gravity: gravityCost },
   }
@@ -322,13 +369,13 @@ export const temperaturePoints = (body) => {
   return extremes ? { current, periapsis: extremes[0], apoapsis: extremes[1] } : { current, periapsis: current, apoapsis: current }
 }
 
-// The cost factors of a body at the three points of its orbit: now, at periapsis and at apoapsis. A body that is neither eccentric nor a moon has only the one, now. `planned` is for a body that doesn't exist yet.
+// The cost factors of a body at the three points of its orbit: now, at periapsis and at apoapsis. A body that is neither eccentric nor a moon has only the one, now. `planned` is for a body that doesn't exist yet. The water of the cost now is the body's own state; at periapsis and apoapsis it is the state the temperature of that point gives (SystemBody.method_43), which only a breather other than oxygen's prices.
 export const costPoints = (body, species, planned = false) => {
   const current = costFactors(body, species, body.SurfaceTemp, planned)
   const extremes = orbitalExtremes(body)
 
   if (extremes) {
-    return { current, periapsis: costFactors(body, species, extremes[0], planned), apoapsis: costFactors(body, species, extremes[1], planned) }
+    return { current, periapsis: costFactors(body, species, extremes[0], planned, hydrosphereTypeAt(body, extremes[0])), apoapsis: costFactors(body, species, extremes[1], planned, hydrosphereTypeAt(body, extremes[1])) }
   }
 
   return { current, periapsis: current, apoapsis: current }
@@ -358,6 +405,7 @@ export const colonyCost = (body, species, skill, planned = false) => {
     raw,
     raws: { current: now.cost, periapsis, apoapsis },
     lowGravity: now.lowGravity,
+    gravityClass: now.gravityClass,
     factors: now.factors,
     dangerousGas: now.dangerousGas,
   }

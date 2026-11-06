@@ -321,7 +321,7 @@ import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
-import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { allBandCounts, bandBasisNote, bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
 import { loadGroundFormations, roleTotals } from '../utilities/ground-formations'
 import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
 import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, linkStyle } from '../utilities/map-hierarchy'
@@ -1034,9 +1034,9 @@ export default {
       return legendCounts(this.currentHabitability, this.systemRows, { reason: this.habitabilityGap, version: this.formulaVersion })
     },
 
-    // Each system's count of bodies per band of COLONY_COST_BANDS, for systems with any.
+    // Each system's count of bodies per band of COLONY_COST_BANDS as the race's Galaxy Map options choose it, for systems with any.
     habitableBands() {
-      return this.currentHabitability ? this.currentHabitability.systems : {}
+      return this.currentHabitability ? allBandCounts(this.currentHabitability) : {}
     },
 
     savedPositions() {
@@ -1697,7 +1697,8 @@ export default {
             ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${counts.value.bands[band]})`, rule: band ? '' : 'map.bestBand' })),
             { kind: 'dot', color: colors.none, label: `None under ${last} (${counts.value.none})` },
             ...(counts.value.unknown ? [unknown(`Colony costs unknown, a body's stored value is missing (${counts.value.unknown})`, { result: counts })] : []),
-            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds`, result: counts }
+            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds`, result: counts },
+            { kind: 'note', label: bandBasisNote(this.currentHabitability.options), result: counts }
           )
         }
       } else if (this.layer === 'stars') {

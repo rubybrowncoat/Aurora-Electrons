@@ -688,7 +688,7 @@ const MEMORY_SCHEMA = {
   FCT_BannedBodies: ['SystemBodyID', 'RaceID'],
   FCT_LagrangePoint: ['GameID', 'SystemID', 'StarID', 'PlanetID'],
   FCT_AtmosphericGas: ['GameID', 'SystemBodyID', 'AtmosGasID', 'AtmosGasPercentage', 'GasAtm', 'FrozenOut'],
-  DIM_Gases: ['GasID', 'Name', 'BoilingPoint', 'GHGas', 'AntiGHGas', 'DangerousOxygen', 'DangerousPPMOxygen', 'DangerousMethane', 'DangerousPPMMethane', 'DangerousSulphur', 'DangerousPPMSulphur', 'DangerousAmmonia', 'DangerousPPMAmmonia'],
+  DIM_Gases: ['GasID', 'Name', 'FreezingPoint', 'GHGas', 'AntiGHGas', 'DangerousOxygen', 'DangerousPPMOxygen', 'DangerousMethane', 'DangerousPPMMethane', 'DangerousSulphur', 'DangerousPPMSulphur', 'DangerousAmmonia', 'DangerousPPMAmmonia'],
 }
 
 const body = (id, system, over = {}) => ({ SystemBodyID: id, GameID: 1, SystemID: system, StarID: 1, ParentBodyID: null, ParentBodyType: null, PlanetNumber: 1, OrbitNumber: 1, BodyClass: 3, BodyTypeID: 1, Radius: 100, Xcor: null, Ycor: null, GroundMineralSurvey: 0, OrbitalDistance: 2, Eccentricity: 0, RadiationLevel: 0, ...over })

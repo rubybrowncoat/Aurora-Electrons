@@ -114,10 +114,10 @@ const SURVEYED = [101, 103, 104, 105, 106]
 const NO_DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
 
 const GASES = [
-  { GasID: 10, Name: 'Oxygen', BoilingPoint: 90, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
-  { GasID: 2, Name: 'Nitrogen', BoilingPoint: 77, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
-  { GasID: 5, Name: 'Water Vapour', BoilingPoint: 373, GHGas: 1, AntiGHGas: 0, ...NO_DANGER },
-  { GasID: 20, Name: 'Carbon Dioxide', BoilingPoint: 195, GHGas: 1, AntiGHGas: 0, ...NO_DANGER, DangerousOxygen: 1, DangerousPPMOxygen: 5 },
+  { GasID: 10, Name: 'Oxygen', FreezingPoint: 90, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 2, Name: 'Nitrogen', FreezingPoint: 77, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 5, Name: 'Water Vapour', FreezingPoint: 373, GHGas: 1, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 20, Name: 'Carbon Dioxide', FreezingPoint: 195, GHGas: 1, AntiGHGas: 0, ...NO_DANGER, DangerousOxygen: 1, DangerousPPMOxygen: 5 },
 ]
 
 const SPECIES = [
@@ -158,6 +158,46 @@ const rowsOfFixture = () => {
   return tables
 }
 
+// Two small saves for the time of a terraforming plan, each with the race's own colony on a body (Home, which gives the race its species) and one body to plan: the reviewer's probe, an ammonia breather's body of 50 % liquid water at 280.5 K under 1 atm of 0.2 ammonia and 0.8 nitrogen, whose plan drains the water; and an oxygen breather's cold body of ice, whose plan drains nothing. The race's terraformers move 1 atm a year each.
+const TIME_GASES = [
+  { GasID: 4, Name: 'Ammonia', FreezingPoint: 195, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 5, Name: 'Water Vapour', FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, ...NO_DANGER, DangerousAmmonia: 2, DangerousPPMAmmonia: 2000 },
+  { GasID: 7, Name: 'Nitrogen', FreezingPoint: 63, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 10, Name: 'Oxygen', FreezingPoint: 54, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 20, Name: 'Aestusium', FreezingPoint: 1, GHGas: 1, AntiGHGas: 0, ...NO_DANGER },
+  { GasID: 22, Name: 'Frigusium', FreezingPoint: 1, GHGas: 0, AntiGHGas: 1, ...NO_DANGER },
+]
+
+const TIME_CASES = {
+  drain: { species: { SpeciesID: 3, SpeciesName: 'Ammonians', BreatheID: 4, Oxygen: 0.2, OxyDev: 0.1, PressMax: 4, Temperature: 288, TempDev: 30, Gravity: 1, GravDev: 0.5, PopulationDensityModifier: 1 }, own: 4, body: { BaseTemp: 255, SurfaceTemp: 280.5, HydroID: 3, HydroExt: 50 } },
+  plain: { species: { SpeciesID: 4, SpeciesName: 'Humans', BreatheID: 10, Oxygen: 0.2, OxyDev: 0.1, PressMax: 10, Temperature: 280, TempDev: 30, Gravity: 1, GravDev: 0.5, PopulationDensityModifier: 1 }, own: 10, body: { BaseTemp: 180, SurfaceTemp: 198, HydroID: 4, HydroExt: 100 } },
+}
+
+const PLANNED_BODY = 201
+const HOME_BODY = 205
+
+const rowsOfTimeCase = ({ species, own, body }) => {
+  const tables = []
+  const planet = (extra) => ({ ...earth, Albedo: 1, OrbitNumber: 0, ...extra })
+
+  tables.push(['FCT_Game', { GameID: GAME, TerraformingSpeed: 100 }])
+  tables.push(['FCT_Race', { GameID: GAME, RaceID: RACE, ColonizationSkill: 1, TerraformingRate: 1 }])
+  tables.push(['FCT_RaceSysSurvey', { SystemID: 1, RaceID: RACE, GameID: GAME, Name: 'Test', ControlRaceID: 0, MilitaryRestrictedSystem: 0 }])
+  tables.push(['FCT_Star', { StarID: 1, SystemID: 1, GameID: GAME, ComponentNumber: 1, Luminosity: 1, OrbitingComponent: 0, OrbitalDistance: 0, Eccentricity: 0 }])
+  TIME_GASES.forEach((gas) => tables.push(['DIM_Gases', gas]))
+  tables.push(['FCT_Species', species])
+  tables.push(['FCT_Population', { PopulationID: 1, GameID: GAME, RaceID: RACE, SystemBodyID: HOME_BODY, SpeciesID: species.SpeciesID, Population: 100, PopName: 'Colony' }])
+  ;[planet({ SystemBodyID: PLANNED_BODY, PlanetNumber: 1, ...body, name: 'Planned' }), planet({ SystemBodyID: HOME_BODY, PlanetNumber: 5, SurfaceTemp: 288, BaseTemp: 255, HydroID: 1, HydroExt: 0, name: 'Home' })].forEach(({ name, ...row }) => {
+    tables.push(['FCT_SystemBody', row])
+    tables.push(['FCT_SystemBodyName', { SystemBodyID: row.SystemBodyID, RaceID: RACE, Name: name }])
+    tables.push(['FCT_SystemBodySurveys', { SystemBodyID: row.SystemBodyID, RaceID: RACE }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: row.SystemBodyID, AtmosGasID: own, AtmosGasPercentage: 20, GasAtm: 0.2, FrozenOut: 0 }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: row.SystemBodyID, AtmosGasID: 7, AtmosGasPercentage: 80, GasAtm: 0.8, FrozenOut: 0 }])
+  })
+
+  return tables
+}
+
 const exec = (db, sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, (error) => (error ? reject(error) : resolve())))
 
 const wrapped = (db) => ({ query: (sql) => new Promise((resolve, reject) => db.all(sql, (error, items) => (error ? reject(error) : resolve([items])))) })
@@ -185,7 +225,7 @@ const schemaOf = (sqls) => {
   return columns
 }
 
-const buildDatabase = async (m) => {
+const buildDatabase = async (m, rows = rowsOfFixture()) => {
   const sqls = []
   const recording = { query: async (sql) => { sqls.push(sql); return [[]] } }
   const data = m['colonization-data']
@@ -196,8 +236,6 @@ const buildDatabase = async (m) => {
   await data.loadGases(recording)
 
   const columns = schemaOf(sqls)
-  const rows = rowsOfFixture()
-
   rows.forEach(([table, row]) => columns.set(table, new Set([...(columns.get(table) || []), ...Object.keys(row)])))
 
   const db = new sqlite3.Database(':memory:')
@@ -215,8 +253,8 @@ const buildDatabase = async (m) => {
   return { db, database: wrapped(db) }
 }
 
-// The Planner's pipeline over a database: what loadBodies, loadSpecies, loadRaceRules and loadGases read, assessed and ranked as the page does (nothing filtered, no species picked).
-const pipeline = async (m, database, scope = SCOPE) => {
+// The Planner's pipeline over a database: what loadBodies, loadSpecies, loadRaceRules and loadGases read, assessed and ranked as the page does (nothing filtered, no species picked). `terraformers` are the installations the ranking assumes.
+const pipeline = async (m, database, scope = SCOPE, terraformers = 10) => {
   const data = m['colonization-data']
   const colonization = m.colonization
   const bodies = await data.loadBodies(database, scope)
@@ -225,9 +263,9 @@ const pipeline = async (m, database, scope = SCOPE) => {
   const gases = await data.loadGases(database)
   const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
   const assessed = await colonization.assessBodies(bodies, species, raceRules, (id) => gasById.get(id))
-  const rows = await colonization.rankBodies(assessed, { speciesId: null, goal: 'both', ranking: colonization.normaliseRanking(null), rules: raceRules, terraformers: 10, distanceOf: () => null, capitalDistanceOf: () => null, origins: { colonies: 0, capital: false } })
+  const rows = await colonization.rankBodies(assessed, { speciesId: null, goal: 'both', ranking: colonization.normaliseRanking(null), rules: raceRules, terraformers, distanceOf: () => null, capitalDistanceOf: () => null, origins: { colonies: 0, capital: false } })
 
-  return { bodies, species, raceRules, assessed, rows: Object.freeze(rows) }
+  return { bodies, species, raceRules, gases, assessed, rows: Object.freeze(rows) }
 }
 
 // ---------- rendering ----------
@@ -395,7 +433,21 @@ const detailOf = (ctx, fixture, row, speciesId) => {
   const tree = vm._render()
   const node = (name) => nodesOf(tree, withAttr('data-detail', name))[0]
 
-  return { shown, cost: node('cost') ? textOf(node('cost')).replace(/\s+/g, ' ').trim() : null, capacity: node('capacity') ? textOf(node('capacity')).replace(/\s+/g, ' ').trim() : null }
+  return { shown, cost: node('cost') ? textOf(node('cost')).replace(/\s+/g, ' ').trim() : null, capacity: node('capacity') ? textOf(node('capacity')).replace(/\s+/g, ' ').trim() : null, gravityClass: node('gravity-class') ? textOf(node('gravity-class')).trim() : null }
+}
+
+// The body detail of a planted body as the page gives it for a species, rendered: its text with the white space of the template folded, and the notes under the plan's heading that say its time is a minimum. `capacity` is what the terraformers move in a year.
+const renderedDetail = (ctx, fixture, row, speciesId, capacity) => {
+  const item = { id: row.body.SystemBodyID, row, body: row.body, best: row.best }
+  const shown = ctx.pageOptions.methods.shownEvaluation.call({ detailSpecies: { [item.id]: speciesId } }, item)
+  const Detail = extended(ctx.detailOptions, ctx.detail)
+  const vm = new Detail({ propsData: { item, shown, speciesOptions: row.evaluations, terraformCapacity: capacity, gases: fixture.gases, rules: { ...fixture.raceRules, ColonizationSkill: 1 }, separator: ',' } })
+
+  mounted.push(vm)
+
+  const tree = vm._render()
+
+  return { shown, text: textOf(tree).replace(/\s+/g, ' '), minimumNotes: nodesOf(tree, withAttr('data-detail', 'minimum-time')).map((node) => textOf(node).trim()) }
 }
 
 // ---------- the statements ----------
@@ -726,6 +778,32 @@ const statements = (ctx) => {
     }
 
     assert.ok(compared >= 6, `only ${compared} figures were compared`)
+
+    return true
+  }))
+
+  add('gravity: the gravity class of a body is carried by its row and drawn beside its cost, and a body in range has none', settle(async () => {
+    const fixture = await fx()
+    const row = rowById(fixture.rows, 101)
+    const classed = { ...row, best: { ...row.best, assessment: { ...row.best.assessment, lowGravity: true, gravityClass: 'LGR' } } }
+    const rows = fixture.rows.map((entry) => (entry === row ? classed : entry))
+    const [item] = w.worksheetRows({ rows, selection: select(fixture.rows, [101]) })
+
+    assert.equal(item.gravityClass, 'LGR')
+    assert.equal(w.worksheetRows({ rows: fixture.rows, selection: select(fixture.rows, [101]) })[0].gravityClass, null)
+
+    const shown = mount(ctx, { selection: select(fixture.rows, [101]), rows, species: fixture.species })
+
+    assert.equal(cellText(shown.tree(), 101, 'gravity-class'), 'LGR')
+    release()
+
+    const plain = mount(ctx, { selection: select(fixture.rows, [101]), rows: fixture.rows, species: fixture.species })
+
+    assert.equal(cellText(plain.tree(), 101, 'gravity-class'), null)
+    release()
+    assert.equal(detailOf(ctx, fixture, classed, null).gravityClass, 'LGR', 'the body detail draws the class beside its cost')
+    assert.equal(detailOf(ctx, fixture, row, null).gravityClass, null, 'and none for a body in range')
+    release()
 
     return true
   }))
@@ -1153,6 +1231,102 @@ const statements = (ctx) => {
     return true
   }))
 
+  // The time of a drain on the Planner's own pipeline and the page's own detail and tooltip: the reviewer's probe at 100 installations of rate 1, the capacity bound of 4.55 days. The surface evaporates and the terraformer removes only the vapour in the air, so the drain can take longer: every place that words the time says it is a minimum, and an ordinary plan is worded as it was.
+  add('drain: the body detail, the tooltip, the state and the worksheet word the time of a drain as a minimum that evaporation can exceed, and a plan that drains nothing is worded as before', async () => {
+    const opened = []
+    const timed = async (name) => {
+      const { db, database } = await buildDatabase(ctx.m, rowsOfTimeCase(TIME_CASES[name]))
+
+      opened.push(db)
+
+      const fixture = { ...(await pipeline(ctx.m, database, SCOPE, 100)), database }
+      const row = rowById(fixture.rows, PLANNED_BODY)
+
+      return { fixture, row, speciesId: TIME_CASES[name].species.SpeciesID, capacity: ctx.m.colonization.terraformCapacityResult(fixture.raceRules, 100).value }
+    }
+    const tooltip = (row) => {
+      const self = { separator: ',' }
+
+      self.years = (value) => ctx.pageOptions.methods.years.call(self, value)
+      self.time = (value, basis) => ctx.pageOptions.methods.time.call(self, value, basis)
+
+      return ctx.pageOptions.methods.stateTooltip.call(self, row)
+    }
+
+    try {
+      const drain = await timed('drain')
+      const { row } = drain
+
+      assert.equal(row.best.species.SpeciesID, 3, 'the ammonia breather is the body\'s species')
+      assert.equal(row.best.strategy, 'terraform', 'the plan is the best route')
+      assert.ok(Math.abs(drain.capacity - 100) < 1e-9, 'the race moves 100 Earth atm a year')
+      assert.ok(Math.abs(row.best.years - 1.2472547819851116 / 100) < 1e-9, 'the years are the capacity bound, 4.55 days')
+      assert.equal(row.best.yearsBasis, 'minimum', 'the ranking labels the years a minimum')
+
+      const rendered = renderedDetail(ctx, drain.fixture, row, drain.speciesId, drain.capacity)
+      const { text } = rendered
+
+      assert.equal(rendered.shown.yearsBasis, 'minimum', 'the evaluation the detail shows is labelled')
+      assert.ok(text.includes('draining 50% of the surface water with it, at least 4.5 days, and longer where the surface water evaporates slowly.'), 'the step that drains')
+      assert.ok(text.includes('at least 4.5 days with the terraformers set by the race, 1.247 atm of Earth-equivalent work'), 'the plan\'s total')
+      assert.equal(rendered.minimumNotes.length, 1, 'the plan\'s heading carries one note')
+      assert.ok(rendered.minimumNotes[0].startsWith('A minimum, not a finishing date') && rendered.minimumNotes[0].includes('evaporates more into it only in small steps'), 'the note under the plan\'s heading names the evaporation')
+      assert.ok(text.includes('Installations to move the work within') && !text.includes('Installations to finish within'), 'the installation counts')
+      assert.ok(text.includes('× at least 4.5 days to terraform'), 'the discount line of the ranking')
+      assert.ok(text.includes('The terraforming time is a minimum, so the worth is the most the plan can earn.'), 'the ranking caption')
+      assert.ok(text.includes('Terraforming takes at least 4.5 days with the terraformers'), 'the state above the detail')
+      assert.ok(text.includes('no stage is dated'), 'the stage notes')
+      assert.ok(!/about 4\.\d|under 0\.1 years/.test(text), 'no figure of the time is a plain estimate')
+
+      assert.ok(row.rank === 1 && tooltip(row).includes('after at least 4.5 days of terraforming'), 'the tooltip of the ranked row')
+      assert.equal(row.state.chip(row.facts), 'To free · at least 4.5 days', 'the chip of the state')
+      assert.ok(ctx.sources[P].includes('counts its minimum years'), 'the ranking help says the years of a drain are a minimum')
+
+      // The worksheet shows the cost and the limit as they are today and no time of a plan, so nothing of it claims a completion.
+      const [sheet] = w.worksheetRows({ rows: drain.fixture.rows, selection: select(drain.fixture.rows, [PLANNED_BODY]), speciesId: drain.speciesId })
+
+      assert.equal(sheet.state, 'known')
+      assert.ok(Math.abs(sheet.costValue - 5) < 1e-9, 'the worksheet shows the cost the body has, 5, not the cost the drain ends at')
+      assert.deepEqual(Object.keys(sheet).filter((key) => /year|time|basis|plan|drain/i.test(key)), [], 'a worksheet row carries no time of a plan')
+
+      // The rendered table itself, not only the row's keys: its columns are the body, its species, the cost and the limit, and no column or cell of the draining body words a time of a plan.
+      const sheetView = mount(ctx, { selection: select(drain.fixture.rows, [PLANNED_BODY]), rows: drain.fixture.rows, species: drain.fixture.species }).tree()
+      const heads = nodesOf(sheetView, (node) => node.tag === 'th' && (node.children || []).some((child) => Boolean(child.data && child.data.attrs && child.data.attrs['data-sort']))).map((node) => textOf(node).replace(/[▲▼]/g, '').replace(/\s+/g, ' ').trim())
+      const cells = nodesOf(rowNode(sheetView, PLANNED_BODY) || { children: [] }, (node) => node.tag === 'td').map((node) => textOf(node).replace(/\s+/g, ' ').trim())
+
+      assert.deepEqual(heads.slice(0, 4), ['Body', 'Species', 'Colony cost', 'Holds'], 'the rendered table leads with the body, its species, the cost and the limit')
+      assert.equal(cellText(sheetView, PLANNED_BODY, 'cost'), '5', 'the rendered row shows the cost the body has now')
+      assert.deepEqual(heads.filter((head) => /time|year|day|finish|terraform|minimum/i.test(head)), [], 'no column of the rendered table is a time of a plan')
+      assert.deepEqual(cells.filter((cell) => /at least|\byears?\b|\bdays?\b|minimum|terraform/i.test(cell)), [], 'no cell of the rendered row words a time of a plan')
+
+      // The page writes years at one decimal, and floors a bound there: a bound whose nearest rounding would overshoot reads below itself.
+      const pageTime = (value, basis) => ctx.pageOptions.methods.time.call({ separator: ',', years: (one) => ctx.pageOptions.methods.years.call({ separator: ',' }, one) }, value, basis)
+
+      assert.equal(pageTime(2.36, 'minimum'), 'at least 2.3 y', 'a 2.36-year bound reads 2.3 years at the page\'s one decimal, not the 2.4 nearest rounding gives')
+      assert.equal(pageTime(2.36, 'capacity'), '2.4 y', 'a plan that drains nothing keeps the page\'s nearest rounding')
+
+      // An ordinary plan: the oxygen breather's cold ice body is warmed and drains nothing, and every place words its time as it did.
+      const plain = await timed('plain')
+
+      assert.equal(plain.row.best.strategy, 'terraform', 'the ordinary plan is the best route')
+      assert.equal(plain.row.best.yearsBasis, 'capacity', 'its years keep the capacity basis')
+
+      const ordinaryDetail = renderedDetail(ctx, plain.fixture, plain.row, plain.speciesId, plain.capacity)
+      const ordinary = ordinaryDetail.text
+
+      assert.deepEqual(ordinaryDetail.minimumNotes, [], 'its plan\'s heading carries no note')
+
+      assert.ok(/, about /.test(ordinary), 'its step is "about" its time')
+      assert.ok(ordinary.includes('Installations to finish within'), 'its installations finish within')
+      assert.ok(!/at least|minimum|finishing date|no stage is dated/.test(ordinary), 'it says nothing of a minimum')
+      assert.ok(!/at least|minimum/.test(tooltip(plain.row)) && !/at least|minimum/.test(plain.row.state.chip(plain.row.facts)), 'neither does its tooltip or chip')
+
+      return true
+    } finally {
+      opened.forEach((db) => db.close())
+    }
+  })
+
   return list
 }
 
@@ -1254,6 +1428,9 @@ const MUTATIONS = [
   { name: 'an amount marked as an accessibility', file: U, find: 'ofRule({ rule: AMOUNT_RULE, value: amount, inputs: { present: [\'the deposit\', \'the body\\\'s survey\'] } })', replace: 'ofRule({ rule: ACCESSIBILITY_RULE, value: amount, inputs: { present: [\'the deposit\', \'the body\\\'s survey\'] } })', fails: ['provenance'] },
   { name: 'the cost taken as the cost now, not the worst of the orbit', file: U, find: 'costValue: assessment.cost.worst,', replace: 'costValue: assessment.cost.current,', fails: ['parity'] },
   { name: 'the cost taken after terraforming', file: U, find: 'costValue: assessment.cost.worst,', replace: 'costValue: assessment.plan && assessment.after ? assessment.after.worst : assessment.cost.worst,', fails: ['parity'] },
+  { name: 'the gravity class dropped from the row', file: U, find: 'gravityClass: assessment.gravityClass || null }', replace: 'gravityClass: null }', fails: ['gravity'] },
+  { name: 'the gravity class not drawn beside the cost', file: V, find: '<span v-if="item.gravityClass" class="caption" :title="gravityText(item.gravityClass)" data-cell="gravity-class"> {{ item.gravityClass }}</span>', replace: '', fails: ['gravity'] },
+  { name: 'the gravity class not drawn in the body detail', file: B, find: '<span v-if="assessment.gravityClass" class="caption" :title="gravityText(assessment.gravityClass)" data-detail="gravity-class">{{ assessment.gravityClass }}</span>', replace: '', fails: ['gravity'] },
   { name: 'the limit of the first species for every body', file: U, find: 'capacityValue: evaluation.capacityNow,', replace: 'capacityValue: row.evaluations[0].capacityNow,', fails: ['parity'] },
   { name: 'the species picked ignored', file: U, find: '(speciesId && row.evaluations.find((evaluation) => evaluation.species.SpeciesID === speciesId)) || row.best', replace: 'row.best', fails: ['species', 'parity'] },
   { name: 'a body selected twice listed twice', file: U, find: 'selection.filter((reference) => !seen.has(reference.SystemBodyID) && seen.add(reference.SystemBodyID))', replace: 'selection.filter(() => true)', fails: ['absent'] },
@@ -1296,6 +1473,18 @@ const MUTATIONS = [
   { name: 'the worksheet not registered', file: P, find: 'components: { BodyDetail, ColonyWorksheet, LoadState,', replace: 'components: { BodyDetail, LoadState,', fails: ['page'] },
   { name: 'the primary star tested by the star\'s old component name', file: C, find: 'if (star.ComponentNumber === 1) {', replace: 'if (star.Component === 1) {', fails: ['cmc-reach'] },
   { name: 'a companion beyond the reach counted as in reach whatever it orbits from', file: C, find: 'return star.Apoapsis < CMC_REACH_AU || linked([star.StarID])', replace: 'return true', fails: ['cmc-reach'] },
+  { name: 'the step that drains worded as about its years', file: B, find: ', {{ stepTime(step) }}.</v-list-item-subtitle>', replace: ', about {{ years(stepYears(step)) }}.</v-list-item-subtitle>', fails: ['drain'] },
+  { name: 'the plan\'s total worded as plain years', file: B, find: 'const total = this.time(planYears(this.assessment.work, this.terraformCapacity), this.assessment.timeBasis)', replace: 'const total = this.years(planYears(this.assessment.work, this.terraformCapacity))', fails: ['drain'] },
+  { name: 'the ranking line worded as plain years', file: B, find: '{{ time(shown.years, shown.yearsBasis) }} to terraform', replace: '{{ years(shown.years) }} to terraform', fails: ['drain'] },
+  { name: 'the ranking caption silent on a minimum', file: B, find: 'this.shown.strategy === \'terraform\' && this.shown.yearsBasis === TIME_BASIS.MINIMUM ?', replace: 'false ?', fails: ['drain'] },
+  { name: 'the minimum-time note never shown', file: B, find: '<div v-if="minimumTime" class="caption text--secondary mb-1" data-detail="minimum-time">', replace: '<div v-if="false" class="caption text--secondary mb-1" data-detail="minimum-time">', fails: ['drain'] },
+  { name: 'the installation counts for finishing within', file: B, find: 'return this.minimumTime ? \'Installations to move the work within\' : \'Installations to finish within\'', replace: 'return \'Installations to finish within\'', fails: ['drain'] },
+  { name: 'the stage notes silent on an undated drain', file: B, find: '...(this.minimumTime ? [DRAIN_STAGE_NOTE] : []),', replace: '', fails: ['drain'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the tooltip worded in plain years', file: P, find: 'after ${this.time(best.years, best.yearsBasis)} of terraforming', replace: 'after ${this.years(best.years)} of terraforming', fails: ['drain'] },
+  { name: 'the ranking help silent on a minimum', file: P, find: 'A plan that drains surface water counts its minimum years, the terraformers\' time, so its discount is the most that plan can earn. ', replace: '', fails: ['drain'] },
+  { name: 'the evaluation without the basis of its years', file: C, find: 'yearsBasis: assessment.timeBasis, cost: assessment.after.worst', replace: 'yearsBasis: null, cost: assessment.after.worst', fails: ['drain'] },
+  { name: 'the page floors a minimum at more decimals than it writes', file: P, find: 'timeWords(value, basis, this.years, 1)', replace: 'timeWords(value, basis, this.years, 2)', fails: ['drain'] },
 ]
 
 const MUTANTS = MUTATIONS.map((mutation, index) => ({ id: `mutant:${index}`, ...mutation }))

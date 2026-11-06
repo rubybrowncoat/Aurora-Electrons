@@ -2,10 +2,10 @@
 //
 // A stage is `{ index, kind ('start', 'step', 'settle' or 'target', the plan's end state when it has no gas operation to carry it), step (the plan step, null for the others), pressure, temperature, hydroExt, cost: { current, periapsis, apoapsis, raw, worst }, points: { current, periapsis, apoapsis } (the cost factors there, each `{ cost, factors, ... }` as `costPoints` gives them), limiting, next, revealed, cleared, overtaken, blocked, result }`. `limiting` and `next` are lists of `{ key, label, value, fixed, at }`, `at` the points of the orbit where the factor stands; a factor is `fixed` when no gas operation changes it (gravity). `next` includes the breathing penalty that a larger factor hides, as the colony cost only counts it below 2. `revealed` are the keys that began to set the cost with this stage; of those that ceased to, `cleared` are the ones whose penalty fell (never a fixed one) and `overtaken` the ones another factor only rose above.
 //
-// The first stage is the body as saved, priced by the same function as the body detail's factor bars. Every later stage is the plan carried one more gas operation, in the plan's order, each taken in full, on the water extent as saved. The plan's own end state (`terraformedBody`, the atmosphere and water the body detail prices after terraforming) is the stage that settles the surface when the water condenses or evaporates over years after the water step, else the stage of the last operation, so the plan's end agrees with the cost the Planner shows after terraforming.
+// The first stage is the body as saved, priced by the same function as the body detail's factor bars. Every later stage carries one completed gas operation in the plan's order. A drain changes the extent inside its water operation; later operations inherit that extent, temperature-dependent phase and dampening. Other condensation or evaporation is priced in the final settling stage, as in the Planner's end state. A stage carries no date: the time of a drain is a minimum (`TIME_BASIS` in terraforming.js), so a stage after it shows the drain complete, not when it completes.
 
-import { BODY_CLASS, BREATHING_PENALTY, FACTORS, breathingFails, costPoints, dangerColumnsOf, limitingFactors, surfaceTemperature, withAtmosphereShares } from './habitability'
-import { albedoForHydrosphere, hydrosphereState, terraformedBody } from './terraforming'
+import { BODY_CLASS, BREATHING_PENALTY, FACTORS, breathingFails, costPoints, limitingFactors } from './habitability'
+import { bodyAfterTerraformStep, terraformedBody } from './terraforming'
 import { ofRule, registerRule } from './provenance'
 
 const POINTS = ['current', 'periapsis', 'apoapsis']
@@ -15,7 +15,8 @@ const FIXED_FACTORS = new Set(['gravity'])
 
 export const STAGE_ASSUMPTIONS = Object.freeze([
   'each gas operation is carried out in full, in the plan\'s order, before the next one',
-  'the water extent changes only in the final settling',
+  'a water drain completes inside its gas operation; later operations inherit the remaining water, while other condensation or evaporation settles at the end',
+  'a drain is shown complete, not dated: it takes at least the terraformers\' time for its work, and the evaporation of the surface water, which is not modelled, can make it longer',
   'the shares of the gases are recomputed from their pressures after each operation',
   'the climate counts every gas as the plan does, frozen out or not',
   'each stage recomputes its own dampening, and the plan reads its target\'s swing, from that body\'s pressure and water extent, using the parent orbit and year for a moon',
@@ -27,49 +28,12 @@ registerRule({
   units: 'colony cost',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, HydroID, TidalLock, Eccentricity, Year, StarLuminosity', 'FCT_SystemBody.ParentOrbitalDistance, ParentEccentricity, ParentYear', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species'],
-  note: 'The colony cost factors of the colony cost rule, priced on the atmosphere the Planner\'s terraforming plan leaves after each gas operation. Every stage recomputes the dampened swing from its own pressure and water extent, on the orbital year, the parent\'s for a moon. The first stage is the body as saved; every later one is the plan\'s own estimate and was not observed on a played-out terraform. A factor is fixed when no gas operation changes it, so it is never promised away.',
+  note: 'The colony cost factors of the colony cost rule, priced on the atmosphere and surface water the Planner\'s terraforming plan leaves after each completed gas operation. The water factor and danger set are those of the species\' breathing gas. A non-oxygen drain is ordered only after a stage where the surface can evaporate, including a seasonal thaw; a frozen surface cannot drain. The completed drain and all later stages carry the remaining water, and the stages carry no dates: the time of a drain is a minimum, the terraformers\' time for its work, because the terraformer removes only the vapour in the air and the surface evaporates only in small steps; that evaporation is not modelled. Every stage recomputes its phase, albedo and dampened swing from the state the preceding operation leaves, on the orbital year, the parent\'s for a moon, and carries the gravity class. Other condensation or evaporation settles at the end. The first stage is the body as saved; later stages are estimates of the plan, not a played-out terraform.',
   assumptions: STAGE_ASSUMPTIONS,
 })
 
-const gasRow = (id, amount, info) => ({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, BoilingPoint: info.BoilingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, ...dangerColumnsOf(info), FrozenOut: false })
-
-// The body once the first `applied` steps of the plan are done: each step sets its gas to the figure the plan types into the game (`set`), a gas set to nothing leaves. The climate is the plan's: the greenhouse and anti-greenhouse gases and the pressure set the temperature, the temperature sets the water phase, and a change of phase moves the albedo.
-const bodyAfter = (body, plan, gasInfo, applied) => {
-  const atmosphere = new Map(body.Atmosphere.map((gas) => [gas.AtmosGasID, gas]))
-
-  plan.steps.slice(0, applied).forEach((step) => {
-    if (Number.isFinite(step.set) && step.set > 0) {
-      const present = atmosphere.get(step.gasId)
-
-      atmosphere.set(step.gasId, present ? { ...present, GasAtm: step.set } : gasRow(step.gasId, step.set, gasInfo(step.gasId) || {}))
-    } else {
-      atmosphere.delete(step.gasId)
-    }
-  })
-
-  const rows = withAtmosphereShares([...atmosphere.values()])
-  const pressure = rows.reduce((sum, gas) => sum + gas.GasAtm, 0)
-  const greenhouse = rows.reduce((sum, gas) => sum + (gas.GHGas ? gas.GasAtm : 0), 0)
-  const anti = rows.reduce((sum, gas) => sum + (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0), 0)
-  const temperatureAt = (albedo) => surfaceTemperature({ ...body, AtmosPress: pressure }, Math.min(3, 1 + pressure / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti), albedo)
-  let albedo = body.Albedo
-  let temperature = temperatureAt(albedo)
-  let hydrosphere = hydrosphereState(temperature, pressure)
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const adjusted = albedoForHydrosphere(body.Albedo, body.HydroID, hydrosphere, body.HydroExt)
-
-    if (Math.abs(adjusted - albedo) < 1e-3) {
-      break
-    }
-
-    albedo = adjusted
-    temperature = temperatureAt(albedo)
-    hydrosphere = hydrosphereState(temperature, pressure)
-  }
-
-  return { ...body, SurfaceTemp: temperature, Albedo: albedo, AtmosPress: pressure, HydroID: hydrosphere, Atmosphere: rows }
-}
+// Replay completed operations on the state each predecessor leaves, using the same execution model that decides where a drain can finish.
+const bodyAfter = (body, plan, gasInfo, applied) => plan.steps.slice(0, applied).reduce((state, step) => bodyAfterTerraformStep(state, step, gasInfo), body)
 
 const merged = (entries) => {
   const byKey = new Map()
@@ -123,6 +87,7 @@ const stageOf = ({ index, kind, step, body, species, skill, planned, previous })
     cost: { current: costs.current, periapsis: costs.periapsis, apoapsis: costs.apoapsis, raw, worst: raw * skill },
     points,
     lowGravity: points.current.lowGravity,
+    gravityClass: points.current.gravityClass,
     limiting,
     next,
     revealed: previous ? limiting.filter(({ key }) => !(previous.limiting.some((entry) => entry.key === key))).map(({ key }) => key) : [],
@@ -133,7 +98,7 @@ const stageOf = ({ index, kind, step, body, species, skill, planned, previous })
   }
 }
 
-// The stages of the plan in `assessment` (from `assessTerraforming` for the same body, species and `gasInfo`), or null when the body is not colonisable or has no plan. `skill` is the race's colonisation skill, as given to `assessTerraforming`. Every gas operation is priced on the atmosphere the operations so far leave, water extent as saved. The plan's own end state (the atmosphere and water the Planner prices after terraforming) is the stage of the settling when the surface has water to condense or evaporate, else a stage of kind 'target' when it differs from what the last operation leaves (in cost or in what limits it), never the last operation's own stage, so the end always agrees with the Planner's cost after terraforming.
+// The stages of the assessment's plan, each operation priced on the state its predecessors leave. A completed drain immediately changes HydroExt and every later stage inherits it. Other surface settling is last; a distinct target stage is retained only when the Planner's end state differs in cost or limits.
 export const terraformStages = ({ assessment, body, species, skill, gasInfo }) => {
   const { plan } = assessment
 
@@ -164,6 +129,7 @@ export const terraformStages = ({ assessment, body, species, skill, gasInfo }) =
     floor: stages[0].lowGravity ? 1 : 0,
     floorWorst: stages[0].lowGravity ? skill : 0,
     lowGravity: stages[0].lowGravity,
+    gravityClass: stages[0].gravityClass,
     tidalLock: !!body.TidalLock && body.BodyClass !== BODY_CLASS.MOON,
     partial: plan.partial,
   }

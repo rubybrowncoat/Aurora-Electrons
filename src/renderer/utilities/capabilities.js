@@ -200,7 +200,7 @@ const EXTRA_READS = Object.freeze({
     'check:free-fighter-capacity': 'DIM_PlanetaryInstallation(FighterProductionValue)',
   }),
   '/habitability': Object.freeze({
-    gases: 'DIM_Gases(GasID Name BoilingPoint GHGas AntiGHGas DangerousOxygen DangerousPPMOxygen DangerousMethane DangerousPPMMethane DangerousSulphur DangerousPPMSulphur DangerousAmmonia DangerousPPMAmmonia)',
+    gases: 'DIM_Gases(GasID Name FreezingPoint GHGas AntiGHGas DangerousOxygen DangerousPPMOxygen DangerousMethane DangerousPPMMethane DangerousSulphur DangerousPPMSulphur DangerousAmmonia DangerousPPMAmmonia)',
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
     BodyDetail: FLEET_COMMAND_READS,
   }),

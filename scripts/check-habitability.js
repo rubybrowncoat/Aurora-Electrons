@@ -15,7 +15,7 @@ const root = path.resolve(__dirname, '..')
 const file = path.join(root, 'src/renderer/utilities/habitability.js')
 const original = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
 const GROUP_BY = 'export default (list, key) => list.reduce((groups, item) => { (groups[item[key]] = groups[item[key]] || []).push(item); return groups }, {})'
-const bodyOf = (extra = {}) => ({ BodyClass: 1, Eccentricity: 0.6, OrbitalDistance: 1, Year: 8760, DistanceToParent: 1, StarLuminosity: 1, BaseTemp: 255, SurfaceTemp: 280.5, Albedo: 1, AtmosPress: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, Atmosphere: [{ GasAtm: 1, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0 }], ...extra })
+const bodyOf = (extra = {}) => ({ BodyClass: 1, Eccentricity: 0.6, OrbitalDistance: 1, Year: 8760, DistanceToParent: 1, StarLuminosity: 1, BaseTemp: 255, SurfaceTemp: 280.5, Albedo: 1, AtmosPress: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, Atmosphere: [{ GasAtm: 1, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }], ...extra })
 const close = (actual, expected, name) => assert.ok(Math.abs(actual - expected) < 1e-9, `${name}: ${actual} != ${expected}`)
 const checks = []
 const check = (id, name, run) => checks.push({ id, name, run })
@@ -67,7 +67,7 @@ check('inputs', 'eccentric wet bodies require an orbital year, and moons require
 })
 
 // The gases of DIM_Gases the checks below price, each with its four breathers' danger pairs as the 3.2 export holds them (DatabaseExport/DIM_Gases.csv): a gas is dangerous to a breather by the rating of the pair of the breathing gas, above the parts per million of the atmosphere the pair gives.
-const gasOf = (AtmosGasID, AtmosGasPercentage, GasAtm, danger) => ({ AtmosGasID, AtmosGasPercentage, GasAtm, FrozenOut: 0, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, DangerousOxygen: danger[0], DangerousPPMOxygen: danger[1], DangerousMethane: danger[2], DangerousPPMMethane: danger[3], DangerousSulphur: danger[4], DangerousPPMSulphur: danger[5], DangerousAmmonia: danger[6], DangerousPPMAmmonia: danger[7] })
+const gasOf = (AtmosGasID, AtmosGasPercentage, GasAtm, danger) => ({ AtmosGasID, AtmosGasPercentage, GasAtm, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, DangerousOxygen: danger[0], DangerousPPMOxygen: danger[1], DangerousMethane: danger[2], DangerousPPMMethane: danger[3], DangerousSulphur: danger[4], DangerousPPMSulphur: danger[5], DangerousAmmonia: danger[6], DangerousPPMAmmonia: danger[7] })
 const METHANE = (share) => gasOf(3, share, share / 100, [2, 500, 0, 0, 0, 0, 2, 10000])
 const AMMONIA = (share) => gasOf(4, share, share / 100, [2, 50, 2, 500, 2, 1000, 0, 0])
 const NITROGEN = (share) => gasOf(7, share, share / 100, [0, 0, 0, 0, 0, 0, 0, 0])
@@ -94,7 +94,7 @@ check('accessor', 'the danger of a gas is the pair of the breathing gas: oxygen 
 
 check('danger', 'the worst dangerous gas and its rating are those of the species\' breathing gas, never the oxygen pair', (h) => {
   const air = airOf([OXYGEN(10), METHANE(10), AMMONIA(10), SULPHUR_DIOXIDE(10), NITROGEN(60)])
-  // The gas and the rating each breather meets: the first gas of the highest rating among those other than its own breathing gas.
+  // The gas and the rating each breather meets: the first gas of the highest rating among all those in the air, its own breathing gas included (no gas of the stock table is dangerous to its own breather).
   const expected = { oxygen: [3, 2], methane: [10, 3], ammonia: [10, 3], sulphur: [10, 2] }
 
   Object.entries(BREATHERS).forEach(([name, id]) => {
@@ -125,9 +125,9 @@ check('share', 'the breathing gas fails above 30 % of the air by its share of th
   assert.equal(h.breathingFails(airOf([{ ...OXYGEN(25), GasAtm: 0.25 }, NITROGEN(75)]), species), false, 'a share under 30 % at the same pressure')
 })
 
-check('gas inputs', 'a gas row without its share or the danger pair of any breather leaves the body unpriced, naming the figure', (h) => {
+check('gas inputs', 'a gas row without its share, its freezing point or the danger pair of any breather leaves the body unpriced, naming the figure', (h) => {
   const missing = (gas) => h.missingBodyInputs(bodyOf({ Atmosphere: [gas] })).filter((name) => name.startsWith('atmosphere'))
-  const figures = [['AtmosGasPercentage', 'gas share'], ['DangerousOxygen', 'danger to oxygen breathers'], ['DangerousPPMOxygen', 'danger level for oxygen breathers'], ['DangerousMethane', 'danger to methane breathers'], ['DangerousPPMMethane', 'danger level for methane breathers'], ['DangerousSulphur', 'danger to sulphur dioxide breathers'], ['DangerousPPMSulphur', 'danger level for sulphur dioxide breathers'], ['DangerousAmmonia', 'danger to ammonia breathers'], ['DangerousPPMAmmonia', 'danger level for ammonia breathers']]
+  const figures = [['AtmosGasPercentage', 'gas share'], ['FreezingPoint', 'freezing point'], ['DangerousOxygen', 'danger to oxygen breathers'], ['DangerousPPMOxygen', 'danger level for oxygen breathers'], ['DangerousMethane', 'danger to methane breathers'], ['DangerousPPMMethane', 'danger level for methane breathers'], ['DangerousSulphur', 'danger to sulphur dioxide breathers'], ['DangerousPPMSulphur', 'danger level for sulphur dioxide breathers'], ['DangerousAmmonia', 'danger to ammonia breathers'], ['DangerousPPMAmmonia', 'danger level for ammonia breathers']]
 
   assert.deepEqual(missing(OXYGEN(20)), [], 'a whole row lacks nothing')
   figures.forEach(([column, name]) => assert.deepEqual(missing({ ...OXYGEN(20), [column]: null }), [`atmosphere ${name}`], column))
@@ -169,6 +169,7 @@ const faults = [
   { name: 'the breathing share is read on the pressure of the gas', from: 'total + candidate.AtmosGasPercentage, 0)', to: 'total + candidate.GasAtm, 0)', fails: ['share'] },
   { name: 'the danger pairs are not required of a gas', from: ', ...DANGER_INPUTS]', to: ']', fails: ['gas inputs'] },
   { name: 'the share of a gas is not required', from: '[\'AtmosGasPercentage\', \'gas share\'], ', to: '', fails: ['gas inputs'] },
+  { name: 'the freezing point of a gas is not required', from: '[\'FreezingPoint\', \'freezing point\'], ', to: '', fails: ['gas inputs'] },
 ]
 
 // A finite number, so that a missing figure never reads as agreement: a non-finite stored or predicted temperature, or a

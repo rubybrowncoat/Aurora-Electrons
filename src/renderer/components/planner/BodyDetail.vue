@@ -27,7 +27,7 @@
           <div class="headline" data-detail="cost">
             <template v-if="plan"><span class="text--secondary">{{ cost(assessment.cost.worst) }}</span> → {{ cost(assessment.after.worst) }}</template>
             <template v-else>{{ cost(assessment.cost.worst) }}</template>
-            <span v-if="assessment.lowGravity" class="caption">LG</span>
+            <span v-if="assessment.gravityClass" class="caption" :title="gravityText(assessment.gravityClass)" data-detail="gravity-class">{{ assessment.gravityClass }}</span>
           </div>
           <div class="caption text--secondary">
             Now {{ cost(assessment.cost.current) }}<template v-if="swing(assessment.cost)"> · periapsis {{ cost(assessment.cost.periapsis) }} · apoapsis {{ cost(assessment.cost.apoapsis) }}</template><template v-if="rules.ColonizationSkill !== 1"> · skill ×{{ rules.ColonizationSkill }}</template>
@@ -58,7 +58,7 @@
             <div class="why-line"><span>Deposits</span><span>{{ why.mining }}</span></div>
             <div class="why-line why-total"><span>Prize for the goal</span><span>{{ why.prize }}</span></div>
             <div class="why-line"><span>× colony cost {{ cost(shown.raw) }}</span><span>{{ why.cost }}</span></div>
-            <div class="why-line"><span>× {{ years(shown.years) }} to terraform</span><span>{{ why.time }}</span></div>
+            <div class="why-line"><span>× {{ time(shown.years, shown.yearsBasis) }} to terraform</span><span>{{ why.time }}</span></div>
             <div class="why-line"><span>× {{ distanceText }}</span><span>{{ why.distance }}</span></div>
             <div class="caption text--secondary mt-1">{{ rankText }}</div>
           </template>
@@ -72,6 +72,7 @@
             <h3 class="mr-3">Terraforming blueprint</h3>
             <span class="caption text--secondary">{{ planSummary }}</span>
           </div>
+          <div v-if="minimumTime" class="caption text--secondary mb-1" data-detail="minimum-time">{{ minimumTimeNote }}</div>
           <v-list dense class="py-0 blueprint">
             <v-list-item v-for="step in plan.steps" :key="`${step.key}-${step.gasId}`" two-line>
               <v-list-item-content>
@@ -88,7 +89,7 @@
                   </span>
                   maximum atm.
                 </v-list-item-title>
-                <v-list-item-subtitle>From {{ round(step.from, 3) }}, about {{ years(stepYears(step)) }}.</v-list-item-subtitle>
+                <v-list-item-subtitle :class="{ 'text-wrap': step.drained > 0 }">From {{ round(step.from, 3) }}<template v-if="step.drained > 0">, draining {{ round(step.drained, 1) }}% of the surface water with it</template>, {{ stepTime(step) }}.</v-list-item-subtitle>
               </v-list-item-content>
             </v-list-item>
             <v-list-item v-if="plan.settling.years > 0.1" two-line>
@@ -137,7 +138,7 @@
             </v-col>
           </v-row>
 
-          <div class="overline mt-3">Installations to finish within</div>
+          <div class="overline mt-3">{{ installationsTitle }}</div>
           <div class="d-flex flex-wrap installation-times">
             <span v-for="option in installationOptions" :key="option.years" class="mr-6 text-no-wrap"><b>{{ option.count }}</b> in {{ option.years }} y</span>
             <span class="text--secondary">{{ rates }}</span>
@@ -177,18 +178,20 @@ import ProvenanceMark from '../page/ProvenanceMark.vue'
 import { activeAppearance, toneColor } from '../../utilities/appearance'
 import { systemBodyName } from '../../utilities/aurora'
 import { linkTo } from '../../utilities/deep-links'
-import { FACTORS, infrastructurePerMillion, limitingFactors } from '../../utilities/habitability'
+import { FACTORS, GRAVITY_CLASSES, infrastructurePerMillion, limitingFactors } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
 import { cmcNote, rowProvenance } from '../../utilities/colonization'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
 import { compact } from '../../utilities/minerals'
 import { isAvailable, unavailable, valueOrNull } from '../../utilities/provenance'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, terraformBreakdown } from '../../utilities/terraform-capacity'
-import { OUTCOMES, planYears } from '../../utilities/terraforming'
+import { MINIMUM_TIME_NOTE, OUTCOMES, TIME_BASIS, planYears, stepTimeBasis, timeWords } from '../../utilities/terraforming'
 import { terraformStages } from '../../utilities/terraform-limits'
 
 const GROUND_SURVEY = { 0: 'completed', 1: 'minimal', 2: 'low', 3: 'good', 4: 'high', 5: 'excellent' }
 const INSTALLATION_YEARS = [5, 10, 25, 50]
+// What the stages say of a drain: they show its end state, and no date for it.
+const DRAIN_STAGE_NOTE = 'The stages after a drain show it complete. It completes no earlier than its minimum time, and no stage is dated.'
 
 export default {
   name: 'BodyDetail',
@@ -290,7 +293,9 @@ export default {
       return [
         ...(this.limits.lowGravity ? [`Gravity below the species' minimum is fixed: no gas operation removes it, so the colony cost can't fall under ${this.cost(this.limits.floorWorst)} on this body (1 before the colonisation skill).`] : []),
         ...(this.limits.tidalLock ? ['A tidally locked body has its temperature factor divided by 5, and that stays whatever the atmosphere.'] : []),
-        'Stages after the first are the plan\'s estimate: each gas operation is taken in full, in the plan\'s order, and the water extent changes only when the surface settles.',
+        'Stages after the first are the plan\'s estimate: each gas operation completes in the plan\'s order. A drain changes the surface water inside its operation; later stages inherit that water and its dampening. Other condensation or evaporation settles at the end.',
+        ...(this.minimumTime ? [DRAIN_STAGE_NOTE] : []),
+        ...(this.assessment.reason ? [this.assessment.reason] : []),
       ]
     },
 
@@ -306,9 +311,20 @@ export default {
     },
 
     planSummary() {
-      const total = planYears(this.assessment.work, this.terraformCapacity)
+      const total = this.time(planYears(this.assessment.work, this.terraformCapacity), this.assessment.timeBasis)
 
-      return `${this.years(total)} with ${this.terraformCapacity > 0 ? 'the terraformers set by the race' : 'no terraformers'}, ${roundToDecimal(this.assessment.work, 3)} atm of Earth-equivalent work`
+      return `${total} with ${this.terraformCapacity > 0 ? 'the terraformers set by the race' : 'no terraformers'}, ${roundToDecimal(this.assessment.work, 3)} atm of Earth-equivalent work`
+    },
+    // Whether the plan's years are a minimum: it drains surface water, and the evaporation that limits the drain is not modelled.
+    minimumTime() {
+      return this.assessment.timeBasis === TIME_BASIS.MINIMUM
+    },
+    minimumTimeNote() {
+      return MINIMUM_TIME_NOTE
+    },
+    // The installations are counted for the work, which a drain's evaporation can keep longer than any number of them.
+    installationsTitle() {
+      return this.minimumTime ? 'Installations to move the work within' : 'Installations to finish within'
     },
 
     tiles() {
@@ -347,7 +363,7 @@ export default {
         const breakdown = terraformBreakdown({ raceRate, speed, source, admins: this.navalAdmins })
         const capacity = valueOrNull(breakdown.capacity)
 
-        return { id: population.PopulationID, name: source.PopName, lines: breakdown.lines, result: breakdown.capacity, yearsText: capacity === null ? 'time not known' : `${this.years(planYears(this.assessment.work, capacity))} for this plan` }
+        return { id: population.PopulationID, name: source.PopName, lines: breakdown.lines, result: breakdown.capacity, yearsText: capacity === null ? 'time not known' : `${this.time(planYears(this.assessment.work, capacity), this.assessment.timeBasis)} for this plan` }
       })
     },
 
@@ -386,7 +402,7 @@ export default {
         return `Worth is not worked out for ${this.shown.species.SpeciesName}: deposit figures are missing from the save.${row.rank ? ` Rank ${row.rank}.` : ''}`
       }
 
-      return `Worth ${roundToDecimal(this.shown.value, 3)} for ${this.shown.species.SpeciesName}${this.shown.strategy === 'terraform' ? ' after terraforming' : ', settled as it is'}.${row.rank ? ` Rank ${row.rank}.` : ''}${score}`
+      return `Worth ${roundToDecimal(this.shown.value, 3)} for ${this.shown.species.SpeciesName}${this.shown.strategy === 'terraform' ? ' after terraforming' : ', settled as it is'}.${this.shown.strategy === 'terraform' && this.shown.yearsBasis === TIME_BASIS.MINIMUM ? ' The terraforming time is a minimum, so the worth is the most the plan can earn.' : ''}${row.rank ? ` Rank ${row.rank}.` : ''}${score}`
     },
     distanceLine() {
       const { distance, capitalDistance } = this.item.row
@@ -402,6 +418,10 @@ export default {
   },
   methods: {
     people,
+    // What a gravity class (LG, LGR or N) says.
+    gravityText(name) {
+      return GRAVITY_CLASSES[name]
+    },
     // The colour of a plan state's or outcome's tone under the appearance in force.
     tone(name) {
       return toneColor(activeAppearance(), name)
@@ -425,8 +445,18 @@ export default {
     years(value) {
       return value === 0 ? 'no time' : !Number.isFinite(value) ? 'forever without terraformers' : value < 0.1 ? 'under 0.1 years' : `${separatedNumber(roundToDecimal(value, value < 10 ? 2 : 1), this.separator)} years`
     },
+    // The years of a time of `basis`, a minimum worded as one (`timeWords`), at the decimals `years` shows: a bound floored there never reads above itself.
+    time(value, basis) {
+      return timeWords(value, basis, this.years, value < 10 ? 2 : 1)
+    },
     stepYears(step) {
       return planYears(step.work, this.terraformCapacity)
+    },
+    // What a step takes: about its years, or for a drain at least them, which the evaporation of the surface water can exceed.
+    stepTime(step) {
+      const value = this.stepYears(step)
+
+      return stepTimeBasis(step) === TIME_BASIS.MINIMUM ? `${this.time(value, TIME_BASIS.MINIMUM)}${Number.isFinite(value) ? ', and longer where the surface water evaporates slowly' : ''}` : `about ${this.years(value)}`
     },
     copy(value) {
       const text = `${roundToDecimal(Number.isFinite(value) ? value : 0, 3)}`

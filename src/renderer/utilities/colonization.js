@@ -3,7 +3,7 @@
 // What makes a body worth settling next, in the order the ranking weighs it (sources in docs/DATABASE.md, "Colonization Planner ranking"):
 //   - the prize: the people it holds (surface area and the species' density, the game's capacity rule) and/or what its deposits are worth (the game's own deposit value, scaled by how short the race is of each mineral);
 //   - the colony cost it takes to live there, on the game's own scale (the cost before the colonisation tech);
-//   - the years of terraforming, when it needs them;
+//   - the years of terraforming, when it needs them (a minimum, the terraformers' time, for a plan that drains surface water: `yearsBasis` of an evaluation says which);
 //   - the distance to the nearest sizeable colony, which is how far a freighter flies to supply it.
 // A body only gets a rank when it is a place to settle at all and worth the trip: it holds the smallest colony worth planning for, or its deposits are worth mining, or it is a civilian mining complex site.
 
@@ -12,7 +12,7 @@ import { routeFacts, stateOf } from './colonization-states'
 import { KM_PER_AU } from './jump-graph'
 import { CMC_MINERAL_IDS, DEPOSIT_MINIMUM_AMOUNT, MINERALS, RICH_DEPOSIT_VALUE, WORTH_MINING_VALUE, depositValueResult, qualifiesForCmc, scarcityResult } from './minerals'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
-import { assessTerraforming, planYears, terraformCapacity } from './terraforming'
+import { assessTerraforming, planYears, terraformCapacity, TIME_BASIS } from './terraforming'
 import { infrastructurePerMillion, infrastructurePerMillionResult, limitingFactor, missingBodyInputs, missingSpeciesInputs, speciesLimits } from './habitability'
 
 export const GOALS = [
@@ -56,7 +56,7 @@ registerRule({
   units: 'atm of an Earth-sized body a year',
   verification: 'estimated',
   structure: ['FCT_Race.TerraformingRate', 'FCT_Game.TerraformingSpeed'],
-  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (the terraforming capacity rule: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered.',
+  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (the terraforming capacity rule: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered. The years of a plan are its work over this capacity; for a plan that drains surface water they are a minimum, since the evaporation of that water, which is not modelled, can make the drain longer however large the capacity.',
   assumptions: ['no output modifier on the terraformers entered'],
 })
 
@@ -94,7 +94,7 @@ registerRule({
   units: '% of the best target',
   verification: 'assumed',
   structure: ['FCT_SystemBody', 'FCT_Species', 'FCT_MineralDeposit', 'FCT_Population', 'FCT_RaceJumpPointSurvey'],
-  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
+  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. A plan that drains surface water counts its minimum years, so its discount is the most that plan can earn. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
   assumptions: ['mineral weights, discount scales and thresholds as set in Ranking'],
 })
 
@@ -114,7 +114,7 @@ const SKILL_ASSUMPTION = 'a colonisation skill of 1, the race row has none'
 const NOTHING = Object.freeze([])
 
 // What a pair of a body and a species is when the save lacks a figure of either that the cost reads: not colonisable on paper, but the entry's `missing` names the figures, so it reads as unknown, not as N/A.
-const UNKNOWN_ASSESSMENT = Object.freeze({ cost: Object.freeze({ colonisable: false, reason: 'Figures missing' }), lowGravity: false, plan: null, work: 0, after: null, outcome: 'no', reason: null })
+const UNKNOWN_ASSESSMENT = Object.freeze({ cost: Object.freeze({ colonisable: false, reason: 'Figures missing' }), lowGravity: false, gravityClass: null, plan: null, work: 0, timeBasis: TIME_BASIS.CAPACITY, after: null, outcome: 'no', reason: null })
 
 // The plan state of a body whose best route cannot be told: the figures it needs are missing. It stands apart from the table of states (colonization-states.js) and is listed beside it.
 export const UNKNOWN_STATE = Object.freeze({
@@ -380,22 +380,22 @@ const worth = (goal, ranking, { capacity, raw, years, distanceAU, minerals, cmcR
   return { people, mining, prize, cost, time, distance, value: prize * cost * time * distance }
 }
 
-// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming, or null when that is unknown (no terraforming option is weighed then). `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming. An unknown entry (`missing`) is worth nothing and has no strategy. With a goal that counts the deposits and a deposit value that is unknown (`mineralsUnknown`), the mining part and the prize are null and the value only orders the species: the row is unknown (`rankBodies`).
+// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming, or null when that is unknown (no terraforming option is weighed then). `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming; `years` is the years of that route and `yearsBasis` what they are (`TIME_BASIS`; null without terraforming): the worth of a plan that drains surface water counts its minimum years, so it is the most that plan can earn. An unknown entry (`missing`) is worth nothing and has no strategy. With a goal that counts the deposits and a deposit value that is unknown (`mineralsUnknown`), the mining part and the prize are null and the value only orders the species: the row is unknown (`rankBodies`).
 export const evaluate = ({ species, assessment, capacityNow, capacityAfter, missing = NOTHING }, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }) => {
   const mineralsUnknown = goal !== 'people' && minerals.surveyed && minerals.value === null
   const base = { species, assessment, capacityNow, capacityAfter, missing, mineralsUnknown }
 
   if (!assessment.cost.colonisable) {
-    return { ...base, value: 0, parts: null, strategy: 'none', years: null, cost: null, raw: null, capacity: 0, infrastructure: null, nowInfrastructure: null, afterInfrastructure: null }
+    return { ...base, value: 0, parts: null, strategy: 'none', years: null, yearsBasis: null, cost: null, raw: null, capacity: 0, infrastructure: null, nowInfrastructure: null, afterInfrastructure: null }
   }
 
   const nowInfrastructure = infrastructurePerMillion(assessment.cost.worst, species, assessment.cost.lowGravity)
-  const options = [{ strategy: 'now', years: 0, cost: assessment.cost.worst, raw: assessment.cost.raw, capacity: capacityNow, lowGravity: assessment.cost.lowGravity, infrastructure: nowInfrastructure }]
+  const options = [{ strategy: 'now', years: 0, yearsBasis: null, cost: assessment.cost.worst, raw: assessment.cost.raw, capacity: capacityNow, lowGravity: assessment.cost.lowGravity, gravityClass: assessment.cost.gravityClass, infrastructure: nowInfrastructure }]
   let afterInfrastructure = null
 
   if (assessment.plan && assessment.after && terraformCapacityPerYear !== null) {
     afterInfrastructure = infrastructurePerMillion(assessment.after.worst, species, assessment.lowGravity)
-    options.push({ strategy: 'terraform', years: planYears(assessment.work, terraformCapacityPerYear), cost: assessment.after.worst, raw: assessment.after.raw, capacity: capacityAfter, lowGravity: assessment.lowGravity, infrastructure: afterInfrastructure })
+    options.push({ strategy: 'terraform', years: planYears(assessment.work, terraformCapacityPerYear), yearsBasis: assessment.timeBasis, cost: assessment.after.worst, raw: assessment.after.raw, capacity: capacityAfter, lowGravity: assessment.lowGravity, gravityClass: assessment.gravityClass, infrastructure: afterInfrastructure })
   }
 
   const best = options.map((option) => {
@@ -491,6 +491,8 @@ export const costDriver = (assessmentCost) => (assessmentCost.colonisable ? limi
 
 const COST_INPUTS = ['body environment', 'species ranges', 'colonisation skill']
 const CAPACITY_INPUTS = ['body size and water', 'species density']
+// What a score says of a plan that drains surface water: its years are a minimum.
+const MINIMUM_YEARS_ASSUMPTION = 'the plan drains surface water, so its years are a minimum and the worth the most that plan can earn: the evaporation of that water is not modelled'
 
 // Whether a deposit value that is unknown could change a row: its state (a rich deposit makes a mining target), whether it is worth the trip, or the score of a goal that counts the deposits. A people-only goal on a body that holds the smallest colony whatever its deposits is not affected, and neither is a body that is no target either way.
 const mineralsDecide = (facts, state, goal, room, ranking) => {
@@ -510,7 +512,7 @@ export const rowProvenance = (row) => {
   const colonisable = best.strategy !== 'none'
   const skill = basis.skillAssumed ? [SKILL_ASSUMPTION] : []
   const lacking = best.missing.length ? best.missing : null
-  const assumptions = [...(!row.distance && row.score !== null ? [`a body with no charted route keeps ${Math.round(NO_ROUTE_FACTOR * 100)}% of its worth`] : []), ...(!basis.outlookKnown && basis.goal !== 'people' ? ['no mineral ledger in the save: every mineral counts once'] : []), ...(row.unknownSpecies.length ? [`species left out for missing figures: ${row.unknownSpecies.join(', ')}`] : [])]
+  const assumptions = [...(!row.distance && row.score !== null ? [`a body with no charted route keeps ${Math.round(NO_ROUTE_FACTOR * 100)}% of its worth`] : []), ...(!basis.outlookKnown && basis.goal !== 'people' ? ['no mineral ledger in the save: every mineral counts once'] : []), ...(row.unknownSpecies.length ? [`species left out for missing figures: ${row.unknownSpecies.join(', ')}`] : []), ...(best.strategy === 'terraform' && best.yearsBasis === TIME_BASIS.MINIMUM ? [MINIMUM_YEARS_ASSUMPTION] : [])]
   const scored = row.score === null ? null : best.assessment.plan && best.assessment.after ? combine({ rule: 'habitability.score', parts: { capacity: basis.capacity }, compute: () => row.score, assumptions }) : ofRule({ rule: 'habitability.score', value: row.score, assumptions })
 
   return {

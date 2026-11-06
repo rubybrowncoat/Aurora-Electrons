@@ -88,7 +88,7 @@ const bodyName = (body) => `${body.SystemName} ${systemBodyName(body)}`
 
 const flat = (cells) => Object.fromEntries(cells.flatMap((cell) => [[amountKey(cell.id), cell.amount], [accessKey(cell.id), cell.accessibility]]))
 
-const NO_FIGURES = { speciesId: null, speciesName: null, costValue: null, capacityValue: null, lowGravity: false, reason: null, missing: [], results: { cost: null, capacity: null } }
+const NO_FIGURES = { speciesId: null, speciesName: null, costValue: null, capacityValue: null, lowGravity: false, gravityClass: null, reason: null, missing: [], results: { cost: null, capacity: null } }
 
 // The cost and the limit as they are today, the two figures the body detail's headlines open with.
 const figuresOf = (row, evaluation) => {
@@ -103,7 +103,7 @@ const figuresOf = (row, evaluation) => {
     return { ...base, state: 'unfit', reason: assessment.reason || assessment.cost.reason || 'no reason recorded' }
   }
 
-  return { ...base, state: 'known', costValue: assessment.cost.worst, capacityValue: evaluation.capacityNow, lowGravity: !!assessment.lowGravity }
+  return { ...base, state: 'known', costValue: assessment.cost.worst, capacityValue: evaluation.capacityNow, lowGravity: !!assessment.lowGravity, gravityClass: assessment.gravityClass || null }
 }
 
 // The worksheet's rows: one per distinct selected body, in the order selected, each worked out for `speciesId` (null: the species the Planner's table shows for the body). `rows` is the Planner's ranked rows before any filter. A selected body the rows do not hold stays in the worksheet as an `absent` row with no figures.

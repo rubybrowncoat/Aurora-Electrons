@@ -45,7 +45,7 @@ left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody
 left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1
 left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${RaceID}
 where FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5)`),
-    rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasPercentage, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.Name as AtmosGasName, DIM_Gases.BoilingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas, DIM_Gases.DangerousOxygen, DIM_Gases.DangerousPPMOxygen, DIM_Gases.DangerousMethane, DIM_Gases.DangerousPPMMethane, DIM_Gases.DangerousSulphur, DIM_Gases.DangerousPPMSulphur, DIM_Gases.DangerousAmmonia, DIM_Gases.DangerousPPMAmmonia
+    rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasPercentage, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.Name as AtmosGasName, DIM_Gases.FreezingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas, DIM_Gases.DangerousOxygen, DIM_Gases.DangerousPPMOxygen, DIM_Gases.DangerousMethane, DIM_Gases.DangerousPPMMethane, DIM_Gases.DangerousSulphur, DIM_Gases.DangerousPPMSulphur, DIM_Gases.DangerousAmmonia, DIM_Gases.DangerousPPMAmmonia
 from FCT_AtmosphericGas
 left join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
 where FCT_AtmosphericGas.GameID = ${GameID}`),
@@ -174,7 +174,7 @@ where FCT_LagrangePoint.GameID = ${GameID}`),
   return Object.freeze(Object.fromEntries(stars.map((star) => [star.StarID, cmcStarInReach(star, starsBySystem[star.SystemID], pointsBySystem[star.SystemID] || [])])))
 }
 
-export const loadGases = (database) => rows(database, 'select GasID, Name, BoilingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen, DangerousMethane, DangerousPPMMethane, DangerousSulphur, DangerousPPMSulphur, DangerousAmmonia, DangerousPPMAmmonia from DIM_Gases')
+export const loadGases = (database) => rows(database, 'select GasID, Name, FreezingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen, DangerousMethane, DangerousPPMMethane, DangerousSulphur, DangerousPPMSulphur, DangerousAmmonia, DangerousPPMAmmonia from DIM_Gases')
 
 // A colony supplies the next one from this many millions of people up (the Planner's "nearest colony").
 export const SUPPLY_BASE_MILLIONS = 1
