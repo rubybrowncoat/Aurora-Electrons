@@ -28,6 +28,8 @@ const ADDED_LIFEPOD = 900000001
 const FOREIGN_RACE = 785
 const ALIASED_POD = { id: 900000002, name: 'Hidden Zulu Pod', crew: 7771, classId: 62894 }
 const UNALIASED_POD = { id: 900000003, name: 'Hidden Alpha Pod', crew: 4242, classId: 1 }
+// The anchors to a Lagrange point (`OrbitLagrangeID`) the 3.2 line gives a waypoint, a wreck and a life pod, which a recorded 2.x save lacks and the copy carries with their default of none.
+const ANCHORS = [['FCT_Waypoint', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0']]
 const DETAIL = process.argv.includes('--detail')
 const RENDERER = path.join(root, 'src', 'renderer')
 const FILES = {
@@ -55,7 +57,7 @@ const copies = () => {
 
   const intactFile = path.join(FOLDER, 'intact.db')
 
-  fs.copyFileSync(convertedSave(SAVE), intactFile)
+  fs.copyFileSync(convertedSave(SAVE, { columns: ANCHORS }), intactFile)
 
   const edit = new Database(intactFile)
   const [system] = edit.query(`select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 1`).all()
@@ -67,8 +69,21 @@ const copies = () => {
   edit.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, ShipName, Crew, Xcor, Ycor) values (${ADDED_LIFEPOD}, ${GAME}, ${RACE}, ${system.SystemID}, 'Added pod', 3, 1500, 2500)`)
 
   ;[ALIASED_POD, UNALIASED_POD].forEach((pod) => edit.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, ClassID, ShipName, Crew, Xcor, Ycor) values (${pod.id}, ${GAME}, ${FOREIGN_RACE}, ${system.SystemID}, ${pod.classId}, '${pod.name}', ${pod.crew}, 1600, 2600)`))
+
+  // One waypoint, one wreck and the added pod of the race are tied to a Lagrange point; the places' subtitles must say it of those and of no other.
+  const known = `SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE})`
+  const [waypoint] = edit.query(`select WaypointID as Id from FCT_Waypoint where GameID = ${GAME} and RaceID = ${RACE} and WaypointType != 4 and ${known} order by WaypointID limit 1`).all()
+  const [wreck] = edit.query(`select WreckID as Id from FCT_Wrecks where GameID = ${GAME} and ${known} order by WreckID limit 1`).all()
+
+  if (!waypoint || !wreck) {
+    throw new HarnessError('the save holds no waypoint and wreck of a known system to tie to a Lagrange point')
+  }
+
+  edit.run(`update FCT_Waypoint set OrbitLagrangeID = 1 where WaypointID = ${waypoint.Id}`)
+  edit.run(`update FCT_Wrecks set OrbitLagrangeID = 1 where WreckID = ${wreck.Id}`)
+  edit.run(`update FCT_Lifepods set OrbitLagrangeID = 1 where LifepodID = ${ADDED_LIFEPOD}`)
   edit.close()
-  COPIES = { intact: new Database(intactFile, { readonly: true }), system }
+  COPIES = { intact: new Database(intactFile, { readonly: true }), system, anchored: { waypoint: waypoint.Id, wreck: wreck.Id, lifepod: ADDED_LIFEPOD } }
 
   return COPIES
 }
@@ -149,6 +164,11 @@ const intactChecks = {
     assert.ok(GROUPS.every((group) => oracle[group].length > 0), `the save holds a place of each group to check: ${GROUPS.map((group) => `${group} ${oracle[group].length}`).join(', ')}`)
     assert.ok(oracle.gatesInTable > oracle.aether.length, 'the save holds a gate in a system the race does not know, which is not offered')
     assertAgainstSave(rows, oracle, GROUPS, 'the copy')
+
+    const anchored = Object.entries(db.anchored).map(([group, id]) => rows.find((row) => row.key === `${group}:${id}`))
+
+    anchored.forEach((row) => assert.ok(row && /at a Lagrange point in /.test(row.subtitle), `a ${row && row.group} tied to a Lagrange point is said to stand at one: ${row && row.subtitle}`))
+    assert.deepEqual(rows.filter((row) => /Lagrange/.test(row.subtitle || '')).map((row) => row.key).sort(), anchored.map((row) => row.key).sort(), 'and no place that is tied to none says it')
   },
 }
 
@@ -271,15 +291,20 @@ const FAULTS = [
   { name: 'the owner of a pod is told the wrong way round', file: 'places', change: swap('const own = row.Own === 1', 'const own = row.Own !== 1'), fails: ['pods'] },
   { name: 'the read brings the owner of a pod of another race', file: 'places', change: swap('(FCT_Lifepods.RaceID = ${context.RaceID}) as Own,', '(FCT_Lifepods.RaceID = ${context.RaceID}) as Own, FCT_Lifepods.RaceID as PodRaceID,'), fails: ['pods'] },
   { name: 'the read brings the owner of a pod of another race in place of the ownership flag', file: 'places', change: then(swap('(FCT_Lifepods.RaceID = ${context.RaceID}) as Own,', 'FCT_Lifepods.RaceID as Own,'), swap('const own = row.Own === 1', 'const own = row.Own === context.RaceID')), fails: ['pods'] },
+  { name: 'a waypoint at a Lagrange point is said to be in the system', file: 'places', change: swap('subtitle: `Waypoint ${standing(row)}`', 'subtitle: `Waypoint in ${row.SystemName}`'), fails: ['intact'] },
+  { name: 'a wreck at a Lagrange point is said to be in the system', file: 'places', change: swap("'Wreck of unknown size'} ${standing(row)}`", "'Wreck of unknown size'} in ${row.SystemName}`"), fails: ['intact'] },
+  { name: 'a pod at a Lagrange point is said to be in the system', file: 'places', change: swap('\'Alien life pods\'} ${standing(row)}`', '\'Alien life pods\'} in ${row.SystemName}`'), fails: ['intact'] },
+  { name: 'a place anywhere is said to be at a Lagrange point', file: 'places', change: swap('(row.OrbitLagrangeID > 0 ?', '(row.OrbitLagrangeID >= 0 ?'), fails: ['intact'] },
+  { name: 'the waypoints leave out the Lagrange point they are tied to', file: 'places', change: swap('FCT_Waypoint.Name, FCT_Waypoint.OrbitLagrangeID, ', 'FCT_Waypoint.Name, '), fails: ['intact'] },
 ]
 
-// Rewrites that say the same thing: the gate load first, the owner test in parentheses, another word for a class that is not known and the system of a pod put ahead of what is said of it.
+// Rewrites that say the same thing: the gate load first, the owner test in parentheses, another word for a class that is not known and the position of a pod put ahead of what is said of it.
 const BENIGN = [
   { name: 'the gate load first', file: 'places', change: swap('const lists = await Promise.all([loadWaypoints(database, context), loadWrecks(database, context, count), loadLifepods(database, context), loadContacts(database, context), loadAetherGates(database, context)])', 'const lists = await Promise.all([loadAetherGates(database, context), loadWaypoints(database, context), loadWrecks(database, context, count), loadLifepods(database, context), loadContacts(database, context)])') },
   { name: 'the owner test of a pod in parentheses', file: 'places', change: swap('const own = row.Own === 1', 'const own = (row.Own === 1)') },
   { name: 'the life pod read with its keywords in capitals', file: 'places', change: swap("\nfrom FCT_Lifepods\n${known('FCT_Lifepods', context)}", "\nFROM FCT_Lifepods\n${known('FCT_Lifepods', context)}") },
   { name: 'another word for the class of a pod that is not known', file: 'places', change: swap(CLASS_CELL, "`${row.AlienClassName || 'unidentified class'} #${row.LifepodID}`") },
-  { name: 'the system of a pod put ahead of what is said of it', file: 'places', change: then(swap('subtitle: `${own ?', 'subtitle: `in ${row.SystemName}: ${own ?'), swap("'Alien life pods'} in ${row.SystemName}`", "'Alien life pods'}`")) },
+  { name: 'the position of a pod put ahead of what is said of it', file: 'places', change: then(swap('subtitle: `${own ?', 'subtitle: `${standing(row)}: ${own ?'), swap("'Alien life pods'} ${standing(row)}`", "'Alien life pods'}`")) },
 ]
 /* eslint-enable no-template-curly-in-string */
 

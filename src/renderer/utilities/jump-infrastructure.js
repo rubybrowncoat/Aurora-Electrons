@@ -22,13 +22,14 @@ registerRule({
   note: 'Stabilising a jump point is an order of the builder\'s own fleet (move action 64); the point holds no progress. An order that has arrived is construction in progress, counting down while its time required is above 0 and waiting for completion at 0; one that has not arrived is queued or on its way. Only the race\'s own orders are readable, so another race\'s work is not known. The time required has no verified unit, so no time left is given.',
 })
 
+// Source members of the salvo rule, 3.1.0 (the formula of the 3.2 line): `Game.UpdateOrbitalPositions` (Game.cs 27901-27909) sets the position of a missile salvo whose `OrbitLagrangeID` names a Lagrange point to the point's, after the point itself has moved.
 registerRule({
   id: 'jumpInfrastructure.ownObjects',
-  versions: VERSIONS,
+  versions: ['3.2.x'],
   units: 'salvos',
   verification: 'estimated',
   structure: ['FCT_MissileSalvo.MissileSalvoID', 'FCT_MissileSalvo.RaceID', 'FCT_MissileSalvo.MissileSpeed', 'FCT_MissileSalvo.LurkerMode', 'FCT_MissileSalvo.SystemID', 'FCT_MissileSalvo.Xcor', 'FCT_MissileSalvo.Ycor', 'FCT_MissileType.SecondStageID', ...STRUCTURE_POINT],
-  note: 'Mines and sensor buoys have no table of their own: they are the race\'s stationary missile salvos, one count per salvo ID. A salvo is stationary when its speed is 0 or when it lurks, a lurking salvo holding its place until it finds a target whatever its speed. A salvo of a design with a second stage is taken as a mine and one without as a buoy; that split matches the designs\' names in a save but is not confirmed by the game\'s rules. A salvo counts at a point when it is in the same system within 1 km of it on each axis. A salvo counts as one object, not as the missiles in it.',
+  note: 'Mines and sensor buoys have no table of their own: they are stationary missile salvos, one count per salvo ID. A salvo is stationary when its speed is 0 or when it lurks, whatever its speed. A Lagrange-anchored salvo has the point\'s saved coordinates and counts by that position just like any other stationary salvo; the anchor alone does not establish separation from a jump point. A design with a second stage is taken as a mine and one without as a buoy; this split matches saved design names but is not source-confirmed. A salvo counts in the same system within 1 km on each axis, as one object rather than as the missiles in it.',
   assumptions: ['a stationary salvo of a design with a second stage is a mine', 'a stationary salvo of a design without a second stage is a buoy'],
 })
 

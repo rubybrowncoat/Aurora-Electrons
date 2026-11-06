@@ -302,8 +302,8 @@ export const checks = checksOf([
     rule: 'Lifepods of the race are still adrift; the life support of every pod lasts two weeks from the ship\'s loss, and the survivors in a pod, its crew or only its officers, are lost with it.',
     evidence: {
       verification: 'estimated',
-      structure: ['FCT_Lifepods.CreationTime, Crew, SystemID', 'FCT_Commander.LifepodID, RetireStatus', 'the game time'],
-      note: 'The lifepods, their crews and creation times are stored rows, and the officers aboard are the active commanders whose stored pod is the lifepod. A ship\'s evacuation can make a pod with no crew and only officers, and the game takes every pod, whatever it holds, once its two weeks are past, so the officers in a pod expire with it. The two weeks are read from the game\'s rules, not from stored data, so the time remaining is an estimate. A missing creation time or game time shows a dash.',
+      structure: ['FCT_Lifepods.CreationTime, Crew, SystemID, OrbitLagrangeID', 'FCT_Commander.LifepodID, RetireStatus', 'the game time'],
+      note: 'The lifepods, their crews and creation times are stored rows, and the officers aboard are the active commanders whose stored pod is the lifepod. A ship\'s evacuation can make a pod with no crew and only officers, and the game takes every pod, whatever it holds, once its two weeks are past, so the officers in a pod expire with it. The two weeks are read from the game\'s rules, not from stored data, so the time remaining is an estimate. A pod anchored to a Lagrange point moves with it, which the caption states. A missing creation time or game time shows a dash.',
       assumptions: ['A lifepod lasts two weeks (1,209,600 seconds) from the pod\'s creation, with or without a crew.'],
     },
     columns: [
@@ -314,7 +314,7 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID, GameTime } = ctx
 
-      const lifepods = await rowsOf(ctx, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_RaceSysSurvey.Name as SystemName, (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) as Officers from FCT_Lifepods left join FCT_RaceSysSurvey on FCT_Lifepods.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Lifepods.RaceID = FCT_RaceSysSurvey.RaceID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.CreationTime asc, FCT_Lifepods.Crew desc`)
+      const lifepods = await rowsOf(ctx, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_RaceSysSurvey.Name as SystemName, (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) as Officers from FCT_Lifepods left join FCT_RaceSysSurvey on FCT_Lifepods.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Lifepods.RaceID = FCT_RaceSysSurvey.RaceID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.CreationTime asc, FCT_Lifepods.Crew desc`)
 
       return lifepods.map((lifepod) => {
         const remaining = podExpiration(lifepod, GameTime)
@@ -326,7 +326,7 @@ export const checks = checksOf([
             crew: figure(ctx, lifepod.Crew, 'the crew of the lifepod', (known) => survivorsText(ctx, known, lifepod.Officers)),
             remaining: remaining === null ? unknownCell(ctx, [...lacking(lifepod, { CreationTime: 'the creation time of the lifepod' }), ...(isKnownNumber(GameTime) ? [] : ['the game time'])]) : { text: remaining, tone: remaining === 'Expired' ? 'error' : undefined },
           },
-          caption: lifepod.SystemName || undefined,
+          caption: lifepod.OrbitLagrangeID > 0 ? [lifepod.SystemName, 'at a Lagrange point'].filter(Boolean).join(' — ') : lifepod.SystemName || undefined,
           link: lifepod.SystemID ? linkTo.map(lifepod.SystemID) : undefined,
           signature: signatureOf(remaining === null ? null : remaining === 'Expired' ? 'expired' : 'adrift'),
         }
@@ -341,8 +341,8 @@ export const checks = checksOf([
     rule: 'A wreck lies in a surveyed system.',
     evidence: {
       verification: 'confirmed',
-      structure: ['FCT_Wrecks.SystemID, Size, ClassID, RaceID, OrbitBodyID', 'FCT_ShipClass.ClassName of the race\'s own wrecks', 'FCT_AlienClass.ClassName of the race\'s intelligence on other races\' wrecks', 'FCT_RaceSysSurvey.Name'],
-      note: 'A presence check on stored rows: a wreck in a system the race has surveyed. The race\'s own wreck shows its class; another race\'s shows the class name the race\'s intelligence holds, or Unknown. A missing size or owner shows a dash.',
+      structure: ['FCT_Wrecks.SystemID, Size, ClassID, RaceID, OrbitBodyID, OrbitLagrangeID', 'FCT_ShipClass.ClassName of the race\'s own wrecks', 'FCT_AlienClass.ClassName of the race\'s intelligence on other races\' wrecks', 'FCT_RaceSysSurvey.Name'],
+      note: 'A presence check on stored rows: a wreck in a system the race has surveyed. The race\'s own wreck shows its class; another race\'s shows the class name the race\'s intelligence holds, or Unknown. A wreck anchored to a Lagrange point moves with it, which the caption states. A missing size or owner shows a dash.',
     },
     columns: [
       { key: 'wreck', text: 'Wreck' },
@@ -352,7 +352,7 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
 
-      const wrecks = await rowsOf(ctx, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.Size, case when FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID then FCT_ShipClass.ClassName end as OwnClassName, FCT_AlienClass.ClassName as AlienClassName, (FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.GameID = FCT_Wrecks.GameID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${GameID}`)
+      const wrecks = await rowsOf(ctx, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.Size, case when FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID then FCT_ShipClass.ClassName end as OwnClassName, FCT_AlienClass.ClassName as AlienClassName, (FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.GameID = FCT_Wrecks.GameID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${GameID}`)
 
       return wrecks.map((wreck) => ({
         id: `wreck:${wreck.WreckID}`,
@@ -361,7 +361,7 @@ export const checks = checksOf([
           size: figure(ctx, wreck.Size, 'the size of the wreck', (known) => ctx.count(known, 1)),
           design: isKnownNumber(wreck.Owned) ? (wreck.Owned ? 'Owned' : '') : unknownCell(ctx, ['the empire the wreck belonged to']),
         },
-        caption: wreck.SystemBodyID ? `${systemText(wreck)} — orbiting ${bodyText(wreck)}` : systemText(wreck),
+        caption: wreck.SystemBodyID ? `${systemText(wreck)} — orbiting ${bodyText(wreck)}` : wreck.OrbitLagrangeID > 0 ? `${systemText(wreck)} — at a Lagrange point` : systemText(wreck),
         link: linkTo.map(wreck.SystemID),
       }))
     },

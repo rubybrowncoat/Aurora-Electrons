@@ -63,6 +63,35 @@ const closeSave = () => {
     SAVED.close()
     SAVED = null
   }
+
+  if (PLANTED) {
+    PLANTED.copy.close()
+    PLANTED = null
+  }
+}
+
+// The save held in memory with a wreck and two life pods of the race added, of which one wreck and one pod are tied to a Lagrange point (`OrbitLagrangeID`), as the save holds none: the planted rows the captions of the warnings must state. The pod of the race is the only kind the life pod warning lists.
+let PLANTED = null
+
+const planted = () => {
+  if (!PLANTED) {
+    saved()
+
+    const copy = new Database(fs.readFileSync(path.join(root, SAVE)))
+    const [wreck] = copy.query(`select WreckID from FCT_Wrecks where GameID = ${GAME} and coalesce(OrbitBodyID, 0) = 0 and SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE}) order by WreckID limit 1`).all()
+    const [system] = copy.query(`select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 1`).all()
+    const [{ GameTime }] = copy.query(`select GameTime from FCT_Game where GameID = ${GAME}`).all()
+
+    if (!wreck || !system) {
+      throw new HarnessError('the save must hold a wreck tied to no body and a system the race has surveyed')
+    }
+
+    copy.run(`update FCT_Wrecks set OrbitLagrangeID = 1 where WreckID = ${wreck.WreckID}`)
+    copy.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, OrbitLagrangeID, ShipName, Crew, CreationTime) values (900000001, ${GAME}, ${RACE}, ${system.SystemID}, 1, 'Tied pod', 4, ${GameTime - 3600}), (900000002, ${GAME}, ${RACE}, ${system.SystemID}, 0, 'Free pod', 2, ${GameTime - 7200})`)
+    PLANTED = { copy, wreck: wreck.WreckID, GameTime }
+  }
+
+  return PLANTED
 }
 
 const adapter = (db) => ({ query: async (sql) => [db.query(sql).all()] })
@@ -110,7 +139,25 @@ const namesChecks = {
   },
 }
 
-const CHECKS = [namesChecks]
+// A wreck and a life pod tied to a Lagrange point are captioned as lying at one, and the wreck and the pod that are tied to none are not.
+const anchoredChecks = {
+  id: 'anchored',
+  name: 'a wreck or a life pod tied to a Lagrange point is captioned as lying at one, and the save, which holds none, as lying at none',
+  run: async ({ rows, wrecks, pods, planted: plantOf }) => {
+    const shownWrecks = await wrecks()
+    const shownPods = await pods()
+    const plant = plantOf()
+    const tied = shownWrecks.find((row) => row.id === `wreck:${plant.wreck}`)
+
+    assert.ok(tied && / — at a Lagrange point$/.test(tied.caption), `the wreck tied to a point is captioned as at one: ${tied && tied.caption}`)
+    assert.deepEqual(shownWrecks.filter((row) => /Lagrange/.test(row.caption || '')).map((row) => row.id), [`wreck:${plant.wreck}`], 'and no other wreck is')
+    assert.ok(/ — at a Lagrange point$/.test(shownPods.find((row) => row.id === 'lifepod:900000001').caption), 'the pod tied to a point is captioned as at one')
+    assert.deepEqual(shownPods.filter((row) => /Lagrange/.test(row.caption || '')).map((row) => row.id), ['lifepod:900000001'], 'and the pod tied to none is not')
+    assert.ok((await rows()).every((row) => !/Lagrange/.test(row.caption || '')), 'no wreck of the save itself, tied to no point, is captioned as at one')
+  },
+}
+
+const CHECKS = [namesChecks, anchoredChecks]
 
 // ---------- the faults and the rewrites ----------
 
@@ -129,6 +176,12 @@ const FAULTS = [
   { name: 'the alias is read from the intelligence of another race', change: swap('FCT_AlienClass.ViewRaceID = ${RaceID}', 'FCT_AlienClass.ViewRaceID != ${RaceID}'), fails: ['names'] },
   { name: 'a wreck of another race is marked as the race\'s', change: swap("(wreck.Owned ? 'Owned' : '')", "'Owned'"), fails: ['names'] },
   { name: 'a wreck of the race is not marked as the race\'s', change: swap("(wreck.Owned ? 'Owned' : '')", "''"), fails: ['names'] },
+  { name: 'a wreck tied to a Lagrange point is captioned as in its system', change: swap('wreck.OrbitLagrangeID > 0 ? `${systemText(wreck)} — at a Lagrange point` : systemText(wreck)', 'systemText(wreck)'), fails: ['anchored'] },
+  { name: 'every wreck is captioned as at a Lagrange point', change: swap('wreck.OrbitLagrangeID > 0 ?', 'wreck.OrbitLagrangeID >= 0 ?'), fails: ['anchored'] },
+  { name: 'the wrecks leave out the Lagrange point they are tied to', change: swap('FCT_Wrecks.SystemID, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.Size', 'FCT_Wrecks.SystemID, FCT_Wrecks.Size'), fails: ['anchored'] },
+  { name: 'a life pod tied to a Lagrange point is captioned as in its system', change: swap("lifepod.OrbitLagrangeID > 0 ? [lifepod.SystemName, 'at a Lagrange point'].filter(Boolean).join(' — ') : lifepod.SystemName || undefined", 'lifepod.SystemName || undefined'), fails: ['anchored'] },
+  { name: 'every life pod is captioned as at a Lagrange point', change: swap('lifepod.OrbitLagrangeID > 0 ?', 'lifepod.OrbitLagrangeID >= 0 ?'), fails: ['anchored'] },
+  { name: 'the life pods leave out the Lagrange point they are tied to', change: swap('FCT_Lifepods.SystemID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.ShipName', 'FCT_Lifepods.SystemID, FCT_Lifepods.ShipName'), fails: ['anchored'] },
 ]
 
 // Rewrites that say the same thing: the owner test in parentheses and another word for a class that is not known.
@@ -146,9 +199,10 @@ const results = async (variant, ids) => {
   const source = variant ? variant.change(text) : text
   const modules = await loadUtilities(['warnings/common', 'warnings/space'], { stubs: STUBS, sources: { 'warnings/space': source } })
   const check = modules['warnings/space'].checks.find((item) => item.key === 'known-wrecks')
+  const podCheck = modules['warnings/space'].checks.find((item) => item.key === 'active-lifepods')
 
-  if (!check) {
-    throw new HarnessError('the module has no check keyed known-wrecks')
+  if (!check || !podCheck) {
+    throw new HarnessError('the module has no check keyed known-wrecks and none keyed active-lifepods')
   }
 
   const db = saved()
@@ -159,8 +213,18 @@ const results = async (variant, ids) => {
 
     return held
   }
+  const readOnPlanted = (which, label) => {
+    const plant = planted()
 
-  return await runChecks(CHECKS.filter(({ id }) => !ids || ids.includes(id)), { rows, db })
+    return through(label, () => which.read({ ...ctx, database: adapter(plant.copy), GameTime: plant.GameTime }))
+  }
+  const memo = (make) => {
+    let made = null
+
+    return () => made || (made = make())
+  }
+
+  return await runChecks(CHECKS.filter(({ id }) => !ids || ids.includes(id)), { rows, db, wrecks: memo(() => readOnPlanted(check, 'the read of the known-wrecks check over the planted rows')), pods: memo(() => readOnPlanted(podCheck, 'the read of the active-lifepods check over the planted rows')), planted })
 }
 
 let checks = 0

@@ -34,6 +34,8 @@ const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pagesDirectory = path.join(root, 'src', 'renderer', 'pages')
 const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const FALRYX_TIMES = ['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230']
+// The anchors to a Lagrange point (`OrbitLagrangeID`) the 3.2 line gives a life pod and a wreck, which a recorded 2.x save lacks: the copies carry them with their default of none, as the rows of the checks that read them need.
+const ANCHORS = [['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0']]
 
 const SAVES = {
   fixture: { ...fixtureSave(), file: path.join(root, fixtureSave().file) },
@@ -297,7 +299,7 @@ const handles = new Map()
 const handleOf = (file) => {
   if (!handles.has(file)) {
     handles.set(file, new Promise((resolve, reject) => {
-      const handle = new sqlite3.Database(file.startsWith(FALRYX) ? convertedSave(file) : file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
+      const handle = new sqlite3.Database(file.startsWith(FALRYX) ? convertedSave(file, { columns: ANCHORS }) : file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
     }))
   }
 

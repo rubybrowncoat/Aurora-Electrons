@@ -7,6 +7,15 @@ export const KM_PER_AU = 149600000
 
 const hasPosition = (point) => Number.isFinite(point.Xcor) && Number.isFinite(point.Ycor)
 
+// A fleet's Lagrange mode is `FCT_Fleet.LagrangeStatus`, the game's `LagrangeStatusEnum` (LagrangeStatusEnum.cs: ManualLP 0, PlottedLP 1, DynamicLP 2) and never the legacy `FCT_Fleet.AutoLP` text, which the game does not read. An order placed for a fleet inserts the intra-system Lagrange jumps when the fleet is Plotted, or Dynamic with no move order queued, and the destination is no Lagrange point (Fleet.cs 10862, method_267); a Dynamic fleet with orders has its route recalculated by the movement update (Game.cs 6958-6960). Source members of the 3.1.0 decompile, the line's formula.
+export const LAGRANGE_MODES = Object.freeze({ 0: 'manual', 1: 'plotted', 2: 'dynamic' })
+
+// The mode a `LagrangeStatus` value names ('manual', 'plotted' or 'dynamic'), null for a value that is not read or that the game does not define.
+export const lagrangeModeOf = (status) => (status === null || status === undefined || status === '' ? null : LAGRANGE_MODES[Number(status)] || null)
+
+// Whether an order placed for a fleet of `mode` that has `queued` move orders takes Lagrange jumps: always for Plotted, never for Manual, and for Dynamic only while no order is queued. null when the mode or the queue is not read.
+export const takesLagrange = (mode, queued) => (mode === 'plotted' ? true : mode === 'manual' ? false : mode === 'dynamic' && Number.isInteger(queued) ? queued === 0 : null)
+
 const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 
 // The rules of a route over the explored jump points, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The plan-level ones (totals, travel time, speed, avoid options) are in utilities/route-plan.js.

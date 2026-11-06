@@ -114,8 +114,11 @@ export const loadPlacesByKeys = async (database, context, keys) => {
   return [...bodies, ...locations]
 }
 
+// Where an object stands, for a subtitle: in the system, or at a Lagrange point of it when the object is anchored to one (`OrbitLagrangeID` above 0, which the game's position update moves with the point after every call: Game.cs 27963-27967 for a waypoint, 27989-27992 a wreck, 28015-28018 a life pod).
+const standing = (row) => (row.OrbitLagrangeID > 0 ? `at a Lagrange point in ${row.SystemName}` : `in ${row.SystemName}`)
+
 // The race's own waypoints, in order of number.
-const loadWaypoints = async (database, context) => (await rows(database, `select FCT_Waypoint.WaypointID, FCT_Waypoint.SystemID, FCT_Waypoint.Xcor, FCT_Waypoint.Ycor, FCT_Waypoint.Number, FCT_Waypoint.WaypointType, FCT_Waypoint.Name, FCT_RaceSysSurvey.Name as SystemName
+const loadWaypoints = async (database, context) => (await rows(database, `select FCT_Waypoint.WaypointID, FCT_Waypoint.SystemID, FCT_Waypoint.Xcor, FCT_Waypoint.Ycor, FCT_Waypoint.Number, FCT_Waypoint.WaypointType, FCT_Waypoint.Name, FCT_Waypoint.OrbitLagrangeID, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Waypoint
 ${known('FCT_Waypoint', context)}
 where FCT_Waypoint.GameID = ${context.GameID} and FCT_Waypoint.RaceID = ${context.RaceID} and FCT_Waypoint.WaypointType != ${MARKED_FOR_DELETION}
@@ -127,7 +130,7 @@ order by FCT_Waypoint.Number`)).map((row) => {
     kind: 'waypoint',
     group: 'waypoint',
     name,
-    subtitle: `Waypoint in ${row.SystemName}`,
+    subtitle: `Waypoint ${standing(row)}`,
     icon: groupIcon('waypoint'),
     SystemID: row.SystemID,
     Xcor: row.Xcor,
@@ -137,7 +140,7 @@ order by FCT_Waypoint.Number`)).map((row) => {
 })
 
 // The game lists every wreck of a system, whoever's it was: the race's own by hull and class, another's by the class name its intelligence holds.
-const loadWrecks = async (database, context, count) => (await rows(database, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.Xcor, FCT_Wrecks.Ycor, FCT_Wrecks.RaceID as WreckRaceID, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_HullDescription.HullAbbr, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
+const loadWrecks = async (database, context, count) => (await rows(database, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.Xcor, FCT_Wrecks.Ycor, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.RaceID as WreckRaceID, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_HullDescription.HullAbbr, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Wrecks
 ${known('FCT_Wrecks', context)}
 left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Wrecks.ClassID
@@ -154,7 +157,7 @@ order by FCT_ShipClass.Size desc`)).map((row) => {
     kind: 'wreck',
     group: 'wreck',
     name,
-    subtitle: `${Number.isFinite(row.Size) ? `${count(row.Size * 50)} t wreck` : 'Wreck of unknown size'} in ${row.SystemName}`,
+    subtitle: `${Number.isFinite(row.Size) ? `${count(row.Size * 50)} t wreck` : 'Wreck of unknown size'} ${standing(row)}`,
     icon: groupIcon('wreck'),
     SystemID: row.SystemID,
     Xcor: row.Xcor,
@@ -175,7 +178,7 @@ const survivorsOf = (row) => {
 }
 
 // The game lists every life pod of a system, whoever's it was: the race's own by ship name and survivors, another's by the class name its intelligence holds and the pod's id. The name and the crew of a foreign pod are never read.
-const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, (FCT_Lifepods.RaceID = ${context.RaceID}) as Own, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew, case when FCT_Lifepods.RaceID = ${context.RaceID} then (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) end as OwnOfficers, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
+const loadLifepods = async (database, context) => (await rows(database, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.OrbitLagrangeID, (FCT_Lifepods.RaceID = ${context.RaceID}) as Own, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.ShipName end as OwnShipName, case when FCT_Lifepods.RaceID = ${context.RaceID} then FCT_Lifepods.Crew end as OwnCrew, case when FCT_Lifepods.RaceID = ${context.RaceID} then (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) end as OwnOfficers, FCT_AlienClass.ClassName as AlienClassName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Lifepods
 ${known('FCT_Lifepods', context)}
 left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID and FCT_AlienClass.ViewRaceID = ${context.RaceID} and FCT_AlienClass.GameID = FCT_Lifepods.GameID
@@ -190,7 +193,7 @@ order by OwnShipName, FCT_Lifepods.LifepodID`)).map((row) => {
     kind: 'lifepod',
     group: 'lifepod',
     name,
-    subtitle: `${own ? survivorsOf(row) : 'Alien life pods'} in ${row.SystemName}`,
+    subtitle: `${own ? survivorsOf(row) : 'Alien life pods'} ${standing(row)}`,
     icon: groupIcon('lifepod'),
     SystemID: row.SystemID,
     Xcor: row.Xcor,

@@ -4,8 +4,8 @@
 //
 // One gate states the mode of every route output (`routeMode`, `routePositions`): a family takes the propagated basis only when an adapter is registered for it in `ADAPTERS`, the consumer takes the adapters (`adapters: ADAPTERS`) because its geometry used the positions they give, and the adapter gives a position; every other family, and every endpoint an adapter declines, stays static with the reason on its record (utilities/orbit-propagation.js `REASONS`). A consumer whose figures rest on the saved positions passes no adapters, so the mode of a figure is the mode of what its distances used.
 
-import { routeLegs } from './jump-graph'
-import { groupOf, motionOf, orbitAdapter } from './orbit-propagation'
+import { lagrangeModeOf, routeLegs, takesLagrange } from './jump-graph'
+import { POINT_OWNER_CLASSES, groupOf, motionOf, orbitAdapter, switchOf } from './orbit-propagation'
 import { place } from './deep-links'
 import { combine, envelope, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
 
@@ -33,11 +33,13 @@ export const FAMILY_NAMES = Object.freeze(Object.keys(FAMILIES))
 
 // Why a position is not known, by condition code.
 export const CONDITIONS = Object.freeze({
-  'clock-unread': 'the game time and the time the bodies were last moved are not read',
+  'clock-unread': 'the game time is not read',
   'clock-inconsistent': 'the position is dated after the game time',
   'motion-switch': 'whether the save has orbital motion on is not recorded',
-  'wreck-orbit-tie': 'whether a body carries the wreck is not recorded',
-  'waypoint-orbit-unread': 'whether a body carries the waypoint is not recorded',
+  'motion-classification': 'the body or point classification needed to determine motion is not read',
+  'fleet-point-inconsistent': 'the fleet references a Lagrange point outside its game or system, or a point whose identity cannot be read; it is not treated as following that point',
+  'wreck-orbit-tie': 'whether a body or a Lagrange point carries the wreck is not recorded',
+  'waypoint-orbit-unread': 'whether a body or a Lagrange point carries the waypoint is not recorded',
   'position-unread': 'the position of the place is not recorded',
   'drift-unobserved': 'the save records no motion for a life pod',
   'fleet-state-unread': 'the fleet\'s last move, orbit, anchor and queued orders are not recorded',
@@ -60,7 +62,9 @@ export const CONDITIONS = Object.freeze({
   'fleet-immobile': 'the fleet has no engines (a speed of 1 or less), so it reaches no moving body',
   'fleet-slower': 'the fleet is not faster than the body, so it does not overtake it and no arrival is worked out',
   'speed-unknown': 'no speed is known for the fleet, so no arrival time is worked out',
-  'eccentric-step': 'an eccentric orbit is stepped by 561,600 s, a fitted figure the game does not state, so the position carries an error that grows with the time ahead',
+  'eccentric-cadence': 'an eccentric orbit repeats whole calls of the saved sub-pulse or latest increment length; movement sees the pulse-opening update in sub-pulse mode, or the preceding increment update in after-movement mode (including the pre-update side at its ending boundary); future lengths may differ, so the position is an estimate',
+  'cadence-unread': 'the length of the sub-pulse or increment the save moves bodies by is not recorded, so the orbit is not advanced',
+  'cadence-budget': 'the exact saved cadence exceeds the supported call budget, so the saved position stands',
   'family-unknown': 'the kind of place is not one the contract knows',
 })
 
@@ -69,28 +73,31 @@ export const ASSUMPTIONS = Object.freeze({
   fixed: 'the place does not move, so its saved position holds at any time',
   'body-held': 'the body moves while the fleet flies; it is held at its saved position, where it stood at the last body update',
   'wreck-held': 'the wreck is held at its saved position; a body may carry it',
-  'waypoint-held': 'the waypoint is held at its saved position; a body may carry it',
+  'waypoint-held': 'the waypoint is held at its saved position; a body or a Lagrange point may carry it',
   unplaced: 'the save records no position for the place, so none is held',
   'drift-held': 'the life pod is held at its saved position; its motion is not recorded',
   'fleet-idle': 'the fleet is idle and held where the save has it',
-  'fleet-following': 'the fleet orbits a body and moves with it; it is held at its saved position',
+  'fleet-following': 'the fleet orbits a body or rides a Lagrange point and moves with it; it is held at its saved position',
   'fleet-held': 'the fleet is held where the save has it now; its later position is not known',
   'contact-held': 'the contact is held where it was last seen; it moves on its own',
   held: 'the place is held where the save has it',
-  propagated: 'the position is worked out for the arrival time, continuous in time, while the game moves bodies in steps of days',
+  propagated: 'the position is worked out for the arrival time with whole calls of the saved cadence; movement sees the pulse-opening position in sub-pulse mode or the preceding increment position in after-movement mode, before its ending update',
   departure: 'the position the save holds at the game time, where the fleet sets out from; its orbit rebuilds to it, and it is not an arrival worked out',
 })
 
-const POSITION_VERSIONS = ['2.7.x']
+const POSITION_VERSIONS = ['3.2.x']
 
+// Source members of the position rule, 3.1.0 (the formula of the 3.2 line): `Game.UpdateOrbitalPositions` (Game.cs 27558-28030) moves the bodies, then the Lagrange points, then what is anchored to them, one call after another; the planet and moon switch `OrbitalMotionForPlanetsAndMoons` (`FCT_Game.OrbitalMotion`) gates it (27562-27565) and no asteroid switch does (27645-27668), `FCT_Game.OrbitalMotionAst` being read by nothing; an eccentric body's bearing falls by 360 x deltaSeconds / (Year x 3600) x current / mean (27669-27687; `SystemBody.InitialiseOrbitalSpeed` SystemBody.cs 806-816 and `UpdateCurrentOrbitalSpeed` 819-829); a trojan takes its parent's bearing plus its offset (27726-27742) and a Lagrange point its body's bearing plus 60 (27760-27763); a call is made for each sub-pulse of `FCT_Game.SubPulseLength` when `FCT_Game.OrbitalMovementInSubPulse` is 1 (Game.cs 23744-23747) and once after the movement of an increment, with its length, when it is 0 (23766-23769), the sub-pulse length being set from the increment's length (IncrementManager.cs 55-121); a fleet at a Lagrange point (`FCT_Fleet.OrbitLagrangeID`) follows it only while its position equals the point's (Game.cs 27598-27604, 27802-27809), a waypoint, a wreck, a missile salvo and a life pod anchored to one (`OrbitLagrangeID`) take its position at every call (Game.cs 27963-27967, 27989-27992, 27901-27909, 28015-28018), and the mode of a fleet is `FCT_Fleet.LagrangeStatus` (LagrangeStatusEnum.cs: Manual 0, Plotted 1, Dynamic 2; Fleet.cs 10857-10923 and Game.cs 6958-6960), the legacy `FCT_Fleet.AutoLP` being read by nothing.
+// Movement phase: Game.cs 23741-23748 updates sub-pulse orbits before ProcessSubPulseMovementLogisticsAndCombat calls method_47 (4051, 4087); its move orders resolve the updated body X/Y (5705, 5732-5758, 7368-7373). In increment mode the orbital update follows all movement (23760-23768). Movement in (t0 + (n-1)L, t0 + nL] therefore sees call n or n-1 respectively; a no-movement snapshot at a boundary is after the update, and t0 stays saved.
+// The eccentric work limit in this rule is orbit-propagation.js MAX_CALLS = 100000, inclusive over the horizon; no coarsening is permitted.
 registerRule({
   id: 'route.position',
-  versions: POSITION_VERSIONS,
+  versions: ['3.2.x'],
   units: '',
   verification: 'estimated',
-  structure: ['FCT_Game.GameTime, LastGrowthTime, OrbitalMotion, OrbitalMotionAst', 'FCT_SystemBody.Xcor, Ycor', 'FCT_Fleet.LastMoveTime, OrbitBodyID, Xcor, Ycor', 'FCT_MoveOrders.FleetID', 'FCT_Contacts.LastUpdate'],
-  note: 'A figure that rests on the positions the save stores. A body, a colony and a Lagrange point are stored as of the last body update, which trails the game time by up to a few days in the saves examined; the body keeps moving while a fleet flies to it, so a long flight to a body is off by the distance it moves. A fleet with queued orders and a contact have no known later position and none is invented. Places that never move are exact. A figure that takes the adapters moves a supported body on to the arrival time and is propagated; every other figure, and every endpoint the adapters decline, keeps the saved position and says why.',
-  assumptions: ['an endpoint is held at the position the save stores unless an adapter moves it on to the arrival time'],
+  structure: ['FCT_Game.GameTime, OrbitalMotion, OrbitalMovementInSubPulse, SubPulseLength', 'FCT_Increments.GameTime, Length', 'FCT_SystemBody.Xcor, Ycor', 'FCT_LagrangePoint.PlanetID, GameID, SystemID, Xcor, Ycor', 'FCT_Fleet.GameID, SystemID, LastMoveTime, OrbitBodyID, OrbitLagrangeID, LagrangeStatus, Xcor, Ycor', 'FCT_MoveOrders.FleetID', 'FCT_Waypoint.OrbitBodyID, OrbitLagrangeID', 'FCT_Contacts.LastUpdate'],
+  note: 'Saved body, colony and Lagrange point coordinates are current at the game time: the source advances the game time and orbital positions together, while the last growth time dates only the construction cycle. A supported orbit repeats whole calls of the saved sub-pulse or latest increment length, with no partial call. Movement sees the pulse-opening update in sub-pulse mode: a positive elapsed time uses the ceiling of elapsed time divided by the sub-pulse length. In after-movement increment mode it sees the last completed increment update: the floor between boundaries, but the preceding position at an exact ending boundary before that update. A no-movement snapshot uses completed calls, including the update at an exact boundary; exactly the saved game time stays saved in both modes. An eccentric body uses the source current/mean speed ratio and is computed for at most 100000 whole calls per body over the horizon; a horizon needing more calls is refused with the required count, saved length and budget. The cadence is never coarsened. A fleet with queued orders and a contact have no known later position and none is invented; a fleet or waypoint anchored to a Lagrange point is held at its saved position. Places that never move are exact. Every declined adapter keeps the saved position and states why.',
+  assumptions: ['an endpoint is held at the position the save stores unless an adapter moves it on to the arrival time', 'every future orbital update repeats the saved sub-pulse length or latest increment length; movement uses the pulse-opening update in sub-pulse mode or the preceding increment update in after-movement mode, while no-movement snapshots use completed calls (the eccentric-cadence condition for an eccentric orbit)'],
 })
 
 registerRule({
@@ -98,15 +105,13 @@ registerRule({
   versions: POSITION_VERSIONS,
   units: 'seconds',
   verification: 'confirmed',
-  structure: ['FCT_Game.GameTime, LastGrowthTime', 'FCT_Fleet.LastMoveTime', 'FCT_Contacts.LastUpdate'],
-  note: 'The game time less the time the oldest position of the route was stored: for a body, a colony or a Lagrange point the time of the last body update, for a fleet its last move, for a contact its last update. Subtraction of saved times.',
+  structure: ['FCT_Game.GameTime', 'FCT_Fleet.LastMoveTime', 'FCT_Contacts.LastUpdate'],
+  note: 'The game time less the position timestamp: saved body, colony and Lagrange point positions and their followers are current at the game time; an independent fleet uses its last move and a contact its last update. The last growth time dates construction, not a position.',
 })
 
 const isTime = (value) => typeof value === 'number' && Number.isFinite(value)
 
 const isPosition = (endpoint) => Number.isFinite(endpoint.Xcor) && Number.isFinite(endpoint.Ycor)
-
-const switchOf = (value) => (value === 1 || value === true ? true : value === 0 || value === false ? false : null)
 
 // ---- Endpoints --------------------------------------------------------------------------------------------------------
 // An endpoint is { family, key, id, name, SystemID, Xcor, Ycor } with `group` (a body's picker group) and `lastUpdate` (a contact's last update) where the page has them. These build one from what each page holds.
@@ -163,45 +168,45 @@ export const NO_ADAPTERS = Object.freeze({})
 // The basis a family takes at the gate: propagated only with an adapter registered for it.
 export const familyBasis = (family, adapters = NO_ADAPTERS) => (typeof adapters[family] === 'function' ? POSITION_BASIS.PROPAGATED : POSITION_BASIS.STATIC)
 
-// Whether the body clock is read: the game time and the time the bodies were last moved.
+// Whether the saved-coordinate epoch, the game time, is read.
 const bodyClockOf = (facts) => {
   const clock = facts && facts.clock
 
-  return clock && isTime(clock.gameTime) && isTime(clock.lastGrowthTime) ? clock : null
+  return clock && isTime(clock.gameTime) ? clock : null
 }
 
-// The families that stand on a body, so whose motion follows the body's kind, and the picker groups that name a body that is not an asteroid or a trojan (class 3 cannot tell the two apart).
-const BODY_FAMILIES = Object.freeze(['body', 'colony', 'lagrange-point'])
-
-const NON_ASTEROID_GROUPS = Object.freeze(['planet', 'moon', 'comet'])
-
 // The motion group a loader read (`motionOf`); facts that carry none have not read it.
-const kindGroup = (group) => (['planet', 'asteroid', 'static'].includes(group) ? group : 'unknown')
+const kindGroup = (group) => (group === 'moving' || group === 'static' ? group : 'unknown')
 
-// Whether the endpoint moves with the bodies, by the game's orbital motion switches and the motion group of the body it stands on (`motionOf` of utilities/orbit-propagation.js, the game's own update order): nothing moves when the planet and moon switch is off; a 'planet' (a planet, moon, comet, or a trojan, fixed body or waypoint of one) follows that switch; an 'asteroid' (an independent asteroid, or what follows one) also needs its own switch on and is held where the save stores it when that switch reads off; a 'static' body (a fixed body with no parent) never moves; and an 'unknown' one needs both. A switch read as 0 is known to be off and a switch never read is unknown. The group comes from the body's own saved fields when the orbit read holds the body, an order or a colony included, from the loader's read of the owner for a waypoint or a fleet, and from the picker only when it names a planet, moon or comet (class 3 cannot tell an independent asteroid, a trojan and a fixed body apart, so a body, colony or Lagrange point whose body the orbit read lacks is a kind not read). Whether the app can propagate the endpoint is the adapter's question, not this one: a moving endpoint it refuses stays moving, with its reason. A switch the save does not record leaves it unknown unless the other already settles it.
+// Motion follows the one orbital switch only after the body/point classification is read. A picker label alone does not read a fixed flag or a parent association. Off is definitively static even when classification is unread.
 const orbitMotion = (endpoint, facts, conditions) => {
   const clock = facts && facts.clock
   const planets = switchOf(clock && clock.orbitalMotion)
-  const rocks = switchOf(clock && clock.orbitalMotionAst)
-  const group = groupOf(facts && facts.orbits, endpoint) || (BODY_FAMILIES.includes(endpoint.family) && !NON_ASTEROID_GROUPS.includes(endpoint.group) ? 'unknown' : endpoint.group)
-  const both = planets === true && rocks === true ? true : null
-  const moves = planets === false || group === 'static' ? false : group === 'asteroid' ? (rocks === false ? false : both) : group === 'unknown' ? both : planets
+  const group = groupOf(facts && facts.orbits, endpoint) || endpoint.group
+  const moves = planets === false || group === 'static' ? false : kindGroup(group) === 'unknown' ? null : planets
 
   if (moves === null && clock) {
-    conditions.push('motion-switch')
+    conditions.push(planets === null ? 'motion-switch' : 'motion-classification')
   }
 
   return moves
 }
 
-// What the saved facts say of a fleet endpoint: { clock, observedAt, moves, assumption, conditions }. A fleet with queued orders or anchored to another fleet may move, so where it will be is not known.
+// The Lagrange facts of a fleet the loader read: { lagrange: { point, mode, shortcuts } }, or nothing when the facts carry none. `mode` is the fleet's `LagrangeStatus` and never the legacy `AutoLP` text.
+const lagrangeOf = (found) => (found && (found.mode !== undefined || found.point !== undefined) ? { lagrange: { point: Number.isInteger(found.point) ? found.point : null, mode: found.mode === undefined ? null : found.mode, shortcuts: takesLagrange(found.mode, found.orders) } } : {})
+
+// What the saved facts say of a fleet endpoint: { clock, observedAt, moves, assumption, lagrange }. A fleet with queued orders or anchored to another fleet may move, so where it will be is not known. A fleet that orbits a body or sits on the Lagrange point it is anchored to (`OrbitLagrangeID`, at the point's own position, as the game's update requires: Game.cs 27598-27604, 27802-27809) follows it. `lagrange` is what the save says of the fleet's Lagrange behaviour: { point, mode, shortcuts }, the point it is anchored to (0 for none), its mode (`LagrangeStatus`, 'manual', 'plotted' or 'dynamic') and whether its route takes a Lagrange jump now (`takesLagrange`).
 const fleetState = (endpoint, facts, conditions) => {
   const found = facts && facts.fleets ? facts.fleets[endpoint.id] : null
+
+  if (found && found.pointInconsistent) {
+    conditions.push('fleet-point-inconsistent')
+  }
 
   if (!found || found.following === null || found.following === undefined || found.orders === null || found.orders === undefined || found.anchor === null || found.anchor === undefined) {
     conditions.push('fleet-state-unread')
 
-    return { clock: 'fleet', observedAt: found && isTime(found.lastMoveTime) ? found.lastMoveTime : null, moves: null, assumption: 'fleet-held' }
+    return { clock: 'fleet', observedAt: found && isTime(found.lastMoveTime) ? found.lastMoveTime : null, moves: null, assumption: 'fleet-held', ...lagrangeOf(found) }
   }
 
   const mayMove = found.orders > 0 || found.anchor > 0
@@ -215,25 +220,26 @@ const fleetState = (endpoint, facts, conditions) => {
   }
 
   if (found.following) {
-    return { clock: 'body', observedAt: bodyClockOf(facts) ? facts.clock.lastGrowthTime : null, moves: mayMove ? null : orbitMotion({ group: kindGroup(found.group) }, facts, conditions), assumption: mayMove ? 'fleet-held' : 'fleet-following' }
+    return { clock: 'body', observedAt: bodyClockOf(facts) ? facts.clock.gameTime : null, moves: mayMove ? null : orbitMotion({ group: kindGroup(found.group) }, facts, conditions), assumption: mayMove ? 'fleet-held' : 'fleet-following', ...lagrangeOf(found) }
   }
 
   if (!isTime(found.lastMoveTime)) {
     conditions.push('fleet-state-unread')
   }
 
-  return { clock: 'fleet', observedAt: isTime(found.lastMoveTime) ? found.lastMoveTime : null, moves: mayMove ? null : isTime(found.lastMoveTime) ? false : null, assumption: mayMove ? 'fleet-held' : 'fleet-idle' }
+  return { clock: 'fleet', observedAt: isTime(found.lastMoveTime) ? found.lastMoveTime : null, moves: mayMove ? null : isTime(found.lastMoveTime) ? false : null, assumption: mayMove ? 'fleet-held' : 'fleet-idle', ...lagrangeOf(found) }
 }
 
-// What the saved facts say of a waypoint: one with no orbit association stays where it is, one carried by a body moves with it (an asteroid's switch applies when the body is one, or is not read), and one whose association is not read is unknown.
+// What the saved facts say of a waypoint: one that no body and no Lagrange point carries stays where it is, one carried by a body (`OrbitBodyID`) or a Lagrange point (`OrbitLagrangeID`) moves with it (Game.cs 27963-27967 moves it after its point at every call), and one whose association is not read is unknown.
 const waypointState = (endpoint, facts, conditions) => {
   const found = facts && facts.waypoints ? facts.waypoints[endpoint.id] : null
+  const carried = found && (found.orbit > 0 || found.point > 0)
 
-  if (!found || !Number.isInteger(found.orbit)) {
+  if (!found || !Number.isInteger(found.orbit) || (found.orbit <= 0 && !Number.isInteger(found.point))) {
     conditions.push('waypoint-orbit-unread')
 
-    return { clock: 'body', observedAt: bodyClockOf(facts) ? facts.clock.lastGrowthTime : null, moves: null, assumption: 'waypoint-held' }
-  } else if (found.orbit <= 0) {
+    return { clock: 'body', observedAt: bodyClockOf(facts) ? facts.clock.gameTime : null, moves: null, assumption: 'waypoint-held' }
+  } else if (!carried) {
     return { clock: 'none', observedAt: null, moves: false, assumption: 'fixed' }
   }
 
@@ -245,7 +251,7 @@ const waypointState = (endpoint, facts, conditions) => {
 
   const moves = orbitMotion({ group: kindGroup(found.group) }, facts, conditions)
 
-  return { clock: 'body', observedAt: clock ? clock.lastGrowthTime : null, moves, assumption: moves === false ? 'fixed' : 'body-held' }
+  return { clock: 'body', observedAt: clock ? clock.gameTime : null, moves, assumption: moves === false ? 'fixed' : 'body-held', ...(found.point > 0 ? { lagrange: { point: found.point } } : {}) }
 }
 
 // The static record of an endpoint: the position the save stores and everything the save says about it.
@@ -272,7 +278,7 @@ const staticRecord = (endpoint, facts) => {
 
     const moves = spec.motion === 'tied' ? null : orbitMotion(endpoint, facts, conditions)
 
-    state = { clock: 'body', observedAt: clock ? clock.lastGrowthTime : null, moves, assumption: spec.motion === 'tied' ? 'wreck-held' : moves === false ? 'fixed' : 'body-held' }
+    state = { clock: 'body', observedAt: clock ? clock.gameTime : null, moves, assumption: spec.motion === 'tied' ? 'wreck-held' : moves === false ? 'fixed' : 'body-held' }
   } else if (spec.motion === 'drift') {
     conditions.push('drift-unobserved')
     state = { clock: 'none', observedAt: null, moves: null, assumption: 'drift-held' }
@@ -323,7 +329,7 @@ export const positionRecord = (endpoint, { facts = null, adapters = NO_ADAPTERS,
   const { state, conditions, age, supported } = staticRecord(endpoint, facts)
   const identity = Object.freeze({ family: endpoint.family, key: endpoint.key === undefined ? `${endpoint.family}:${endpoint.id}` : endpoint.key, id: endpoint.id === undefined ? null : endpoint.id, name: endpoint.name === undefined ? null : endpoint.name })
   const position = isPosition(endpoint) ? Object.freeze({ SystemID: endpoint.SystemID, Xcor: endpoint.Xcor, Ycor: endpoint.Ycor }) : null
-  const base = { identity, family: endpoint.family, position, basis: POSITION_BASIS.STATIC, clock: state.clock, observedAt: state.observedAt, age, moves: state.moves, supported, conditions: [...new Set(conditions)], assumption: state.assumption }
+  const base = { identity, family: endpoint.family, position, basis: POSITION_BASIS.STATIC, clock: state.clock, observedAt: state.observedAt, age, moves: state.moves, supported, conditions: [...new Set(conditions)], assumption: state.assumption, ...(state.lagrange ? { lagrange: state.lagrange } : {}) }
 
   if (familyBasis(endpoint.family, adapters) === POSITION_BASIS.PROPAGATED) {
     let found = null
@@ -352,7 +358,7 @@ export const positionRecord = (endpoint, { facts = null, adapters = NO_ADAPTERS,
 
     const kept = [...new Set([...base.conditions, 'propagation-unavailable', ...(found && Array.isArray(found.reasons) ? found.reasons : [])])]
 
-    return Object.freeze({ ...base, conditions: kept, unknown: true })
+    return Object.freeze({ ...base, conditions: kept, ...(found && found.details ? { details: found.details } : {}), unknown: true })
   }
 
   return Object.freeze({ ...base, unknown: base.conditions.length > 0 })
@@ -385,12 +391,13 @@ export const summarisePositions = (list, { merge = false } = {}) => {
       byKey.set(key, record)
     } else if (merge) {
       const conditions = [...new Set([...kept.conditions, ...record.conditions])]
+      const details = [...new Set([...(kept.details || []), ...(record.details || [])])]
       const fellBack = kept.basis === POSITION_BASIS.PROPAGATED && record.basis !== POSITION_BASIS.PROPAGATED
 
       if (fellBack) {
-        byKey.set(key, Object.freeze({ ...record, conditions, unknown: true }))
-      } else if (conditions.length > kept.conditions.length) {
-        byKey.set(key, Object.freeze({ ...kept, conditions, unknown: true }))
+        byKey.set(key, Object.freeze({ ...record, conditions, ...(details.length ? { details } : {}), unknown: true }))
+      } else if (conditions.length > kept.conditions.length || details.length > (kept.details || []).length) {
+        byKey.set(key, Object.freeze({ ...kept, conditions, ...(details.length ? { details } : {}), unknown: true }))
       }
     }
   })
@@ -420,7 +427,7 @@ export const summarisePositions = (list, { merge = false } = {}) => {
     unsupported: Object.freeze(unsupported),
     caveat,
     assumptions: Object.freeze([...held.map((code) => ASSUMPTIONS[code]), ...(unsupported.length ? ['an endpoint the contract does not support is held at its saved position'] : [])]),
-    missing: Object.freeze(codes.map((code) => CONDITIONS[code])),
+    missing: Object.freeze([...codes.map((code) => CONDITIONS[code]), ...new Set(records.flatMap((record) => record.details || []))]),
   })
 }
 
@@ -500,10 +507,10 @@ export const describePositions = (positions) => {
   const groups = new Map()
 
   positions.records.forEach((record) => {
-    const key = [record.assumption, record.conditions.join(','), record.supported].join('|')
+    const key = [record.assumption, record.conditions.join(','), record.supported, JSON.stringify(record.details || [])].join('|')
 
     if (!groups.has(key)) {
-      groups.set(key, { key, assumption: record.assumption, text: ASSUMPTIONS[record.assumption], names: [], count: 0, ages: [], conditions: record.conditions.map((code) => ({ code, text: CONDITIONS[code] })), supported: record.supported })
+      groups.set(key, { key, assumption: record.assumption, text: ASSUMPTIONS[record.assumption], names: [], count: 0, ages: [], conditions: [...record.conditions.map((code) => ({ code, text: CONDITIONS[code] })), ...(record.details || []).map((text) => ({ code: 'cadence-budget-detail', text }))], supported: record.supported })
     }
 
     const group = groups.get(key)
@@ -525,19 +532,20 @@ const columnsOf = async (database, table) => {
 
 const timeOrNull = (value) => (isTime(value) ? value : null)
 
-// The motion group (`motionOf` of utilities/orbit-propagation.js) of each body the IDs name, from the saved fields of the body and of the bodies the game's position update follows from it (a trojan's parent, a fixed body's fixed parent): 'planet', 'asteroid', 'static', or 'unknown' for a body the save does not hold and for one whose class, trojan angle, fixed flag or parent association was not read. A column the save lacks reads as not read, never as 0.
+// The motion group (`motionOf` of utilities/orbit-propagation.js) of each body the IDs name, from the saved fields of the body and of the bodies the game's position update follows from it (a trojan's parent, a fixed body's fixed parent): 'moving', 'static', or 'unknown' for a body the save does not hold and for one whose class, trojan angle, fixed flag or parent association was not read. A column the save lacks reads as not read, never as 0. `classes` holds the body class of each, null when it is not read.
 const BODY_MOTION_ROUNDS = 5
 
 const loadBodyGroups = async (database, body, GameID, ids) => {
   const wanted = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
   const groups = {}
+  const classes = {}
 
   if (!wanted.length) {
-    return groups
+    return { groups, classes }
   }
 
   const known = {}
-  const stored = (name, value) => (body.has(name) ? Number(value || 0) : null)
+  const stored = (name, value) => (body.has(name) && value !== null && value !== undefined ? Number(value) : null)
   const readable = ['SystemBodyID', 'BodyClass'].every((name) => body.has(name))
   let pending = readable ? wanted : []
 
@@ -554,28 +562,51 @@ const loadBodyGroups = async (database, body, GameID, ids) => {
 
   wanted.forEach((id) => {
     groups[id] = motionOf(known, id)
+    classes[id] = known[id] ? known[id].bodyClass : null
   })
 
-  return groups
+  return { groups, classes }
 }
 
-// The facts positions rest on: `clock` { gameTime, lastGrowthTime, orbitalMotion, orbitalMotionAst } of the game (a column the save lacks is null, never 0), `fleets`, by FleetID, of the race's own fleets: { lastMoveTime, following (orbiting a body at exactly the body's coordinates: true, false, or null when the save does not say), orders (queued move orders, null when the save does not say), anchor (the fleet it is anchored to, 0 for none, null when the save does not say) } and `waypoints`, by WaypointID, of the race's own waypoints: { orbit (the body that carries it, 0 for none, null when the save does not say), asteroid (whether that body is an asteroid: true, false, or null when it is not read) }. `problems` names what the save lacks.
+// The motion group of the body each Lagrange point the IDs name rides, by the point's ID: the game moves a point only with a planet (1) or a moon (2), so a point whose owner is another class is 'static', and otherwise the point moves as its owner does. A point the save does not hold, or whose owner it does not hold, is 'unknown'.
+const loadPointGroups = async (database, body, lagrange, GameID, ids) => {
+  const wanted = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+  const points = {}
+
+  if (!wanted.length || !['LagrangePointID', 'PlanetID'].every((name) => lagrange.has(name))) {
+    return points
+  }
+
+  const rows = (await Promise.all(Array.from({ length: Math.ceil(wanted.length / 400) }, (_empty, index) => wanted.slice(index * 400, (index + 1) * 400)).map(async (part) => (await database.query(`select FCT_LagrangePoint.LagrangePointID, FCT_LagrangePoint.PlanetID from FCT_LagrangePoint where FCT_LagrangePoint.LagrangePointID in (${part.join(',')})${lagrange.has('GameID') ? ` and FCT_LagrangePoint.GameID = ${Number(GameID)}` : ''}`))[0]))).flat()
+  const { groups, classes } = await loadBodyGroups(database, body, GameID, rows.map((row) => row.PlanetID))
+
+  rows.forEach((row) => {
+    const owner = Number(row.PlanetID)
+
+    points[row.LagrangePointID] = Number.isFinite(classes[owner]) && !POINT_OWNER_CLASSES.includes(classes[owner]) ? 'static' : groups[owner] || 'unknown'
+  })
+
+  return points
+}
+
+// The facts positions rest on: `clock` { gameTime, lastGrowthTime, orbitalMotion, orbitalMovementInSubPulse, subPulseLength, incrementLength } of the game (a column the save lacks is null, never 0; `incrementLength` is the length of the latest increment the save holds), `fleets`, by FleetID, of the race's own fleets: { lastMoveTime, following (orbiting a body, or anchored to a Lagrange point, at exactly the body's or the point's coordinates: true, false, or null when the save does not say), group (the motion group of the body or of the point's owner it follows), point (the Lagrange point it is anchored to, `OrbitLagrangeID`, 0 for none, null when the save does not say), mode (`LagrangeStatus`: 'manual', 'plotted' or 'dynamic', null when it is not read; the legacy `AutoLP` is read by nothing), orders (queued move orders, null when the save does not say), anchor (the fleet it is anchored to, 0 for none, null when the save does not say) } and `waypoints`, by WaypointID, of the race's own waypoints: { orbit (the body that carries it, 0 for none, null when the save does not say), point (the Lagrange point that carries it, 0 for none, null when the save does not say), group (the motion group of that body, or of that point's owner) }. `problems` names what the save lacks.
 export const loadPositionFacts = async (database, { GameID, RaceID }) => {
-  const [game, fleet, orders, body, waypoint] = await Promise.all(['FCT_Game', 'FCT_Fleet', 'FCT_MoveOrders', 'FCT_SystemBody', 'FCT_Waypoint'].map((table) => columnsOf(database, table)))
+  const [game, fleet, orders, body, waypoint, increments, lagrange] = await Promise.all(['FCT_Game', 'FCT_Fleet', 'FCT_MoveOrders', 'FCT_SystemBody', 'FCT_Waypoint', 'FCT_Increments', 'FCT_LagrangePoint'].map((table) => columnsOf(database, table)))
   const problems = []
   const gameColumn = (name) => (game.has(name) ? `FCT_Game.${name}` : 'null')
-  let clock = { gameTime: null, lastGrowthTime: null, orbitalMotion: null, orbitalMotionAst: null }
+  const incrementLength = ['GameID', 'GameTime', 'Length'].every((name) => increments.has(name)) ? '(select FCT_Increments.Length from FCT_Increments where FCT_Increments.GameID = FCT_Game.GameID order by FCT_Increments.GameTime desc limit 1)' : 'null'
+  let clock = { gameTime: null, lastGrowthTime: null, orbitalMotion: null, orbitalMovementInSubPulse: null, subPulseLength: null, incrementLength: null }
 
   if (game.has('GameID')) {
-    const [[row]] = await database.query(`select ${gameColumn('GameTime')} as GameTime, ${gameColumn('LastGrowthTime')} as LastGrowthTime, ${gameColumn('OrbitalMotion')} as OrbitalMotion, ${gameColumn('OrbitalMotionAst')} as OrbitalMotionAst from FCT_Game where FCT_Game.GameID = :GameID`, { replacements: { GameID } })
+    const [[row]] = await database.query(`select ${gameColumn('GameTime')} as GameTime, ${gameColumn('LastGrowthTime')} as LastGrowthTime, ${gameColumn('OrbitalMotion')} as OrbitalMotion, ${gameColumn('OrbitalMovementInSubPulse')} as OrbitalMovementInSubPulse, ${gameColumn('SubPulseLength')} as SubPulseLength, ${incrementLength} as IncrementLength from FCT_Game where FCT_Game.GameID = :GameID`, { replacements: { GameID } })
 
     if (row) {
-      clock = { gameTime: timeOrNull(row.GameTime), lastGrowthTime: timeOrNull(row.LastGrowthTime), orbitalMotion: row.OrbitalMotion === undefined ? null : row.OrbitalMotion, orbitalMotionAst: row.OrbitalMotionAst === undefined ? null : row.OrbitalMotionAst }
+      clock = { gameTime: timeOrNull(row.GameTime), lastGrowthTime: timeOrNull(row.LastGrowthTime), orbitalMotion: row.OrbitalMotion === undefined ? null : row.OrbitalMotion, orbitalMovementInSubPulse: row.OrbitalMovementInSubPulse === undefined ? null : row.OrbitalMovementInSubPulse, subPulseLength: timeOrNull(row.SubPulseLength), incrementLength: timeOrNull(row.IncrementLength) }
     }
   }
 
-  if (clock.gameTime === null || clock.lastGrowthTime === null) {
-    problems.push(`the save has no ${clock.gameTime === null ? 'game time' : 'last growth time'}`)
+  if (clock.gameTime === null) {
+    problems.push('the save has no game time')
   }
 
   const fleets = {}
@@ -583,13 +614,21 @@ export const loadPositionFacts = async (database, { GameID, RaceID }) => {
   if (['FleetID', 'GameID', 'RaceID'].every((name) => fleet.has(name))) {
     const orbits = ['OrbitBodyID', 'Xcor', 'Ycor'].every((name) => fleet.has(name)) && ['SystemBodyID', 'Xcor', 'Ycor'].every((name) => body.has(name))
     const following = orbits ? 'case when FCT_Fleet.OrbitBodyID is null or FCT_Fleet.Xcor is null or FCT_Fleet.Ycor is null then null when FCT_Fleet.OrbitBodyID > 0 and exists (select 1 from FCT_SystemBody where FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBody.Xcor = FCT_Fleet.Xcor and FCT_SystemBody.Ycor = FCT_Fleet.Ycor) then 1 when FCT_Fleet.OrbitBodyID > 0 and exists (select 1 from FCT_SystemBody where FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID and (FCT_SystemBody.Xcor is null or FCT_SystemBody.Ycor is null)) then null else 0 end' : 'null'
+    const anchored = ['OrbitLagrangeID', 'SystemID', 'Xcor', 'Ycor'].every((name) => fleet.has(name)) && ['LagrangePointID', 'GameID', 'SystemID', 'Xcor', 'Ycor'].every((name) => lagrange.has(name))
+    const pointIdentity = 'FCT_LagrangePoint.LagrangePointID = FCT_Fleet.OrbitLagrangeID and FCT_LagrangePoint.GameID = FCT_Fleet.GameID and FCT_LagrangePoint.SystemID = FCT_Fleet.SystemID'
+    const followingPoint = anchored ? `case when FCT_Fleet.OrbitLagrangeID is null or FCT_Fleet.Xcor is null or FCT_Fleet.Ycor is null then null when FCT_Fleet.OrbitLagrangeID > 0 and not exists (select 1 from FCT_LagrangePoint where ${pointIdentity}) then -1 when FCT_Fleet.OrbitLagrangeID > 0 and exists (select 1 from FCT_LagrangePoint where ${pointIdentity} and FCT_LagrangePoint.Xcor = FCT_Fleet.Xcor and FCT_LagrangePoint.Ycor = FCT_Fleet.Ycor) then 1 when FCT_Fleet.OrbitLagrangeID > 0 and exists (select 1 from FCT_LagrangePoint where ${pointIdentity} and (FCT_LagrangePoint.Xcor is null or FCT_LagrangePoint.Ycor is null)) then null else 0 end` : 'null'
     const queued = ['FleetID', 'GameID'].every((name) => orders.has(name)) ? '(select count(*) from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID and FCT_MoveOrders.GameID = FCT_Fleet.GameID)' : 'null'
-    const [rows] = await database.query(`select FCT_Fleet.FleetID, ${fleet.has('LastMoveTime') ? 'FCT_Fleet.LastMoveTime' : 'null'} as LastMoveTime, ${following} as Following, ${fleet.has('OrbitBodyID') ? 'FCT_Fleet.OrbitBodyID' : 'null'} as OrbitBody, ${queued} as Orders, ${fleet.has('AnchorFleetID') ? 'FCT_Fleet.AnchorFleetID' : 'null'} as Anchor from FCT_Fleet where FCT_Fleet.GameID = :GameID and FCT_Fleet.RaceID = :RaceID`, { replacements: { GameID, RaceID } })
+    const [rows] = await database.query(`select FCT_Fleet.FleetID, ${fleet.has('LastMoveTime') ? 'FCT_Fleet.LastMoveTime' : 'null'} as LastMoveTime, ${following} as Following, ${followingPoint} as FollowingPoint, ${fleet.has('OrbitBodyID') ? 'FCT_Fleet.OrbitBodyID' : 'null'} as OrbitBody, ${fleet.has('OrbitLagrangeID') ? 'FCT_Fleet.OrbitLagrangeID' : 'null'} as OrbitPoint, ${fleet.has('LagrangeStatus') ? 'FCT_Fleet.LagrangeStatus' : 'null'} as LagrangeStatus, ${queued} as Orders, ${fleet.has('AnchorFleetID') ? 'FCT_Fleet.AnchorFleetID' : 'null'} as Anchor from FCT_Fleet where FCT_Fleet.GameID = :GameID and FCT_Fleet.RaceID = :RaceID`, { replacements: { GameID, RaceID } })
 
-    const fleetGroups = await loadBodyGroups(database, body, GameID, rows.map((row) => row.OrbitBody))
+    const { groups: fleetGroups } = await loadBodyGroups(database, body, GameID, rows.map((row) => row.OrbitBody))
+    const pointGroups = await loadPointGroups(database, body, lagrange, GameID, rows.map((row) => row.OrbitPoint))
+    const unread = (value) => value === null || value === undefined
 
     rows.forEach((row) => {
-      fleets[row.FleetID] = Object.freeze({ lastMoveTime: timeOrNull(row.LastMoveTime), following: row.Following === null || row.Following === undefined ? null : Number(row.Following) === 1, group: fleetGroups[row.OrbitBody] || null, orders: row.Orders === null || row.Orders === undefined ? null : Number(row.Orders), anchor: row.Anchor === null || row.Anchor === undefined ? null : Number(row.Anchor) })
+      const either = unread(row.Following) || unread(row.FollowingPoint) ? (Number(row.Following) === 1 || Number(row.FollowingPoint) === 1 ? true : null) : Number(row.Following) === 1 || Number(row.FollowingPoint) === 1
+      const onPoint = Number(row.FollowingPoint) === 1
+
+      fleets[row.FleetID] = Object.freeze({ lastMoveTime: timeOrNull(row.LastMoveTime), following: either, group: (onPoint ? pointGroups[row.OrbitPoint] : fleetGroups[row.OrbitBody]) || null, point: unread(row.OrbitPoint) ? null : Number(row.OrbitPoint), mode: lagrangeModeOf(row.LagrangeStatus), orders: unread(row.Orders) ? null : Number(row.Orders), anchor: unread(row.Anchor) ? null : Number(row.Anchor), ...(Number(row.FollowingPoint) === -1 || (!anchored && Number(row.OrbitPoint) > 0) ? { pointInconsistent: true } : {}) })
     })
   } else {
     problems.push('the save has no fleet, game or race identifier on fleets, so no fleet position could be read')
@@ -598,15 +637,18 @@ export const loadPositionFacts = async (database, { GameID, RaceID }) => {
   const waypoints = {}
 
   if (['WaypointID', 'GameID', 'RaceID', 'OrbitBodyID'].every((name) => waypoint.has(name))) {
-    const [rows] = await database.query('select FCT_Waypoint.WaypointID, FCT_Waypoint.OrbitBodyID as Orbit from FCT_Waypoint where FCT_Waypoint.GameID = :GameID and FCT_Waypoint.RaceID = :RaceID', { replacements: { GameID, RaceID } })
+    const [rows] = await database.query(`select FCT_Waypoint.WaypointID, FCT_Waypoint.OrbitBodyID as Orbit, ${waypoint.has('OrbitLagrangeID') ? 'FCT_Waypoint.OrbitLagrangeID' : 'null'} as Point from FCT_Waypoint where FCT_Waypoint.GameID = :GameID and FCT_Waypoint.RaceID = :RaceID`, { replacements: { GameID, RaceID } })
 
-    const owners = await loadBodyGroups(database, body, GameID, rows.map((row) => row.Orbit))
+    const { groups: owners } = await loadBodyGroups(database, body, GameID, rows.map((row) => row.Orbit))
+    const pointOwners = await loadPointGroups(database, body, lagrange, GameID, rows.map((row) => row.Point))
 
     rows.forEach((row) => {
-      waypoints[row.WaypointID] = Object.freeze({ orbit: row.Orbit === null || row.Orbit === undefined ? null : Number(row.Orbit), group: owners[row.Orbit] || null })
+      const point = row.Point === null || row.Point === undefined ? null : Number(row.Point)
+
+      waypoints[row.WaypointID] = Object.freeze({ orbit: row.Orbit === null || row.Orbit === undefined ? null : Number(row.Orbit), point, group: (Number(row.Orbit) > 0 ? owners[row.Orbit] : pointOwners[row.Point]) || null })
     })
   } else {
-    problems.push('the save has no waypoint, game, race or orbit body identifier on waypoints, so whether a body carries a waypoint could not be read')
+    problems.push('the save has no waypoint, game, race or orbit body identifier on waypoints, so whether a body or a Lagrange point carries a waypoint could not be read')
   }
 
   return Object.freeze({ clock: Object.freeze(clock), fleets: Object.freeze(fleets), waypoints: Object.freeze(waypoints), problems: Object.freeze(problems) })
