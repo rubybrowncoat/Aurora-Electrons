@@ -5,7 +5,7 @@ import { isAvailable, registerRule, unavailable } from './provenance'
 import { REFIT_TASK_TYPES, figure } from './refits'
 import { SHIPYARD_TYPE, growsInCapacity, isFullCapacityYard } from './shipyard-types'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const UNVERIFIED_STEPS = 'No yard activity of this step is stored in any save checked, so its price follows the pattern of the steps that are: the slipways times the same unit price times the step\'s multiple.'
 
 // The labels of the work a yard does. A shipyard task (`FCT_ShipyardTask.TaskTypeID`) is a ship made, repaired, refitted or scrapped; an upgrade activity (`FCT_Shipyard.TaskType`) is what the yard itself is being modified with, 0 being nothing.

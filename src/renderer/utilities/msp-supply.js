@@ -20,7 +20,7 @@ export const MSP_HORIZONS = [
   { years: 2, label: '2 y' },
 ]
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const EPSILON = 1e-9
 // The game's launcher leaves a surplus below one tonne at the colony.
 const MIN_LAUNCH = 1
@@ -41,7 +41,7 @@ registerRule({
 
 registerRule({
   id: 'mspSupply.supplied',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP/yr',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles, reserves and mass driver destination', 'FCT_MineralDeposit.Amount', 'FCT_MassDriverPackets', 'FCT_IndustrialProjects and shipyard tasks', 'the freighter classes and charted jump points'],

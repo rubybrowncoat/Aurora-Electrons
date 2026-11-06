@@ -7,7 +7,7 @@ import { ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { refitRate, retoolCost, retoolTime, yardEligibility } from './refits'
 import { yardWorkers } from './workforce-demand'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 // The versions of the rules written against the line's source: the components a station project takes from the colony's stock for the whole batch, and the floor of a platform's cost.
 const LINE_VERSIONS = ['3.2.x']
 const DAYS_PER_YEAR = 365

@@ -128,7 +128,7 @@ const pure = (ctx) => {
 
   add('rules: the six rules are registered with the versions they hold for, and the kind of check each is', () => {
     const expected = { 'platformPaths.recipe': 'confirmed', 'platformPaths.stationClass': 'estimated', 'platformPaths.spaceport': 'estimated', 'platformPaths.yard': 'estimated', 'platformPaths.industry': 'estimated', 'platformPaths.labour': 'confirmed' }
-    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes(id === 'platformPaths.industry' ? '3.2.x' : '2.7.x') || !rule.units }).map(([id]) => id)
+    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('3.2.x') || !rule.units }).map(([id]) => id)
 
     return bad.length ? `wrong or missing: ${bad.join(', ')}` : true
   })

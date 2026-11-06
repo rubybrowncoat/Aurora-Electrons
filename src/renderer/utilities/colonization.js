@@ -47,7 +47,7 @@ export const NO_OUTLOOK = { known: false, minerals: {} }
 // A mineral the outlook says nothing of (no outlook read yet) counts once, as holding; `rankBodies` reports that as an assumption while the outlook is not known.
 const HOLDING = scarcityResult(Infinity)
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The colony cost and the infrastructure per million are in habitability.js, the species' population in colonization-data.js.
 registerRule({
@@ -62,7 +62,7 @@ registerRule({
 
 registerRule({
   id: 'habitability.bodyCapacity',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier'],
@@ -90,7 +90,7 @@ registerRule({
 
 registerRule({
   id: 'habitability.score',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: '% of the best target',
   verification: 'assumed',
   structure: ['FCT_SystemBody', 'FCT_Species', 'FCT_MineralDeposit', 'FCT_Population', 'FCT_RaceJumpPointSurvey'],

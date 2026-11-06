@@ -21,7 +21,7 @@ const MIN_SPEED = 1
 
 // The line's parasite transfer decides both rules below: the parasite is moved into the target fleet's list and takes that fleet (Ship.cs:8007-8060, TransferToFleet, which adds each ship whose mother ship is the transferred one to the target fleet and writes the new fleet to it), so a hangared ship counts under the fleet its own row names, and the fleet's speed is recomputed by the member that holds a hand-set speed to the maximum and never raises it (Fleet.cs:10467-10488, method_252, called for both fleets after a transfer). Both are exercised on the interim fixture and on a save the game wrote under the present line by scripts/check-fleet-profile.js.
 const FLEET_MEMBERSHIP_VERSIONS = ['3.2.x']
-const FLEET_VERSIONS = ['2.7.x']
+const FLEET_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'transport.fleetSpeed',
@@ -55,7 +55,7 @@ registerRule({
 
 registerRule({
   id: 'transport.fleetTrip',
-  versions: FLEET_VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['transport.fleetSpeed', 'transport.fleetCargo', 'the explored jump points'],

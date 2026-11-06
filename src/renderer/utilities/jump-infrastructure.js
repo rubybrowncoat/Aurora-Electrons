@@ -3,7 +3,7 @@
 import { jumpPointNumbers } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 // DIM_MoveAction 'Stabilise Jump Point'; a destination of type 1 is the jump point of the order.
 export const STABILISE_JUMP_POINT = 64
@@ -44,7 +44,7 @@ registerRule({
 
 registerRule({
   id: 'jumpInfrastructure.probes',
-  versions: VERSIONS,
+  versions: ['x'],
   verification: 'estimated',
   structure: ['FCT_Ship.ShipID'],
   note: 'A probe is an ordinary ship of a class the player named: the save has no probe type, and a ship cannot be told to be a probe by its class name, so no probe count is given.',

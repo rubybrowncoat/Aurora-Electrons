@@ -17,7 +17,7 @@ registerRule({
 
 registerRule({
   id: 'production.procurementReservations',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'component units',
   verification: 'estimated',
   structure: ['FCT_ShipyardTask.TaskTypeID, UseComponents, ClassID, RefitID, PopulationID, NumShips', 'FCT_ClassComponent.NumComponent'],

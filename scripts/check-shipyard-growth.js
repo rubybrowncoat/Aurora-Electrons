@@ -428,7 +428,7 @@ const ZERO_MINERALS = Object.fromEntries(['Duranium', 'Neutronium', 'Corbomite',
 const classRecord = (id, sizeHS, extra = {}) => ({ id, name: id, sizeHS, cost: 500, commercial: false, obsolete: false, shippingLine: false, otherRace: false, prototype: false, counts: { 1: 4 }, ...extra })
 const eligibilityContext = (...classes) => ({ classesById: Object.fromEntries(classes.map((shipClass) => [shipClass.id, shipClass])), components: { 1: { id: 1, name: 'part 1', typeId: 1, cost: 10, minerals: ZERO_MINERALS } }, version: '3.2.0', cache: new Map() })
 const HELD = [{ id: 1, name: 'Level 1', multiplier: 1 }, { id: 2, name: 'Level 2', multiplier: 0.8 }]
-const version = '2.7.x'
+const version = '3.2.x'
 
 // The yards: A, a naval yard of 4 slipways and 5,000 t with a construction task (class of 2,000 size units, 5,250 BP left) and a refit (10,500 BP left); B, a commercial yard of 2 slipways with a construction task (3,000 BP left) adding 1,000 t (800 BP, 200 done); C, a repair yard with nothing; D, a naval yard of 3 slipways, all working, retooling for class 101 (1,000 BP).
 const task = (id, over = {}) => ({ id, taskType: 0, classId: 100, className: 'Alpha class', refitId: null, name: `Unit ${id}`, totalBP: 6000, completedBP: 750, remaining: 5250, hulls: 1, paused: false, size: 2000, commercial: false, targetSize: null, targetCommercial: null, ...over })
@@ -463,9 +463,9 @@ const pure = (ctx) => {
   const missing = (result) => (result && result.inputs ? result.inputs.missing : null)
   const value = p.valueOrNull
 
-  add('rules: the five rules are registered, 2.7.x, with the kind of check each is', () => {
+  add('rules: the five rules are registered, 3.2.x, with the kind of check each is', () => {
     const expected = { 'shipyardGrowth.operations': 'confirmed', 'shipyardGrowth.slipwayPrice': 'confirmed', 'shipyardGrowth.capacityStep': 'confirmed', 'shipyardGrowth.capacityStepPattern': 'estimated', 'shipyardGrowth.continualPrice': 'estimated' }
-    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = p.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('2.7.x') || rule.units !== (id === 'shipyardGrowth.operations' ? '' : 'BP') }).map(([id]) => id)
+    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = p.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('3.2.x') || rule.units !== (id === 'shipyardGrowth.operations' ? '' : 'BP') }).map(([id]) => id)
 
     return same(bad, [])
   })

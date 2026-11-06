@@ -144,8 +144,8 @@ const pure = (ctx) => {
   const add = (name, test) => statements.push([name, test])
   const run = (over = {}) => pm.reconcile(input(over))
 
-  add('rules: both rules are registered as estimated, the manifest for 3.2.x and the reservations for 2.7.x', () => {
-    const bad = Object.entries({ 'production.procurementManifest': '3.2.x', 'production.procurementReservations': '2.7.x' }).filter(([id, line]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== 'estimated' || !rule.versions.includes(line) }).map(([id]) => id)
+  add('rules: both rules are registered as estimated, both for 3.2.x', () => {
+    const bad = Object.entries({ 'production.procurementManifest': '3.2.x', 'production.procurementReservations': '3.2.x' }).filter(([id, line]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== 'estimated' || !rule.versions.includes(line) }).map(([id]) => id)
 
     assert.deepEqual(bad, [])
 
@@ -1697,7 +1697,7 @@ const MUTATIONS = [
   { name: 'hulls of a fraction accepted', file: U, find: 'const whole = (value) => isNumber(value) && Number.isInteger(value) && value >= 1', replace: 'const whole = (value) => isNumber(value) && value > 0', fails: ['invalid'] },
   { name: 'no colony needed accepted', file: U, find: 'if (targetId === null || targetId === undefined) {', replace: 'if (false) {', fails: ['invalid'] },
   { name: 'the default colony without a shipyard first', file: U, find: 'const yards = Number(isNumber(colony.yards) && colony.yards > 0)', replace: 'const yards = 0', fails: ['target'] },
-  { name: 'the rule of the claims not for 2.7', file: U, find: 'id: \'production.procurementReservations\',\n  versions: [\'2.7.x\']', replace: 'id: \'production.procurementReservations\',\n  versions: [\'2.6.x\']', fails: ['rules'] },
+  { name: 'the rule of the claims not for 3.2', file: U, find: 'id: \'production.procurementReservations\',\n  versions: [\'3.2.x\']', replace: 'id: \'production.procurementReservations\',\n  versions: [\'2.6.x\']', fails: ['rules'] },
   { name: 'an unknown figure exported as 0', file: U, find: 'const cell = (value) => csvCell(typeof value === \'number\' ? rounded(value) : value, {', replace: 'const cell = (value) => csvCell(typeof value === \'number\' ? rounded(value) : value ?? 0, {', fails: ['csv'] },
   { name: 'the held back and the proven claim run into one column', file: U, find: '\'Reserved (proven)\': row.reserved.proven, \'Held back (claim not known)\': row.reserved.unknown', replace: '\'Reserved (proven)\': row.reserved.proven + row.reserved.unknown, \'Held back (claim not known)\': row.reserved.unknown', fails: ['csv'] },
   { name: 'the stock here and elsewhere not told apart', file: U, find: '\'Stock here\': row.stock.local, \'Stock elsewhere\': row.stock.remote', replace: '\'Stock here\': row.stock.local + row.stock.remote, \'Stock elsewhere\': row.stock.remote', fails: ['csv'] },

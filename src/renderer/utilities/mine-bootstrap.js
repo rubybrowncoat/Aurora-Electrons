@@ -9,8 +9,8 @@ import { freeCapacity } from './production'
 import { combine, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 import { fleetCanTransit, hasGate, transitRule } from './transport'
 
-const VERSIONS = ['2.7.x']
-// The ground rule is the one verified against the line's own source; the other three rules stay on the earlier line's formula.
+const VERSIONS = ['3.2.x']
+// Ground assistance retains its own version constant and verification classification.
 const GROUND_VERSIONS = ['3.2.x']
 const DAYS_PER_YEAR = 365
 // The share of a parent headquarters' commander bonus a subordinate formation takes up.

@@ -612,17 +612,17 @@ const pure = (ctx) => {
 
       return problems.length === 0 ? true : problems.join('; ')
     }],
-    ['registry: the rules are registered for the 2.7 line with the verification of what they are', () => {
+    ['registry: the stored stock and time axis are registered for the source line and the derived ratios for every version, with their verification unchanged', () => {
       const { getRule, ruleSupports } = m.provenance
       const expected = { 'stockRates.colonyStock': 'confirmed', 'stockRates.rate': 'confirmed', 'stockRates.relativeRate': 'confirmed', 'stockRates.depletion': 'estimated', 'stockRates.depletionEarliest': 'estimated' }
       const problems = Object.entries(expected).filter(([id, verification]) => {
         const rule = getRule(id)
 
-        return !(rule && rule.verification === verification && equal(rule.versions, ['2.7.x']) && rule.note.length > 40)
+        return !(rule && rule.verification === verification && equal(rule.versions, [id === 'stockRates.colonyStock' || id === 'stockRates.rate' ? '3.2.x' : 'x']) && rule.note.length > 40)
       }).map(([id]) => id)
       const a = run(DECLINING)
 
-      return problems.length === 0 && ruleSupports('stockRates.depletion', '2.7.1') === true && ruleSupports('stockRates.depletion', '2.6.4') === false && getRule('stockRates.depletion').assumptions.length === 3 && a.depletion.rule.id === 'stockRates.depletion' && a.depletion.status === 'estimated' ? true : short([problems, ruleSupports('stockRates.depletion', '2.6.4')])
+      return problems.length === 0 && ruleSupports('stockRates.depletion', '3.2.0') === true && ruleSupports('stockRates.depletion', '2.6.4') === true && getRule('stockRates.depletion').assumptions.length === 3 && a.depletion.rule.id === 'stockRates.depletion' && a.depletion.status === 'estimated' ? true : short([problems, ruleSupports('stockRates.depletion', '2.6.4')])
     }],
     ['random: invariants hold over random series with gaps, duplicates and zeros', () => {
       let seed = 12345
@@ -925,7 +925,7 @@ const MUTATIONS = [
   { name: 'a horizon of a billion years', file: U, find: 'export const HORIZON_YEARS = 1000', replace: 'export const HORIZON_YEARS = 1e9', fails: ['distant', 'random'] },
   { name: 'the depletion taken from the first stock', file: U, find: 'rule: \'stockRates.depletion\', parts: { rate, stock: last.result }', replace: 'rule: \'stockRates.depletion\', parts: { rate, stock: first.result }', fails: ['declining', 'estimate'] },
   { name: 'the date dated from the first observation', file: U, find: 'last.t + depletion.value * YEAR_SECONDS', replace: 'first.t + depletion.value * YEAR_SECONDS', fails: ['declining'] },
-  { name: 'the depletion registered as confirmed', file: U, find: 'id: \'stockRates.depletion\',\n  versions: STOCK_VERSIONS,\n  units: \'game years\',\n  verification: \'estimated\',', replace: 'id: \'stockRates.depletion\',\n  versions: STOCK_VERSIONS,\n  units: \'game years\',\n  verification: \'confirmed\',', fails: ['estimate', 'registry', 'csv'] },
+  { name: 'the depletion registered as confirmed', file: U, find: 'id: \'stockRates.depletion\',\n  versions: [\'x\'],\n  units: \'game years\',\n  verification: \'estimated\',', replace: 'id: \'stockRates.depletion\',\n  versions: [\'x\'],\n  units: \'game years\',\n  verification: \'confirmed\',', fails: ['estimate', 'registry', 'csv'] },
   { name: 'the window left out of the words', file: U, find: 'years ? `the last ${years} game ${years === 1 ? \'year\' : \'years\'} before the latest snapshot (${date(Math.max(from, 0))} to ${date(latest)})` : `every retained snapshot, up to the latest (${date(latest)})`', replace: '\'the window\'', fails: ['notes', 'estimate', 'csv', 'panel-defaults'] },
   { name: 'the average-rate assumption left out of the rule', file: U, find: 'assumptions: [\'the stock keeps changing at the average rate observed over the window\', ', replace: 'assumptions: [', fails: ['estimate', 'csv'] },
   { name: 'the no-guarantee assumption left out of the rule', file: U, find: ', \'the estimate comes from observations only and is not a guarantee that the stock runs out\'],\n})\n\nregisterRule({\n  id: \'stockRates.depletionEarliest\'', replace: '],\n})\n\nregisterRule({\n  id: \'stockRates.depletionEarliest\'', fails: ['estimate'] },
@@ -956,7 +956,7 @@ const MUTATIONS = [
   { name: 'a colony with no figure read as 0', file: U, find: 'return isKnownNumber(value) ? ofRule(', replace: 'return true ? ofRule(', fails: ['colony'] },
   { name: 'a snapshot without the colony counted as unrecorded', file: U, find: 'return entry ? [{ t: snapshot.t, result: colonyResult(entry, stock, columns) }] : []', replace: 'return [{ t: snapshot.t, result: entry ? colonyResult(entry, stock, columns) : unavailable({ rule: \'stockRates.colonyStock\', missing: [\'colony\'], units: stock.unit }) }]', fails: ['colony'] },
   { name: 'the treasury offered for a colony', file: U, find: '(scope === SCOPES.COLONY ? stock.colony !== null : true)', replace: '(scope === SCOPES.COLONY ? true : true)', fails: ['colony', 'panel-colony', 'panel-defaults'] },
-  { name: 'the rules registered for the 2.6 line', file: U, find: 'const STOCK_VERSIONS = [\'2.7.x\']', replace: 'const STOCK_VERSIONS = [\'2.6.x\']', fails: ['registry'] },
+  { name: 'the rules registered for the 2.6 line', file: U, find: 'const STOCK_VERSIONS = [\'3.2.x\']', replace: 'const STOCK_VERSIONS = [\'2.6.x\']', fails: ['registry'] },
   { name: 'the rate registered as estimated', file: U, find: 'id: \'stockRates.rate\',\n  versions: STOCK_VERSIONS,\n  units: \'per game year\',\n  verification: \'confirmed\',', replace: 'id: \'stockRates.rate\',\n  versions: STOCK_VERSIONS,\n  units: \'per game year\',\n  verification: \'estimated\',', fails: ['registry', 'estimate', 'csv'] },
   { name: 'the panel\'s window ignored', file: V, find: 'years: this.rateWindow', replace: 'years: 0', fails: ['panel-defaults'] },
   { name: 'the colony chosen ignored', file: V, find: 'return this.colonyOptions.some((option) => option.value === this.rateColony) ? this.rateColony :', replace: 'return false ? this.rateColony :', fails: ['panel-colony'] },

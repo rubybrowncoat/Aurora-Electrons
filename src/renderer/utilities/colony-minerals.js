@@ -3,7 +3,7 @@
 import { MINERALS } from './minerals'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-const COLONY_VERSIONS = ['2.7.x']
+const COLONY_VERSIONS = ['3.2.x']
 
 // The rules of a colony's mineral figures, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 registerRule({

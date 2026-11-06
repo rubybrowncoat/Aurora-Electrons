@@ -115,7 +115,7 @@ order by TotalPopulation desc`)
 
 registerRule({
   id: 'habitability.speciesPopulation',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'M people',
   verification: 'confirmed',
   structure: ['FCT_Population.Population, SpeciesID, RaceID'],

@@ -7,8 +7,8 @@ import { capacityKind } from './production-types'
 import { combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, weakestStatus } from './provenance'
 
 const VERSIONS = ['3.2.x']
-// The shipbuilding rule stays on the earlier line: the migrated fixture's ledger holds no shipyard activity, so the activity half of the rule has no case to check there (it needs a played 3.1 save), and its figure rests on the shipyard rates of production.js.
-const SHIPBUILDING_VERSIONS = ['2.7.x']
+// The shipbuilding forecast follows the source's task and yard activity rates.
+const SHIPBUILDING_VERSIONS = ['3.2.x']
 
 // The uses a ledger-less save can switch on and off, in the order the page lists them. `groups` are the ledger's flow groups (FLOW_GROUPS of minerals.js) that the category stands for when a ledger observes it, and `rule` the rule of its modelled results.
 export const CATEGORIES = Object.freeze([

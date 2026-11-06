@@ -198,8 +198,8 @@ const pure = (ctx) => {
   const add = (name, test) => statements.push([name, test])
   const runLocal = (over = {}) => mb.localRoute(local(over))
 
-  add('rules: the four rules are registered with the kind of check each is, the three arithmetic rules on the earlier line and the ground rule on the line', () => {
-    const expected = { 'mineBootstrap.requirements': ['confirmed', '2.7.x'], 'mineBootstrap.localBuild': ['estimated', '2.7.x'], 'mineBootstrap.import': ['estimated', '2.7.x'], 'mineBootstrap.groundAssistance': ['estimated', '3.2.x'] }
+  add('rules: the four rules are registered with the kind of check each is, all on the source-verified line', () => {
+    const expected = { 'mineBootstrap.requirements': ['confirmed', '3.2.x'], 'mineBootstrap.localBuild': ['estimated', '3.2.x'], 'mineBootstrap.import': ['estimated', '3.2.x'], 'mineBootstrap.groundAssistance': ['estimated', '3.2.x'] }
     const bad = Object.entries(expected).filter(([id, [verification, version]]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || rule.versions.length !== 1 || !rule.versions.includes(version) }).map(([id]) => id)
 
     assert.deepEqual(bad, [])
@@ -2320,7 +2320,7 @@ const MUTATIONS = [
   { name: 'the routes in another order', file: U, find: '  importRoute({ requirement, target, ...importing, format }),\n  localRoute({ requirement, ...local, format }),', replace: '  localRoute({ requirement, ...local, format }),\n  importRoute({ requirement, target, ...importing, format }),', fails: ['compare'] },
   { name: 'an unmapped version taken as mapped', file: U, find: 'if (ruleSupports(\'mineBootstrap.groundAssistance\', version) !== true) {', replace: 'if (false) {', fails: ['ground-unavailable'] },
   { name: 'an unknown version taken as mapped', file: U, find: 'if (ruleSupports(\'mineBootstrap.groundAssistance\', version) !== true) {', replace: 'if (ruleSupports(\'mineBootstrap.groundAssistance\', version) === false) {', fails: ['ground-unavailable'] },
-  { name: 'the ground rule kept on the earlier line', file: U, find: 'versions: GROUND_VERSIONS', replace: 'versions: VERSIONS', fails: ['rules'] },
+  { name: 'the ground rule kept on the earlier line', file: U, find: 'versions: GROUND_VERSIONS', replace: 'versions: [\'2.7.x\']', fails: ['rules'] },
   { name: 'a column the save lacks not named', file: U, find: 'if (ground.gaps.length) {', replace: 'if (false) {', fails: ['ground-unavailable'] },
   { name: 'a null rating or bonus given a figure', file: U, find: 'if (unknown.length || atTarget.unknown.length) {', replace: 'if (false) {', fails: ['ground-unavailable'] },
   { name: 'the capacity of a headquarters ignored', file: U, find: 'total === null || !isNumber(formation.hq) ? null : total > formation.hq ? 0 : 1', replace: 'total === null || !isNumber(formation.hq) ? null : 1', fails: ['ground-command'] },

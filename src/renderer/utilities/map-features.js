@@ -19,7 +19,7 @@ left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody
 const BODY_COLUMNS = 'FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.ComponentNumber, FCT_SystemBodyName.Name as SystemBodyName'
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
-const FEATURE_VERSIONS = ['2.7.x']
+const FEATURE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'map.ruinState',
@@ -41,7 +41,7 @@ registerRule({
 
 registerRule({
   id: 'map.dangerFlag',
-  versions: FEATURE_VERSIONS,
+  versions: ['2.7.x'],
   units: 'flag',
   verification: 'assumed',
   structure: ['FCT_RaceSysSurvey.DangerRating', 'FCT_ShipClass.ProtectionValue, MaxSpeed', 'FCT_Ship', 'FCT_Fleet.SystemID'],

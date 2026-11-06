@@ -10,7 +10,7 @@ export const BALANCE_TOLERANCE = 1e-6
 
 registerRule({
   id: 'finances.treasuryResidual',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'wealth',
   verification: 'estimated',
   structure: ['history snapshots (wealth, game time)', 'FCT_WealthData.UseID, TimeUsed, Amount', 'DIM_WealthUse.Income', 'FCT_Race.WealthPoints'],

@@ -44,7 +44,7 @@ export const SHUTTLE_SERVICE_COLUMNS = 'coalesce(VIR_Service.ShuttleCapacity, 0)
 export const shuttleServiceJoin = (gameId, populationColumn) => `left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) as ShuttleCapacity, group_concat(DIM_PlanetaryInstallation.Name, ', ') as ServiceNames from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${gameId} and FCT_PopulationInstallations.Amount > 0 and DIM_PlanetaryInstallation.CargoShuttleValue > 0 group by FCT_PopulationInstallations.PopID) as VIR_Service on VIR_Service.PopID = ${populationColumn}`
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). Evidence: docs/plans/backlog/evidence/AE-080-01.md, AE-081-01.md and AE-082-01.md.
-const TRANSPORT_VERSIONS = ['2.7.x']
+const TRANSPORT_VERSIONS = ['3.2.x']
 // The loading rules the later line states: the colony's spaceport or cargo shuttle station joins the base of a ship's strength before any officer multiplies it, and a ship with no undamaged cargo shuttle bays counts one bay, so that no ship's bays keep it from loading at a colony.
 const LOADING_VERSIONS = ['3.2.x']
 
@@ -119,7 +119,7 @@ registerRule({
 
 registerRule({
   id: 'transport.roundTrip',
-  versions: TRANSPORT_VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_ShipClass.MaxSpeed', 'the explored jump points'],

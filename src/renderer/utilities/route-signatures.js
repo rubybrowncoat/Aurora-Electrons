@@ -10,7 +10,6 @@ import { orderPlaceKey } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, UNLOADS } from './transport'
 
-const ROUTE_VERSIONS = ['2.7.x']
 const GROUP_VERSIONS = ['3.2.x']
 
 registerRule({
@@ -25,7 +24,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.groupCapacity',
-  versions: ROUTE_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['hauling.freightMoved', 'hauling.colonistsMoved'],

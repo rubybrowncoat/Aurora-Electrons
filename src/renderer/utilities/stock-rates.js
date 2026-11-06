@@ -12,7 +12,7 @@ import { UNKNOWN_TEXT, countText, isKnownNumber } from './math'
 import { MINERALS } from './minerals'
 import { combine, exportFields, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-const STOCK_VERSIONS = ['2.7.x']
+const STOCK_VERSIONS = ['3.2.x']
 
 // A game year as the history's time axis counts it (utilities/history.js `history.timeAxis`).
 export const YEAR_SECONDS = 31536000
@@ -55,7 +55,7 @@ registerRule({
 
 registerRule({
   id: 'stockRates.relativeRate',
-  versions: STOCK_VERSIONS,
+  versions: ['x'],
   units: '% per game year',
   verification: 'confirmed',
   structure: ['the rate of a stock', 'its first observation in the window'],
@@ -64,7 +64,7 @@ registerRule({
 
 registerRule({
   id: 'stockRates.depletion',
-  versions: STOCK_VERSIONS,
+  versions: ['x'],
   units: 'game years',
   verification: 'estimated',
   structure: ['the rate of a stock over the window', 'its last observation'],
@@ -74,7 +74,7 @@ registerRule({
 
 registerRule({
   id: 'stockRates.depletionEarliest',
-  versions: STOCK_VERSIONS,
+  versions: ['x'],
   units: 'game years',
   verification: 'estimated',
   structure: ['the fastest decline between two neighbouring observations in the window', 'its last observation'],

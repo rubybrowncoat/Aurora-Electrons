@@ -8,7 +8,7 @@ import { categoryOfType } from './event-triage'
 import { isKnownNumber } from './math'
 import { envelope, failureWords, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 // The event types the checklist watches, all of the Combat category of utilities/event-triage.js (scripts/check-event-triage.js holds each to the export of DIM_EventType), with the icon the log shows for the type. `group` is 'fire' or 'boarding'. None of them says why an interval stalls.
 export const WATCHED = Object.freeze([
@@ -98,7 +98,7 @@ registerRule({
 
 registerRule({
   id: 'logDiagnostic.fleet',
-  versions: VERSIONS,
+  versions: ['x'],
   units: '',
   verification: 'confirmed',
   structure: [],

@@ -3,7 +3,7 @@
 import { crewFraction } from './crew'
 import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
-const LAGRANGE_VERSIONS = ['2.7.x']
+const LAGRANGE_VERSIONS = ['3.2.x']
 // The two timing rules hold on 3.2, which skips a ship with no crew aboard and caps the duration at Int32.MaxValue seconds before converting it to an integer (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime` of the 3.1.0 source, the reference for the 3.2 line; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
 const TIMING_VERSIONS = ['3.2.x']
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
@@ -52,7 +52,7 @@ registerRule({
 
 registerRule({
   id: 'lagrange.mapScale',
-  versions: LAGRANGE_VERSIONS,
+  versions: ['x'],
   units: 'dot size and colour',
   verification: 'assumed',
   note: 'A display scale, not a game rule: a dot grows and changes colour with the number of stable points in its system (none, one, two or more), and a ring marks a system with colonies.',

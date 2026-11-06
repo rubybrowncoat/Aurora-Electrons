@@ -7,9 +7,9 @@
 import { WORKER_TOLERANCE, infrastructureCapResult, infrastructureOf, workerSplit } from './colonies'
 import { combine, isAvailable, ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
-// The two rules the fixture's colonies exercise: the loader that reads them (check-colonist-floor, group save-loader, against raw counts of the population table). The other rules of the module have worked colonies only, so they keep the line they were verified on.
+// The source and pool rules are also checked against saved colony rows.
 const FIXTURE_VERSIONS = ['3.2.x']
 
 // Workers in millions: a balance this close to zero counts as staffed when the removable population is searched for.
@@ -26,7 +26,7 @@ export const NO_COLONIST_SOURCES = Object.freeze({ rows: Object.freeze([]), prob
 
 registerRule({
   id: 'colonistFloor.staffing',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_Population.Population', 'FCT_PopulationInstallations.Amount', 'FCT_Shipyard.Slipways, ParentShipID', 'the worker split rule'],
@@ -36,7 +36,7 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.removable',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the staffing rule', 'the retained floor entered here'],
@@ -46,7 +46,7 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.outcome',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the staffing rule', 'the batch entered here'],
@@ -56,7 +56,7 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.committed',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the committed workforce rule', 'the staffing rule'],
@@ -94,7 +94,7 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.futurePickups',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the shipping lines\' ships', 'the pool after queued loads'],
