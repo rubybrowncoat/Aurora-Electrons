@@ -380,6 +380,45 @@
           </div>
         </v-card>
 
+        <v-card class="panel" data-summary="Compare each system's civilian mining potential and the wealth its complexes move." elevation="1">
+          <div class="panel-head">
+            <span>Civilian mining by system<provenance-mark rule="cmcSummary.system" /></span>
+            <span class="head-tools body-2">
+              <span class="text--secondary">{{ summaryText }}</span>
+            </span>
+          </div>
+          <div v-if="!raceRules.AllowCMC" class="selection-bar caption warning--text" data-cmc-off>Civilian mining complexes are switched off for the game: the game founds and expands none, so the figures below show the potential the race's bodies hold, not complexes this game creates.</div>
+          <v-data-table :headers="summaryHeaders" :items="summary.rows" :custom-sort="sortNullLast" item-key="key" :sort-by.sync="summaryTable.sortBy" :sort-desc.sync="summaryTable.sortDesc" disable-pagination hide-default-footer no-data-text="No known system holds a surveyed body that could host a civilian mining complex of the race.">
+            <template v-for="(rule, column) in summaryRules" #[`header.${column}`]="{ header }">
+              <span :key="column">{{ header.text }}<provenance-mark :rule="rule" /></span>
+            </template>
+            <template #[`item.name`]="{ item }">
+              <div class="py-2">
+                <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
+                <div v-if="item.possible" class="caption warning--text text-no-wrap">{{ counted(item.possible, 'body', 'bodies') }} could qualify</div>
+              </div>
+            </template>
+            <template #[`item.controller`]="{ item }">
+              <span class="text-no-wrap">{{ item.controller || '—' }}</span>
+            </template>
+            <template #[`item.population`]="{ item }">
+              <div class="py-2 text-no-wrap">
+                <div>{{ isAvailable(item.populationResult) ? `${count(item.population, 1)} M` : '—' }}<provenance-mark v-if="!isAvailable(item.populationResult)" :result="item.populationResult" /></div>
+                <div v-if="item.founds === false" class="caption text--secondary text-no-wrap">10 M or less</div>
+              </div>
+            </template>
+            <template v-for="column in summaryCounts" #[`item.${column}`]="{ item }">
+              <span :key="column" class="text-no-wrap">{{ isAvailable(item.countsResult) ? count(item[column]) : '—' }}<provenance-mark v-if="!isAvailable(item.countsResult)" :result="item.countsResult" /></span>
+            </template>
+            <template v-for="column in summaryWealth" #[`item.${column}`]="{ item }">
+              <span :key="column" class="text-no-wrap">{{ isAvailable(item[`${column}Result`]) ? count(item[column]) : '—' }}<provenance-mark v-if="!isAvailable(item[`${column}Result`])" :result="item[`${column}Result`]" /></span>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            Use it to see which of the race's systems could host a civilian mining complex and what the complexes of a system move in wealth. A system is listed when it holds a surveyed body with more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better within reach of its star and the body, or a colony of the race with a complex. Active counts the colonies of the race with a complex; available and blocked split the qualifying bodies without one: blocked where a colony on the body has people, an automated mine, a civilian or ex-civilian complex, a mass driver or orbital miners at work, or the race has banned the body. A known alien colony keeps a complex off under the same conditions; one the race has no record of cannot be seen, so its body can still show as available. The largest colony is the race's largest population there in millions, and the game founds a complex only in a system where a colony of the race holds more than 10 M people. Income and expenditure are a year's tax on the complexes and the year's cost of buying their output, the two civilian mining lines of the wealth ledger; the game charges and pays only for a complex that produces, so the ledger holds less over part of a year. The game's own tab reads the race's population records alone, counts a record with no orbital miners as keeping a complex off and reads neither mass drivers nor complexes; the rows here follow the founding rule, so a body holding only an empty colony is available here and blocked on the tab, and one with orbital miners at work is the other way round. A dash is a figure the save does not record, never 0, and its mark names what is missing.
+          </div>
+        </v-card>
+
         <v-card class="panel" data-summary="Compare each colony's mineral stocks, reserves and requirements." elevation="1">
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} in the colonies` : 'Minerals in the colonies' }}<provenance-mark rule="minerals.colonyStock" /></span>
@@ -542,8 +581,9 @@ import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
 import { DEFAULT_SETTINGS, MAX_TEXT, RANKINGS, SETTING_FIELDS, candidateRanking, normaliseSettings } from '../utilities/cmc-candidates'
 import { CMC_PURCHASE_COST, CMC_TAX_INCOME, NO_CMC_POLICY, POLICY_STATES, TARGET_STATES, cmcPolicyRows, loadCmcPolicy } from '../utilities/cmc-policy'
+import { cmcSummary } from '../utilities/cmc-summary'
 import { cmcBodyInReach } from '../utilities/colonization'
-import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadCmcBlocks, loadRoutes } from '../utilities/colonization-data'
+import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadCmcBlocks, loadCmcReach, loadRoutes } from '../utilities/colonization-data'
 import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
 import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMineralResults, loadPacketsInFlight, loadQueueNeeds, worstState } from '../utilities/colony-minerals'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
@@ -564,6 +604,7 @@ const INPUT_LABELS = {
   miners: 'the orbital miners',
   aliens: 'the alien colonies',
   cmcBlocks: 'the colonies that keep a civilian mining complex off a body',
+  cmcReach: 'the stars in reach of a civilian mining complex',
   policy: 'the civilian mining policy',
   formulaVersion: "the save's game version",
 }
@@ -629,6 +670,7 @@ export default {
       depositTable: tableView('mineralsDepositsTable', { sortBy: ['potential'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       colonyTable: tableView('mineralsColoniesTable', { sortBy: ['stateOrder'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       policyTable: tableView('mineralsCmcPolicyTable', { sortBy: ['stateOrder'], sortDesc: [false] }),
+      summaryTable: tableView('mineralsCmcSummaryTable', { sortBy: ['name'], sortDesc: [false] }),
       cmcAcknowledged: { key: 'mineralsCmcTaxAcknowledged', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored.filter(Number.isInteger) : undefined) },
       cmcRanking: { key: 'mineralsCmcRanking', default: 'headline', scope: 'race', valid: oneOf(RANKINGS.map((option) => option.id)) },
       cmcPreference: { key: 'mineralsCmcPreference', default: { ...DEFAULT_SETTINGS }, scope: 'race', normalise: normaliseSettings },
@@ -655,6 +697,9 @@ export default {
       settingMaxText: MAX_TEXT,
       candidateExpanded: [],
       candidateRules: { rank: 'minerals.siteOrder', potential: 'minerals.bodyPotential', reserve: 'cmcCandidate.reserve', accessibility: 'cmcCandidate.accessibility', lifetime: 'cmcCandidate.lifetime', score: 'cmcCandidate.score' },
+      summaryRules: { name: 'cmcSummary.system', controller: 'cmcSummary.control', population: 'cmcSummary.population', active: 'cmcSummary.system', available: 'cmcSummary.system', blocked: 'cmcSummary.system', income: 'cmcSummary.wealth', expenditure: 'cmcSummary.wealth' },
+      summaryCounts: ['active', 'available', 'blocked'],
+      summaryWealth: ['income', 'expenditure'],
       policyRules: { outputSort: 'cmcPolicy.output', choiceSort: 'cmcPolicy.choice', targetSort: 'cmcPolicy.destination', drivers: 'cmcPolicy.drivers', throughput: 'cmcPolicy.throughput', switchSort: 'cmcPolicy.switch' },
       choiceLabels: { buy: 'Bought', tax: 'Taxed', npr: 'Kept (NPR)' },
       tonnageColumns: ['stock', 'reserve', 'free', 'needs', 'inbound'],
@@ -858,7 +903,9 @@ export default {
           complexColonies: own.filter((colony) => colony.Complexes > 0),
           cmcCandidate: cmcBlocked ? '' : cmcMinerals.join(' and '),
           cmcInReach: inReach,
+          cmcStarInReach: !!this.cmcReach[row.StarID],
           cmcBlocked,
+          banned: !!row.Banned,
           workers: [
             ...own.map((colony) => ({ key: `colony-${colony.PopulationID}`, text: colony.PopName, note: this.minesText(colony) })),
             ...(fleet ? [{ key: 'orbital', text: this.counted(fleet.Ships, 'orbital miner', 'orbital miners'), note: this.counted(fleet.Modules, 'module', 'modules') }] : []),
@@ -1264,6 +1311,31 @@ export default {
     // The civilian mining candidates, ranked by the headline order or the longevity preference (utilities/cmc-candidates.js), in every system whatever the view.
     candidates() {
       return candidateRanking({ bodies: this.bodies, race: this.race, allowed: this.raceRules.AllowCMC, settings: this.cmcPreference, ranking: this.cmcRanking })
+    },
+
+    // The civilian mining summary by system (utilities/cmc-summary.js): the bodies of each system that could host a complex, split by whether a colony keeps one off, with the race's largest colony and the year's wealth.
+    summary() {
+      return cmcSummary({ bodies: this.bodies, colonies: this.colonies, systems: this.systems, version: this.formulaVersion })
+    },
+
+    summaryHeaders() {
+      return [
+        { text: 'System', value: 'name' },
+        { text: 'Controlling race', value: 'controller' },
+        { text: 'Largest colony', value: 'population', align: 'end' },
+        { text: 'Active', value: 'active', align: 'end' },
+        { text: 'Available', value: 'available', align: 'end' },
+        { text: 'Blocked', value: 'blocked', align: 'end' },
+        { text: 'Income', value: 'income', align: 'end' },
+        { text: 'Expenditure', value: 'expenditure', align: 'end' },
+      ]
+    },
+
+    // How many systems the summary lists, and how many bodies it leaves uncertain.
+    summaryText() {
+      const { systems, possible } = this.summary
+
+      return `${this.counted(systems, 'system', 'systems')}${possible ? ` · ${this.counted(possible, 'body', 'bodies')} possible` : ''}`
     },
 
     candidateHeaders() {
@@ -1733,7 +1805,7 @@ export default {
           return []
         }
 
-        const [systems] = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.MilitaryRestrictedSystem from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`)
+        const [systems] = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.ControlRaceID, FCT_AlienRace.AlienRaceName as ControllerName from FCT_RaceSysSurvey left join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID} where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`)
 
         return Object.freeze(systems)
       }),
@@ -1758,7 +1830,7 @@ export default {
           return []
         }
 
-        const [deposits] = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, FCT_SystemBody.RadiationLevel, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_MineralDeposit.GameID = ${this.GameID} and FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID})`)
+        const [deposits] = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.StarID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, FCT_SystemBody.RadiationLevel, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_RaceSysSurvey.Name as SystemName, case when FCT_BannedBodies.SystemBodyID is null then 0 else 1 end as Banned from FCT_MineralDeposit inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_MineralDeposit.GameID = ${this.GameID} and FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID})`)
 
         return Object.freeze(deposits)
       }),
@@ -1841,6 +1913,18 @@ export default {
         return Object.freeze(await loadCmcBlocks(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: [],
+    },
+
+    // Whether the race's systems' stars are in reach of a civilian mining complex (utilities/colonization-data.js `loadCmcReach`), by StarID.
+    cmcReach: {
+      get: tracked('cmcReach', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await loadCmcReach(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: {},
     },
 
     // The race's civilian mining complex colonies and their output, for the policy panel.

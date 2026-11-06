@@ -154,6 +154,26 @@ where FCT_Game.GameID = ${GameID}`),
   }
 }
 
+// Whether the game counts each star of the systems the race knows as in reach of a civilian mining complex (colonization.js `cmcStarInReach`), by StarID: the stars of those systems and their Lagrange points, as `loadBodies` reads them for the Planner.
+export const loadCmcReach = async (database, { GameID, RaceID }) => {
+  const [stars, lagrangePoints] = await Promise.all([
+    rows(database, `select FCT_Star.StarID, FCT_Star.SystemID, FCT_Star.ComponentNumber, FCT_Star.OrbitingComponent, FCT_Star.OrbitalDistance * (1 + FCT_Star.Eccentricity) as Apoapsis
+from FCT_Star
+inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Star.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_Star.GameID
+where FCT_Star.GameID = ${GameID}`),
+    rows(database, `select FCT_LagrangePoint.SystemID, FCT_LagrangePoint.StarID, FCT_Star.OrbitingComponent as StarOrbitingComponent, FCT_SystemBody.OrbitalDistance * (1 + FCT_SystemBody.Eccentricity) as PlanetApoapsis
+from FCT_LagrangePoint
+inner join FCT_Star on FCT_Star.StarID = FCT_LagrangePoint.StarID
+inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID
+inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_LagrangePoint.GameID
+where FCT_LagrangePoint.GameID = ${GameID}`),
+  ])
+  const starsBySystem = groupBy(stars, 'SystemID')
+  const pointsBySystem = groupBy(lagrangePoints, 'SystemID')
+
+  return Object.freeze(Object.fromEntries(stars.map((star) => [star.StarID, cmcStarInReach(star, starsBySystem[star.SystemID], pointsBySystem[star.SystemID] || [])])))
+}
+
 export const loadGases = (database) => rows(database, 'select GasID, Name, BoilingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen, DangerousMethane, DangerousPPMMethane, DangerousSulphur, DangerousPPMSulphur, DangerousAmmonia, DangerousPPMAmmonia from DIM_Gases')
 
 // A colony supplies the next one from this many millions of people up (the Planner's "nearest colony").
