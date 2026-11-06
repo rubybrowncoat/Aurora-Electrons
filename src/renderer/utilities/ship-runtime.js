@@ -12,7 +12,7 @@ import { SECONDS_PER_YEAR } from './transport'
 
 const SECONDS_PER_MONTH = 2592000
 const UNSUPPORTED_VERSION = 'the game version the save was played under, which the hangar and shore-leave rates are read for'
-const RUNTIME_VERSIONS = ['2.7.x']
+const RUNTIME_VERSIONS = ['3.2.x']
 // DIM_MaintenanceState: operational and under maintenance (an overhaul).
 const OPERATIONAL = 0
 const UNDER_MAINTENANCE = 2
@@ -139,7 +139,7 @@ registerRule({
 
 registerRule({
   id: RECOVERY_ETA,
-  versions: RUNTIME_VERSIONS,
+  versions: ['x'],
   units: 'months',
   verification: 'estimated',
   structure: ['shipRuntime.deploymentAge', 'shipRuntime.shoreLeaveRecovery'],

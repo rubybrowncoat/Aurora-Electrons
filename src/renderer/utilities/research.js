@@ -13,7 +13,7 @@ export const AVAILABLE = 'available'
 export const LOCKED = 'locked'
 export const BLOCKED = 'blocked'
 
-const RESEARCH_VERSIONS = ['2.7.x']
+const RESEARCH_VERSIONS = ['3.2.x']
 // The rules that state the saved points and the carry into a queued tech, checked against the current game's research processing (Population.cs:851-949 and 5107-5142).
 const SAVED_VERSIONS = ['3.2.x']
 const RATE_RULE = 'research.projectRate'
@@ -86,7 +86,7 @@ registerRule({
 
 registerRule({
   id: RATE_RULE,
-  versions: RESEARCH_VERSIONS,
+  versions: ['2.7.x'],
   units: 'RP/yr',
   verification: 'estimated',
   structure: ['FCT_ResearchProject.Facilities, ResSpecID', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses.BonusValue (Research bonus 3)', 'FCT_Species.ResearchRateModifier', 'FCT_Race.Research, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PopPoliticalStatus.ProductionMod', 'FCT_Game.ResearchSpeed', 'FCT_AncientConstruct.ResearchField, ResearchBonus'],
@@ -95,7 +95,7 @@ registerRule({
 
 registerRule({
   id: 'research.output',
-  versions: RESEARCH_VERSIONS,
+  versions: ['2.7.x'],
   units: 'RP/yr',
   verification: 'estimated',
   structure: ['the research.projectRate figure of each running project'],
@@ -122,7 +122,7 @@ registerRule({
 
 registerRule({
   id: 'research.nextLanding',
-  versions: RESEARCH_VERSIONS,
+  versions: ['2.7.x'],
   units: 'years',
   verification: 'estimated',
   structure: ['the research.landing figure of each running project', 'FCT_Game.StartYear, GameTime'],

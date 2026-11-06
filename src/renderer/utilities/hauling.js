@@ -50,11 +50,11 @@ export const CARGO_COMPOSITION = 'The cargo of this cycle is not worked out: a t
 export const CARGO_TRANSFER = 'The cargo of this cycle is not worked out: the component unload to another fleet has a handling timer, but its transfer outcome is not established. The hold has an unknown remainder, not a guaranteed empty hold.'
 
 // The rules this module implements, registered once (utilities/provenance.js). Loading time is `transport.handlingTime`, whose strength and landing rules the Hauling page shares with Transport. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
-const HAULING_VERSIONS = ['2.7.x']
+const HAULING_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'hauling.routeDistance',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_MoveOrders', 'FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_SystemBody'],
@@ -63,7 +63,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.cycleTime',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
@@ -73,7 +73,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.freightMoved',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.CargoCapacity'],
@@ -83,7 +83,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.colonistsMoved',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'colonists/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.ColonistCapacity'],
@@ -93,7 +93,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.fleetFuelPerYear',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'L/yr',
   verification: 'estimated',
   structure: ['FCT_ShipClass.FuelEfficiency, Size', 'FCT_ClassComponent', 'FCT_DamagedComponent', 'FCT_Fleet.Speed, UseMaximumSpeed'],
@@ -113,7 +113,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.deliveries',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.PopulationID'],

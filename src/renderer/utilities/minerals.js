@@ -5,7 +5,7 @@ import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { capacityKind } from './production-types'
 
-const MINERALS_VERSIONS = ['2.7.x']
+const MINERALS_VERSIONS = ['3.2.x']
 const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
 const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']
 
@@ -106,7 +106,7 @@ registerRule({
 
 registerRule({
   id: 'minerals.massDriverRate',
-  versions: MINERALS_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],

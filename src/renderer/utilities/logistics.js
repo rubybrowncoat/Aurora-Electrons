@@ -464,14 +464,14 @@ export const compact = (value) => {
 }
 
 // The rule registry for the Logistics page's figures, with the evidence in docs/plans/aurcalcs/build-2.md § Logistics.
-const LOGISTICS_VERSIONS = ['2.7.x']
+const LOGISTICS_VERSIONS = ['3.2.x']
 // The two harvester rules a played save of the line reproduces: its stored tank levels equal the rule's fuel over the gap between two saves (scripts/check-harvesters.js with --since).
 const HARVESTER_VERSIONS = ['3.2.x']
 const LEDGER = 'matches the game\'s own mineral ledger on every sample colony'
 
 registerRule({
   id: 'logistics.refineryOutput',
-  versions: LOGISTICS_VERSIONS,
+  versions: ['2.7.x'],
   units: 'L/yr',
   verification: 'confirmed',
   structure: ['FCT_Population.Refineries, FuelProduction, FuelProdStatus', 'the colony\'s production modifier'],
@@ -490,7 +490,7 @@ registerRule({
 
 registerRule({
   id: 'logistics.mspProduction',
-  versions: LOGISTICS_VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP/yr',
   verification: 'confirmed',
   structure: ['FCT_Population.MaintenanceFacilities, MSPProduction, MaintProdStatus', 'the colony\'s production modifier'],
@@ -546,7 +546,7 @@ registerRule({
 
 registerRule({
   id: 'logistics.maintenanceLocation',
-  versions: LOGISTICS_VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP/yr, t, years',
   verification: 'estimated',
   structure: ['FCT_Fleet.Xcor, Ycor, SystemID', 'FCT_ShipClass.Commercial, Size', 'FCT_Population maintenance columns', 'logistics.maintenancePool'],

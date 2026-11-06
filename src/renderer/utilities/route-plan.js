@@ -357,13 +357,13 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
 }
 
 // The rules of a planned route: its totals, the speed and time it is flown at, the stops' options and the figures drawn from them. The rules of one route's jumps and distance are in utilities/jump-graph.js.
-const PLAN_VERSIONS = ['2.7.x']
+const PLAN_VERSIONS = ['3.2.x']
 const SECONDS_PER_DAY = 86400
 const ROUTE_INPUTS = ['the explored jump points', 'their positions']
 
 registerRule({
   id: 'route.travelTime',
-  versions: PLAN_VERSIONS,
+  versions: ['x'],
   units: 'days',
   verification: 'estimated',
   structure: ['route.distanceKm', 'route.effectiveSpeed'],

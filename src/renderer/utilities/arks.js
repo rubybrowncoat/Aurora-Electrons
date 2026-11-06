@@ -4,7 +4,7 @@
 
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const COLONIST_CARGO = 1
 const COLONIST_MODULE = 17
 const STANDARD_BERTHS = 7
@@ -60,7 +60,7 @@ registerRule({
 
 registerRule({
   id: ORBIT,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: '',
   verification: 'estimated',
   structure: ['FCT_Fleet.AssignedPopulationID, Xcor, Ycor, SystemID, CivilianFunction, OrbitBodyID', 'FCT_MoveOrders.FleetID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor, Ycor'],
@@ -80,7 +80,7 @@ registerRule({
 
 registerRule({
   id: EMPTY,
-  versions: VERSIONS,
+  versions: ['x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the colonists aboard and standard berths rules'],
@@ -89,7 +89,7 @@ registerRule({
 
 registerRule({
   id: TOTALS,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the Ark ships\' own results'],
@@ -99,7 +99,7 @@ registerRule({
 
 registerRule({
   id: BODY_SPECIES,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: '',
   verification: 'estimated',
   structure: ['the colonists aboard, species and standard berths rules'],

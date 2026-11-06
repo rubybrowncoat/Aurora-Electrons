@@ -4,7 +4,7 @@ import { CATEGORIES, UNMODELLED } from './legacy-consumption'
 import { CRITICAL_RUNWAY_YEARS, WARNING_RUNWAY_YEARS, depositForecast, orbitalChainGap, orbitalMinerRate, stockProjection, surfaceRate } from './minerals'
 import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 // The two rates a played save of the line reproduces against the game's own mineral ledger (scripts/check-orbital-mining.js on the played saves).
 const LEDGER_VERSIONS = ['3.2.x']
 
@@ -37,7 +37,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.miningRate',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 't/yr',
   verification: 'confirmed',
   structure: ['the colonies\' and orbital miners\' rows of one deposit or mineral'],
@@ -56,7 +56,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.net',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['production and use of the same mineral'],
@@ -65,7 +65,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.runway',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 'years',
   verification: 'estimated',
   structure: ['the mineral\'s stock and cargo in transit', 'its yearly net'],
@@ -74,7 +74,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.runwayStatus',
-  versions: VERSIONS,
+  versions: ['x'],
   units: '',
   verification: 'assumed',
   structure: ['the mineral\'s runway, production and use'],
@@ -84,7 +84,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.depositForecast',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_MineralDeposit.Amount, Accessibility, HalfOriginalAmount, OriginalAcc', 'the deposit\'s mining rate'],
@@ -94,7 +94,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.stockProjection',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 't',
   verification: 'estimated',
   structure: ['the mineral\'s stock and cargo in transit', 'its deposits\' forecasts', 'its other production and its use'],
@@ -104,7 +104,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.queueDemand',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 't',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.Amount, ProdPerUnit, Percentage, Queue, <mineral>', 'each colony\'s production capacity (production.populationCapacity)'],

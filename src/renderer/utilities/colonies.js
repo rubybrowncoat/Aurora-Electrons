@@ -11,7 +11,7 @@ const MINIMUM_CAPACITY = 0.05
 const MONTHS_PER_YEAR = 12
 // Workers in millions: a balance this close to zero is balanced, not short.
 export const WORKER_TOLERANCE = 0.005
-const COLONY_VERSIONS = ['2.7.x']
+const COLONY_VERSIONS = ['3.2.x']
 // The growth rule alone: check-workforce-demand runs every colony of the fixture through it against the rate the 3.1 source gives.
 const GROWTH_VERSIONS = ['3.2.x']
 // The implied colony cost alone: check-breather-cost runs every colony with people of the fixture and of a played save through it against the planner's cost for the colony's species.
@@ -20,7 +20,7 @@ const TOTALS = 'colonies.totals'
 
 registerRule({
   id: 'colonies.capacity',
-  versions: COLONY_VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier'],
@@ -47,7 +47,7 @@ registerRule({
 
 registerRule({
   id: 'colonies.populationProjection',
-  versions: COLONY_VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_Population.Population', 'the growth rate and capacity rules', 'FCT_MoveOrders, FCT_ShipCargo (colonists on their way)', 'the infrastructure cap rule'],
@@ -65,7 +65,7 @@ registerRule({
 
 registerRule({
   id: 'colonies.infrastructureCap',
-  versions: COLONY_VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'confirmed',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.InfrastructureValue, LGInfrastructureValue', 'FCT_Population.ReqInf, Population', 'FCT_MoveOrders, FCT_ShipCargo (infrastructure on its way)'],
@@ -92,7 +92,7 @@ registerRule({
 
 registerRule({
   id: 'colonies.workers',
-  versions: COLONY_VERSIONS,
+  versions: ['2.7.x'],
   units: 'M workers',
   verification: 'confirmed',
   structure: ['FCT_Population.Population', 'FCT_PopulationInstallations, DIM_PlanetaryInstallation.Workers', 'FCT_Shipyard.Capacity, Slipways, SYType, ParentShipID', 'the colony cost rule'],
@@ -101,7 +101,7 @@ registerRule({
 
 registerRule({
   id: 'colonies.attention',
-  versions: COLONY_VERSIONS,
+  versions: ['x'],
   units: 'flag',
   verification: 'estimated',
   structure: ['the worker and population projection rules'],
@@ -110,7 +110,7 @@ registerRule({
 
 registerRule({
   id: TOTALS,
-  versions: COLONY_VERSIONS,
+  versions: ['x'],
   units: '',
   verification: 'estimated',
   structure: ['the colonies\' own results'],

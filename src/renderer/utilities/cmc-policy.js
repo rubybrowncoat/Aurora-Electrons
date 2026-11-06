@@ -4,7 +4,7 @@ import { massDriverRateResult, surfaceRate } from './minerals'
 import { gateMiningRows, surfaceMiningQuery } from './mining-data'
 import { combine, isAvailable, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
-const POLICY_VERSIONS = ['2.7.x']
+const POLICY_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'cmcPolicy.choice',
@@ -62,7 +62,7 @@ registerRule({
 
 registerRule({
   id: 'cmcPolicy.throughput',
-  versions: POLICY_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue, MiningProductionValue', 'FCT_MassDriverPackets.TotalSize, Speed'],
