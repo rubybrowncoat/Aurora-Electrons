@@ -226,7 +226,7 @@ check('factor', 'a captain of a ship of 20 hull spaces or less, the limit includ
 check('rate', 'a fleet\'s points a day count a light naval craft\'s captain in full and a larger ship\'s halved, each ship by its own size, a rate that rests on the full bonus says so while one that does not stays confirmed, a sensor ship whose class size is not stored gives no rate and names it, and a ship without a captain, a ship whose captain\'s Survey bonus is 1 even with a science officer, or a ship without a sensor of the kind needs no size', async (w) => {
   const { survey: s } = await w.modules()
   const scientist = { HasScienceOfficer: true, ScienceBonus: 1.3, ScienceDepartments: 1 }
-  const rate = (ships, speed = 100) => s.fleetSurveyRate(ships, 'geo', { speed, admin: 1, version: '2.7.1' })
+  const rate = (ships, speed = 100) => s.fleetSurveyRate(ships, 'geo', { speed, admin: 1, version: '3.2.0' })
   const light = rate([sensorShip(1, 10)])
   const limit = rate([sensorShip(1, 20)])
   const over = rate([sensorShip(1, 20.5)])
@@ -317,7 +317,7 @@ check('save', 'on the fixture the two survey ships of the class Intrepid rate by
     rows.forEach((row) => {
       const expected = oracle.find((one) => one.ShipID === row.ShipID)
       const factor = s.officerFactor(row)
-      const rate = s.fleetSurveyRate([row], 'geo', { speed: SURVEY_SPEED, admin: 1, version: '2.7.1' })
+      const rate = s.fleetSurveyRate([row], 'geo', { speed: SURVEY_SPEED, admin: 1, version: '3.2.0' })
 
       assert.ok(near(row.ClassSize, size), `${label}: the loader's class size ${row.ClassSize} is the stored ${size}`)
       assert.ok(near(factor, oracleFactor(expected)), `${label}: ship ${row.ShipID}'s officer factor ${factor}, worked out ${oracleFactor(expected)}`)
