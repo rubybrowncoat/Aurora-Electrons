@@ -465,6 +465,8 @@ export const compact = (value) => {
 
 // The rule registry for the Logistics page's figures, with the evidence in docs/plans/aurcalcs/build-2.md § Logistics.
 const LOGISTICS_VERSIONS = ['2.7.x']
+// The two harvester rules a played save of the line reproduces: its stored tank levels equal the rule's fuel over the gap between two saves (scripts/check-harvesters.js with --since).
+const HARVESTER_VERSIONS = ['3.2.x']
 const LEDGER = 'matches the game\'s own mineral ledger on every sample colony'
 
 registerRule({
@@ -564,19 +566,19 @@ registerRule({
 
 registerRule({
   id: 'logistics.harvesterOutput',
-  versions: LOGISTICS_VERSIONS,
+  versions: HARVESTER_VERSIONS,
   units: 'L/yr per ship',
   verification: 'confirmed',
   structure: ['FCT_ClassComponent and FCT_DamagedComponent (the undamaged harvester modules)', 'FCT_Race.FuelProduction', 'FCT_Ship.CurrentCrew, FCT_ShipClass.Crew', 'FCT_CommanderBonuses (Mining) and the naval admin chain', 'FCT_MineralDeposit.Accessibility of the body at the fleet\'s coordinates'],
-  note: 'Undamaged modules times the racial Fuel Production rate (not the component\'s own value) times the commander\'s and naval admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard when it is short; a fleet with no command takes the race\'s root naval admin command. This is the game\'s rule: its stored inputs (racial rate, class modules, accessibility, tank levels) were reconciled on two saves, but no clean fuel increment between saves has been observed, so the rate itself rests on the rule and those inputs.',
+  note: 'Undamaged modules times the racial Fuel Production rate (not the component\'s own value) times the commander\'s and naval admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard when it is short; a fleet with no command takes the race\'s root naval admin command. This is the game\'s rule: its stored inputs (racial rate, class modules, accessibility, tank levels) were reconciled on every played save, and over the construction cycles between two played saves it gave the stored fuel of the three ships that ended below their capacity with no transfer exactly. A pair in which every ship ended at its capacity or lost fuel by a transfer bounds the rate and does not observe it.',
 })
 
 registerRule({
   id: 'logistics.harvesterObtainable',
-  versions: LOGISTICS_VERSIONS,
+  versions: HARVESTER_VERSIONS,
   units: 'L',
   verification: 'confirmed',
   structure: ['logistics.harvesterOutput', 'FCT_Ship.Fuel and the undamaged FuelStorage components (FCT_ClassComponent, FCT_DamagedComponent)', 'FCT_MineralDeposit.Amount'],
-  note: 'The unconstrained rate times the horizon, held first to the tonnes of Sorium the deposit has (2,000 L each) and then to the free room in the undamaged tanks; a ship with any room is filled and one with none gives nothing. The game\'s order. The tank cap was observed on a save pair (35 of 36 ships ended at capacity); the rate was not, and the deposit\'s decline per cycle is not modelled.',
+  note: 'The unconstrained rate times the horizon, held first to the tonnes of Sorium the deposit has (2,000 L each) and then to the free room in the undamaged tanks; a ship with any room is filled and one with none gives nothing. The game\'s order. The tank cap was observed on a save pair (35 of 36 ships ended at capacity); the rate is the one observed on a pair of played saves, and the deposit\'s decline per cycle is not modelled.',
   assumptions: ['The deposit\'s accessibility holds over the horizon: it falls once less than half of the original amount is left, and that is not applied', 'Ships over one deposit take it in turn, so a body\'s total is held to the deposit and each ship\'s own figure is taken against all of it', 'The ship stays where it is, with its modules, crew and commanders, over the horizon'],
 })

@@ -512,6 +512,7 @@ const workedCases = async (app) => {
   add('page: unknown module count: the rate and the step are unknown', `${page({ Harvesters: null }).basis.perYear} ${page({ Harvesters: null }).taken.litres}`, 'null null')
   add('page: a result is confirmed for a version the rule is registered for and estimated for none', `${page({}).basis.rate.status} ${page({}, 1, null).basis.rate.status} ${page({}).taken.result.status} ${page({}, 1, null).taken.result.status}`, 'confirmed estimated confirmed estimated')
   add('page: the version the capability loader states for a save of the line gives the status the registry gives it', `${page({}, 1, app.STATED_FORMULA_VERSION).basis.rate.status} ${page({}, 1, app.STATED_FORMULA_VERSION).taken.result.status}`, `${statusFor(app, 'logistics.harvesterOutput', app.STATED_FORMULA_VERSION)} ${statusFor(app, 'logistics.harvesterObtainable', app.STATED_FORMULA_VERSION)}`)
+  add('rules: both harvester rules are registered for the version the capability loader states for a save of the line', ['logistics.harvesterOutput', 'logistics.harvesterObtainable'].map((id) => app.registry.getRule(id).versions.join()).join(' '), `${app.STATED_FORMULA_VERSION} ${app.STATED_FORMULA_VERSION}`)
   add('page: a fleet with no command takes the root command: 1.01', app.harvesterAdminBonus(root, { SystemID: 5, NavalAdminCommandID: 0 }), 1.01, 'decimal')
   add('page: a fleet out of the root command\'s range: 1', app.harvesterAdminBonus(root, { SystemID: 6, NavalAdminCommandID: 0 }), 1)
 

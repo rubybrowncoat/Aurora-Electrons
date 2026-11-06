@@ -6,9 +6,7 @@ import { missingBodyInputs, surfaceTemperature } from './habitability'
 import { navalAdminChain } from './minerals'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
-// The fleet term and the figures it feeds, checked on the saves of the supported line.
-const TERM_VERSIONS = ['3.2.x']
+const VERSIONS = ['3.2.x']
 const TERRAFORMER_COMPONENT_TYPE = 33
 const TERRAFORMING_BONUS = 9
 const NONE = new Set()
@@ -37,7 +35,7 @@ registerRule({
 // `Population.method_211` (Population.cs:9928-9948) sums the terraformer modules of the fleets of the colony's race within one unit of the colony's body on both axes (`Game.AreCoordinatesWithinOneUnit`, Game.cs:37170) that are assigned to the colony or to none, and the game gives an unassigned fleet to the first colony that asks; the same rule the ordnance term and the civilian mining complex exclusion read.
 registerRule({
   id: 'terraform.orbitalOutput',
-  versions: TERM_VERSIONS,
+  versions: VERSIONS,
   units: 'atm/yr (Earth-equivalent, before the game speed)',
   verification: 'estimated',
   structure: ['FCT_Race.TerraformingRate', 'FCT_Fleet.RaceID, AssignedPopulationID, OrbitBodyID, Xcor, Ycor, ParentCommandID', 'FCT_Population.RaceID, SystemBodyID', 'FCT_SystemBody.Xcor, Ycor', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent.Number', 'FCT_Commander, FCT_CommanderBonuses (Terraforming)', 'FCT_NavalAdminCommand'],
@@ -47,7 +45,7 @@ registerRule({
 
 registerRule({
   id: 'terraform.capacity',
-  versions: TERM_VERSIONS,
+  versions: VERSIONS,
   units: 'atm/yr (Earth-equivalent)',
   verification: 'estimated',
   structure: ['terraform.installationOutput', 'terraform.orbitalOutput', 'FCT_Game.TerraformingSpeed'],
@@ -56,7 +54,7 @@ registerRule({
 
 registerRule({
   id: 'production.terraformRate',
-  versions: TERM_VERSIONS,
+  versions: VERSIONS,
   units: 'atm/yr',
   verification: 'estimated',
   structure: ['terraform.capacity', 'FCT_SystemBody.Radius', 'crew.terraforming'],

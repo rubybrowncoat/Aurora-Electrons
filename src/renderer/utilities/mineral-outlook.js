@@ -5,6 +5,8 @@ import { CRITICAL_RUNWAY_YEARS, WARNING_RUNWAY_YEARS, depositForecast, orbitalCh
 import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
 const VERSIONS = ['2.7.x']
+// The two rates a played save of the line reproduces against the game's own mineral ledger (scripts/check-orbital-mining.js on the played saves).
+const LEDGER_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'mineral.stock',
@@ -17,7 +19,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.surfaceRate',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 't/yr',
   verification: 'confirmed',
   structure: ['DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_PopulationInstallations.Amount', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PopPoliticalStatus.ProductionMod', 'FCT_Commander, FCT_CommanderBonuses'],
@@ -26,7 +28,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.orbitalRate',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_ShipClass.MiningModules, Crew', 'FCT_Ship.CurrentCrew', 'FCT_Race.MineProduction, MaximumOrbitalMiningDiameter', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.Radius', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_NavalAdminCommand'],

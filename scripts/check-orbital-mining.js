@@ -143,6 +143,7 @@ const worked = (app) => {
   check('SYNTHETIC an admin chain the save does not settle is unknown (null), never 1', value(syntheticRow(), syntheticAdmins({ Unknown: 'ranks not in the save', Eligible: null })) === null)
   check('SYNTHETIC a commander bonus that is not a number is unknown, never 1', value(syntheticRow({ CommanderBonus: null })) === null)
   check('SYNTHETIC a ship with no recorded crew is unknown, never full', value(syntheticRow({ CurrentCrew: null })) === null)
+  check('the orbital and the colony mine rates are registered for the line of the played saves', ['mineral.orbitalRate', 'mineral.surfaceRate'].every((id) => provenance.getRule(id).versions.join() === '3.2.x'), ['mineral.orbitalRate', 'mineral.surfaceRate'].map((id) => `${id} ${provenance.getRule(id).versions.join()}`).join(', '))
 
   const first = outlook.orbitalRateResult(syntheticRow(), syntheticAdmins())
   const second = outlook.orbitalRateResult(syntheticRow({ MiningModules: 1, CommanderBonus: 1.5 }), syntheticAdmins())

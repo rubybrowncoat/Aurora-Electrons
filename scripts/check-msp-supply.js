@@ -1202,7 +1202,10 @@ const COMPOSED = MUTATIONS.map((mutation, index) => ({ id: `composed:${index}`, 
 
 // Edits that must change nothing the checks look at: the summary and the header reworded, whitespace before an equals sign and a reordered list of attributes on the page's mount and on a marked cell, the columns in another order, another default horizon and the bound values written another way. Each is located by its structure (the attribute, the key or the state it belongs to and its whole value, with any spacing around `=` and either quote), never by what it holds now, so it still applies after the others.
 const QUOTED = '"[^"]*"|\'[^\']*\''
-const attribute = (name) => new RegExp(`(?<=\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*(${QUOTED})`)
+const escaped = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const attribute = (name) => new RegExp(`(?<=\\s)${escaped(name)}\\s*=\\s*(${QUOTED})`)
+// The attribute of one tag: the page binds `:rows` on the panel's mount and on the summary's, so a name alone finds two.
+const attributeOf = (tag, name) => new RegExp(`(?<=<${tag}\\b[^>]*?\\s)${escaped(name)}\\s*=\\s*(${QUOTED})`)
 const valueOf = (quoted) => quoted.slice(1, -1)
 const quote = (text) => (text.includes('"') ? `'${text}'` : `"${text}"`)
 
@@ -1216,10 +1219,10 @@ const BENIGN = [
   { name: 'the summary shortened to one sentence', file: V, at: attribute('data-summary'), to: () => 'data-summary="Compare the maintenance supplies of each colony with and without incoming minerals."' },
   { name: 'the header of the panel reworded', file: V, at: /(<div class="panel-head">\s*<span[^>]*>)[^<]*/, to: (m) => `${m[1]}Incoming minerals and maintenance` },
   { name: 'the foot of the panel reworded', file: V, at: /(<div class="panel-foot[^"]*">)[^<]*/, to: (m) => `${m[1]}\n        The figures are an estimate from the saved game.\n      ` },
-  { name: 'whitespace around the equals sign of a bound property on the mount', file: P, at: attribute(':rows'), to: (m) => `:rows  =  ${m[1]}` },
+  { name: 'whitespace around the equals sign of a bound property on the mount', file: P, at: attributeOf('msp-supply', ':rows'), to: (m) => `:rows  =  ${m[1]}` },
   { name: 'the attributes of the mount reordered', file: P, at: /(<msp-supply)([^>]*?)(\s*\/>)/, to: (m) => `${m[1]} ${reversed(m[2])}${m[3]}` },
-  { name: 'the rows given to the panel in parentheses', file: P, at: attribute(':rows'), to: (m) => `:rows=${quote(`(${valueOf(m[1])})`)}` },
-  { name: 'the horizon given to the panel as a negated negation', file: P, at: attribute(':years'), to: (m) => `:years=${quote(`+${valueOf(m[1])}`)}` },
+  { name: 'the rows given to the panel in parentheses', file: P, at: attributeOf('msp-supply', ':rows'), to: (m) => `:rows=${quote(`(${valueOf(m[1])})`)}` },
+  { name: 'the horizon given to the panel as a negated negation', file: P, at: attributeOf('msp-supply', ':years'), to: (m) => `:years=${quote(`+${valueOf(m[1])}`)}` },
   { name: 'whitespace in the mark of a figure cell', file: V, at: new RegExp(`(${SLOT('stockOnlyValue')}[\\s\\S]*?)<provenance-mark\\s+:result\\s*=\\s*(${QUOTED})\\s*/>`), to: (m) => `${m[1]}<provenance-mark  :result = ${m[2]}  />` },
   { name: 'the attributes of a figure cell reordered', file: V, at: new RegExp(`(${SLOT('highValue')}\\s*<span)([^>]*)>`), to: (m) => `${m[1]} ${reversed(m[2])}>` },
   { name: 'the columns of the table in the opposite order', file: V, at: /(headers\(\) \{\s*return \[\n)([\s\S]*?)(\n\s*\]\n\s*\})/, to: (m) => `${m[1]}${m[2].split('\n').reverse().join('\n')}${m[3]}` },

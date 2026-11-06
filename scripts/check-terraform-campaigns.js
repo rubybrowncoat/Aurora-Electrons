@@ -355,6 +355,7 @@ const BREAKDOWN_CHECKS = {
       near(breakdown.capacity.value, expected.capacity, 1e-12, 'capacity')
       near(breakdown.rate.value, expected.rate, 1e-12, 'rate')
       assert.deepEqual([breakdown.installations, breakdown.orbital, breakdown.capacity, breakdown.rate].map((result) => result.rule.id), ['terraform.installationOutput', 'terraform.orbitalOutput', 'terraform.capacity', 'production.terraformRate'])
+      assert.deepEqual([breakdown.installations, breakdown.orbital, breakdown.capacity, breakdown.rate].map((result) => result.rule.versions), [['3.2.x'], ['3.2.x'], ['3.2.x'], ['3.2.x']], 'the four rules hold for the line of the played saves')
       assert.ok(breakdown.lines.some((line) => line.key === 'admin0' && Math.abs(line.value - 1.01) < 1e-12))
     },
   },
@@ -815,6 +816,7 @@ const BREAKDOWN_FAULTS = [
   { label: 'the fleet position test dropped', from: 'if (placed ? fleetCountsForColony(fleet, colony) : fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {', to: 'if (fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {', fails: ['planted: an assigned fleet away from its colony counts nothing'] },
   { label: 'an unassigned fleet at the colony ignored', from: 'if (placed ? fleetCountsForColony(fleet, colony) : fleet.RaceID === colony.RaceID && fleetClaimable(fleet, colony)) {', to: 'if (fleet.AssignedPopulationID === colony.PopulationID && fleetPlaced(fleet, colony) && fleetCountsForColony(fleet, colony)) {', fails: ['planted: an unassigned fleet at the colony is counted'] },
   { label: 'an ambiguous fleet resolved silently', from: 'contested: reach.length > 1', to: 'contested: false', fails: ['planted: a fleet the game may give to two colonies leaves the term unavailable'] },
+  { label: 'the rules labelled for the earlier line', from: "const VERSIONS = ['3.2.x']", to: "const VERSIONS = ['2.7.x']", fails: ['arith'] },
   { label: 'installation sum not rounded down', from: 'raceRate * Math.trunc(source.installations) * modifier.value', to: 'raceRate * source.installations * modifier.value', fails: ['arith'] },
   { label: 'Math.PI for the body area', from: 'export const SURFACE_PI = 3.1416', to: 'export const SURFACE_PI = Math.PI', fails: ['arith'] },
   { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith'] },
