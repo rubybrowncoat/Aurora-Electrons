@@ -1096,8 +1096,8 @@ const actualRepository = async (api) => {
   const route = api.adapters.catalogSuite(fs.readFileSync(path.join(root, suite), 'utf8'), suite, root, files)
   assert.ok(route.variants.some((entry) => entry.key === 'benign:all'))
   const anchors = route.variants.filter((entry) => entry.anchors.some((anchor) => anchor.file === 'src/renderer/pages/hauling.vue'))
-  assert.equal(anchors.filter((entry) => entry.key.startsWith('fault:')).length, 55)
-  assert.equal(anchors.filter((entry) => entry.key.startsWith('composed:')).length, 140)
+  assert.equal(anchors.filter((entry) => entry.key.startsWith('fault:')).length, 58)
+  assert.equal(anchors.filter((entry) => entry.key.startsWith('composed:')).length, 173)
   return route
 }
 const rawControls = async (api) => {

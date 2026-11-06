@@ -271,7 +271,7 @@ import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
 import { cachedPropagation } from '../utilities/orbit-propagation'
-import { ADAPTERS, CONDITIONS, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
+import { ADAPTERS, CONDITIONS, ORBIT_FAMILIES, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
 import { fleetTimingOf, flightOnly, loadSystemDust } from '../utilities/route-time'
 import { auditOf, colonyChoices, desiresOf } from '../utilities/route-audit'
 import { loadRouteQueues } from '../utilities/route-queues'
@@ -303,8 +303,6 @@ const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.i
 const MOVE_TO_LOCATION = 2
 const ROUTE_PAGE_SIZES = [15, 30, -1]
 const SUMMARY_PAGE_SIZES = [10, 25, -1]
-// The families whose orbits are read for the page (`loadOrbitFacts`): a place of any other family keeps the position the save stores.
-const ORBIT_FAMILIES = ['body', 'colony', 'lagrange-point']
 
 // A colony's place as a route search takes it.
 const colonyPlace = (colony) => ({ SystemID: colony.SystemID, Xcor: colony.Xcor, Ycor: colony.Ycor })
@@ -826,7 +824,7 @@ export default {
         const from = orderExitEndpoint(orders[(index + orders.length - 1) % orders.length])
         const to = orderEndpoint(order)
 
-        return { steps: [{ kind: 'fly', SystemID: order.SystemID, from, to, via: null }], from, to, leave: orderExitEndpoint(order), delay: order.OrderDelay || 0, wait: handling.stops[index].seconds }
+        return { steps: [{ kind: 'fly', SystemID: order.SystemID, from, to, via: null }], from, to, leave: orderExitEndpoint(order), action: order.MoveActionID, delay: order.OrderDelay || 0, wait: handling.stops[index].seconds }
       })
       const cycle = [...hops.slice(1), hops[0]]
 
@@ -835,7 +833,7 @@ export default {
       }
 
       const timed = !flightOnly(walk, sailing.Speed)
-      const scenario = JSON.stringify([...cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.delay, hop.wait]), timed])
+      const scenario = JSON.stringify([...cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.action, hop.delay, hop.wait]), timed])
 
       return cachedPropagation(this.database, 'hauling-route', { facts: positionRead, profile: sailing.Speed, scenario }, () => simulateCycles({ hops: cycle, facts: positionRead, adapters: ADAPTERS, speed: sailing.Speed, timed }))
     },

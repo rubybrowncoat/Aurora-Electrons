@@ -6,7 +6,7 @@
 //
 // Whether a link still holds is worked out on every read against the objects of the open save and is never stored. An ID can be given again (a fleet deleted and a new one made, a waypoint cleared, a colony removed), so an object is the one the note named only where the save proves it (a fleet's creation entry, a body's system discovery time: `held` by evidence) or where the player confirmed that very object, by its fingerprint, name and, for a fleet, the overlap of its ship classes (`held` by confirmation; a waypoint and a colony are held this way only, the creation time of a waypoint being set again whenever the game refreshes it). An object that is there under the ID but is not shown to be the one named (its fingerprint differs, or the save stores nothing that tells) needs review: nothing is compared with it, the note attaches to no fleet until the player confirms it, and the link is never moved to another object by its name or its place. An object that is not there is gone: a deleted fleet leaves its note archived, a deleted station or base leaves the note stale, both readable with the name and system they last had.
 //
-// Where a fleet is against its station: a fleet that is in the orbit of the station's body (or of the body a waypoint is tied to) is on station by that identity, whatever coordinates the body had when the note was made. Otherwise the stored position is compared with the station's own within the distance below which the game takes two points for one; a body that is only matched by position is not followed by the fleet when it moves.
+// Where a fleet is against its station: a fleet that is in the orbit of the station's body (or of the body a waypoint is tied to), or that rides the Lagrange point a waypoint is tied to, is on station by that identity, whatever coordinates the body or the point had when the note was made. Otherwise the stored position is compared with the station's own within the distance below which the game takes two points for one; a body or a point that is only matched by position is not followed by the fleet when it moves.
 //
 // Storage and the rules of a stale edit are the repository's. This module takes the repository and the database as arguments, so a check runs it on in-memory stores.
 
@@ -40,14 +40,14 @@ export const ROLE_TYPES = Object.freeze({
 
 export const VERDICTS = Object.freeze({ HELD: 'held', REVIEW: 'review', GONE: 'gone', UNREAD: 'unread' })
 
-const STATION_VERSIONS = ['2.7.x']
+const STATION_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'fleetStation.onStation',
   versions: STATION_VERSIONS,
   verification: 'estimated',
-  structure: ['FCT_Fleet.OrbitBodyID, AssignedPopulationID, SystemID, Xcor, Ycor', 'FCT_SystemBody.SystemBodyID, Xcor, Ycor', 'FCT_Waypoint.OrbitBodyID, SystemID, Xcor, Ycor', 'FCT_Population.SystemBodyID'],
-  note: 'A fleet is on station when it is in the orbit of the station\'s body (or of the body a waypoint is tied to): the game puts a fleet that arrives at a body with no minimum distance into that body\'s orbit and moves it with the body, so the orbit is the identity and the coordinates follow. A fleet not in that orbit is on station only if its stored position is within a kilometre of the station\'s, the distance below which the game takes two points for one, and a body matched by position alone is not followed when it moves. The comparison is made only against the object the note named, never one that has taken its ID.',
+  structure: ['FCT_Fleet.OrbitBodyID, OrbitLagrangeID, AssignedPopulationID, SystemID, Xcor, Ycor', 'FCT_LagrangePoint.LagrangePointID, GameID, SystemID, Xcor, Ycor', 'FCT_SystemBody.SystemBodyID, Xcor, Ycor', 'FCT_Waypoint.OrbitBodyID, OrbitLagrangeID, SystemID, Xcor, Ycor', 'FCT_Population.SystemBodyID'],
+  note: 'A fleet is on station when it is in the orbit of the station\'s body (or of the body a waypoint is tied to): the game puts a fleet that arrives at a body with no minimum distance into that body\'s orbit and moves it with the body, so the orbit is the identity and the coordinates follow. A waypoint tied to a Lagrange point is carried by the point at every call of the position update, and a fleet at the point\'s position that references the same point is carried with it, so that is the identity of a station at a point: the fleet and the waypoint ride the one point. A fleet not in that orbit or on that point is on station only if its stored position is within a kilometre of the station\'s, the distance below which the game takes two points for one, and a body or a point matched by position alone is not followed when it moves. The comparison is made only against the object the note named, never one that has taken its ID.',
   assumptions: ['the stored coordinates are kilometres', 'a fleet that is moving is compared at its stored position'],
 })
 
@@ -95,9 +95,9 @@ const classesOf = (text, ships) => {
 
 // ---- The objects a note is about -------------------------------------------------------------------------------------
 
-const FLEET_SQL = "select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_Fleet.AssignedPopulationID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, Founded.CreatedTime, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, (select group_concat(distinct FCT_Ship.ShipClassID) from FCT_Ship where FCT_Ship.FleetID = FCT_Fleet.FleetID and FCT_Ship.GameID = FCT_Fleet.GameID) as Classes, (select count(*) from FCT_Ship where FCT_Ship.FleetID = FCT_Fleet.FleetID and FCT_Ship.GameID = FCT_Fleet.GameID) as Ships from FCT_Fleet left join (select FCT_FleetHistory.FleetID, min(FCT_FleetHistory.GameTime) as CreatedTime from FCT_FleetHistory where FCT_FleetHistory.GameID = :GameID and FCT_FleetHistory.Description like 'Created on%' group by FCT_FleetHistory.FleetID) Founded on Founded.FleetID = FCT_Fleet.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBody.GameID = FCT_Fleet.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID and FCT_SystemBodyName.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = :GameID and FCT_Fleet.RaceID = :RaceID order by FCT_Fleet.FleetID"
+const FLEET_SQL = "select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_Fleet.OrbitLagrangeID, FCT_LagrangePoint.SystemID as PointSystemID, FCT_LagrangePoint.Xcor as PointXcor, FCT_LagrangePoint.Ycor as PointYcor, FCT_Fleet.AssignedPopulationID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, Founded.CreatedTime, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, (select group_concat(distinct FCT_Ship.ShipClassID) from FCT_Ship where FCT_Ship.FleetID = FCT_Fleet.FleetID and FCT_Ship.GameID = FCT_Fleet.GameID) as Classes, (select count(*) from FCT_Ship where FCT_Ship.FleetID = FCT_Fleet.FleetID and FCT_Ship.GameID = FCT_Fleet.GameID) as Ships from FCT_Fleet left join FCT_LagrangePoint on FCT_LagrangePoint.LagrangePointID = FCT_Fleet.OrbitLagrangeID and FCT_LagrangePoint.GameID = FCT_Fleet.GameID and FCT_LagrangePoint.SystemID = FCT_Fleet.SystemID left join (select FCT_FleetHistory.FleetID, min(FCT_FleetHistory.GameTime) as CreatedTime from FCT_FleetHistory where FCT_FleetHistory.GameID = :GameID and FCT_FleetHistory.Description like 'Created on%' group by FCT_FleetHistory.FleetID) Founded on Founded.FleetID = FCT_Fleet.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBody.GameID = FCT_Fleet.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID and FCT_SystemBodyName.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = :GameID and FCT_Fleet.RaceID = :RaceID order by FCT_Fleet.FleetID"
 
-const WAYPOINT_SQL = `select FCT_Waypoint.WaypointID, FCT_Waypoint.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Waypoint.OrbitBodyID, FCT_Waypoint.CreationTime, FCT_Waypoint.Xcor, FCT_Waypoint.Ycor, FCT_Waypoint.Number, FCT_Waypoint.WaypointType, FCT_Waypoint.Name from FCT_Waypoint left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Waypoint.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Waypoint.RaceID and FCT_RaceSysSurvey.GameID = FCT_Waypoint.GameID where FCT_Waypoint.GameID = :GameID and FCT_Waypoint.RaceID = :RaceID and FCT_Waypoint.WaypointType != ${MARKED_FOR_DELETION} order by FCT_Waypoint.Number`
+const WAYPOINT_SQL = `select FCT_Waypoint.WaypointID, FCT_Waypoint.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Waypoint.OrbitBodyID, FCT_Waypoint.OrbitLagrangeID, FCT_Waypoint.CreationTime, FCT_Waypoint.Xcor, FCT_Waypoint.Ycor, FCT_Waypoint.Number, FCT_Waypoint.WaypointType, FCT_Waypoint.Name from FCT_Waypoint left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Waypoint.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Waypoint.RaceID and FCT_RaceSysSurvey.GameID = FCT_Waypoint.GameID where FCT_Waypoint.GameID = :GameID and FCT_Waypoint.RaceID = :RaceID and FCT_Waypoint.WaypointType != ${MARKED_FOR_DELETION} order by FCT_Waypoint.Number`
 
 const BODY_CLASSES = '1, 2, 3, 5'
 
@@ -123,6 +123,8 @@ export const STATION_TARGETS = Object.freeze({
     row: (source) => ({
       ...NOTE_TARGETS.fleet.row(source),
       orbitBodyId: numberOrNull(source.OrbitBodyID),
+      orbitLagrangeId: numberOrNull(source.OrbitLagrangeID),
+      pointPosition: { systemId: numberOrNull(source.PointSystemID), x: numberOrNull(source.PointXcor), y: numberOrNull(source.PointYcor) },
       orbitName: source.OrbitBodyID > 0 && source.BodyClass !== null && source.BodyClass !== undefined ? systemBodyName({ SystemBodyName: source.SystemBodyName, BodyClass: source.BodyClass, PlanetNumber: source.PlanetNumber, OrbitNumber: source.OrbitNumber, ComponentNumber: source.ComponentNumber, SystemBodyID: source.OrbitBodyID }, { Name: source.SystemName }) : '',
       assignedPopulationId: numberOrNull(source.AssignedPopulationID),
       x: numberOrNull(source.Xcor),
@@ -153,6 +155,7 @@ export const STATION_TARGETS = Object.freeze({
       number: numberOrNull(source.Number),
       created: numberOrNull(source.CreationTime),
       orbitBodyId: numberOrNull(source.OrbitBodyID),
+      orbitLagrangeId: numberOrNull(source.OrbitLagrangeID),
       x: numberOrNull(source.Xcor),
       y: numberOrNull(source.Ycor),
     }),
@@ -247,7 +250,7 @@ export const stationChoices = (objects, type, { systemId = null } = {}) => noteC
 
 const PAYLOAD_KEYS = ['fleet', 'station', 'base', 'note']
 
-const anchorOk = (anchor) => isObject(anchor) && ((anchor.body !== undefined && Object.keys(anchor).length === 1 && Number.isInteger(anchor.body) && anchor.body > 0) || (Object.keys(anchor).length === 2 && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)))
+const anchorOk = (anchor) => isObject(anchor) && ((anchor.body !== undefined && Object.keys(anchor).length === 1 && Number.isInteger(anchor.body) && anchor.body > 0) || (anchor.point !== undefined && Object.keys(anchor).length === 1 && Number.isInteger(anchor.point) && anchor.point > 0) || (Object.keys(anchor).length === 2 && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)))
 
 const confirmedOk = (confirmed) => isObject(confirmed) && typeof confirmed.fingerprint === 'string' && typeof confirmed.name === 'string' && (confirmed.classes === null || (Array.isArray(confirmed.classes) && confirmed.classes.every(Number.isInteger))) && typeof confirmed.gameTime === 'number' && Number.isFinite(confirmed.gameTime) && (confirmed.anchor === undefined || confirmed.anchor === null || anchorOk(confirmed.anchor))
 
@@ -336,7 +339,7 @@ export const registerFleetStations = (register) => {
 
 const overlaps = (kept, now) => Array.isArray(kept) && Array.isArray(now) && ((kept.length === 0 && now.length === 0) || kept.some((id) => now.includes(id)))
 
-// What the save holds of a waypoint that the game does not change when the waypoint is only refreshed: the body it is tied to (the coordinates then follow the body, so they are no evidence), or, for a point tied to none, its fixed position. Null when the row does not say which of the two it is: a null tie, or a point without coordinates.
+// What the save holds of a waypoint that the game does not change when the waypoint is only refreshed: the body it is tied to or the Lagrange point it is tied to (the coordinates then follow the body or the point, so they are no evidence), or, for a point tied to neither, its fixed position. Null when the row does not say which of the three it is: a null tie, or a point without coordinates.
 const waypointAnchorOf = (row) => {
   if (typeof row.orbitBodyId !== 'number' || !Number.isFinite(row.orbitBodyId)) {
     return null
@@ -346,16 +349,24 @@ const waypointAnchorOf = (row) => {
     return { body: row.orbitBodyId }
   }
 
+  if (row.orbitLagrangeId > 0) {
+    return { point: row.orbitLagrangeId }
+  }
+
   return finite(row.x, row.y) ? { x: row.x, y: row.y } : null
 }
 
-// Whether the waypoint now under the ID sits where the confirmed one did: the same body, or a fixed point within the game's one unit of the same spot (the distance under which the game takes a waypoint asked for as the one already there). Anything not known on either side is not shown to be the same.
+// Whether the waypoint now under the ID sits where the confirmed one did: the same body or the same Lagrange point, or a fixed point within the game's one unit of the same spot (the distance under which the game takes a waypoint asked for as the one already there). Anything not known on either side is not shown to be the same.
 const sameAnchor = (kept, now) => {
   if (!anchorOk(kept) || !anchorOk(now)) {
     return false
   }
 
-  return kept.body !== undefined ? now.body === kept.body : now.body === undefined && Math.abs(now.x - kept.x) < WAYPOINT_SAME_SPOT && Math.abs(now.y - kept.y) < WAYPOINT_SAME_SPOT
+  if (kept.body !== undefined) {
+    return now.body === kept.body
+  }
+
+  return kept.point !== undefined ? now.point === kept.point : now.body === undefined && now.point === undefined && Math.abs(now.x - kept.x) < WAYPOINT_SAME_SPOT && Math.abs(now.y - kept.y) < WAYPOINT_SAME_SPOT
 }
 
 // The object as it is described when the player confirms or picks it: what is checked against the object under the ID later.
@@ -428,42 +439,56 @@ const anchorOf = (station) => {
   return typeof id === 'number' && id > 0 ? id : null
 }
 
-// The fleet (a row of `loadStationObjects`) against the station (a row of a body or a waypoint), both known to be the objects the note named. `{ role: 'station', state: 'on' | 'off' | 'unknown', basis: 'orbit' | 'position' | null, movement, where, distance, reason, result }`: `movement` is what becomes of the fleet when the station moves, said only for a fleet on station: 'follows' (in the station's orbit), 'left-behind' (at the body by position alone, in no orbit of it), 'fixed' (the station is a point tied to no body) and 'unknown' where the fleet's orbit or the body a waypoint is tied to is not recorded, so neither the following nor the fixed point is known; `where` what the fleet is doing when it is off station, `distance` the result of the distance in km when both positions are known in one system.
+// The Lagrange point a waypoint is tied to (`OrbitLagrangeID`), null for a station that is no waypoint or is tied to none; a waypoint tied to a body is tied to no point, the game tying it to one or the other.
+const pointOf = (station) => (station.type === 'waypoint' && !(station.orbitBodyId > 0) && typeof station.orbitLagrangeId === 'number' && station.orbitLagrangeId > 0 ? station.orbitLagrangeId : null)
+
+// What the fleet is doing when it is off its station or its base: in another body's orbit, riding a Lagrange point, or in open space.
+const whereOf = (fleet) => (fleet.orbitBodyId !== null && fleet.orbitBodyId > 0 ? 'other-orbit' : fleet.orbitLagrangeId > 0 ? 'at-point' : 'open-space')
+
+// Present station status is independent of point following: a point-tied waypoint must be within the existing proximity threshold now. `following` is a separate true/false/null relationship, certified by exact fleet-to-point identity and coordinates, even when the waypoint is displaced. `onPoint` marks the certified point identity, not present station status; `movement` retains the on-station guidance. An unread point never certifies following.
 export const compareStation = (fleet, station) => {
   const anchor = anchorOf(station)
+  const point = pointOf(station)
   const anchorUnknown = station.type === 'waypoint' && station.orbitBodyId === null
   const sameSystem = finite(fleet.systemId, station.systemId) ? fleet.systemId === station.systemId : null
   const km = sameSystem ? kmBetween(fleet, station) : null
   const inputs = ['the fleet\'s orbit', 'the fleet\'s system', 'the station']
+  // What ties the fleet to the station when it moves: the Lagrange point for a station tied to one, the body's orbit otherwise. Not recorded when that column is null.
+  const pointPosition = fleet.pointPosition
+  const pointUnread = fleet.orbitLagrangeId === point && (!pointPosition || !finite(pointPosition.systemId, pointPosition.x, pointPosition.y))
+  const tieUnknown = point !== null ? !finite(fleet.orbitLagrangeId, fleet.x, fleet.y) || pointUnread : fleet.orbitBodyId === null
+  const following = point === null ? {} : { following: tieUnknown ? null : Boolean(fleet.orbitLagrangeId === point && sameSystem && !pointUnread && pointPosition.systemId === fleet.systemId && fleet.x === pointPosition.x && fleet.y === pointPosition.y) }
 
   if (anchor !== null && fleet.orbitBodyId === anchor) {
     return { role: 'station', state: 'on', basis: 'orbit', movement: 'follows', where: null, distance: distanceResult(km), reason: '', result: stateResult('on', inputs) }
   }
 
-  if (km !== null && km < ON_STATION_KM) {
-    const movement = anchorUnknown ? 'unknown' : anchor === null ? 'fixed' : fleet.orbitBodyId === null ? 'unknown' : 'left-behind'
+  // Only exact fleet-to-point coordinates select a source follower (Game.cs 27598-27604). The waypoint can be displaced from its point, and the movement proximity tolerance proves no follow relationship.
+  if (following.following === true && km !== null && km < ON_STATION_KM) {
+    return { ...following, role: 'station', state: 'on', basis: 'orbit', onPoint: true, movement: 'follows', where: null, distance: distanceResult(km), reason: '', result: stateResult('on', inputs) }
+  }
 
-    return { role: 'station', state: 'on', basis: 'position', movement, where: null, distance: distanceResult(km), reason: '', result: stateResult('on', [...inputs, 'the positions']) }
+  if (km !== null && km < ON_STATION_KM) {
+    const movement = anchorUnknown ? 'unknown' : anchor === null && point === null ? 'fixed' : tieUnknown ? 'unknown' : 'left-behind'
+
+    return { ...following, role: 'station', state: 'on', basis: 'position', movement, where: null, distance: distanceResult(km), reason: '', result: stateResult('on', [...inputs, 'the positions']) }
   }
 
   if (sameSystem === false) {
-    return { role: 'station', state: 'off', basis: null, movement: null, where: 'other-system', distance: null, reason: '', result: stateResult('off', inputs) }
+    return { ...following, role: 'station', state: 'off', basis: null, movement: null, where: 'other-system', distance: null, reason: '', result: stateResult('off', inputs) }
   }
 
   // Off station is said only when the evidence establishes it: the positions are both known and apart, and nothing unknown could still put the fleet in the station's orbit (the fleet's own orbit, or the body a waypoint is tied to).
-  const orbitUnknown = fleet.orbitBodyId === null
 
   if (km === null) {
-    return UNKNOWN('station', sameSystem === null ? 'The fleet\'s system or the station\'s is not known.' : 'The position of the fleet or of the station is not known, so the distance between them is not.', [sameSystem === null ? 'the fleet\'s system or the station\'s' : 'the fleet\'s position and the station\'s'])
+    return { ...UNKNOWN('station', sameSystem === null ? 'The fleet\'s system or the station\'s is not known.' : 'The position of the fleet or of the station is not known, so the distance between them is not.', [sameSystem === null ? 'the fleet\'s system or the station\'s' : 'the fleet\'s position and the station\'s']), ...following }
   }
 
-  if ((orbitUnknown && (anchor !== null || anchorUnknown)) || (anchorUnknown && fleet.orbitBodyId > 0)) {
-    return UNKNOWN('station', anchorUnknown ? 'The body the station is tied to is not known, so the fleet\'s orbit cannot be compared with it.' : 'The fleet\'s orbit is not known, so it cannot be compared with the station\'s.', [anchorUnknown ? 'the body the station is tied to' : 'the fleet\'s orbit'])
+  if ((tieUnknown && (anchor !== null || anchorUnknown)) || (anchorUnknown && fleet.orbitBodyId > 0)) {
+    return { ...UNKNOWN('station', anchorUnknown ? 'The body the station is tied to is not known, so the fleet\'s orbit cannot be compared with it.' : 'The fleet\'s orbit is not known, so it cannot be compared with the station\'s.', [anchorUnknown ? 'the body the station is tied to' : 'the fleet\'s orbit']), ...following }
   }
 
-  const where = fleet.orbitBodyId !== null && fleet.orbitBodyId > 0 ? 'other-orbit' : 'open-space'
-
-  return { role: 'station', state: 'off', basis: null, movement: null, where, distance: distanceResult(km), reason: '', result: stateResult('off', inputs) }
+  return { ...following, ...(following.following === true ? { onPoint: true } : {}), role: 'station', state: 'off', basis: null, movement: null, where: whereOf(fleet), distance: distanceResult(km), reason: '', result: stateResult('off', inputs) }
 }
 
 // The fleet against its base (a colony): at the base when it is in the orbit of the colony's body or assigned to the colony.
@@ -481,7 +506,7 @@ export const compareBase = (fleet, colony) => {
     return UNKNOWN('base', fleet.orbitBodyId === null || fleet.assignedPopulationId === null ? 'The fleet\'s orbit or its assigned colony is not known.' : 'The colony\'s body is not known.', [fleet.orbitBodyId === null || fleet.assignedPopulationId === null ? 'the fleet\'s orbit and assigned colony' : 'the colony\'s body'])
   }
 
-  return { role: 'base', state: 'off', basis: null, movement: null, where: fleet.orbitBodyId > 0 ? 'other-orbit' : 'open-space', distance: null, reason: '', result: stateResult('off', inputs) }
+  return { role: 'base', state: 'off', basis: null, movement: null, where: whereOf(fleet), distance: null, reason: '', result: stateResult('off', inputs) }
 }
 
 // ---- Reading the notes -----------------------------------------------------------------------------------------------
@@ -629,8 +654,8 @@ const ordersOf = (fleet, orders, entry) => {
   return { read: true, list, destination, standoff }
 }
 
-// What a row says of the fleet itself, apart from any note: its system, the body it orbits and whether it is in orbit at all.
-const placeOf = (fleet) => ({ systemId: fleet.systemId, systemName: fleet.systemName, orbitBodyId: fleet.orbitBodyId, orbitName: fleet.orbitName, inOrbit: fleet.orbitBodyId === null ? null : fleet.orbitBodyId > 0 })
+// What a row says of the fleet itself, apart from any note: its system, the body it orbits and whether it is in orbit at all, and, for a fleet that rides a Lagrange point, `atPoint`.
+const placeOf = (fleet) => ({ systemId: fleet.systemId, systemName: fleet.systemName, orbitBodyId: fleet.orbitBodyId, orbitName: fleet.orbitName, inOrbit: fleet.orbitBodyId === null ? null : fleet.orbitBodyId > 0, ...(fleet.orbitLagrangeId > 0 ? { atPoint: true } : {}) })
 
 // The fleets of the race as rows with their notes beside them, and the notes that belong to no fleet of the race as it stands: `{ rows, review, archived, unchecked, ahead, overlapping }`. A note is attached to a fleet's row only when the fleet is known to be the one the note was made for and nothing else competes for it. `review` holds the notes whose fleet ID is held by an object not shown to be that fleet (nothing of the note is compared with it), `archived` those whose fleet is no longer in the save, `unchecked` those whose fleet could not be checked, `ahead` those made at a later game time than the open save (kept and shown, never applied), and `overlapping` the notes of one fleet when it has more than one (every one of them is listed for the player to keep one or delete the others, and none is applied meanwhile). A row has `intent` (what the note keeps), `place` (where the fleet is now) and `location` (the note compared with where the fleet is) and `orders` (what is saved for the fleet): the four are never folded into one.
 export const stationRows = ({ fleets, entries, orders = null }) => {
@@ -684,9 +709,9 @@ export const checklistOf = (row) => {
     if (station.verdict.state !== VERDICTS.HELD) {
       steps.push({ key: 'repick', role: 'station', target: station.name, reason: station.verdict.state })
     } else if (comparison && comparison.state === 'on' && comparison.basis === 'position' && comparison.movement === 'left-behind') {
-      steps.push({ key: 'orbit', role: 'station', target: station.row.name, type: station.type })
+      steps.push({ key: 'orbit', role: 'station', target: station.row.name, type: station.type, ...(pointOf(station.row) !== null ? { point: true } : {}) })
     } else if (comparison && comparison.state !== 'on') {
-      steps.push({ key: 'move', role: 'station', target: station.row.name, type: station.type, tied: station.type === 'body' || anchorOf(station.row) !== null, systemName: station.row.systemName })
+      steps.push({ key: 'move', role: 'station', target: station.row.name, type: station.type, tied: station.type === 'body' || anchorOf(station.row) !== null || pointOf(station.row) !== null, systemName: station.row.systemName })
     }
   }
 

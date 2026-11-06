@@ -184,6 +184,9 @@ const FLEET_COMMAND_READS = 'FCT_Fleet(ParentCommandID)'
 
 const MASS_DRIVER_READS = 'DIM_PlanetaryInstallation(MassDriverValue) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* GameID MassDriverDest PopulationID RaceID) FCT_PopulationInstallations(Amount)'
 
+// The wrecks and life pods a Lagrange point carries are read for the position facts by one statement built from the name of each table (route-position.js), so the scan finds the whole table and none of its columns: these are the columns the two reads name.
+const ANCHORED_OBJECT_READS = 'FCT_Lifepods(LifepodID GameID SystemID OrbitLagrangeID Xcor Ycor) FCT_Wrecks(WreckID GameID SystemID OrbitLagrangeID Xcor Ycor)'
+
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
@@ -207,10 +210,10 @@ const EXTRA_READS = Object.freeze({
   '/logistics': Object.freeze({ page: START_DELAY_READS, colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
   '/minerals': Object.freeze({ page: 'FCT_IndustrialProjects(* Amount GameID PopulationID RaceID) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* Reserve* GameID PopulationID RaceID) FCT_ShipyardTask(* CompletedBP GameID PopulationID RaceID TaskTypeID TotalBP)' }),
   '/colony-outlook': Object.freeze({ bootstrapSources: BUILDABILITY_READS, page: START_DELAY_READS }),
-  '/routes': Object.freeze({ page: START_DELAY_READS }),
+  '/routes': Object.freeze({ page: START_DELAY_READS, positionFacts: ANCHORED_OBJECT_READS }),
   '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_MineralDeposit(Accessibility Amount) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
-  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS }),
-  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS, shippingTax: 'FCT_Race(GameID RaceID ShippingLineTax NPR)' }),
+  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS, positionFacts: ANCHORED_OBJECT_READS }),
+  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS, shippingTax: 'FCT_Race(GameID RaceID ShippingLineTax NPR)', positionFacts: ANCHORED_OBJECT_READS }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
     classUsage: 'FCT_Ship(ShipClassID GameID RaceID Destroyed)',

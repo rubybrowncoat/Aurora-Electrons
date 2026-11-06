@@ -21,7 +21,7 @@ export const MAX_CALLS = 100000
 const MAX_PARENTS = 4
 
 // Why a position is not propagated, by condition code (the texts are utilities/route-position.js `CONDITIONS`). A route states each one it fell back on.
-export const REASONS = Object.freeze(['clock-unread', 'clock-inconsistent', 'motion-switch', 'motion-classification', 'cadence-unread', 'cadence-budget', 'orbit-unread', 'orbit-unsurveyed', 'orbit-missing', 'orbit-mismatch', 'orbit-family', 'orbit-star', 'orbit-horizon', 'arrival-diverged', 'fleet-immobile', 'fleet-slower', 'speed-unknown', 'cycles-capped'])
+export const REASONS = Object.freeze(['clock-unread', 'clock-inconsistent', 'motion-switch', 'motion-classification', 'cadence-unread', 'cadence-budget', 'orbit-unread', 'orbit-unsurveyed', 'orbit-missing', 'orbit-mismatch', 'orbit-family', 'orbit-star', 'orbit-horizon', 'anchor-unread', 'visitor-association-unread', 'arrival-diverged', 'fleet-immobile', 'fleet-slower', 'speed-unknown', 'cycles-capped'])
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
@@ -263,8 +263,21 @@ export const POINT_OWNER_CLASSES = Object.freeze([1, 2])
 const pointStateAt = (orbits, clock, point, elapsed, options = {}) => {
   const body = bodyOf(orbits, point.planetId)
 
-  if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {
-    throw unsupported('orbit-family')
+  if (!isNumber(body.bodyClass)) {
+    throw unsupported('motion-classification')
+  } else if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {
+    if (!isNumber(point.xcor) || !isNumber(point.ycor)) {
+      throw unsupported('orbit-missing')
+    } else if (elapsed < 0) {
+      throw unsupported('clock-inconsistent')
+    } else if (switchOf(clock.orbitalMotion) === null) {
+      throw unsupported('motion-switch')
+    } else if (switchOf(clock.orbitalMotion) && elapsed > 0 && options.movement && callLength(clock) === null) {
+      throw unsupported('cadence-unread')
+    }
+
+    // The owner class leaves the point fixed, but the following objects still snap to these coordinates on an orbital update.
+    return { Xcor: point.xcor, Ycor: point.ycor, advanced: false, family: 'static' }
   }
 
   const state = stateAt(orbits, clock, point.planetId, elapsed, options)
@@ -346,7 +359,7 @@ const verify = (orbits, clock, target) => {
       if (target.point) {
         const state = pointStateAt(orbits, { ...clock, orbitalMotion: 1 }, target.point, 0, { horizon: false })
 
-        outcome = [check(state, { xcor: target.point.xcor, ycor: target.point.ycor }), ...chain(target.point.planetId)].find(Boolean) || null
+        outcome = state.family === 'static' ? null : [check(state, { xcor: target.point.xcor, ycor: target.point.ycor }), ...chain(target.point.planetId)].find(Boolean) || null
       } else {
         outcome = chain(target.id).find(Boolean) || null
       }
@@ -394,6 +407,11 @@ const speedAt = (orbits, target) => {
   }
 
   const body = bodyOf(orbits, target.point.planetId)
+
+  if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {
+    return 0
+  }
+
   const turn = turnBound(orbits, target.point.planetId)
 
   return familyOf(body) === 'moon' ? turn * target.point.distance * KM_PER_AU + speedBound(orbits, body.parentId, 1) : turn * target.point.distance * KM_PER_AU * pathFactor(body.eccentricity)
@@ -449,7 +467,7 @@ const clockOf = (facts) => {
 }
 
 // The adapter registered in utilities/route-position.js `ADAPTERS` for the families that sit on a body: a body, a colony and a Lagrange point. `at` is the time the fleet leaves `from` (the game time when null); with `from` the position is where the fleet meets the endpoint (the arrival solve, `observedAt` the arrival time), without it the position at `at` (the saved one at the game time, since the save is what the game holds now). Returns { position, observedAt, conditions } or { reasons: [codes] } when the endpoint is not propagated, naming why; `base` is the static record.
-export const orbitAdapter = (endpoint, { facts, at = null, from = null, speed = null }) => {
+export const orbitAdapter = (endpoint, { facts, at = null, from = null, speed = null, savedUntilUpdate = false }) => {
   const clock = clockOf(facts)
   const orbits = facts && facts.orbits
 
@@ -473,7 +491,10 @@ export const orbitAdapter = (endpoint, { facts, at = null, from = null, speed = 
     const positionAt = (time) => {
       const state = stateOfTarget(orbits, clock, target, time - clock.gameTime, { movement: !!from })
 
-      return time === clock.gameTime ? { ...state, Xcor: saved.Xcor, Ycor: saved.Ycor } : state
+      // A displaced follower keeps its own saved coordinates until the first update its phase sees: any positive snapshot elapsed time (including a final partial call), opening sub-pulse for movement, preceding increment for movement. stateOfTarget still validates cadence/orbit before this override.
+      const beforeUpdate = savedUntilUpdate && (switchOf(clock.orbitalMotion) === false || (from && switchOf(clock.orbitalMovementInSubPulse) === false ? time <= clock.gameTime + callLength(clock) : time <= clock.gameTime))
+
+      return time === clock.gameTime || beforeUpdate ? { ...state, Xcor: saved.Xcor, Ycor: saved.Ycor } : state
     }
     const speedOf = () => speedAt(orbits, target)
 
@@ -500,6 +521,52 @@ export const orbitAdapter = (endpoint, { facts, at = null, from = null, speed = 
 
     throw error
   }
+}
+
+// ---- The anchor family ------------------------------------------------------------------------------------------------
+// The objects the game's position update carries with a Lagrange point (`OrbitLagrangeID`), as the 3.1.0 source orders it (`Game.UpdateOrbitalPositions`, Game.cs 27558-28030): after a point has moved, a fleet that stands at the point's own position takes it (27598-27604 select the fleet, 27802-27809 move it), then a missile salvo (27893-27909), a waypoint (27963-27967), a wreck (27989-27992) and a life pod (28015-28018) each take the point's position at every call. A displaced non-fleet follower keeps its saved coordinates at the exact saved epoch and until its first source-ordered update; a snapshot's final partial call counts as an update, while movement retains its whole-call phase. No other table anchors an object to a point (the population carries no such column), a deep space population being the fixed class 3 body it stands on. This is the adapter of those families: an object the position contract found anchored (`base.anchor`, the point it rides, by the identity rule of utilities/route-position.js) follows the point through its own adapter, including every refusal; an object no point carries is not served by it.
+export const ANCHOR_FAMILIES = Object.freeze(['fleet', 'waypoint', 'wreck', 'lifepod', 'salvo'])
+
+// The table and key column that hold the point each family is anchored to.
+const ANCHOR_TABLES = Object.freeze({ fleet: ['FCT_Fleet', 'FleetID'], waypoint: ['FCT_Waypoint', 'WaypointID'], wreck: ['FCT_Wrecks', 'WreckID'], lifepod: ['FCT_Lifepods', 'LifepodID'], salvo: ['FCT_MissileSalvo', 'MissileSalvoID'] })
+
+// What each kind is called in the text that says a save lacks what the read needs.
+const ANCHOR_NOUNS = Object.freeze({ fleet: 'fleets', waypoint: 'waypoints', wreck: 'wrecks', lifepod: 'life pods', salvo: 'missile salvos' })
+
+export const anchorAdapter = (endpoint, { facts, at = null, from = null, speed = null, base = null }) => {
+  const anchor = base && base.anchor
+
+  if (!anchor || !Number.isInteger(anchor.point) || anchor.point <= 0) {
+    return { reasons: ['anchor-unread'] }
+  }
+
+  const point = { family: 'lagrange-point', key: `lagrange:${anchor.point}`, id: anchor.point, name: null, SystemID: endpoint.SystemID, Xcor: endpoint.Xcor, Ycor: endpoint.Ycor }
+  const found = orbitAdapter(point, { facts, at, from, speed, savedUntilUpdate: true })
+
+  return found.position ? { ...found, position: { ...found.position, SystemID: endpoint.SystemID } } : found
+}
+
+// The adapter serves only an object a point is read to carry (`state.anchor` of its static record): any other object is held by the treatment of its kind whatever adapters a consumer gives, and a consumer asks `serves` before it counts the endpoint as served.
+anchorAdapter.serves = (state) => Boolean(state && state.anchor)
+
+// The Lagrange points that the endpoints of the anchor families ride, as { family, lacking, points }: the points the save names for them (`OrbitLagrangeID` above 0), and `lacking` true when the table of the family holds the objects without the column or the key (a save with no such table has no such objects, and says nothing). The orbit read takes these points with the ones the endpoints name, so an anchored object's point has its orbit.
+const anchorPointsOf = (database, game, wanted) => {
+  const families = [...new Set(wanted.map((endpoint) => endpoint.family).filter((family) => ANCHOR_TABLES[family]))]
+
+  return Promise.all(families.map(async (family) => {
+    const [table, key] = ANCHOR_TABLES[family]
+    const columns = await columnsOf(database, table)
+
+    if (columns.size === 0) {
+      return { family, lacking: false, points: [] }
+    } else if (!['GameID', key, 'OrbitLagrangeID'].every((name) => columns.has(name))) {
+      return { family, lacking: true, points: [] }
+    }
+
+    const rows = await rowsIn(database, `select ${table}.OrbitLagrangeID from ${table} where ${table}.GameID = ${game} and ${table}.OrbitLagrangeID > 0 and ${table}.${key}`, integers(wanted.filter((endpoint) => endpoint.family === family).map((endpoint) => endpoint.id)))
+
+    return { family, lacking: null, points: rows.map((row) => row.OrbitLagrangeID) }
+  }))
 }
 
 // ---- The read ---------------------------------------------------------------------------------------------------------
@@ -543,7 +610,11 @@ export const loadOrbitFacts = (database, { GameID, RaceID }, endpoints) => {
     }
 
     const colonyIds = integers(wanted.filter((endpoint) => endpoint.family === 'colony').map((endpoint) => endpoint.id))
-    const pointIds = integers(wanted.filter((endpoint) => endpoint.family === 'lagrange-point').map((endpoint) => endpoint.id))
+    const anchored = await anchorPointsOf(database, game, wanted)
+    const pointIds = integers([...wanted.filter((endpoint) => endpoint.family === 'lagrange-point').map((endpoint) => endpoint.id), ...anchored.flatMap((entry) => entry.points)])
+
+    anchored.filter((entry) => entry.lacking).forEach((entry) => problems.push(`The save lacks the key, game or Lagrange point of the ${ANCHOR_NOUNS[entry.family]}, so the points that they ride could not be read`))
+
     const bodyIds = new Set(integers(wanted.filter((endpoint) => endpoint.family === 'body').map((endpoint) => endpoint.id)))
     const bodyOf = {}
     const points = {}

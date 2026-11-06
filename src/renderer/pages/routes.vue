@@ -49,6 +49,10 @@
                     </div>
                   </template>
                 </v-checkbox>
+                <div v-if="routeFleetLagrange" class="mt-3" data-fleet-lagrange>
+                  <div class="body-2">Lagrange mode of {{ routeFleetLagrange.name }}: {{ routeFleetLagrange.mode || 'not recorded' }}</div>
+                  <div class="caption text--secondary" data-fleet-lagrange-text>{{ routeFleetLagrange.text }}</div>
+                </div>
               </v-card>
             </v-menu>
           </div>
@@ -183,7 +187,7 @@ import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUP
 import { describeResult, describeRule, failureWords, valueOrNull } from '../utilities/provenance'
 import { fleetProfile, loadFleetShips } from '../utilities/fleet-profile'
 import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime, withoutWaits } from '../utilities/route-plan'
-import { ADAPTERS, lagrangeEndpoint, placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
+import { ADAPTERS, ORBIT_FAMILIES, lagrangeEndpoint, lagrangeWords, placeEndpoint, positionRecord, routePositions, summarisePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
 import { NEBULA_GAP, elapsedResult, fleetTimingOf, loadSystemDust, routeEvents, searchTiming, speedIn, timingGaps, waitResult, walkEvents } from '../utilities/route-time'
 import { AVOID_OPTIONS, loadAvoidSystems } from '../utilities/safe-routes'
 import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
@@ -402,6 +406,15 @@ export default {
       return place && place.fleet ? place.fleet : null
     },
 
+    // The Lagrange mode of the route's fleet beside the route options: its mode (`LagrangeStatus`), whether its orders take Lagrange jumps and whether it rides a point, `{ name, mode, text, riding }`; null with no fleet or while the saved facts of the fleets are not read.
+    routeFleetLagrange() {
+      const fleet = this.routeFleetRow
+      const place = this.routeFleet && this.placeByKey[this.routeFleet]
+      const words = fleet && place && this.positionRead ? lagrangeWords(positionRecord(placeEndpoint(place), { facts: this.positionRead })) : null
+
+      return words ? { name: fleet.FleetName, ...words } : null
+    },
+
     // What the route's fleet gives the timing (`fleetTimingOf`), null with no fleet, while its ships are being read again or the read failed (the page keeps the rows of the last read, which may be another save's), or when the rows belong to another fleet.
     crewTiming() {
       const fleet = this.routeFleetRow
@@ -496,9 +509,9 @@ export default {
       }
     },
 
-    // The endpoints whose orbits the page reads: the stops that sit on a body and the Lagrange points a route may jump between.
+    // The endpoints whose orbits the page reads: the stops that sit on a body or that a Lagrange point carries (the point is read with the stop) and the Lagrange points a route may jump between.
     orbitEndpoints() {
-      const stops = this.routeStops.map(placeEndpoint).filter((endpoint) => ['body', 'colony', 'lagrange-point'].includes(endpoint.family))
+      const stops = this.routeStops.map(placeEndpoint).filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))
       const points = this.options.useLagrange ? this.lagrangePoints.map(lagrangeEndpoint) : []
 
       return [...stops, ...points]

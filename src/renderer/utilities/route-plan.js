@@ -3,7 +3,7 @@
 import { flyRoute, routeLegs, routeRecords, routeResults, searchRoutes } from './jump-graph'
 import { REASONS } from './orbit-propagation'
 import { combine, envelope, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
-import { NO_ADAPTERS, POSITION_BASIS, ROUTE_MODE, jumpEndpoint, lagrangeEndpoint, placeEndpoint, positionRecord, routePositions, summarisePositions, viaEndpoints, withPositions } from './route-position'
+import { NO_ADAPTERS, POSITION_BASIS, ROUTE_MODE, isServed, jumpEndpoint, lagrangeEndpoint, placeEndpoint, positionRecord, routePositions, summarisePositions, viaEndpoints, withPositions } from './route-position'
 import { NEBULA_GAP, carriedDelay, elapsedResult, routeEvents, searchTiming, timingGaps, waitResult, walkEvents } from './route-time'
 
 // A system's own place is its centre, (0, 0); any other place is where the save has it, and a place with no position there reaches nothing (`searchRoutes`).
@@ -72,7 +72,7 @@ export const reachPoint = (flight, point, from, time) => {
   const endpoint = endpointOf(point)
   const seconds = (position) => (from && flight.speed ? Math.hypot(position.Xcor - from.Xcor, position.Ycor - from.Ycor) / flight.speed : 0)
 
-  if (!endpoint || typeof flight.adapters[endpoint.family] !== 'function') {
+  if (!endpoint || !isServed(endpoint, flight)) {
     return { Xcor: point.Xcor, Ycor: point.Ycor, time: time + seconds(point), record: null }
   }
 
@@ -254,22 +254,45 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
   let firstSeconds = 0
 
   const start = endpointOf(hops[0].from)
-  const departure = start && typeof adapters[start.family] === 'function' ? [positionRecord(start, { facts, adapters, at: time })] : []
-  const unserved = [...new Map(walks.flatMap((hop) => [hop.from, hop.to, hop.leave]).map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && typeof adapters[endpoint.family] !== 'function').map((endpoint) => [endpoint.key, endpoint])).values()].map((endpoint) => positionRecord(endpoint, { facts }))
+  const departure = start && isServed(start, { facts, adapters }) ? [positionRecord(start, { facts, adapters, at: time })] : []
+  const unserved = [...new Map(walks.flatMap((hop) => [hop.from, hop.to, hop.leave]).map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && !isServed(endpoint, { facts, adapters })).map((endpoint) => [endpoint.key, endpoint])).values()].map((endpoint) => positionRecord(endpoint, { facts }))
+  // Association is assigned by the arrival action, not merely by the destination's motion. A body-associated waypoint uses Game.cs 5818-5822's body guard; point-only waypoints assign nothing. Nonzero-time Salvage (107) copies wreck associations (6323-6333). The stationary-fleet branch (6399-6417) copies associations for ordnance hub actions 191/192/194 and refuel/resupply actions 210/224/230/231/233/234.
+  const carries = (point, action, wait) => {
+    const endpoint = endpointOf(point)
+
+    if (endpoint && (endpoint.family === 'wreck' || endpoint.family === 'fleet')) {
+      const record = positionRecord(endpoint, { facts })
+
+      if (!record.anchor) {
+        return false
+      }
+
+      if (!Number.isInteger(action)) {
+        records.push(Object.freeze({ ...record, moves: null, conditions: [...record.conditions, 'propagation-unavailable', 'visitor-association-unread'], unknown: true }))
+
+        return false
+      }
+
+      const assigns = endpoint.family === 'wreck' ? action === 107 && wait > 0 : [191, 192, 194, 210, 224, 230, 231, 233, 234].includes(action)
+
+      return assigns
+    }
+
+    return endpoint && (endpoint.family === 'body' || endpoint.family === 'colony' || (endpoint.family === 'waypoint' && facts && facts.waypoints && facts.waypoints[endpoint.id] && facts.waypoints[endpoint.id].orbit > 0))
+  }
 
   for (let cycle = 0; cycle < MAX_CYCLES && (!cycle || time - flight.gameTime < horizon); cycle += 1) {
     const kms = []
     const flown = []
     const mark = records.length
 
-    const carries = (point) => (endpointOf(point) || {}).family !== 'lagrange-point'
-
-    walks.forEach((hop) => {
-      // An order's delay is spent before its flight, where the fleet is: a body or colony carries it on, a Lagrange point does not.
+    walks.forEach((hop, index) => {
+      const previous = walks[(index + walks.length - 1) % walks.length]
+      // A delay is spent where the visiting fleet is; only an association assigned by arrival carries it on.
       if (hop.delay > 0) {
         time += hop.delay
 
-        const waited = carries(hop.from) && typeof adapters[(endpointOf(hop.from) || {}).family] === 'function' ? reachPoint(flight, hop.from, null, time) : null
+        const waited = carries(hop.from, previous.action, previous.wait) && endpointOf(hop.from) && isServed(endpointOf(hop.from), { facts, adapters }) ? reachPoint(flight, hop.from, null, time) : null
 
         if (waited) {
           at = { Xcor: waited.Xcor, Ycor: waited.Ycor }
@@ -287,9 +310,9 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
       records.push(...run.records)
       time = run.end.time + (hop.wait || 0)
 
-      // A body carries a fleet that waits at it; a Lagrange point does not, so a fleet that reached one stays where it arrived, and a point left through is where it is when the fleet arrives.
+      // A different exit is resolved at arrival (e.g. an intra-system jump). Otherwise a visitor without an assigned orbit/point keeps its arrival coordinates through waits as well as delays.
       const target = hop.leave || hop.to
-      const stay = hop.wait > 0 && carries(target) ? reachPoint(flight, target, null, time) : hop.leave ? reachPoint(flight, hop.leave, null, run.end.time) : run.end
+      const stay = hop.wait > 0 && carries(target, hop.action, hop.wait) ? reachPoint(flight, target, null, time) : hop.leave && hop.leave.key !== hop.to.key ? reachPoint(flight, hop.leave, null, run.end.time) : run.end
 
       at = { Xcor: stay.Xcor, Ycor: stay.Ycor }
 
@@ -316,7 +339,7 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
   const clockHeld = timed && everything.some((record) => record.moves !== false)
   const unmoved = capped || clockHeld || everything.some(refused)
   const reasons = [...new Set([...(capped ? ['cycles-capped'] : []), ...(clockHeld ? ['timed-clock'] : []), ...everything.filter(refused).flatMap((record) => record.conditions).filter((code) => code === 'propagation-unavailable' || REASONS.includes(code))])].sort()
-  const served = [...new Map([...walks.flatMap((hop) => [hop.from, hop.to, hop.leave]), ...heldRuns.flatMap((run) => run.points)].map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && typeof adapters[endpoint.family] === 'function').map((endpoint) => [endpoint.key, endpoint])).values()]
+  const served = [...new Map([...walks.flatMap((hop) => [hop.from, hop.to, hop.leave]), ...heldRuns.flatMap((run) => run.points)].map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && isServed(endpoint, { facts, adapters })).map((endpoint) => [endpoint.key, endpoint])).values()]
   const kept = served.map((endpoint) => { const base = positionRecord(endpoint, { facts }); return Object.freeze({ ...base, conditions: [...new Set([...base.conditions, ...(unmoved ? ['propagation-unavailable', ...reasons.filter((code) => code !== 'propagation-unavailable')] : [])])], unknown: true }) })
   const all = cycles.flatMap((cycle) => cycle.km)
   const flownPositions = summarisePositions(unmoved ? [...unserved, ...kept] : [...unserved, ...unmovedFirst(everything)], { merge: true })

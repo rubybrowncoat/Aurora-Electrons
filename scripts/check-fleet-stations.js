@@ -320,14 +320,14 @@ const fakeSave = (save, { failing = [] } = {}) => {
         return [save.fleets.map((row) => {
           const orbiting = row.orbit > 0 ? found(save.bodies, row.orbit) : null
 
-          return { FleetID: row.id, FleetName: row.name, SystemID: row.systemId, SystemName: named(row.systemId), OrbitBodyID: row.orbit, AssignedPopulationID: row.assigned, Xcor: row.x, Ycor: row.y, CreatedTime: row.created, BodyClass: orbiting ? orbiting.bodyClass : null, PlanetNumber: orbiting ? orbiting.planet : null, OrbitNumber: orbiting ? orbiting.orbit : null, SystemBodyName: orbiting ? orbiting.name : null, ComponentNumber: orbiting ? 1 : null, Classes: row.classes === null ? null : row.classes.join(','), Ships: row.ships }
+          return { FleetID: row.id, FleetName: row.name, SystemID: row.systemId, SystemName: named(row.systemId), OrbitBodyID: row.orbit, OrbitLagrangeID: row.point === undefined ? 0 : row.point, PointSystemID: row.point > 0 && row.pointX !== null ? row.systemId : null, PointXcor: row.pointX === undefined ? 3000 : row.pointX, PointYcor: row.pointY === undefined ? 3000 : row.pointY, AssignedPopulationID: row.assigned, Xcor: row.x, Ycor: row.y, CreatedTime: row.created, BodyClass: orbiting ? orbiting.bodyClass : null, PlanetNumber: orbiting ? orbiting.planet : null, OrbitNumber: orbiting ? orbiting.orbit : null, SystemBodyName: orbiting ? orbiting.name : null, ComponentNumber: orbiting ? 1 : null, Classes: row.classes === null ? null : row.classes.join(','), Ships: row.ships }
         })]
       }
 
       if (sql.startsWith('select FCT_Waypoint.WaypointID')) {
         const hidden = /FCT_Waypoint\.WaypointType != (\d+)/.exec(sql)
 
-        return [save.waypoints.filter((row) => !hidden || row.type !== Number(hidden[1])).map((row) => ({ WaypointID: row.id, SystemID: row.systemId, SystemName: named(row.systemId), OrbitBodyID: row.orbit, CreationTime: row.created, Xcor: row.x, Ycor: row.y, Number: row.number, WaypointType: row.type, Name: row.name }))]
+        return [save.waypoints.filter((row) => !hidden || row.type !== Number(hidden[1])).map((row) => ({ WaypointID: row.id, SystemID: row.systemId, SystemName: named(row.systemId), OrbitBodyID: row.orbit, OrbitLagrangeID: row.point === undefined ? 0 : row.point, CreationTime: row.created, Xcor: row.x, Ycor: row.y, Number: row.number, WaypointType: row.type, Name: row.name }))]
       }
 
       if (sql.startsWith('select FCT_MoveOrders.MoveOrderID')) {
@@ -382,7 +382,7 @@ const readOn = async (m, w, save, where = scope(), options = {}) => {
 const rowOf = (shown, id) => shown.rows.find((row) => row.key === id)
 
 // The fleet and the station as rows of the loaders, for the comparison alone.
-const fleetRow = (extra = {}) => ({ type: 'fleet', id: 30, name: 'F', systemId: 1, orbitBodyId: 0, assignedPopulationId: 0, x: 0, y: 0, classes: [5], ...extra })
+const fleetRow = (extra = {}) => ({ type: 'fleet', id: 30, name: 'F', systemId: 1, orbitBodyId: 0, assignedPopulationId: 0, x: 0, y: 0, classes: [5], pointPosition: { systemId: 1, x: 3000, y: 3000 }, ...extra })
 const bodyRow = (extra = {}) => ({ type: 'body', id: 100, name: 'Earth', systemId: 1, x: 1000, y: 2000, ...extra })
 const waypointRow = (extra = {}) => ({ type: 'waypoint', id: 60, name: 'Marker', systemId: 1, orbitBodyId: 0, x: 3000, y: 3000, ...extra })
 
@@ -457,6 +457,52 @@ const pure = (ctx) => {
     const samePosition = cmp(fleetRow({ x: 3000, y: 3000 }), waypointRow({ orbitBodyId: 0 }))
 
     return tied.state === 'on' && tied.basis === 'orbit' && untied.state === 'off' && samePosition.state === 'on' && samePosition.basis === 'position' ? true : short([tied, untied, samePosition])
+  })
+  add('orbit: a fleet that rides the Lagrange point a waypoint is tied to is on station by that identity and goes with the point, while a fleet at the point by position alone, in the orbit of a body, on another point or on none is on station by position and left behind when the point moves, and one whose own point is not given is not said to be left behind', () => {
+    const riding = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const movedPoint = cmp(fleetRow({ orbitLagrangeId: 7, x: 4200, y: 3900, pointPosition: { systemId: 1, x: 4200, y: 3900 } }), waypointRow({ orbitLagrangeId: 7, x: 4200, y: 3900 }))
+    const inside = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000.999, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const bySpot = cmp(fleetRow({ orbitLagrangeId: 0, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const another = cmp(fleetRow({ orbitLagrangeId: 8, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const inOrbit = cmp(fleetRow({ orbitBodyId: 100, orbitLagrangeId: 0, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const noBody = cmp(fleetRow({ orbitBodyId: null, orbitLagrangeId: 0, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const unread = cmp(fleetRow({ orbitLagrangeId: null, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7 }))
+    const displacedWaypoint = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000.999, y: 3000 }), waypointRow({ orbitLagrangeId: 7, x: 3000.999 }))
+    const pointOnly = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000, y: 3000 }), waypointRow({ orbitLagrangeId: 7, x: 9000 }))
+    const unreadPoint = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000, y: 3000, pointPosition: null }), waypointRow({ orbitLagrangeId: 7 }))
+    const wrongSystem = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000, y: 3000, pointPosition: { systemId: 2, x: 3000, y: 3000 } }), waypointRow({ orbitLagrangeId: 7 }))
+
+    return [riding, movedPoint].every((result) => result.state === 'on' && result.basis === 'orbit' && result.movement === 'follows' && result.where === null && result.onPoint === true && result.following === true) && pointOnly.state === 'off' && pointOnly.distance.value === 6000 && pointOnly.following === true && [inside, displacedWaypoint, wrongSystem, bySpot, another, inOrbit, noBody].every((result) => result.state === 'on' && result.basis === 'position' && result.movement === 'left-behind' && !('onPoint' in result) && result.following === false) && [unread, unreadPoint].every((result) => result.state === 'on' && result.basis === 'position' && result.movement === 'unknown' && result.following === null) ? true : short([riding, movedPoint, inside, displacedWaypoint, pointOnly, unreadPoint, wrongSystem])
+  })
+  add('orbit: a fleet that references the point but is not at its position, on another point or on none is off station and said to be at a point, in another orbit or in open space, and one whose own point is not given is not compared as off station', () => {
+    const tied = waypointRow({ orbitLagrangeId: 7 })
+    const apart = cmp(fleetRow({ orbitLagrangeId: 7, x: 9000, y: 9000 }), tied)
+    const edge = cmp(fleetRow({ orbitLagrangeId: 7, x: 3001, y: 3000 }), tied)
+    const another = cmp(fleetRow({ orbitLagrangeId: 8, x: 9000, y: 9000 }), tied)
+    const orbiting = cmp(fleetRow({ orbitBodyId: 101, orbitLagrangeId: 7, x: 9000, y: 9000 }), tied)
+    const free = cmp(fleetRow({ orbitLagrangeId: 0, x: 9000, y: 9000 }), tied)
+    const noBody = cmp(fleetRow({ orbitBodyId: null, orbitLagrangeId: 0, x: 9000, y: 9000 }), tied)
+    const unread = cmp(fleetRow({ orbitLagrangeId: null, x: 9000, y: 9000 }), tied)
+    const elsewhere = cmp(fleetRow({ systemId: 2, orbitLagrangeId: 7, x: 3000, y: 3000 }), tied)
+
+    return [apart, another, orbiting, free, noBody, elsewhere, edge].every((result) => result.state === 'off' && result.basis === null && result.movement === null && !('onPoint' in result)) && apart.where === 'at-point' && edge.where === 'at-point' && another.where === 'at-point' && orbiting.where === 'other-orbit' && free.where === 'open-space' && noBody.where === 'open-space' && elsewhere.where === 'other-system' && unread.state === 'off' && unread.following === null ? true : short([apart, edge.where, another.where, orbiting.where, free.where, noBody.where, elsewhere.where, unread.state])
+  })
+  add('orbit: a waypoint tied to a body is tied to no point, so the point a fleet rides is no evidence of its station, and the orbit of a body is none of a waypoint tied to a point', () => {
+    const bodied = cmp(fleetRow({ orbitLagrangeId: 7, x: 1000, y: 2000 }), waypointRow({ orbitBodyId: 100, orbitLagrangeId: 7, x: 1000, y: 2000 }))
+    const inBody = cmp(fleetRow({ orbitBodyId: 100, orbitLagrangeId: 7, x: 9, y: 9 }), waypointRow({ orbitBodyId: 100, orbitLagrangeId: 7 }))
+    const orbiting = cmp(fleetRow({ orbitBodyId: 100, orbitLagrangeId: 0, x: 9, y: 9 }), waypointRow({ orbitBodyId: 0, orbitLagrangeId: 7 }))
+    const both = cmp(fleetRow({ orbitLagrangeId: 7, x: 3000, y: 3000 }), waypointRow({ orbitBodyId: 100, orbitLagrangeId: 7 }))
+
+    return bodied.state === 'on' && bodied.basis === 'position' && bodied.movement === 'left-behind' && both.basis === 'position' && both.movement === 'left-behind' && inBody.state === 'on' && inBody.basis === 'orbit' && orbiting.state === 'off' && orbiting.where === 'other-orbit' ? true : short([bodied, both, inBody.basis, orbiting])
+  })
+  add('orbit: the place of a fleet says it rides a Lagrange point only when it does, and only that', () => {
+    const placeOf = (extra) => m.fs.stationRows({ fleets: [fleetRow(extra)], entries: [], orders: null }).rows[0].place
+    const riding = placeOf({ orbitLagrangeId: 7 })
+    const free = placeOf({ orbitLagrangeId: 0 })
+    const unread = placeOf({ orbitLagrangeId: null })
+    const bare = placeOf({})
+
+    return riding.atPoint === true && same(Object.keys(riding).sort(), ['atPoint', 'inOrbit', 'orbitBodyId', 'orbitName', 'systemId', 'systemName']) === true && [free, unread, bare].every((place) => !('atPoint' in place) && same(Object.keys(place).sort(), ['inOrbit', 'orbitBodyId', 'orbitName', 'systemId', 'systemName']) === true) ? true : short([riding, free, unread, bare])
   })
   add('orbit: a fleet in another system is off station and no distance is given between two systems', () => {
     const result = cmp(fleetRow({ systemId: 2, x: 1000, y: 2000 }), bodyRow())
@@ -648,6 +694,21 @@ const pure = (ctx) => {
     const tied = { moved: await verdictOf(60, { x: 777, y: 888 }), another: await verdictOf(60, { orbit: 101 }), loosened: await verdictOf(60, { orbit: 0 }) }
 
     return [untied.elsewhere, untied.tied, untied.far, tied.another, tied.loosened].every((verdict) => verdict.state === 'review') && [untied.near, tied.moved].every((verdict) => verdict.state === 'held' && verdict.basis === 'confirmed') ? true : short([untied, tied])
+  })
+  add('reuse: a waypoint tied to a Lagrange point is the same station only where it holds that point: another point, a body, no tie and a fixed point read under review, while a point that moved with the save stays held', async () => {
+    const tiedAt = edited(SAVE(), (copy) => { Object.assign(found(copy.waypoints, 61), { point: 7 }) })
+    const verdictOf = async (change) => {
+      const w = world(m)
+
+      await kept(m, w, scope(), await open(m, tiedAt), { station: ['waypoint', 61], base: null })
+
+      return (await readOn(m, w, edited(tiedAt, (copy) => { Object.assign(found(copy.waypoints, 61), { created: 150000, ...change }) }))).shown.rows.find((item) => item.entry).entry.intent.station.verdict
+    }
+    const record = await kept(m, world(m), scope(), await open(m, tiedAt), { station: ['waypoint', 61], base: null })
+    const held = [await verdictOf({ x: 777, y: 888 }), await verdictOf({})]
+    const review = { another: await verdictOf({ point: 8 }), loosened: await verdictOf({ point: 0 }), bodied: await verdictOf({ point: 0, orbit: 101 }), bodiedStill: await verdictOf({ orbit: 101 }) }
+
+    return same(record.payload.station.confirmed.anchor, { point: 7 }) === true && held.every((verdict) => verdict.state === 'held' && verdict.basis === 'confirmed') && Object.values(review).every((verdict) => verdict.state === 'review') ? true : short([record.payload.station.confirmed.anchor, held, review])
   })
   add('reuse: a waypoint whose tie or position the save does not give is not shown to be the one confirmed, takes no note and no confirmation, and a note kept before the anchor was recorded reads under review', async () => {
     const w = world(m)
@@ -1073,6 +1134,46 @@ const pure = (ctx) => {
   })
 
   // ---- loaders ----
+  add('loaders: a real point read proves exact fleet-to-point coordinates in the same game and system, independently of a displaced waypoint; missing coordinates do not certify following', async () => {
+    const raw = new sqlite3.Database(':memory:')
+    const exec = (sql) => new Promise((resolve, reject) => raw.exec(sql, (error) => error ? reject(error) : resolve()))
+    const query = (sql) => new Promise((resolve, reject) => raw.all(sql, { ':GameID': GAME, ':RaceID': RACE }, (error, rows) => error ? reject(error) : resolve(rows)))
+
+    try {
+      await exec(`
+        create table FCT_Fleet (FleetID, FleetName, GameID, RaceID, SystemID, OrbitBodyID, OrbitLagrangeID, AssignedPopulationID, Xcor, Ycor);
+        create table FCT_LagrangePoint (LagrangePointID, GameID, SystemID, Xcor, Ycor);
+        create table FCT_RaceSysSurvey (SystemID, RaceID, GameID, Name);
+        create table FCT_FleetHistory (FleetID, GameID, GameTime, Description);
+        create table FCT_SystemBody (SystemBodyID, GameID, StarID, BodyClass, PlanetNumber, OrbitNumber);
+        create table FCT_SystemBodyName (SystemBodyID, RaceID, GameID, Name);
+        create table FCT_Star (StarID, ComponentNumber);
+        create table FCT_Ship (FleetID, GameID, ShipClassID);
+        insert into FCT_Fleet values (30, 'F', 1, 7, 1, 0, 7, 0, 3000, 3000);
+        insert into FCT_LagrangePoint values (7, 2, 1, 3000, 3000), (7, 1, 2, 3000, 3000);
+      `)
+      const compare = async (stationX = 3000) => cmp(m.fs.STATION_TARGETS.fleet.row((await query(m.fs.STATION_TARGETS.fleet.sql))[0]), waypointRow({ orbitLagrangeId: 7, x: stationX }))
+      const foreign = await compare()
+
+      await exec('insert into FCT_LagrangePoint values (7, 1, 1, 3000, 3000)')
+
+      const exact = await compare()
+      const displacedStation = await compare(9000)
+
+      await exec('update FCT_Fleet set Xcor = 3000.999')
+
+      const near = await compare()
+      const sameWaypoint = await compare(3000.999)
+
+      await exec('update FCT_LagrangePoint set Xcor = null where GameID = 1 and SystemID = 1')
+
+      const unread = await compare()
+
+      return exact.onPoint === true && exact.movement === 'follows' && exact.following === true && displacedStation.state === 'off' && displacedStation.distance.value === 6000 && displacedStation.following === true && [near, sameWaypoint].every((one) => one.state === 'on' && one.basis === 'position' && one.movement === 'left-behind' && !one.onPoint && one.following === false) && [foreign, unread].every((one) => one.state === 'on' && one.movement === 'unknown' && !one.onPoint && one.following === null) ? true : short([foreign, exact, displacedStation, near, sameWaypoint, unread])
+    } finally {
+      await new Promise((resolve) => raw.close(resolve))
+    }
+  })
   add('loaders: every statement the panel sends is a select, so keeping a note never writes the save', async () => {
     const w = world(m)
     const context = await open(m, SAVE())
@@ -1087,14 +1188,25 @@ const pure = (ctx) => {
   })
   add('loaders: a column the save leaves null stays null: no orbit, position, creation time or class is read as 0', async () => {
     const save = edited(SAVE(), (copy) => {
-      Object.assign(found(copy.fleets, 31), { orbit: null, assigned: null, x: null, y: null, created: null, classes: null, ships: null })
-      Object.assign(found(copy.waypoints, 61), { orbit: null, x: null, y: null, created: null, name: null, type: 1 })
+      Object.assign(found(copy.fleets, 31), { orbit: null, point: null, assigned: null, x: null, y: null, created: null, classes: null, ships: null })
+      Object.assign(found(copy.waypoints, 61), { orbit: null, point: null, x: null, y: null, created: null, name: null, type: 1 })
     })
     const context = await open(m, save)
     const flt = context.objects.fleet.get(31)
     const way = context.objects.waypoint.get(61)
 
-    return flt.orbitBodyId === null && flt.assignedPopulationId === null && flt.x === null && flt.y === null && flt.created === null && flt.classes === null && flt.ships === null && way.orbitBodyId === null && way.x === null && way.created === null && way.name.length > 0 ? true : short([flt, way])
+    return flt.orbitBodyId === null && flt.orbitLagrangeId === null && flt.assignedPopulationId === null && flt.x === null && flt.y === null && flt.created === null && flt.classes === null && flt.ships === null && way.orbitBodyId === null && way.orbitLagrangeId === null && way.x === null && way.created === null && way.name.length > 0 ? true : short([flt, way])
+  })
+  add('loaders: the Lagrange point of a fleet and of a waypoint is read as the save gives it and the statements ask for it', async () => {
+    const save = edited(SAVE(), (copy) => {
+      Object.assign(found(copy.fleets, 30), { point: 7 })
+      Object.assign(found(copy.waypoints, 61), { point: 9 })
+    })
+    const context = await open(m, save)
+    const asked = (table) => context.database.sent.some(({ sql }) => sql.includes(`${table}.OrbitLagrangeID`))
+    const read = [context.objects.fleet.get(30).orbitLagrangeId, context.objects.fleet.get(31).orbitLagrangeId, context.objects.waypoint.get(60).orbitLagrangeId, context.objects.waypoint.get(61).orbitLagrangeId]
+
+    return same(read, [7, 0, 0, 9]) === true && asked('FCT_Fleet') && asked('FCT_Waypoint') ? true : short([read, asked('FCT_Fleet'), asked('FCT_Waypoint')])
   })
   add('loaders: ship classes that the save does not give are unknown when ships are there and empty only for a fleet with no ship', async () => {
     const save = edited(SAVE(), (copy) => {
@@ -1523,6 +1635,38 @@ const panel = (ctx) => {
     const fixed = await stateOf(atPoint(0), ['waypoint', 61])
 
     return noOrbit.on === 'on' && noOrbit.unknown === 1 && noOrbit.left === 0 && noOrbit.fixed === 0 && !noOrbit.steps.includes('orbit') && left.on === 'on' && left.left === 1 && left.unknown === 0 && left.steps.includes('orbit') && fixed.on === 'on' && fixed.fixed === 1 && fixed.left === 0 && fixed.unknown === 0 ? true : short([noOrbit, left, fixed])
+  })
+  add('component: a fleet riding the Lagrange point of its station is shown on station at that point with no left-behind warning and no orbit step, a fleet at the point by position alone is shown left behind with the step that names the point, one whose own point is not given is told as unknown, and a fleet off station is told apart by the point it rides', async () => {
+    const stateOf = async (change, station = ['waypoint', 61]) => {
+      const made = await live(edited(SAVE(), (copy) => { found(copy.waypoints, 61).point = 7; change(copy) }), { notes: { station, base: null } })
+      const row = rowOf(made.view, 30)
+      const expanded = expandedOf(made, row)
+      const nodes = treeOf(regionOf(expanded, 'data-station-checklist')).filter((node) => 'data-station-step' in attrsOf(node))
+      const left = regionOf(expanded, 'data-station-not-followed')
+      const orbit = nodes.find((node) => attrsOf(node)['data-station-step'] === 'orbit')
+
+      return { on: row.location.station.state, movement: row.location.station.movement, left: left.length, leftText: left.length ? textOf(left[0]) : '', unknown: regionOf(expanded, 'data-station-movement-unknown').length, steps: nodes.map((node) => attrsOf(node)['data-station-step']), stepText: orbit ? textOf(orbit) : '', place: textOf(expanded), compare: regionOf(expanded, 'data-station-compare').map((node) => textOf(node)).join(' | ') }
+    }
+    const at = (point, x = 3000, y = 3000) => (copy) => { Object.assign(found(copy.fleets, 30), { orbit: 0, point, x, y }) }
+    const riding = await stateOf(at(7))
+    const bySpot = await stateOf(at(0))
+    const unread = await stateOf(at(null))
+    const apart = await stateOf(at(7, 9000, 9000))
+    const free = await stateOf(at(0, 9000, 9000))
+    const body = await stateOf((copy) => { Object.assign(found(copy.fleets, 30), { orbit: 0, x: 1000, y: 2000 }) }, ['body', 100])
+    const near = await stateOf(at(7, 3000.999))
+    const unreadPoint = await stateOf((copy) => { at(7)(copy); found(copy.fleets, 30).pointX = null })
+    const displaced = await stateOf((copy) => { at(7)(copy); found(copy.waypoints, 61).x = 9000 })
+
+    if (displaced.on !== 'off' || !displaced.compare.includes('Off station') || !displaced.place.includes("follows the waypoint's point; the waypoint joins it at the next update") || riding.on !== 'on' || !riding.place.includes("follows the waypoint's point")) {
+      return short([displaced, riding])
+    }
+
+    if (near.on !== 'on' || near.movement !== 'left-behind' || near.left !== 1 || !near.steps.includes('orbit') || !near.compare.includes('at the same position') || !near.stepText.includes('association') || unreadPoint.movement !== 'unknown' || unreadPoint.unknown !== 1 || unreadPoint.steps.includes('orbit')) {
+      return short([near, unreadPoint])
+    }
+
+    return riding.on === 'on' && riding.movement === 'follows' && riding.left === 0 && riding.unknown === 0 && !riding.steps.includes('orbit') && riding.place.includes('In Sol, at a Lagrange point') && riding.compare.includes('Lagrange point') && bySpot.on === 'on' && bySpot.left === 1 && bySpot.leftText.includes('Lagrange point') && bySpot.steps.includes('orbit') && bySpot.stepText.includes('Lagrange point') && bySpot.place.includes('In Sol, not in orbit') && bySpot.compare.includes('at the same position') && !riding.compare.includes('at the same position') && unread.on === 'on' && unread.left === 0 && unread.unknown === 1 && !unread.steps.includes('orbit') && apart.on === 'off' && free.on === 'off' && apart.compare.includes('Off station') && !apart.compare.includes('elsewhere') && apart.compare !== free.compare && apart.place.includes('In Sol, at a Lagrange point') && body.left === 1 && body.steps.includes('orbit') && !body.stepText.includes('Lagrange') ? true : short([riding, bySpot, unread, apart, free, body])
   })
   add('component: the last saved order is told as naming the station, naming another destination or not known to do either, and a destination kind or ID the save leaves null is never told as another destination', async () => {
     const headsOf = async (destinationType, destinationId) => {
@@ -2097,8 +2241,8 @@ const saveStatements = async (ctx, save) => {
 
 const MUTATIONS = [
   { name: 'the orbit not taken for the identity of a fleet on station', file: U, at: /if \(anchor !== null && fleet\.orbitBodyId === anchor\) \{/, to: () => 'if (false) {', fails: ['orbit'] },
-  { name: 'the tolerance taken as inclusive', file: U, at: /km < ON_STATION_KM/, to: () => 'km <= ON_STATION_KM', fails: ['orbit'] },
-  { name: 'a fleet at the body by position taken as following it', file: U, at: /(const movement = anchorUnknown \? 'unknown' : anchor === null \? 'fixed' : fleet\.orbitBodyId === null \? 'unknown' : )'left-behind'/, to: (found0) => `${found0[1]}'follows'`, fails: ['orbit'] },
+  { name: 'the tolerance taken as inclusive', file: U, at: /km < ON_STATION_KM(\) \{\s*const movement)/, to: (found0) => `km <= ON_STATION_KM${found0[1]}`, fails: ['orbit'] },
+  { name: 'a fleet at the body by position taken as following it', file: U, at: /(const movement = anchorUnknown \? 'unknown' : anchor === null && point === null \? 'fixed' : tieUnknown \? 'unknown' : )'left-behind'/, to: (found0) => `${found0[1]}'follows'`, fails: ['orbit'] },
   { name: 'a distance between two systems worked out', file: U, at: /const km = sameSystem \? kmBetween\(fleet, station\) : null/, to: () => 'const km = kmBetween(fleet, station)', fails: ['orbit'] },
   { name: 'a fleet whose system is unknown taken for another system', file: U, at: /(finite\(fleet\.systemId, station\.systemId\) \? fleet\.systemId === station\.systemId : )null/, to: (found0) => `${found0[1]}false`, fails: ['orbit'] },
   { name: 'a fleet assigned to the colony not at its base', file: U, at: /const assigned = fleet\.assignedPopulationId !== null && fleet\.assignedPopulationId > 0 && fleet\.assignedPopulationId === colony\.id/, to: () => 'const assigned = false', fails: ['orbit'] },
@@ -2175,8 +2319,8 @@ const MUTATIONS = [
   { name: 'an order that has not arrived marked as arrived', file: V, at: /:data-station-order-arrived="[^"]*"/, to: () => 'data-station-order-arrived="arrived"', fails: ['component'] },
   { name: 'a destination kind left null taken for another destination', file: U, at: /last\.destinationType === null \? null : /, to: () => '', fails: ['orders'] },
   { name: 'a destination ID left null taken for another destination', file: U, at: /last\.destinationId === null \? null : /, to: () => '', fails: ['orders'] },
-  { name: 'a position match taken for a fleet left behind or a fixed point whatever is not known of the orbit', file: U, at: /const movement = anchorUnknown \? 'unknown' : anchor === null \? 'fixed' : fleet\.orbitBodyId === null \? 'unknown' : 'left-behind'/, to: () => "const movement = anchor === null ? 'fixed' : 'left-behind'", fails: ['orbit'] },
-  { name: 'a waypoint tied to no known body taken for a fixed point', file: U, at: /anchorUnknown \? 'unknown' : (?=anchor === null \? 'fixed')/, to: () => '', fails: ['orbit'] },
+  { name: 'a position match taken for a fleet left behind or a fixed point whatever is not known of the orbit', file: U, at: /const movement = anchorUnknown \? 'unknown' : anchor === null && point === null \? 'fixed' : tieUnknown \? 'unknown' : 'left-behind'/, to: () => "const movement = anchor === null && point === null ? 'fixed' : 'left-behind'", fails: ['orbit'] },
+  { name: 'a waypoint tied to no known body taken for a fixed point', file: U, at: /anchorUnknown \? 'unknown' : (?=anchor === null && point === null \? 'fixed')/, to: () => '', fails: ['orbit'] },
   { name: 'a fleet whose movement is not known given the step to go into orbit', file: U, at: /comparison\.movement === 'left-behind'/, to: () => "comparison.movement !== 'follows'", fails: ['component'] },
   { name: 'a fleet whose movement is not known told to be a fixed point', file: V, at: /item\.location\[role\]\.movement === 'fixed'/, to: () => "item.location[role].movement !== 'left-behind'", fails: ['component'] },
   { name: 'the creation time of a waypoint made part of what names it', file: U, at: /(fingerprint: \(row\) => \['waypoint', present\(row\.systemId\), present\(row\.number\))\]/, to: (found0) => `${found0[1]}, present(row.created)]`, fails: ['reuse'] },
@@ -2198,6 +2342,34 @@ const MUTATIONS = [
   { name: 'a waypoint whose tie the save does not give taken for a fixed point', file: U, at: /typeof row\.orbitBodyId !== 'number' \|\| !Number\.isFinite\(row\.orbitBodyId\)/, to: () => 'false', fails: ['reuse'] },
   { name: 'a note kept before the anchor was recorded taken as holding', file: U, at: /const sameAnchor = \(kept, now\) => \{/, to: () => 'const sameAnchor = (kept, now) => {\n  if (kept === undefined) {\n    return true\n  }\n', fails: ['reuse'] },
   { name: 'a note taken for a waypoint whose tie or position is not known', file: U, at: /if \(checked\.station && unverifiable\(picks\.station\.type, checked\.station\.row\)\) \{/, to: () => 'if (false) {', fails: ['reuse'] },
+  { name: 'the Lagrange point a fleet rides not taken for its identity on station', file: U, at: /following\.following === true && km !== null && km < ON_STATION_KM/, to: () => 'false', fails: ['orbit'] },
+  { name: 'a fleet that references the point taken as riding it wherever it stands', file: U, at: / && fleet\.x === pointPosition\.x && fleet\.y === pointPosition\.y/, to: () => '', fails: ['orbit'] },
+  { name: 'point following again uses waypoint proximity', file: U, at: /fleet\.x === pointPosition\.x && fleet\.y === pointPosition\.y/, to: () => 'km !== null && km < ON_STATION_KM', fails: ['orbit', 'component'] },
+  { name: 'a fleet that rides the point of its station not told to', file: U, at: /basis: 'orbit', onPoint: true, /, to: () => "basis: 'orbit', ", fails: ['orbit', 'component'] },
+  { name: 'a fleet at a point by position alone taken as riding it', file: U, at: /(tieUnknown \? 'unknown' : )'left-behind'/, to: (found0) => `${found0[1]}point !== null ? 'follows' : 'left-behind'`, fails: ['orbit'] },
+  { name: 'a fleet whose own point the save does not give taken as left behind', file: U, at: /const tieUnknown = point !== null \? !finite\(fleet\.orbitLagrangeId, fleet\.x, fleet\.y\) \|\| pointUnread : fleet\.orbitBodyId === null/, to: () => 'const tieUnknown = fleet.orbitBodyId === null', fails: ['orbit', 'component'] },
+  { name: 'a waypoint tied to a body taken as tied to a point as well', file: U, at: /\s*&& !\(station\.orbitBodyId > 0\)/, to: () => '', fails: ['orbit'] },
+  { name: 'a fleet at a point told to be in open space when it is off station', file: U, at: / : fleet\.orbitLagrangeId > 0 \? 'at-point' : 'open-space'/, to: () => " : 'open-space'", fails: ['orbit'] },
+  { name: 'the place of a fleet that rides a point not told', file: U, at: /\.\.\.\(fleet\.orbitLagrangeId > 0 \? \{ atPoint: true \} : \{\}\)/, to: () => '', fails: ['orbit', 'component'] },
+  { name: 'the point of a waypoint left out of what holds it', file: U, at: /if \(row\.orbitLagrangeId > 0\) \{\s*return \{ point: row\.orbitLagrangeId \}\s*\}\s*/, to: () => '', fails: ['reuse'] },
+  { name: 'a point not taken as the anchor of a confirmation', file: U, at: /\s*\|\| \(anchor\.point !== undefined && Object\.keys\(anchor\)\.length === 1 && Number\.isInteger\(anchor\.point\) && anchor\.point > 0\)/, to: () => '', fails: ['reuse'] },
+  { name: 'the point a waypoint is tied to not compared', file: U, at: /now\.point === kept\.point/, to: () => 'now.point !== undefined', fails: ['reuse'] },
+  { name: 'the Lagrange point of a fleet not read', file: U, at: /orbitLagrangeId: numberOrNull\(source\.OrbitLagrangeID\),(\s*pointPosition)/, to: (found0) => `orbitLagrangeId: 0,${found0[1]}`, fails: ['loaders', 'component'] },
+  { name: 'a null Lagrange point of a fleet read as 0', file: U, at: /orbitLagrangeId: numberOrNull\(source\.OrbitLagrangeID\),(\s*pointPosition)/, to: (found0) => `orbitLagrangeId: Number(source.OrbitLagrangeID),${found0[1]}`, fails: ['loaders', 'component'] },
+  { name: 'the Lagrange point of a waypoint not read', file: U, at: /orbitLagrangeId: numberOrNull\(source\.OrbitLagrangeID\),(\s*x: numberOrNull)/, to: (found0) => `orbitLagrangeId: 0,${found0[1]}`, fails: ['loaders', 'reuse'] },
+  { name: 'a null Lagrange point of a waypoint read as 0', file: U, at: /orbitLagrangeId: numberOrNull\(source\.OrbitLagrangeID\),(\s*x: numberOrNull)/, to: (found0) => `orbitLagrangeId: Number(source.OrbitLagrangeID),${found0[1]}`, fails: ['loaders'] },
+  { name: 'the Lagrange point of a fleet not asked for', file: U, at: /FCT_Fleet\.OrbitBodyID, FCT_Fleet\.OrbitLagrangeID, /, to: () => 'FCT_Fleet.OrbitBodyID, ', fails: ['loaders'] },
+  { name: 'the Lagrange point of a waypoint not asked for', file: U, at: /FCT_Waypoint\.OrbitBodyID, FCT_Waypoint\.OrbitLagrangeID, /, to: () => 'FCT_Waypoint.OrbitBodyID, ', fails: ['loaders'] },
+  { name: 'the step that puts a fleet on the point of its station not naming the point', file: V, at: /step\.point \? `[^`]*` : /, to: () => '', fails: ['component'] },
+  { name: 'the place of a fleet at a point not told', file: V, at: / : place\.atPoint \? `\$\{where\}, at a Lagrange point` : /, to: () => ' : ', fails: ['component'] },
+  { name: 'a fleet off station at a point told as elsewhere', file: V, at: / 'at-point': '[^']*',/, to: () => '', fails: ['component'] },
+  { name: 'a fleet on its point told to be in orbit', file: V, at: /comparison\.onPoint \? '[^']*' : 'On station: in orbit'/, to: () => "'On station: in orbit'", fails: ['component'] },
+  { name: 'station following ignores the point game', file: U, at: / and FCT_LagrangePoint\.GameID = FCT_Fleet\.GameID/, to: () => '', fails: ['loaders'] },
+  { name: 'station following ignores the point system', file: U, at: / and FCT_LagrangePoint\.SystemID = FCT_Fleet\.SystemID/, to: () => '', fails: ['loaders'] },
+  { name: 'station following substitutes fleet coordinates for the point read', file: U, at: /pointPosition: \{ systemId: numberOrNull\(source\.PointSystemID\), x: numberOrNull\(source\.PointXcor\), y: numberOrNull\(source\.PointYcor\) \}/, to: () => 'pointPosition: { systemId: numberOrNull(source.SystemID), x: numberOrNull(source.Xcor), y: numberOrNull(source.Ycor) }', fails: ['loaders'] },
+  { name: 'unread point coordinates taken as readable', file: U, at: /\|\| !finite\(pointPosition\.systemId, pointPosition\.x, pointPosition\.y\)/, to: () => '', fails: ['loaders'] },
+  { name: 'following alone incorrectly establishes present station status', file: U, at: /following\.following === true && km !== null && km < ON_STATION_KM/, to: () => 'following.following === true', fails: ['orbit', 'component'] },
+  { name: 'the separate following line is hidden', file: V, at: /item\.location\[role\]\.following === true/, to: () => 'false', fails: ['component'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -2232,15 +2404,17 @@ const BENIGN = [
   { name: 'the attributes of the count chip reordered', family: 'attribute order', file: V, at: /(<v-chip)([^>]*?data-station-count[^>]*)(>)/, to: (found0) => `${found0[1]} ${reversed(found0[2])}${found0[3]}` },
   { name: 'whitespace in the mark of a comparison cell', family: 'whitespace', file: V, at: /(<template\s+#\[`item\.stationStatus`\]\s*=\s*"[^"]*"\s*>[\s\S]*?)<provenance-mark\s+:result\s*=\s*(?:"[^"]*"|'[^']*')\s*\/>/, to: (found0) => `${found0[1]}<provenance-mark  :result = "item.location.station.result"  />` },
   { name: 'the attributes of the comparison cell reordered', family: 'attribute order', file: V, at: /(<template\s+#\[`item\.stationStatus`\]\s*=\s*"[^"]*"\s*>\s*<span)([^>]*)>/, to: (found0) => `${found0[1]} ${reversed(found0[2])}>` },
-  { name: 'the words of a step of the checklist reworded', family: 'words', file: V, at: new RegExp(`(if \\(step\\.key === 'orbit'\\) \\{\\s*return )(?:${STRING})`), to: (found0) => `${found0[1]}\`Put the fleet in orbit of \${step.target}.\`` },
+  { name: 'the words of a step of the checklist reworded', family: 'words', file: V, at: new RegExp(`(if \\(step\\.key === 'orbit'\\) \\{\\s*return (?:step\\.point \\? (?:${STRING}) : )?)(?:${STRING})`), to: (found0) => `${found0[1]}\`Put the fleet in orbit of \${step.target}.\`` },
+  { name: 'the words of the step that puts a fleet on a point reworded', family: 'words', file: V, at: new RegExp(`(if \\(step\\.key === 'orbit'\\) \\{\\s*return step\\.point \\? )(?:${STRING})( : )`), to: (found0) => `${found0[1]}\`Establish the fleet's Lagrange point association at the exact point of \${step.target}; reaching a point-only waypoint assigns none.\`${found0[2]}` },
+  { name: 'the words of a fleet on its point reworded', family: 'words', file: V, at: /(comparison\.onPoint \? )'[^']*'/, to: (found0) => `${found0[1]}'On station: riding the Lagrange point of the station'` },
   { name: 'the words of the verdicts reworded', family: 'words', file: V, at: /(const VERDICT_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} evidence: 'Shown by the save', confirmed: 'Confirmed by the player', reused: 'Held by another object', unwitnessed: 'Not shown to be the same'${found0[2]}` },
-  { name: 'the words of the places of a fleet that is off station reworded', family: 'words', file: V, at: /(const WHERE_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} 'other-system': 'elsewhere in the galaxy', 'other-orbit': 'around another body', 'open-space': 'in the open'${found0[2]}` },
+  { name: 'the words of the places of a fleet that is off station reworded', family: 'words', file: V, at: /(const WHERE_WORDS = \{)[^}]*(\})/, to: (found0) => `${found0[1]} 'other-system': 'elsewhere in the galaxy', 'other-orbit': 'around another body', 'at-point': 'near a Lagrange point', 'open-space': 'in the open'${found0[2]}` },
   { name: 'the table headers listed in the opposite order', family: 'list order', file: V, at: /(headers\(\) \{\s*return \[)([\s\S]*?)(\s*\]\s*\})/, to: (found0) => `${found0[1]}${found0[2].split('\n').reverse().join('\n')}${found0[3]}` },
   { name: 'the foot of the panel reworded', family: 'words', file: V, at: /(data-station-limits>)[\s\S]*?(\s*<\/div>)/, to: (found0) => `${found0[1]}\n        Notes are local to the campaign; a fleet is matched to its note only where the save shows it or the player confirmed it.${found0[2]}` },
   { name: 'the label of the view reworded', family: 'words', file: P, at: /(stations\s*:\s*)(?:'[^']*'|"[^"]*")(?=\s*\})/, to: (found0) => `${found0[1]}'Stations of fleets'` },
   { name: 'the words naming the reads of the panel reworded', family: 'words', file: X, at: /(stationObjects\s*:\s*)(?:'[^']*'|"[^"]*")/, to: (found0) => `${found0[1]}'the fleets and the places they can sit at'` },
   { name: 'the assumptions of a note reworded', family: 'words', file: U, at: /(const ASSUMPTIONS = Object\.freeze\(\[)[^\]]*(\]\))/, to: (found0) => `${found0[1]}'The note is the player\\'s own and gives the game no order', 'The fleet a note names is the fleet only where the save shows it or the player confirmed that object'${found0[2]}` },
-  { name: 'the reason of an unknown comparison reworded', family: 'words', file: U, at: /(if \(km === null\) \{\s*return UNKNOWN\('station', sameSystem === null \? )'(?:[^'\\]|\\.)*'/, to: (found0) => `${found0[1]}'The system of the fleet or of the station is not known.'` },
+  { name: 'the reason of an unknown comparison reworded', family: 'words', file: U, at: /(if \(km === null\) \{\s*return \{ \.\.\.UNKNOWN\('station', sameSystem === null \? )'(?:[^'\\]|\\.)*'/, to: (found0) => `${found0[1]}'The system of the fleet or of the station is not known.'` },
   { name: 'the arrival caveat of an order worded as a negated completion', family: 'negated words', file: V, at: /(<span v-if="order\.arrived">)[^<]*(<\/span>)/, to: (found0) => `${found0[1]} (arrived; work at the destination is not necessarily complete)${found0[2]}` },
 ].map((edit, index) => ({ id: `benign:${index}`, ...edit }))
 

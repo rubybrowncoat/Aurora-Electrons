@@ -333,7 +333,7 @@ import { SERVICE_BOUNDS, SERVICE_KINDS, SERVICE_REASONS, SERVICE_VERDICTS, ledge
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
 import { fleetTimingOf, flightOnly, loadSystemDust, waitResult } from '../utilities/route-time'
 import { cachedPropagation } from '../utilities/orbit-propagation'
-import { ADAPTERS, CONDITIONS, figureOf, lagrangeEndpoint, placeEndpoint, routePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
+import { ADAPTERS, CONDITIONS, ORBIT_FAMILIES, figureOf, lagrangeEndpoint, placeEndpoint, routePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -494,9 +494,9 @@ export default {
       return place && this.origin && place.key !== this.origin.key ? place : null
     },
 
-    // The endpoints whose orbits are read: the two ends of the run and the Lagrange points a route may jump between.
+    // The endpoints whose orbits are read: the two ends of the run, an object a Lagrange point carries among them (its point is read with it), and the Lagrange points a route may jump between.
     orbitEndpoints() {
-      const ends = [this.origin, this.destination].filter(Boolean).map(placeEndpoint).filter((endpoint) => ['body', 'colony', 'lagrange-point'].includes(endpoint.family))
+      const ends = [this.origin, this.destination].filter(Boolean).map(placeEndpoint).filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))
 
       return [...ends, ...(this.useLagrange ? this.lagrangePoints.map(lagrangeEndpoint) : [])]
     },
