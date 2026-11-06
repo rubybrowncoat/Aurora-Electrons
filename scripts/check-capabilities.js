@@ -6,7 +6,7 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the saves of the line (the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the played 3.2 save and the migrated 3.1 fixture of scripts/lib/fixtures.js): of the 3.2 line with none of the seven columns missing, the formula version 3.2.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report is supported, and the columns the reports lack are exactly those `RENAMED_READS` lists, the columns Aurora 3.1 renamed or removed that a read of a page still names with the inputs and reports that still name each, so a half-migrated set of reads fails rather than passing as the item's whole set (it is empty since AE-308-02 and AE-308-03 deleted their entries), none of them a column of DIM_Gases or FCT_AtmosphericGas. The altered copies and the report-level checks are made from the shipped 3.1 save;
+  - the saves of the line (the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the two played 3.2 saves and the migrated 3.1 fixture of scripts/lib/fixtures.js): of the 3.2 line with none of the seven columns missing, the formula version 3.2.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report is supported, and the columns the reports lack are exactly those `RENAMED_READS` lists, the columns Aurora 3.1 renamed or removed that a read of a page still names with the inputs and reports that still name each, so a half-migrated set of reads fails rather than passing as the item's whole set (it is empty since AE-308-02 and AE-308-03 deleted their entries), none of them a column of DIM_Gases or FCT_AtmosphericGas. The altered copies and the report-level checks are made from the shipped 3.1 save;
   - the saves from before the line (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): refused as a save from before Aurora 3.0, naming the seven columns Aurora 3.0 added that the file lacks, with every report still evaluated so that the layout alone holds each page back, and no formula version (the direct loader states none for them either);
   - copies of the shipped 3.1 save, in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
@@ -38,20 +38,21 @@ const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
-const { FIXTURE, PLAYED } = require('./lib/fixtures')
+const { FIXTURE, PLAYED, PLAYED_NEXT } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
 const READS_FILE = path.join(repo, 'src', 'renderer', 'utilities', 'capability-reads.js')
 const PLANNED_ROUTES = new Set(['/settings', '/about'])
 
-// The saves the preflight is run on, each with the line it is expected to be of: the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the migrated 3.1 fixture and the played 3.2 save are the 3.2 line (the three releases share one schema), the two 2.7 saves are refused as saves from before Aurora 3.0.
+// The saves the preflight is run on, each with the line it is expected to be of: the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the migrated 3.1 fixture and the two played 3.2 saves are the 3.2 line (the three releases share one schema), the two 2.7 saves are refused as saves from before Aurora 3.0.
 const REAL = [
   { label: 'shipped 3.0 save', file: 'saves/AuroraDB_300_shipped.db', expect: 'accepted' },
   { label: 'shipped 3.1 save', file: 'saves/AuroraDB_310_shipped.db', expect: 'accepted' },
   { label: 'migrated 3.1 save', file: FIXTURE.file, expect: 'accepted' },
   { label: 'shipped 3.2 save', file: 'saves/AuroraDB_320_shipped.db', expect: 'accepted' },
-  { label: 'played 3.2 save', file: PLAYED.file, expect: 'accepted' },
+  { label: 'played 3.2 save A', file: PLAYED.file, expect: 'accepted' },
+  { label: 'played 3.2 save B', file: PLAYED_NEXT.file, expect: 'accepted' },
   { label: 'modded 2.7 save', file: 'AuroraDB.db', expect: 'refused' },
   { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db', expect: 'refused' },
 ]
