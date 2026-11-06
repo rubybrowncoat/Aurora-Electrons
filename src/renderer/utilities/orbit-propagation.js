@@ -1,8 +1,8 @@
-// Saved body and point coordinates are current at GameTime, not the construction-cycle LastGrowthTime. Supported orbits are rebuilt and advanced from that epoch in whole source calls. Snapshots use completed calls; movement sees the pulse-opening update in sub-pulse mode, or the preceding increment update in after-movement mode. Eccentric horizons must remain below one orbit and within MAX_CALLS. Every refusal keeps the saved position with its reason.
+// Saved body and point coordinates are the baseline at GameTime, not the construction-cycle LastGrowthTime. Snapshots advance to the requested time; movement sees the pulse-opening update in sub-pulse mode, or the preceding increment update in after-movement mode. Eccentric horizons must remain below one orbit and within MAX_CALLS. Every refusal keeps the saved position with its reason.
 //
 // The rules are those of the game's own orbit update, `Game.UpdateOrbitalPositions` (Game.cs 27558-28030 of the 3.1.0 source, the formula of the 3.2 line), as the saves reproduce them: a body at bearing B on an orbit of semi-major axis a (AU, or km for a moon) lies at the coordinate angle B - 90 degrees; an eccentric body's ellipse centre is offset a x e from its star along EccentricityDirection and the coordinate angle is turned by the same direction; one call of the update with `deltaSeconds` lowers a circular body's and a moon's bearing by 360 x deltaSeconds / (Year x 3600) and an eccentric body's by that times current / mean, `mean = sqrt(2 / a - 1 / a)` (`SystemBody.InitialiseOrbitalSpeed`, SystemBody.cs 806-816) and `current = sqrt(2 / r - 1 / a)` at the distance r from the star that the body has when the call begins (`SystemBody.UpdateCurrentOrbitalSpeed`, SystemBody.cs 819-829; Game.cs 27669-27687), so an eccentric position is one call after another and no Kepler solve; a moon is at its parent's position and a trojan has its parent's bearing plus its own offset (Game.cs 27726-27742); a Lagrange point is at its body's bearing plus 60 degrees (Game.cs 27760-27763). Nothing moves with the planet and moon switch (`FCT_Game.OrbitalMotion`) off (Game.cs 27562-27565), and there is no asteroid switch: `OrbitalMotionAst` is stored and read by no part of the update (Game.cs 27645-27668 select every non-fixed independent asteroid).
 //
-// Future calls are assumed to repeat the saved cadence: SubPulseLength when OrbitalMovementInSubPulse is 1, otherwise the latest FCT_Increments.Length. The source advances the clock, updates sub-pulse orbits, then processes movement (Game.cs 23741-23748, 4051-4087, 5705-5758, 7368-7373); after-increment orbits update only after movement ends (23760-23768). Thus movement in (t0 + (n-1)L, t0 + nL] sees call n in sub-pulse mode and call n-1 in increment mode. A snapshot at a boundary is after its update, and exactly t0 remains saved. No shorter remainder call or coarser substitute is invented. Circular and moon geometry can combine whole calls algebraically; eccentric bearings recalculate current/mean at every call and refuse more than MAX_CALLS over the horizon.
+// Future cadence is estimated from SubPulseLength when OrbitalMovementInSubPulse is 1, otherwise the latest FCT_Increments.Length. The source advances the clock, updates sub-pulse orbits, then processes movement (Game.cs 23741-23748, 4051-4087, 5705-5758, 7368-7373); after-increment orbits update only after movement ends (23760-23768). Thus movement in (t0 + (n-1)L, t0 + nL] sees call n in sub-pulse mode and call n-1 in increment mode. A no-movement snapshot instead advances circular and moon-own bearings for the entire elapsed time, and an eccentric bearing by whole calls then one final remainder call. That local partial call never enters the whole-call cache. Exactly t0 remains saved. Every eccentric call recalculates current/mean and counts against MAX_CALLS; no coarser substitute is used. Prediction assumes no future forced load/edit updates: loading can force 60 seconds of orbital advance without advancing GameTime (Game.cs 40738, 36286-36302), but saved coordinates remain the baseline and no load history is inferred here.
 
 import { KM_PER_AU } from './jump-graph'
 import { inputWords } from './provenance'
@@ -15,7 +15,7 @@ export const ARRIVAL_MAX_EVALUATIONS = 8
 // A rebuilt position more than this far from the saved one is not trusted.
 export const REBUILD_TOLERANCE_KM = 1
 
-// The maximum whole source calls computed for one eccentric body over the requested horizon. Longer horizons are refused, never silently advanced at a different cadence.
+// The maximum source calls computed for one eccentric body over the requested horizon, including a snapshot's final partial call. Longer horizons are refused, never silently advanced at a different cadence.
 export const MAX_CALLS = 100000
 
 const MAX_PARENTS = 4
@@ -178,7 +178,7 @@ const callsOf = (orbits, body, length) => {
   return tables.get(key)
 }
 
-// The state of a body `elapsed` seconds after the saved epoch: { Xcor, Ycor, bearing, advanced }. Snapshots use completed updates; `movement` selects the position the move-order phase sees, including the pre-update side of an exact increment boundary. `advanced` marks an eccentric orbit whose estimate rests on the saved call length. A body whose orbit is not moving stays saved; an eccentric body past one orbit is not worked out (`horizon: false` lifts that for rebuilds).
+// The state of a body `elapsed` seconds after the saved epoch: { Xcor, Ycor, bearing, advanced }. Snapshots reach the full elapsed time; `movement` selects whole calls in the move-order phase, including the pre-update side of an exact increment boundary. `advanced` marks an eccentric orbit whose estimate rests on the saved call length. A body whose orbit is not moving stays saved; an eccentric body past one orbit is not worked out (`horizon: false` lifts that for rebuilds).
 const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, movement = false } = {}) => {
   const body = bodyOf(orbits, id, depth)
   const family = familyOf(body)
@@ -199,13 +199,14 @@ const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, moveme
 
   const length = callLength(clock)
 
-  if (planets && elapsed > 0 && length === null) {
+  if (planets && elapsed > 0 && length === null && (movement || family === 'eccentric')) {
     throw unsupported('cadence-unread')
   }
 
   const count = elapsed / (length || 1)
   const whole = !planets ? 0 : movement && elapsed > 0 ? switchOf(clock.orbitalMovementInSubPulse) ? Math.ceil(count) : Math.ceil(count) - 1 : Math.floor(count)
-  const seconds = whole * (length || 1)
+  const seconds = !planets ? 0 : movement ? whole * (length || 1) : elapsed
+  const remainder = !planets || movement ? 0 : elapsed - whole * (length || 1)
   const year = body.year * 3600
   let advanced = false
   let bearing = body.bearing
@@ -226,8 +227,12 @@ const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, moveme
       throw unsupported('orbit-horizon')
     }
 
-    if (whole > MAX_CALLS) {
-      throw Object.assign(new Error('cadence-budget'), { code: 'cadence-budget', unsupported: true, details: [`the horizon needs ${whole} calls of ${length} s; the app computes at most ${MAX_CALLS}`] })
+    const evaluations = whole + (remainder > 0 ? 1 : 0)
+
+    if (evaluations > MAX_CALLS) {
+      const needs = remainder > 0 ? `${whole} calls of ${length} s and a final call of ${remainder} s, ${evaluations} evaluations` : `${evaluations} calls of ${length} s`
+
+      throw Object.assign(new Error('cadence-budget'), { code: 'cadence-budget', unsupported: true, details: [`the horizon needs ${needs} against a budget of ${MAX_CALLS}`] })
     }
 
     const star = starOf(orbits, body)
@@ -240,6 +245,10 @@ const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, moveme
 
     advanced = true
     bearing = calls[whole]
+
+    if (remainder > 0) {
+      bearing = advance(body, star, bearing, remainder)
+    }
   }
 
   const point = family === 'moon' ? moonPoint(body.distance, bearing, parent) : orbitPoint(body, bearing, starOf(orbits, body))
