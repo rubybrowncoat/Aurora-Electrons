@@ -27,7 +27,7 @@ registerRule({
 
 registerRule({
   id: 'mineBootstrap.localBuild',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Population.Efficiency, the colony\'s construction capacity and its running projects', 'DIM_PlanetaryInstallation.Cost, Workers'],
@@ -37,7 +37,7 @@ registerRule({
 
 registerRule({
   id: 'mineBootstrap.import',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Population (builder colony capacity and stock)', 'FCT_ShipClass.CargoCapacity, MaxSpeed, Size, MilitaryEngines and the jump drives of the class', 'FCT_Ship (ships of each class)', 'jump points'],

@@ -91,7 +91,7 @@ registerRule({
 
 registerRule({
   id: SUPPLY_DRAW,
-  versions: RUNTIME_VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP a year',
   verification: 'estimated',
   structure: ['design.averageRepairCost', 'shipRuntime.failureChanceNow'],

@@ -31,7 +31,7 @@ const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 registerRule({
   id: 'mspSupply.stockOnly',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP/yr',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles of the input minerals', 'logistics.mspProduction'],
@@ -51,7 +51,7 @@ registerRule({
 
 registerRule({
   id: 'mspSupply.delivery',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 't',
   verification: 'estimated',
   structure: ['FCT_MassDriverPackets.<mineral>, Speed, Xcor, Ycor, DestID', 'FCT_SystemBody.Xcor, Ycor', 'the Hauling Planner\'s plan and freighter classes'],

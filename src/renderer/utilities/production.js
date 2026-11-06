@@ -162,7 +162,7 @@ registerRule({
 
 registerRule({
   id: 'production.stockCover',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'units',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.Amount, PartialCompletion, FuelRequired and the mineral columns', 'FCT_Population mineral stockpiles and FuelStockpile', 'production.industryFinish'],

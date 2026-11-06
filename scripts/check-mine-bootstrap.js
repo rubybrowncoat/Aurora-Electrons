@@ -198,8 +198,8 @@ const pure = (ctx) => {
   const add = (name, test) => statements.push([name, test])
   const runLocal = (over = {}) => mb.localRoute(local(over))
 
-  add('rules: the four rules are registered with the kind of check each is, all on the source-verified line', () => {
-    const expected = { 'mineBootstrap.requirements': ['confirmed', '3.2.x'], 'mineBootstrap.localBuild': ['estimated', '3.2.x'], 'mineBootstrap.import': ['estimated', '3.2.x'], 'mineBootstrap.groundAssistance': ['estimated', '3.2.x'] }
+  add('rules: the four rules are registered with the kind of check each is, the worker-dependent bootstrap rules retained under B09/B07', () => {
+    const expected = { 'mineBootstrap.requirements': ['confirmed', '3.2.x'], 'mineBootstrap.localBuild': ['estimated', '2.7.x'], 'mineBootstrap.import': ['estimated', '2.7.x'], 'mineBootstrap.groundAssistance': ['estimated', '3.2.x'] }
     const bad = Object.entries(expected).filter(([id, [verification, version]]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || rule.versions.length !== 1 || !rule.versions.includes(version) }).map(([id]) => id)
 
     assert.deepEqual(bad, [])
