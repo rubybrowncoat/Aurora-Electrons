@@ -3,10 +3,10 @@
 
   bun scripts/check-version-line.js [--no-mutations] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]] [--detail]
 
-  A release is numbered <Aurora major>.<Aurora minor>.<count of releases for that line> (2.7.10 is the first of the 2.7 line), so the first two numbers of the version in package.json and the first two of the line the app states for the saves it reads (STATED_FORMULA_VERSION of utilities/capabilities.js, `3.2.x` on `3.2`) are one statement made in two places. The head reads both as the app does (package.json as JSON, the constant from the module) and proves:
+  A release is numbered <Aurora major>.<Aurora minor>.<count of releases for that line> (3.2.0 is the first of the 3.2 line), so the first two numbers of the version in package.json and the first two of the line the app states for the saves it reads (STATED_FORMULA_VERSION of utilities/capabilities.js, `3.2.x` on `3.2`) are one statement made in two places. The head reads both as the app does (package.json as JSON, the constant from the module) and proves:
   - version-form: the package version is a plain three-part version (numbers without a leading zero) and the stated one a line `major.minor.x`;
-  - version-line: from 2.7.10 on, the major.minor of the package version is the stated line's. A version before 2.7.10 is numbered the old way (0.x) and states no line, so it passes with a note; the check applies from the bump commit that makes the version 2.7.10 or later.
-  Planted faults are states of the two files, never a change of this script's own logic, each naming both values so that a move of the real line changes none of them: a package version one minor or one major ahead of the line, the stated line moved to 3.0.x or 2.8.x with the package left at 2.7.10, a package version of two parts or with a leading zero, a stated line that names a patch. Each must fail the check named for it by a wrong value. The rewrites that must pass: the next count of the line (2.7.11), the 3.0 line once both move (3.0.0 against 3.0.x), and the old numbering (0.11.0).
+  - version-line: the major.minor of the package version is the stated line's.
+  Planted faults are states of the two files, never a change of this script's own logic, each naming both values so that a move of the real line changes none of them: a package version one minor or one major ahead of the line, the stated line moved to 3.0.x or 3.3.x with the package left at 3.2.0, a package version of two parts or with a leading zero, a stated line that names a patch. Each must fail the check named for it by a wrong value. The rewrites that must pass: the next count of the line (3.2.1) and the 3.3 line once both move (3.3.0 against 3.3.x).
 
   The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of the fixture save (scripts/lib/fixtures.js) and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to another line (3.0.x, or 4.1.x when the real line is 3.0.x), so a line that does not come from the constant fails by a value:
   - about-line: the line on screen reads "For Aurora <stated line> saves", the sentence the release notes and the refusal notice repeat, with the line the served constant holds;
@@ -37,8 +37,6 @@ const SAVE = FIXTURE.file
 const TIMEOUT = 90000
 // The line the served constant is moved to, so that a page which does not read it shows the line it was built with: the first of these the real line is not.
 const MOVED = ['3.0.x', '4.1.x']
-// The first version of the rule: a package version before it is numbered the old way (0.x) and states no line.
-const RULE_STARTS = [2, 7, 10]
 const NUMBER = '(0|[1-9]\\d*)'
 const PACKAGE_FORM = new RegExp(`^${NUMBER}\\.${NUMBER}\\.${NUMBER}$`)
 const STATED_FORM = new RegExp(`^${NUMBER}\\.${NUMBER}\\.x$`)
@@ -50,12 +48,6 @@ const partsOf = (version, form) => {
   const match = typeof version === 'string' ? form.exec(version) : null
 
   return match ? match.slice(1).map(Number) : null
-}
-
-const before = (version, start) => {
-  const at = version.findIndex((part, index) => part !== start[index])
-
-  return at !== -1 && version[at] < start[at]
 }
 
 // ---------- the two statements of the line ----------
@@ -82,11 +74,11 @@ const VERSION_CHECKS = [
     assert.ok(partsOf(packageVersion, PACKAGE_FORM) !== null, `the package version ${JSON.stringify(packageVersion)} is not major.minor.patch`)
     assert.ok(partsOf(stated, STATED_FORM) !== null, `the stated version ${JSON.stringify(stated)} is not a line major.minor.x`)
   }),
-  check('version-line', 'from 2.7.10 on, the major.minor of the package version is the stated line\'s', ({ packageVersion, stated }) => {
+  check('version-line', 'the major.minor of the package version is the stated line\'s', ({ packageVersion, stated }) => {
     const own = partsOf(packageVersion, PACKAGE_FORM)
     const line = partsOf(stated, STATED_FORM)
 
-    if (own === null || line === null || before(own, RULE_STARTS)) {
+    if (own === null || line === null) {
       return
     }
 
@@ -96,20 +88,19 @@ const VERSION_CHECKS = [
 
 // States of the two files that break the rule, each with the checks that name it, and states that keep it. Each names both values, so that a move of the real line (the 3.0 trunk) changes none of them.
 const VERSION_FAULTS = [
-  { name: 'the package version is a minor ahead of the stated line (2.8.0 against 2.7.x)', state: { version: '2.8.0', constant: '2.7.x' }, fails: ['version-line'] },
-  { name: 'the package version is a major ahead of the stated line (3.7.10 against 2.7.x)', state: { version: '3.7.10', constant: '2.7.x' }, fails: ['version-line'] },
-  { name: 'the stated line moves to 3.0.x and the package version stays 2.7.10', state: { version: '2.7.10', constant: '3.0.x' }, fails: ['version-line'] },
-  { name: 'the stated line moves to 2.8.x and the package version stays 2.7.10', state: { version: '2.7.10', constant: '2.8.x' }, fails: ['version-line'] },
-  { name: 'the package version has two parts (2.7)', state: { version: '2.7', constant: '2.7.x' }, fails: ['version-form'] },
-  { name: 'the package version has a leading zero (2.07.10)', state: { version: '2.07.10', constant: '2.7.x' }, fails: ['version-form'] },
-  { name: 'the stated version names a patch (2.7.1)', state: { version: '2.7.10', constant: '2.7.1' }, fails: ['version-form'] },
+  { name: 'the package version is a minor ahead of the stated line (3.3.0 against 3.2.x)', state: { version: '3.3.0', constant: '3.2.x' }, fails: ['version-line'] },
+  { name: 'the package version is a major ahead of the stated line (4.7.10 against 3.2.x)', state: { version: '4.7.10', constant: '3.2.x' }, fails: ['version-line'] },
+  { name: 'the stated line moves to 3.0.x and the package version stays 3.2.0', state: { version: '3.2.0', constant: '3.0.x' }, fails: ['version-line'] },
+  { name: 'the stated line moves to 3.3.x and the package version stays 3.2.0', state: { version: '3.2.0', constant: '3.3.x' }, fails: ['version-line'] },
+  { name: 'the package version has two parts (3.2)', state: { version: '3.2', constant: '3.2.x' }, fails: ['version-form'] },
+  { name: 'the package version has a leading zero (3.02.0)', state: { version: '3.02.0', constant: '3.2.x' }, fails: ['version-form'] },
+  { name: 'the stated version names a patch (3.2.1)', state: { version: '3.2.0', constant: '3.2.1' }, fails: ['version-form'] },
 ]
 
 const VERSION_BENIGN = [
-  { name: 'the next count of the line (2.7.11 against 2.7.x)', state: { version: '2.7.11', constant: '2.7.x' } },
-  { name: 'the first count of the line (2.7.10 against 2.7.x)', state: { version: '2.7.10', constant: '2.7.x' } },
-  { name: 'both move to the 3.0 line (3.0.0 against 3.0.x)', state: { version: '3.0.0', constant: '3.0.x' } },
-  { name: 'the old numbering (0.11.0 against 2.7.x)', state: { version: '0.11.0', constant: '2.7.x' } },
+  { name: 'the next count of the line (3.2.1 against 3.2.x)', state: { version: '3.2.1', constant: '3.2.x' } },
+  { name: 'the first count of the line (3.2.0 against 3.2.x)', state: { version: '3.2.0', constant: '3.2.x' } },
+  { name: 'both move to the 3.3 line (3.3.0 against 3.3.x)', state: { version: '3.3.0', constant: '3.3.x' } },
 ]
 
 // ---------- the About page, as a player sees it ----------
@@ -399,13 +390,7 @@ const judgeAbout = async (change, what) => {
 }
 
 const checkVersionHead = async () => {
-  const state = await stateOf({})
-
-  if (before(partsOf(state.packageVersion, PACKAGE_FORM) || [0, 0, 0], RULE_STARTS)) {
-    console.log(`INFO  the package version ${state.packageVersion} is numbered the old way, so the line check starts at 2.7.10`)
-  }
-
-  reportResults(await runChecks(VERSION_CHECKS, state))
+  reportResults(await runChecks(VERSION_CHECKS, await stateOf({})))
 }
 
 const checkVersionFault = async (fault) => {

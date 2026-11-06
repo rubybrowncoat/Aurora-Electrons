@@ -157,7 +157,7 @@ export const baseGrowthRate = (population) => (population > 0 ? Math.min(0.1, 0.
 // Full growth up to a third of the body's capacity, then a linear fall to none at capacity. A capacity that is not positive has no crowding figure.
 export const crowdingFactor = (bodyPopulation, capacity) => (capacity > 0 ? Math.max(0, Math.min(1, 1.5 * (1 - bodyPopulation / capacity))) : NaN)
 
-// Annual growth as a fraction. The base rate takes the governor bonus, the species modifier scales that growth only where it is positive (3.1: `Population.RecalculateAnnualSurfaceGrowthAndOvercrowding`, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since 2.7.1, line 229), crowding scales the product and radiation takes 1% per 400 points off the result.
+// Annual growth as a fraction. The base rate takes the governor bonus, the species modifier scales that growth only where it is positive (3.1: `Population.RecalculateAnnualSurfaceGrowthAndOvercrowding`, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since the earlier line, line 229), crowding scales the product and radiation takes 1% per 400 points off the result.
 export const growthRate = (colony, population, bodyPopulation, capacity) => {
   const growth = baseGrowthRate(population) * colony.PopulationGrowthBonus
 

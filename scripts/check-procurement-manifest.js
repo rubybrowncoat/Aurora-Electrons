@@ -144,8 +144,8 @@ const pure = (ctx) => {
   const add = (name, test) => statements.push([name, test])
   const run = (over = {}) => pm.reconcile(input(over))
 
-  add('rules: both rules are registered for 2.7.x as estimated', () => {
-    const bad = ['production.procurementManifest', 'production.procurementReservations'].filter((id) => { const rule = provenance.getRule(id); return !rule || rule.verification !== 'estimated' || !rule.versions.includes('2.7.x') })
+  add('rules: both rules are registered as estimated, the manifest for 3.2.x and the reservations for 2.7.x', () => {
+    const bad = Object.entries({ 'production.procurementManifest': '3.2.x', 'production.procurementReservations': '2.7.x' }).filter(([id, line]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== 'estimated' || !rule.versions.includes(line) }).map(([id]) => id)
 
     assert.deepEqual(bad, [])
 

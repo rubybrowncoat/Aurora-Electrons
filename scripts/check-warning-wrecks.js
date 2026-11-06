@@ -269,7 +269,7 @@ const checkRewrite = async (rewrite) => {
 const DEADLINE = 120
 
 const variantsOf = (mutating) => [
-  { key: 'head', name: 'the head: the known-wrecks warning over the Skoormit save', head: true, heading: 'The known-wrecks warning (utilities/warnings/space.js)', deadline: DEADLINE, run: checkHead },
+  { key: 'head', name: 'the head: the known-wrecks warning over the fixture save', head: true, heading: 'The known-wrecks warning (utilities/warnings/space.js)', deadline: DEADLINE, run: checkHead },
   ...(mutating ? FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults', deadline: DEADLINE, run: () => checkFault(fault) })) : []),
   ...(mutating ? BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites that say the same thing', deadline: DEADLINE, run: () => checkRewrite(rewrite) })) : []),
 ]

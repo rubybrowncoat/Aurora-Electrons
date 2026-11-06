@@ -10,7 +10,7 @@
   - cross-section: the effective and the uncloaked cross-section stay distinct for a cloaked class, the floor of 0.3 HS, the cloak that covers the class, the last such cloak, and the active reach with the floor and the square of the cross-section over the resolution;
   - reduction: the engines rebuilt at each researched thermal reduction level, the cost factor read from the tech row;
   - em: shields × 30, an active sensor max(1, trunc(strength) × trunc(resolution)), each sensor on its own and never summed, 0 and not unknown for no shields or no active sensor;
-  - saves: ClassThermal, ClassCrossSection and SensorReduction rebuilt for every class of every save in saves/ from the loader and the rules (read-only), with the two modded classes whose stored thermal signature the rule does not reproduce pinned; a save that is not there is reported as skipped, never as passed.
+  - saves: ClassThermal, ClassCrossSection and SensorReduction rebuilt for every class of the registered saves of the line in saves/ (the fixture of scripts/lib/fixtures.js and the played saves) from the loader and the rules (read-only); a save that is not there is reported as skipped, never as passed.
 
   Mutations: each deliberate fault planted in the source of a module (the module is loaded from its text, scripts/lib/utilities.js, with a registry of provenance rules of its own, so no fault reaches another) runs the checks it names and must fail them. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
@@ -22,6 +22,7 @@ const { patched } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { PINNED_ENGINES } = require('./lib/pinned-engines')
 const { PINNED_SAVES, pinnedSaveOfGame } = require('./lib/pinned-saves')
+const { LINE_SAVE_FILES } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -77,7 +78,7 @@ const sizes = (m, cls) => {
 
 // ---------- the saves ----------
 
-// The saves of saves/ the checks read, each { file, database }, opened by `run`.
+// The registered saves of the line in saves/ the checks read, each { file, database }, opened by `run`.
 const SAVES = []
 
 const skipped = (reason) => ({ skipped: reason })
@@ -106,18 +107,10 @@ const openSave = (file) => new Promise((resolve, reject) => {
 })
 
 const openSaves = async () => {
-  const files = fs.existsSync(savesDirectory) ? fs.readdirSync(savesDirectory).filter((name) => name.endsWith('.db')).sort() : []
-
-  for (const file of files) {
+  for (const file of LINE_SAVE_FILES.filter((name) => fs.existsSync(path.join(savesDirectory, name)))) {
     SAVES.push(await openSave(file))
   }
 }
-
-// The two modded classes of one save whose stored thermal signature is 12.5 times what the rule gives.
-const PINNED = Object.freeze([
-  { file: 'AuroraDB_270_unknown.db', game: 140, race: 784, classId: 62932, name: 'Owl', field: 'ClassThermal', stored: 15000, computed: 1200 },
-  { file: 'AuroraDB_270_unknown.db', game: 140, race: 784, classId: 62946, name: 'Akita', field: 'ClassThermal', stored: 30000, computed: 2400 },
-])
 
 const racesOf = async (save) => {
   const [rows] = await save.database.query('select distinct GameID, RaceID from FCT_ShipClass order by GameID, RaceID')
@@ -167,8 +160,6 @@ const reconcileSave = async (m, save) => {
 
   return { tally, mismatches }
 }
-
-const explains = (pin, mismatch) => pin.file === mismatch.file && pin.game === mismatch.game && pin.race === mismatch.race && pin.classId === mismatch.classId && pin.field === mismatch.field && sameFigure(pin.stored, mismatch.stored) && sameFigure(pin.computed, mismatch.computed)
 
 const describeMismatch = (mismatch) => `${mismatch.file} game ${mismatch.game} race ${mismatch.race} class ${mismatch.classId} ${mismatch.name} ${mismatch.field}: stored ${mismatch.stored}, rebuilt ${mismatch.computed}`
 
@@ -855,7 +846,6 @@ check('reduction: a pinned engine explains a difference only at its saved state,
   }
 
   assert.equal(new Set(PINNED_ENGINES.map((pin) => pin.save)).size > 1, true, 'the engines are pinned in more than one saved state')
-  assert.equal(PINNED_ENGINES.filter((pin) => pin.save === 'modded-g140').map((pin) => `${pin.id} ${pin.field}`).join() === PINNED_ENGINES.filter((pin) => pin.save === 'modded-270-g140').map((pin) => `${pin.id} ${pin.field}`).join(), true, 'the two saved states of the modded campaign hold the same engine pins')
 })
 
 // ----- em
@@ -905,59 +895,29 @@ check('em: no shields or no active sensor gives 0, not unknown', (m) => {
 
 // ----- saves
 
-check('saves: ClassThermal, ClassCrossSection and SensorReduction are rebuilt for every class, but for the pinned rows', async (m) => {
+check('saves: ClassThermal, ClassCrossSection and SensorReduction are rebuilt for every class', async (m) => {
   if (!SAVES.length) {
-    return skipped('no save in saves/')
+    return skipped('no save of the line in saves/')
   }
 
   const lines = []
-  const unexplained = []
-  const seen = new Set()
+  const mismatched = []
   let classes = 0
-  let explained = 0
 
   for (const save of SAVES) {
     const { tally, mismatches } = await reconcileSave(m, save)
-    const own = mismatches.filter((mismatch) => PINNED.some((pin, index) => explains(pin, mismatch) && seen.add(index)))
 
-    unexplained.push(...mismatches.filter((mismatch) => !own.includes(mismatch)))
+    mismatched.push(...mismatches)
     classes += tally.classes
-    explained += own.length
 
     const count = (field) => mismatches.filter((mismatch) => mismatch.field === field).length
 
-    lines.push(`${save.file}: ${tally.classes} classes in ${tally.races} races, ${tally.withEngines} with engines, ${tally.cloaked} cloaked, ${tally.several} with several engine designs; mismatches: ClassThermal ${count('ClassThermal')}, ClassCrossSection ${count('ClassCrossSection')}, SensorReduction ${count('SensorReduction')}, of which ${own.length} explained`)
+    lines.push(`${save.file}: ${tally.classes} classes in ${tally.races} races, ${tally.withEngines} with engines, ${tally.cloaked} cloaked, ${tally.several} with several engine designs; mismatches: ClassThermal ${count('ClassThermal')}, ClassCrossSection ${count('ClassCrossSection')}, SensorReduction ${count('SensorReduction')}`)
   }
 
   assert.ok(classes > 0, 'the saves hold no class')
-  assert.deepEqual(unexplained.map(describeMismatch), [], 'mismatches no pinned row explains')
-  assert.equal(seen.size, PINNED.filter((pin) => SAVES.some((save) => save.file === pin.file)).length, 'every pinned row of a save read is still a mismatch')
-  lines.push(`${classes} classes over ${SAVES.length} saves, ${unexplained.length} unexplained mismatches, ${explained} explained by the pinned rows`)
-
-  return { lines }
-})
-
-check('saves: the pinned modded classes store what is pinned and the rule gives the pinned figure', async (m) => {
-  const present = SAVES.filter((save) => PINNED.some((pin) => pin.file === save.file))
-
-  if (!present.length) {
-    return skipped(`${[...new Set(PINNED.map((pin) => pin.file))].join(', ')} is not in saves/`)
-  }
-
-  const lines = []
-
-  for (const pin of PINNED) {
-    const save = present.find((item) => item.file === pin.file)
-    const classes = await m.dd.loadSignatureClasses(save.database, { GameID: pin.game, RaceID: pin.race })
-    const cls = classes.find((item) => item.id === pin.classId)
-
-    assert.ok(cls, `class ${pin.classId} of ${pin.file}`)
-    assert.equal(cls.name, pin.name)
-    assert.equal(cls.stored.thermal, pin.stored, `${pin.name}: stored`)
-    close(m.dr.classThermal({ engines: cls.engines }), pin.computed, `${pin.name}: rebuilt`)
-    assert.equal(m.sig.classSignatures(cls).thermal.agrees, false, `${pin.name}: the disagreement is shown, not hidden`)
-    lines.push(`game ${pin.game} race ${pin.race} class ${pin.classId} ${pin.name}: ${pin.field} stored ${pin.stored}, rebuilt ${pin.computed}`)
-  }
+  assert.deepEqual(mismatched.map(describeMismatch), [], 'a class whose stored figure the rule does not give')
+  lines.push(`${classes} classes over ${SAVES.length} saves, ${mismatched.length} mismatches`)
 
   return { lines }
 })

@@ -6,9 +6,7 @@ import { commercialSizeFactor, finishDays, flagOf, shipRate, shipyardFinish, shi
 import { UNVERIFIED_SAVE, combine, envelope, getRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 import { SHIPYARD_TYPE } from './shipyard-types'
 
-const REFIT_VERSIONS = ['2.7.x']
-// The yard rules hold for the yard types as the game's two lines give them (the Light yard is the line's own).
-const YARD_VERSIONS = ['2.7.x', '3.2.x']
+const REFIT_VERSIONS = ['3.2.x']
 // A refit adds 20% for the yard work, and the size change adds its own share of the added cost.
 export const REFIT_OVERHEAD = 0.2
 // The size window the Refits view lists its pairs by, so that a save with many classes shows the comparable ones: a filter on the screen, not a retool rule.
@@ -55,7 +53,7 @@ registerRule({
 
 registerRule({
   id: 'refit.noRetool',
-  versions: YARD_VERSIONS,
+  versions: REFIT_VERSIONS,
   units: 'yes or no',
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size, Cost', 'refit.cost'],
@@ -73,7 +71,7 @@ registerRule({
 
 registerRule({
   id: 'refit.yardEligibility',
-  versions: YARD_VERSIONS,
+  versions: REFIT_VERSIONS,
   units: '',
   verification: 'estimated',
   structure: ['FCT_Shipyard.SYType, Slipways, Capacity, BuildClassID, RetoolClassID, TaskType', 'FCT_ShipyardTask.ShipyardID', 'FCT_ShipClass.Size, Cost, Commercial, Obsolete, ClassShippingLineID, OtherRaceClassID', 'refit.noRetool'],
@@ -357,7 +355,7 @@ export const costShare = (total, base) => {
   return combine({ rule, parts: { 'the refit\'s cost': total }, compute: (values) => values['the refit\'s cost'] / base.cost * 100, units: '%', inputs: { present: [`the cost of ${base.name}`] } })
 }
 
-// Whether a yard tooled for `tooling` builds, or refits to, `target` without retooling: true only for a class with the tooled class's own id, false for every other class (a retool is what admits it), null when the save does not give an id for one of them. The game's yard adds the class it is tooled for to its list (`Shipyard.cs:466`) and then the alternatives its filter passes; that filter compares each candidate with itself (`gclass22_0 != gclass22_0`, Shipyard.cs:468 and :471), so it passes nothing, and the 80% to 120% window with the at-most-a-fifth cost share at Shipyard.cs:476 (`withinSize`, `affordable` and `limit`, always null here) decides nothing. The 2.7.1 line, Shipyard.cs:454, reads the same. `version` is the save's formula version (`loadFormulaVersion`).
+// Whether a yard tooled for `tooling` builds, or refits to, `target` without retooling: true only for a class with the tooled class's own id, false for every other class (a retool is what admits it), null when the save does not give an id for one of them. The game's yard adds the class it is tooled for to its list (`Shipyard.cs:466`) and then the alternatives its filter passes; that filter compares each candidate with itself (`gclass22_0 != gclass22_0`, Shipyard.cs:468 and :471), so it passes nothing, and the 80% to 120% window with the at-most-a-fifth cost share at Shipyard.cs:476 (`withinSize`, `affordable` and `limit`, always null here) decides nothing. The source of the earlier line, Shipyard.cs:454, reads the same. `version` is the save's formula version (`loadFormulaVersion`).
 export const noRetoolCheck = (tooling, target, version = null) => {
   const rule = 'refit.noRetool'
   const known = tooling.id !== null && tooling.id !== undefined && target.id !== null && target.id !== undefined

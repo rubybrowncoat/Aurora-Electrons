@@ -5,7 +5,7 @@
 
   Three parts, each with a head, planted faults and rewrites that say the same thing (scripts/lib/suite-runner.js):
   - `pure`: the ledger over constructed ships and sites, every expected figure written here from the rules and worked by hand: the legs, a colony with no stock, the rate and the stock as limits, the 20 HS limit of a low rate, the order tankers and recipients are taken in, the reserves, the hours, a closing visit, the litres a run needs, the gates, an input that is not known, and the netting of several fleets over one stock.
-  - `real`: the same ledger over the saves, read-only (the Falryx copy of the 2930 artifact, a recorded 2.x game, and the migrated Galactic Shogunate save of scripts/lib/fixtures.js), set against SQL written here and the independent fills of scripts/lib/fuel-service-oracle.js.
+  - `real`: the same ledger over the migrated Galactic Shogunate save of scripts/lib/fixtures.js, read-only, set against SQL written here and the independent fills of scripts/lib/fuel-service-oracle.js.
   - `page`: /information served by scripts/lib/page-server.js over a copy of the fixture save in which fleets of cargo ships, a destination spaceport with a stock and a stationary tanker fleet are planted (the rows they are made from are chosen from the fixture by SQL, `chooseWorld`), read back in Chromium: the status, the cycle, the ledger, the tankers, the reserves not read, the draw order and its stability under sorting, the fill target, and the orders of the copy untouched.
   Every planted fault must fail the checks it names by an assertion, and every rewrite must pass every check.
 
@@ -1229,8 +1229,6 @@ const PURE_BENIGN = [
 
 // ---------- the ledger over the saves, read-only ----------
 
-const SAVES = { falryx: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', fixture: FIXTURE.file }
-const REAL = { falryx: { GameID: 141, RaceID: 791, fleet: 461113, tankers: 468378 }, fixture: { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId } }
 // A ship that can serve as a tanker by the game's gates: its class is marked a tanker, has a refuelling rate and a Transfer - Fuel system (written here, with `c` the class).
 const TANKER_SQL = 'c.FuelTanker = 1 and c.RefuellingRate > 0 and exists (select 1 from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID and d.ComponentTypeID = 61 where cc.ClassID = c.ShipClassID)'
 
@@ -1240,8 +1238,8 @@ const openRead = (file) => new Promise((resolve, reject) => {
 const allOf = (raw, sql) => new Promise((resolve, reject) => raw.all(sql, (error, rows) => (error ? reject(error) : resolve(rows))))
 const closeRaw = (raw) => new Promise((resolve) => raw.close(resolve))
 
-const withSave = async (key, work) => {
-  const raw = await openRead(SAVES[key])
+const withSave = async (work) => {
+  const raw = await openRead(BASE)
 
   try {
     return await work(raw, { query: async (sql) => [await allOf(raw, sql)] })
@@ -1252,86 +1250,26 @@ const withSave = async (key, work) => {
 
 const POINTS = 'coalesce((select sum(i.MassRefuelling * a.Amount) from FCT_PopulationInstallations a join DIM_PlanetaryInstallation i on i.PlanetaryInstallationID = a.PlanetaryInstallationID where a.PopID = p.PopulationID and a.GameID = p.GameID), 0)'
 
-const realCargoChecks = {
-  id: 'real-cargo',
-  name: 'the Falryx 2930 save, race 791: ten cargo ships against a colony with a stock, one with none, one of population 0, and a stationary tanker fleet, each against SQL and the independent fills',
-  run: async (ctx) => {
-    await withSave('falryx', async (raw, database) => {
-      const ids = REAL.falryx
-      const ships = await ctx.mod.loadFleetShips(database, { GameID: ids.GameID, RaceID: ids.RaceID, fleetWhere: `FCT_Fleet.FleetID = ${ids.fleet}` })
-      const sites = await ctx.mod.loadFuelSites(database, ids)
-      const sql = await allOf(raw, `select s.ShipID id, c.FuelCapacity - s.Fuel want, c.FuelCapacity cap from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = ${ids.fleet} order by s.ShipID`)
-      const [stocks] = [Object.fromEntries((await allOf(raw, `select p.PopName name, p.PopulationID id, p.FuelStockpile stock, p.Population population, ${POINTS} points from FCT_Population p where p.RaceID = ${ids.RaceID} and p.PopName in ('New Concordia', 'Valerian', 'Bremen IV')`)).map((row) => [row.name, row]))]
-      const [{ rate }] = await allOf(raw, `select MaxRefuellingRate rate from FCT_Race where RaceID = ${ids.RaceID}`)
-      const run = (stop, siteChanges = {}) => ctx.mod.fuelLedger({ profile: ctx.fp.fleetProfile(ships, { FleetID: ids.fleet, FleetName: 'Cargo Fleet Bravo' }, { basis: 'maximum' }), legs: [1e6], stops: [stop, { name: 'Elsewhere', PopulationID: null, SystemID: 1, Xcor: 0, Ycor: 0 }], sites: { ...sites, ...siteChanges }, reserves: READ, version: VERSION })
-      const stopOf = (row) => ({ name: row.name, PopulationID: row.id, SystemID: 1, Xcor: 0, Ycor: 0 })
-
-      assert.equal(ships.length, 10, 'the fleet has ten ships')
-      assert.equal(sites.rates.MaxRefuellingRate, rate, 'the race\'s rate is the one in the save')
-
-      const wants = sql.map((row) => ({ id: row.id, litres: row.want }))
-      const truth = fuelFillTruth.colonyFill({ stock: stocks['New Concordia'].stock, reserve: 0, rate, wants })
-      const service = firstService(run(stopOf(stocks['New Concordia'])))
-
-      wants.forEach((want) => near(service.perShip.get(want.id), want.litres, `ship ${want.id} receives its deficit`))
-      near(service.perShip.get(196290), 214783.069585257, 'each ship receives 214,783.07 L')
-      near(service.received, truth.total, 'the total received')
-      near(service.hours, truth.hours, 'the hours')
-      near(service.hours, 214783.069585257 / 160000, 'the hours are the largest deficit over the rate, 1.342')
-      near(service.residual, stocks['New Concordia'].stock - truth.total, 'the residual is the stock less what was received')
-
-      const empty = firstService(run(stopOf(stocks.Valerian)))
-
-      assert.equal(stocks.Valerian.stock, 0, 'Valerian has no stock in the save')
-      assert.deepEqual({ permission: empty.permission, reason: empty.reason, received: empty.received }, { permission: 'blocked', reason: 'stock-empty', received: 0 }, 'a colony with a point and no stock')
-
-      const bremen = firstService(run(stopOf(stocks['Bremen IV'])))
-
-      assert.equal(stocks['Bremen IV'].population, 0, 'Bremen IV has no population in the save')
-      assert.equal(bremen.permission, 'allowed', 'a colony of population 0 serves')
-      near(bremen.received, truth.total, 'and gives each ship its deficit')
-
-      const fleetRow = sites.fleets.find((fleet) => fleet.FleetID === ids.tankers)
-      const [donor] = await allOf(raw, `select s.ShipID id, s.Fuel fuel, c.MinimumFuel minimum, c.RefuellingRate rate, c.FuelCapacity cap from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = ${ids.tankers}`)
-      const depot = { name: 'Depot', PopulationID: null, SystemID: fleetRow.SystemID, Xcor: fleetRow.Xcor, Ycor: fleetRow.Ycor }
-      const surplus = Math.floor(donor.fuel) - donor.minimum
-      const filled = fuelFillTruth.tankerFill({ tankers: [{ id: donor.id, fraction: donor.fuel / donor.cap, surplus, rate: donor.rate }], recipients: ships.map((ship) => ({ id: ship.ShipID, priority: ship.RefuelPriority, classPriority: ship.ClassRefuelPriority, capacity: ship.FuelCapacity, size: ship.Size, litres: ship.FuelCapacity - ship.Fuel })) })
-      const tankers = firstService(run(depot))
-
-      assert.equal(surplus, 21774428, 'the tanker has 21,774,428 L above its floor')
-      assert.equal(fleetRow.FirstOrderStationary, 1, 'the fleet has no order, which is stationary')
-      assert.equal(tankers.permission, 'allowed', 'the tanker fleet\'s gates pass')
-      assert.equal(tankers.stock, surplus, 'the surplus is the whole litres above the minimum')
-      near(tankers.received, filled.total, 'the fleet is filled from the one tanker')
-      near(tankers.hours, 2147830.69585257 / 450000, 'the hours are at least the litres over the rate')
-      assert.equal(tankers.bound, 'at-least', 'a lower bound')
-    })
-  },
-}
-
 const realColonyChecks = {
   id: 'real-colonies',
-  name: 'both saves: every colony of the race with a point and no stock is blocked at the stock, and no colony has a stock and no point',
+  name: 'the fixture: every colony of the race with a point and no stock is blocked at the stock, and no colony has a stock and no point',
   run: async (ctx) => {
-    for (const key of ['falryx', 'fixture']) {
-      await withSave(key, async (raw, database) => {
-        const ids = REAL[key]
-        const sites = await ctx.mod.loadFuelSites(database, ids)
-        const rows = await allOf(raw, `select p.PopulationID id, ${POINTS} points, p.FuelStockpile stock from FCT_Population p where p.RaceID = ${ids.RaceID}`)
-        const emptyWithPoint = rows.filter((row) => row.points > 0 && row.stock === 0)
-        const stockNoPoint = rows.filter((row) => row.points === 0 && row.stock > 0)
+    await withSave(async (raw, database) => {
+      const sites = await ctx.mod.loadFuelSites(database, IDS)
+      const rows = await allOf(raw, `select p.PopulationID id, ${POINTS} points, p.FuelStockpile stock from FCT_Population p where p.RaceID = ${IDS.RaceID}`)
+      const emptyWithPoint = rows.filter((row) => row.points > 0 && row.stock === 0)
+      const stockNoPoint = rows.filter((row) => row.points === 0 && row.stock > 0)
 
-        assert.equal(sites.colonies.length, rows.length, `${key}: every colony of the race is listed`)
-        assert.equal(stockNoPoint.length, 0, `${key}: no colony has a stock and no point`)
+      assert.equal(sites.colonies.length, rows.length, 'every colony of the race is listed')
+      assert.equal(stockNoPoint.length, 0, 'no colony has a stock and no point')
 
-        emptyWithPoint.forEach((row) => {
-          const site = sites.colonies.find((colony) => colony.PopulationID === row.id)
-          const service = ctx.mod.colonyService(site, [{ id: 1, want: 10 }], { rate: 80000, reserve: 0, saved: 0, now: 0, entry: 0 })
+      emptyWithPoint.forEach((row) => {
+        const site = sites.colonies.find((colony) => colony.PopulationID === row.id)
+        const service = ctx.mod.colonyService(site, [{ id: 1, want: 10 }], { rate: 80000, reserve: 0, saved: 0, now: 0, entry: 0 })
 
-          assert.deepEqual({ permission: service.permission, reason: service.reason }, { permission: 'blocked', reason: 'stock-empty' }, `${key}: colony ${row.id} with a point and no stock`)
-        })
+        assert.deepEqual({ permission: service.permission, reason: service.reason }, { permission: 'blocked', reason: 'stock-empty' }, `colony ${row.id} with a point and no stock`)
       })
-    }
+    })
   },
 }
 
@@ -1339,10 +1277,9 @@ const realTankerChecks = {
   id: 'real-tankers',
   name: 'the fixture, race 784: the stationary fleet with the most tankers, alone at its stop, against ten planted recipients: the gates pass with no orders and the fill equals the independent one over all its tankers',
   run: async (ctx) => {
-    await withSave('fixture', async (raw, database) => {
-      const ids = REAL.fixture
-      const [chosen] = await allOf(raw, `select s.FleetID as fleet from FCT_Ship s join FCT_Fleet f on f.FleetID = s.FleetID join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${ids.GameID} and s.RaceID = ${ids.RaceID} and f.OrbitBodyID > 0 and ${TANKER_SQL} and not exists (select 1 from FCT_MoveOrders m where m.FleetID = s.FleetID) group by s.FleetID order by count(*) desc, s.FleetID limit 1`)
-      const loaded = await ctx.mod.loadFuelSites(database, ids)
+    await withSave(async (raw, database) => {
+      const [chosen] = await allOf(raw, `select s.FleetID as fleet from FCT_Ship s join FCT_Fleet f on f.FleetID = s.FleetID join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.GameID = ${IDS.GameID} and s.RaceID = ${IDS.RaceID} and f.OrbitBodyID > 0 and ${TANKER_SQL} and not exists (select 1 from FCT_MoveOrders m where m.FleetID = s.FleetID) group by s.FleetID order by count(*) desc, s.FleetID limit 1`)
+      const loaded = await ctx.mod.loadFuelSites(database, IDS)
       const fleet = loaded.fleets.find((row) => row.FleetID === chosen.fleet)
       const donors = await allOf(raw, `select s.ShipID id, s.Fuel fuel, c.MinimumFuel minimum, c.RefuellingRate rate, c.FuelCapacity cap from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = ${chosen.fleet} and ${TANKER_SQL}`)
       const recipients = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((id) => hauler(id, 0, { FuelCapacity: 500000 + 50000 * id, RefuelPriority: (id % 3) + 1 }))
@@ -1368,7 +1305,7 @@ const realTankerChecks = {
   },
 }
 
-const REAL_CHECKS = [realCargoChecks, realColonyChecks, realTankerChecks]
+const REAL_CHECKS = [realColonyChecks, realTankerChecks]
 
 // ---------- the planted world of the page ----------
 
@@ -2927,7 +2864,7 @@ const main = async () => {
   const mutating = mayMutate() || GROUPS_ONLY
   const totals = await runSuite({
     script: __filename,
-    inputs: [SAVES.falryx, SAVES.fixture],
+    inputs: [BASE],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

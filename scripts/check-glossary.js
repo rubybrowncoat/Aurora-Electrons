@@ -437,7 +437,7 @@ const MUTATIONS = [
   ['a term is no longer shown on any page', GLOSSARY, 'terms: [\'game-log\', \'production-cycle\'', 'terms: [\'production-cycle\'', ['every term is shown on some page']],
   ['the runway term leaves the Mineral Outlook', GLOSSARY, 'terms: [\'runway\', \'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', 'terms: [\'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', ['mapped to the pages that show them']],
   ['a term carries a review date', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, reviewed: \'2026-10-13\' })', ['carries a review date or a version label']],
-  ['a term carries a game version label', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, versions: \'2.7.x\' })', ['carries a review date or a version label']],
+  ['a term carries a game version label', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, versions: \'3.2.x\' })', ['carries a review date or a version label']],
   ['a term loses its local definition', GLOSSARY, 'units, definition })', 'units, definition: \'\' })', ['every term has a name']],
   ['a definition holds an address', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'See https://example.com for the mass unit of ships, cargo and minerals;', ['a definition is short text of its own']],
   ['a definition speaks in the first person', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'The mass unit of my ships, cargo and minerals;', ['the help speaks in the impersonal voice']],

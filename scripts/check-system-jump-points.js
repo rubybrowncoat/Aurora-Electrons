@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-system-jump-points.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  Two datasets, each read by the module and drawn by the System view, each with its own oracle read from the save by SQL written here (never from the module). The fixture (scripts/lib/fixtures.js `FIXTURE`, the race Shogunate of game 141, a save of the present line) is the dataset every fault and rewrite runs on: it holds the gates (strength 1000) and the charted and unexplored points, and the case written into its copy is in the system with the most gates among those where the races Shogunate and Ancients have both charted at least three points and one point is charted by both, not explored by the Ancients at either end, and with its far system known to both by name; the copy has that point not explored by the race at either end and without a gate, and the lowest other point of the system charted by both a gate of strength 500. The recorded campaign (artifacts/falryx-sequential-and-rollback, the race Concord of game 141, a save of an earlier release) is a regression input only, read for the module and the page as a head of the suite and by no fault: scripts/lib/fixtures.js `convertedSave` gives its star's component number under its present name and, for the copy the browser reads, the seven columns the app looks for to accept a save as of the present line (the statements are documented there; the app refuses the recorded save without them), and the copy has the point 59944 of the system 21771 charted but not explored by the race, the point 59943 beside it a gate of strength 500 and the point 59944 without a gate; the save itself holds the case the item names: the race Ancients (789) has charted the points 59943 and 59944 of that system without exploring either, and knows the system beyond 59944 by the name Warrior Knight. A figure printed for the campaign is a regression figure, not a fixture one, and is credited to no rule of the module as one.
+  One dataset, read by the module and drawn by the System view, with its own oracle read from the save by SQL written here (never from the module). The fixture (scripts/lib/fixtures.js `FIXTURE`, the race Shogunate of game 141, a save of the present line) is the dataset every fault and rewrite runs on: it holds the gates (strength 1000) and the charted and unexplored points, and the case written into its copy is in the system with the most gates among those where the races Shogunate and Ancients have both charted at least three points and one point is charted by both, not explored by the Ancients at either end, and with its far system known to both by name; the copy has that point not explored by the race at either end and without a gate, and the lowest other point of the system charted by both a gate of strength 500.
   - module: the rows of the system are the points the race has charted there in a system it knows, one each and no other; each row has the fields the race may see and no other (never the link, the builder of the gate or the flags); a point that is not explored has no far system and no far name, an explored one has the system beyond and its name as the race knows it; the label of an unexplored point is the word of the module's own table, whatever its row carries; a gate is a strength above 0; the same on the small save written here for the cases the saves do not hold (a far system the race does not know, a gate of strength 500 and 999, a point charted by another race only, a point of another game, a point in a system the race does not know);
   - page: the System view of the system, opened on the map, draws a label for each charted point of the system that is the oracle's (the word for the far side of the unexplored point of the case, never the name of the system beyond it), reads only the fields the race may see, and draws the gate outline on the points whose strength is above 0 and on no other.
   Every planted fault is served in place of the module's or the component's file (or run on the module's text) and each must fail the checks it names by a value; the rewrites must leave every check passing and the labels as they were. Table wording is human-reviewed prose: the check reads the words back through the module's own table (FAR_SIDE_TEXT of jump-infrastructure.js) and never spells them. The labels and outlines are read from the scene the component builds (its annotation registry, in the order of its points); the canvas itself is not read, which this check records as its limit.
@@ -19,13 +19,10 @@ const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, failureLine, describe, HarnessError, installScreen } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
-const { convertedSave, FIXTURE, fixturePath, fixtureRows } = require('./lib/fixtures')
+const { FIXTURE, fixturePath, fixtureRows } = require('./lib/fixtures')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
-const CAMPAIGN_SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
-// The anchors to a body (`OrbitBodyID`) and to a Lagrange point (`OrbitLagrangeID`) the 3.2 line gives a life pod, a wreck and a waypoint, which the recorded 2.x save lacks and the copy carries with their default of none.
-const ANCHOR_COLUMNS = [['FCT_Lifepods', 'OrbitBodyID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Waypoint', 'OrbitLagrangeID', 'INTEGER default 0']]
 const TIMEOUT = 120000
 const STEP = 45000
 const MODULE = 'src/renderer/utilities/system-jump-points.js'
@@ -36,19 +33,7 @@ const DETAIL = process.argv.includes('--detail')
 // What the race may see of a point: the position, the gate strength, whether it is explored, and the system beyond with its name once it is explored.
 const FIELDS = ['DestinationID', 'DestinationName', 'Explored', 'JumpGateStrength', 'SystemID', 'WarpPointID', 'Xcor', 'Ycor']
 
-// The two datasets: { key, label, copyOf (the file the copy the browser reads is made from), original (the save as it is, which the race Ancients are read on), game, names (the game and the race as the Empires page lists them), race: { player, ancients }, system, point: { hidden, gated } }.
-const campaign = () => ({
-  key: 'campaign',
-  label: 'the recorded campaign',
-  copyOf: convertedSave(CAMPAIGN_SAVE, { line: true, columns: ANCHOR_COLUMNS }),
-  original: convertedSave(CAMPAIGN_SAVE),
-  game: 141,
-  names: { game: 'Orphean Concord', race: 'Concord' },
-  race: { player: 791, ancients: 789 },
-  system: 21771,
-  point: { hidden: 59944, gated: 59943 },
-})
-
+// The dataset: { key, label, copyOf (the file the copy the browser reads is made from), original (the save as it is, which the race Ancients are read on), game, names (the game and the race as the Empires page lists them), race: { player, ancients }, system, point: { hidden, gated } }.
 // The fixture's dataset: the system and the points of the case are chosen by SQL from the save, so that the check holds on the save the fixture stands for and says so when it does not.
 const fixtureDataset = () => {
   const game = FIXTURE.gameId
@@ -97,7 +82,7 @@ const fixtureDataset = () => {
   }
 }
 
-const DATASETS = { fixture: fixtureDataset, campaign }
+const DATASETS = { fixture: fixtureDataset }
 
 // The cases the save does not hold, written into the copy: the point the race has charted without exploring, at either end (its far system is known to the race), a gate of strength 500 and a point with no gate.
 const statementsOf = ({ game, race, point }) => [
@@ -708,7 +693,6 @@ const on = (key, variant) => ({ ...variant, pool: key })
 
 const variantsOf = (mutating) => [
   on('fixture', { key: 'head:fixture', name: 'the head on the fixture: the module and the System view as they are', head: true, heading: 'The jump points of the System view (scripts/lib/page-server.js over a copy of a save)', deadline: DEADLINES.head, run: checkHead }),
-  on('campaign', { key: 'head:campaign', name: 'the head on the recorded campaign: the module and the System view as they are (a regression input, not a fixture run)', head: true, deadline: DEADLINES.head, run: checkHead }),
   ...(mutating ? MODULE_FAULTS.map((fault, index) => on('fixture', { key: `module-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the module, on the fixture', deadline: DEADLINES.module, run: () => checkModuleFault(fault) })) : []),
   ...(mutating ? MODULE_BENIGN.map((rewrite, index) => on('fixture', { key: `module-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the module that say the same thing, on the fixture', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })) : []),
   ...(mutating ? PAGE_FAULTS.map((fault, index) => on('fixture', { key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the view, on the fixture', deadline: DEADLINES.view, run: () => checkFault(fault) })) : []),
@@ -719,7 +703,7 @@ const main = async () => {
   const mutating = !process.argv.includes('--no-mutations')
   const totals = await runSuite({
     script: __filename,
-    inputs: [CAMPAIGN_SAVE, FIXTURE.file],
+    inputs: [FIXTURE.file],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

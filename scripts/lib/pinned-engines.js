@@ -9,7 +9,7 @@ const MIGRATED_COST = 'the stored cost is 1000 where the rule gives 4218.75 at i
 const MIGRATED_POWER = "the stored power is a multiple of 25 EP, 25 to 250 EP from the rule's at the engine's size and thrust; the stored fuel efficiency, cost and maximum explosion all reproduce at the rule's power and none at the stored one, so the power was set outside the design rule in the campaign this save was migrated from"
 const MIGRATED_SMALL = "the stored power, fuel efficiency, cost and maximum explosion of this small engine are 2.5 to 4.4 times the rule's at its stored size and thrust, while its crew, HTK and explosion chance agree; the figures were set outside the design rule in the campaign this save was migrated from, and the cause is not identified"
 
-// The two engines of the modded campaign, found in both of its saved states of the repository (the 2.7 save of the root and saves/AuroraDB_270_unknown.db).
+// The two engines of the modded campaign, audited in the modded save of the root.
 const MODDED_ENGINES = [
   { id: 500260, field: 'cost', stored: 150, computed: 1500, reason: MODDED_COST },
   { id: 500613, field: 'military', stored: 0, computed: 1, reason: MODDED_FLAG },
@@ -37,7 +37,6 @@ const MIGRATED_ENGINES = [
 
 const PINNED_ENGINES = Object.freeze([
   ...pinnedRows('modded-g140', MODDED_ENGINES),
-  ...pinnedRows('modded-270-g140', MODDED_ENGINES),
   ...pinnedRows('migrated-g141', MIGRATED_ENGINES),
 ])
 

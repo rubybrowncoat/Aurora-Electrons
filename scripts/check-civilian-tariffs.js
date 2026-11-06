@@ -60,7 +60,7 @@ const EXPECTED_USES = {
 // Uses whose names touch civilian shipping and are acknowledged as no shipping-line payout: civilian mining and its mineral purchases, and the tariff income use, which is not read as a source of any payout rate.
 const EXCLUDED_USES = [10, 35, 36]
 
-const UNSUPPORTED = [null, undefined, '', ' ', '2.6.0', '2.6.x', '2.7.0', '2.7.1', '2.7.x', '2.8.0', '2.70.0', '3.0.0', '3.1.0', '1.9.0', 'x']
+const UNSUPPORTED = [null, undefined, '', ' ', '2.8.0', '3.20.0', '3.0.0', '3.1.0', '4.0.0', '1.9.0', 'x']
 
 const missingText = (result) => result.inputs.missing.join(' | ')
 
@@ -590,7 +590,7 @@ const MUTATIONS = [
   ['the payout rows price two units', 'quantity: 1, billionKm', 'quantity: 2, billionKm', ['one unit over a measured route']],
   ['the rates are given to every game version', 'if (ruleSupports(\'civilianTariff.rates\', version) !== true) {', 'if (false) {', ['unsupported game version null']],
   ['the rules hold for any 3.x version', 'const TARIFF_VERSIONS = [\'3.2.x\']', 'const TARIFF_VERSIONS = [\'3.x\']', ['the rules are registered with the stated line\'s version']],
-  ['the rules hold for the earlier line as well', 'const TARIFF_VERSIONS = [\'3.2.x\']', 'const TARIFF_VERSIONS = [\'3.2.x\', \'2.7.x\']', ['the rules are registered with the stated line\'s version']],
+  ['the rules hold for another line as well', 'const TARIFF_VERSIONS = [\'3.2.x\']', 'const TARIFF_VERSIONS = [\'3.2.x\', \'3.0.x\']', ['the rules are registered with the stated line\'s version']],
   ['an unknown rate is estimated as zero', 'if (!category || category.rate === null) {', "if (category && category.rate === null) {\n    return ofRule({ rule: 'civilianTariff.rates', value: 0, inputs: { present: ['an assumed rate'] } })\n  }\n\n  if (!category || category.rate === null) {", ['fuel has no published rate']],
   ['an unavailable rate no longer stops the estimate', 'if (!isAvailable(rate)) {', 'if (false) {', ['unsupported game version null']],
   ['the quantity is not checked', 'finite(quantity) && quantity >= 0', 'true', ['a quantity that is not a number']],
@@ -636,7 +636,7 @@ const PAGE_MUTATIONS = [
   // eslint-disable-next-line no-template-curly-in-string
   ['Finances states the gap without naming the read', 'finances', 'and ${missing.join(\', \')} ${missing.length === 1 ? \'is\' : \'are\'} not in it', 'and the schema is incomplete', ['Finances: the statement is null']],
   ['Finances speaks to the reader', 'finances', 'Units carried times the rate times the one-way', 'Your units carried times the rate times the one-way', ['the new text speaks in no first or second person']],
-  ['Transport prices the route for a fixed 2.7 version', 'information', 'payoutRows({ version, km, taxRate, npr })', 'payoutRows({ version: \'2.7.x\', km, taxRate, npr })', ['Transport: the payout note prices the measured route']],
+  ['Transport prices the route for a fixed version of another line', 'information', 'payoutRows({ version, km, taxRate, npr })', 'payoutRows({ version: \'3.0.x\', km, taxRate, npr })', ['Transport: the payout note prices the measured route']],
   ['Finances leaves the saved tax out of the receipt', 'finances', 'taxRate: shippingTax ? shippingTax.rate : null', 'taxRate: 0', ['Finances, player: a tax of 25 %']],
   ['Finances reads the race kind as always a player\'s', 'finances', 'npr: shippingTax ? shippingTax.npr : null', 'npr: false', ['Finances, computer-run empire']],
   ['Finances takes the tax and kind from the read directly, not from the state settled for the race shown', 'finances', 'const shippingTax = this.shippingTaxState.value', 'const shippingTax = this.shippingTax && this.shippingTax.value', ['Finances: a race switch before the tax reread starts', 'Finances: another copy of the save with the same game and race', 'Finances: a failed reread after a successful one']],

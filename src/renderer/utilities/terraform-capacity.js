@@ -7,8 +7,8 @@ import { navalAdminChain } from './minerals'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 
 const VERSIONS = ['2.7.x']
-// The fleet term and the figures it feeds, checked on the saves of the supported line as well.
-const TERM_VERSIONS = ['2.7.x', '3.2.x']
+// The fleet term and the figures it feeds, checked on the saves of the supported line.
+const TERM_VERSIONS = ['3.2.x']
 const TERRAFORMER_COMPONENT_TYPE = 33
 const TERRAFORMING_BONUS = 9
 const NONE = new Set()

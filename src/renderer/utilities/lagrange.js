@@ -4,8 +4,8 @@ import { crewFraction } from './crew'
 import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LAGRANGE_VERSIONS = ['2.7.x']
-// The two timing rules also hold on 3.2, which skips a ship with no crew aboard and caps the duration at Int32.MaxValue seconds before converting it to an integer (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime` of the 3.1.0 source, the reference for the 3.2 line; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918).
-const TIMING_VERSIONS = ['2.7.x', '3.2.x']
+// The two timing rules hold on 3.2, which skips a ship with no crew aboard and caps the duration at Int32.MaxValue seconds before converting it to an integer (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime` of the 3.1.0 source, the reference for the 3.2 line; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
+const TIMING_VERSIONS = ['3.2.x']
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 export const BASE_DAYS = 60 * 30
 const SECONDS_PER_DAY = 86400

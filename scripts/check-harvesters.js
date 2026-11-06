@@ -3,7 +3,7 @@
 
   node scripts/check-harvesters.js [<save.db> --race <RaceID>] [--years <n>] [--since <earlier.db>] [--list]
 
-  Two kinds of result stay apart. Rule verification: the rule below is the game's 2.7.1 per-step harvesting rule, read from its source (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an earlier save of the same 2.7 campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
+  Two kinds of result stay apart. Rule verification: the rule below is the game's per-step harvesting rule, read from the source of the earlier line (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an earlier save of the same campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
 
   A stored value the rule does not reproduce, a page figure that differs from the rule, and a worked case that fails are mismatches and set exit code 1. The page follows the rule on the undamaged module and tank counts, the body found by coordinates, any room in the tanks, the root command for a fleet without one, and an unknown output where the body is unsurveyed, so no page difference is explained away: the explained classes that remain are only the stored-input ones (a deposit raised outside the game, fuel above the capacity of damaged tanks).
 
@@ -30,9 +30,7 @@ const LITRES_PER_TON = 2000
 const SECONDS_PER_YEAR = 31536000
 const RELATIVE_TOLERANCE = 1e-9
 const ABSOLUTE_TOLERANCE = 1e-6
-const SHAPE_COLUMNS = ['AllowCMC', 'AncientRelics']
 const APP_RULES = ['logistics.harvesterOutput', 'logistics.harvesterObtainable']
-const FORMULA_VERSION = '2.7.x'
 
 const fail = (message) => {
   console.error(message)
@@ -87,9 +85,9 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
 })
 
 const loadApp = async () => {
-  const { logistics, minerals, crew, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules, 'fuel-donors': fuelDonors } = await loadUtilities(['logistics', 'minerals', 'crew', 'naval-admins', 'provenance', 'design-rules', 'fuel-donors'])
+  const { logistics, minerals, crew, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules, 'fuel-donors': fuelDonors, capabilities } = await loadUtilities(['logistics', 'minerals', 'crew', 'naval-admins', 'provenance', 'design-rules', 'fuel-donors', 'capabilities'])
 
-  return { ...logistics, crewFraction: crew.crewFraction, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven, fuelDonors }
+  return { ...logistics, crewFraction: crew.crewFraction, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven, fuelDonors, loadFormulaVersion: capabilities.loadFormulaVersion, LINE_SIGNATURE: capabilities.LINE_SIGNATURE, STATED_FORMULA_VERSION: capabilities.STATED_FORMULA_VERSION }
 }
 
 // The page's own harvesters query, read from its source so the check compares what the page runs, not a copy of it.
@@ -227,8 +225,7 @@ const loadWorld = async (database, raceId, app) => {
 
   const parameters = { ':game': race.GameID, ':race': race.RaceID }
   const [game] = await query(database, 'select GameID, GameName, GameTime, LastGrowthTime, MinConstructionPeriod from FCT_Game where GameID = :game', { ':game': race.GameID })
-  const gameColumns = (await query(database, "select name from pragma_table_info('FCT_Game')")).map((column) => column.name)
-  const shape = SHAPE_COLUMNS.every((column) => gameColumns.includes(column)) ? '2.7' : 'other'
+  const formulaVersion = await app.loadFormulaVersion({ query: (sql) => all(database, sql).then((rows) => [rows]) })
   const [tech] = await query(database, 'select max(FCT_TechSystem.AdditionalInfo) as Rate, count(*) as Techs from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race and FCT_TechSystem.TechTypeID = ' + FUEL_RACIAL_RATE_TECH_TYPE, parameters)
   const components = await query(database, 'select FCT_ClassComponent.ClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.ComponentValue from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.GameID = :game and FCT_ClassComponent.ClassID in (select ShipClassID from FCT_ShipClass where GameID = :game and RaceID = :race) and FCT_ShipDesignComponents.ComponentTypeID in (' + HARVESTER_TYPE + ', ' + FUEL_STORAGE_TYPE + ')', parameters)
   const classes = new Map((await query(database, 'select ShipClassID, ClassName, Crew, Harvesters, FuelCapacity from FCT_ShipClass where GameID = :game and RaceID = :race', parameters)).map((row) => [row.ShipClassID, { ...row, harvesterRows: [], tankRows: [] }]))
@@ -257,7 +254,7 @@ const loadWorld = async (database, raceId, app) => {
   const admins = await app.loadNavalAdmins({ query: (sql) => all(database, sql).then((rows) => [rows]) }, { GameID: race.GameID, RaceID: race.RaceID, bonusId: MINING_BONUS, share: 'Industrial' })
   const rootAdmin = Object.values(admins).find((admin) => !admin.ParentCommandID) || null
 
-  return { race, game, shape, tech, classes, ships: harvesterShips, damaged, commanders, bodies, bodyTypes, deposits, surveyed, admins, rootAdmin, pageRows: new Map() }
+  return { race, game, formulaVersion, tech, classes, ships: harvesterShips, damaged, commanders, bodies, bodyTypes, deposits, surveyed, admins, rootAdmin, pageRows: new Map() }
 }
 
 // The page's rows for the race: the query of logistics.vue run on the save.
@@ -305,7 +302,14 @@ const readShip = (world, ship, app) => {
 }
 
 // The page's report as logistics.vue builds it: harvesterReport over every row of the page's query, for `years`. Its rows by ShipID.
-const pageReport = (world, app, years) => new Map(app.harvesterReport([...world.pageRows.values()], { admins: world.admins, horizon: years, version: world.shape === '2.7' ? FORMULA_VERSION : null }).rows.map((row) => [row.ShipID, row]))
+const pageReport = (world, app, years) => new Map(app.harvesterReport([...world.pageRows.values()], { admins: world.admins, horizon: years, version: world.formulaVersion }).rows.map((row) => [row.ShipID, row]))
+
+// The status a result of a rule carries for a version, written from the registry: the rule's own verification where the version is one it is registered for, an estimate otherwise (the helpers' `statusFor`, read independently of them).
+const statusFor = (app, ruleId, version) => {
+  const rule = app.registry.getRule(ruleId)
+
+  return version !== null && rule.versions.includes(version) ? rule.verification : 'estimated'
+}
 
 // What the page shows of one ship, in the rule's three states: it works, it does not, or the output is unknown (an unsurveyed body, or a missing module or tank count).
 const pageState = (page) => (page.unknown ? 'unknown' : page.idle === null ? 'works' : 'idle')
@@ -345,6 +349,15 @@ const reconcileShips = (world, read, app, reports, years) => {
     reports.room.compare(rowId, 'tank room', pageRoom, ruleRoom, 'exact')
     reports.body.compare(rowId, 'body', row.SystemBodyID || 0, state.body ? state.body.SystemBodyID : 0, 'exact')
     reports.status.compare(rowId, 'harvesting state', pageState(row), ruleState(state), 'exact')
+
+    // The version the helpers were given is the one the capability loader states for the save: a result the page makes carries the status the registry gives that version (an unavailable result states no version).
+    if (row.rate.status !== 'unavailable') {
+      reports.version.compare(rowId, 'status of the rate', row.rate.status, statusFor(app, 'logistics.harvesterOutput', world.formulaVersion), 'exact')
+    }
+
+    if (row.obtainable.status !== 'unavailable') {
+      reports.version.compare(rowId, 'status of the obtainable fuel', row.obtainable.status, statusFor(app, 'logistics.harvesterObtainable', world.formulaVersion), 'exact')
+    }
 
     // The rate is compared wherever the race can see the deposit, tanks full or not; the unconstrained figure is the rate the harvester works at.
     if (state.known && state.deposit && state.perYear !== null) {
@@ -403,16 +416,49 @@ const checkStoredInputs = (world, app) => {
   return [rate, classes, deposits, tanks]
 }
 
+// The formula version the save's schema stands for, written from the schema here and not through the loader: the stated version when every column of the line signature is in its table, none otherwise.
+const versionByColumns = async (database, app) => {
+  const present = await Promise.all(app.LINE_SIGNATURE.map(async (field) => {
+    const [table, column] = field.split('.')
+
+    return (await query(database, `select count(*) as n from pragma_table_info('${table}') where name = '${column}'`))[0].n === 1
+  }))
+
+  return present.every(Boolean) ? app.STATED_FORMULA_VERSION : null
+}
+
+// The formula version the page's own loader (`loadFormulaVersion`, utilities/capabilities.js) states for a schema made in memory that holds exactly `fields` ('Table.Column'): the read the Logistics page makes, over a save that is only its columns.
+const loadedVersion = async (app, fields) => {
+  const database = new sqlite3.Database(':memory:')
+  const tables = new Map()
+
+  for (const field of fields) {
+    const [table, column] = field.split('.')
+
+    tables.set(table, [...(tables.get(table) || []), column])
+  }
+
+  await new Promise((resolve, reject) => database.exec([...tables].map(([table, columns]) => `create table ${table} (${columns.join(', ')});`).join(' '), (error) => (error ? reject(error) : resolve())))
+
+  try {
+    return await app.loadFormulaVersion({ query: (sql) => all(database, sql).then((rows) => [rows]) })
+  } finally {
+    await new Promise((resolve) => database.close(resolve))
+  }
+}
+
 // Worked cases on synthetic in-memory rows, labelled as such: each has its expected value written out by hand and must hold, or the check fails. Where the page's helper gives a different answer for the same case, `page` records it (a known gap, not a failure).
-const workedCases = (app) => {
+const workedCases = async (app) => {
   const cases = []
+  // The version the page's rules are registered for: the in-memory cases below are worked under it, as under a save the rules hold for.
+  const ruleVersion = app.registry.getRule('logistics.harvesterOutput').versions[0]
   const add = (name, actual, expected, kind = 'exact') => cases.push({ name, actual, expected, kind })
   const base = { modules: 10, fuel: 0, capacity: 1000000, perYear: 400000, depositTons: 1000 }
   const step = (overrides, years = 1) => harvestStep({ ...base, ...overrides }, years)
   const potential = (overrides) => annualPotential({ modules: 10, rate: 40000, commander: 1, admin: 1, crew: 100, classCrew: 100, accessibility: 1, ...overrides })
   const row = (overrides) => ({ ClassCrew: 100, CurrentCrew: 100, Harvesters: 10, ClassHarvesters: 10, FuelProduction: 40000, MiningBonus: 1, SoriumAccessibility: 1, SoriumAmount: 1000, Surveyed: 1, SystemBodyID: 1, Fuel: 0, FuelCapacity: 1000000, ...overrides })
-  // The page's helpers on the same case: its basis and the step over `years` (with a version the rule is stated for unless given).
-  const page = (overrides, years = 1, version = FORMULA_VERSION) => {
+  // The page's helpers on the same case: its basis and the step over `years` (with the version the rules are registered for unless given).
+  const page = (overrides, years = 1, version = ruleVersion) => {
     const basis = app.harvesterBasis(row(overrides), { version })
 
     return { basis, taken: app.harvesterObtainable(basis, years, version) }
@@ -464,15 +510,25 @@ const workedCases = (app) => {
   add('page: not at a gas giant: 0 litres, the rate unknown', `${page({ SystemBodyID: null, Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).taken.litres} ${page({ SystemBodyID: null, Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).basis.perYear}`, '0 null')
   add('page: unknown tank capacity (damaged-capacity data missing): the step is unknown, the rate and the fuel in the tanks stay', `${page({ FuelCapacity: null }).taken.litres} ${page({ FuelCapacity: null }).basis.perYear} ${page({ FuelCapacity: null }).basis.room}`, 'null 400000 null')
   add('page: unknown module count: the rate and the step are unknown', `${page({ Harvesters: null }).basis.perYear} ${page({ Harvesters: null }).taken.litres}`, 'null null')
-  add('page: a result is confirmed for a save with the formula columns and estimated otherwise', `${page({}).basis.rate.status} ${page({}, 1, null).basis.rate.status} ${page({}).taken.result.status} ${page({}, 1, null).taken.result.status}`, 'confirmed estimated confirmed estimated')
+  add('page: a result is confirmed for a version the rule is registered for and estimated for none', `${page({}).basis.rate.status} ${page({}, 1, null).basis.rate.status} ${page({}).taken.result.status} ${page({}, 1, null).taken.result.status}`, 'confirmed estimated confirmed estimated')
+  add('page: the version the capability loader states for a save of the line gives the status the registry gives it', `${page({}, 1, app.STATED_FORMULA_VERSION).basis.rate.status} ${page({}, 1, app.STATED_FORMULA_VERSION).taken.result.status}`, `${statusFor(app, 'logistics.harvesterOutput', app.STATED_FORMULA_VERSION)} ${statusFor(app, 'logistics.harvesterObtainable', app.STATED_FORMULA_VERSION)}`)
   add('page: a fleet with no command takes the root command: 1.01', app.harvesterAdminBonus(root, { SystemID: 5, NavalAdminCommandID: 0 }), 1.01, 'decimal')
   add('page: a fleet out of the root command\'s range: 1', app.harvesterAdminBonus(root, { SystemID: 6, NavalAdminCommandID: 0 }), 1)
 
   // A deposit of 0.75 t (1,500 L) shared by two ships that would each fill 400,000 L: the body's total is the deposit, not twice it.
-  const shared = app.harvesterReport([row({ ShipID: 1, SoriumAmount: 0.75 }), row({ ShipID: 2, SoriumAmount: 0.75 })], { admins: {}, horizon: 1, version: FORMULA_VERSION })
+  const shared = app.harvesterReport([row({ ShipID: 1, SoriumAmount: 0.75 }), row({ ShipID: 2, SoriumAmount: 0.75 })], { admins: {}, horizon: 1, version: ruleVersion })
 
   add('page: two ships over a 1,500 L deposit: the body gives 1,500 L, not 3,000 L', shared.litres, 1500)
   add('page: two ships over a deposit that cannot cover them: each is flagged', shared.rows.every((entry) => entry.overDeposit), true)
+
+  // The version the page is given comes from the seven columns of the line signature and from nothing else: the pair of game columns (AllowCMC, AncientRelics) a save of the earlier line also carries is no alternative oracle.
+  const pair = ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics']
+  const signature = [...app.LINE_SIGNATURE]
+
+  add('version: a save with the seven columns of the line signature states the stated version', await loadedVersion(app, [...pair, ...signature]), app.STATED_FORMULA_VERSION)
+  add('version: a save with the old pair of columns and none of the seven (a save from before 3.0) states none', await loadedVersion(app, pair), null)
+  add('version: a save lacking any one of the seven, the old pair present, states none, whichever column it lacks', (await Promise.all(signature.map((missing) => loadedVersion(app, [...pair, ...signature.filter((field) => field !== missing)])))).every((version) => version === null), true)
+  add('version: the seven columns without the old pair still state the stated version', await loadedVersion(app, signature), app.STATED_FORMULA_VERSION)
 
   return cases
 }
@@ -640,7 +696,7 @@ const checkFuelService = async (database, world, app) => {
   const known = tankers.filter((row) => row.fuel !== null)
   // The sum of the fuel the save states: 0 with no counted tanker, unknown when counted tankers exist and none states any.
   const tankerSum = tankers.length === 0 ? 0 : known.length ? known.reduce((sum, row) => sum + row.fuel, 0) : null
-  const donorReport = app.fuelDonors.tankerReport(rows, { version: world.shape === '2.7' ? FORMULA_VERSION : null })
+  const donorReport = app.fuelDonors.tankerReport(rows, { version: world.formulaVersion })
 
   report.compare({ id: 'all', name: 'every tanker' }, 'the tanker total against the sum of the fuel aboard', donorReport.totals.stored.value, tankerSum, kindOf(donorReport.totals.stored.value, tankerSum))
   report.compare({ id: 'all', name: 'every tanker' }, 'the number of counted tankers', donorReport.totals.ships, tankers.length, 'exact')
@@ -674,7 +730,7 @@ const main = async () => {
   world.pageRows = await loadPageRows(database, world).catch((error) => fail(`The page's harvesters query fails on this save: ${error.message}`))
   const read = world.ships.map((ship) => readShip(world, ship, app))
 
-  console.log(`${path.basename(options.save)}: race ${world.race.RaceID} "${world.race.RaceName}"${world.race.NPR ? ' (NPR)' : ''}, game ${world.game.GameID} "${world.game.GameName}", ${world.shape === '2.7' ? 'a save with the formula columns (AllowCMC and AncientRelics present): the rule holds as the 2.7.x harvesting rule' : 'not a save with the formula columns: the 2.7.x rule is unverified for it, treat every figure as an estimate'}`)
+  console.log(`${path.basename(options.save)}: race ${world.race.RaceID} "${world.race.RaceName}"${world.race.NPR ? ' (NPR)' : ''}, game ${world.game.GameID} "${world.game.GameName}", ${world.formulaVersion === null ? 'no formula version is stated for it (a column of the line signature is missing): the rules are unverified for it, treat every figure as an estimate' : `formula version ${world.formulaVersion}, as the Logistics page reads it (every column of the line signature is present)`}`)
   console.log(`${read.length} harvester ships, ${read.reduce((sum, state) => sum + state.modules, 0)} undamaged modules (class totals ${read.reduce((sum, state) => sum + state.classModules, 0)}); by state: ${Object.entries(read.reduce((counts, state) => ({ ...counts, [state.status]: (counts[state.status] || 0) + 1 }), {})).map(([status, count]) => `${count} ${status}`).join(', ') || 'none'}`)
   console.log(`factors away from neutral, over the ${read.length} ships: Mining bonus above 1 on ${read.filter((state) => state.commander !== 1).length}, admin bonus above 1 on ${read.filter((state) => state.admin !== 1).length}, crew below the class crew on ${read.filter((state) => state.input.crew < state.input.classCrew).length}, accessibility below 1 on ${read.filter((state) => state.input.accessibility !== null && state.input.accessibility < 1).length}, damaged harvester modules on ${read.filter((state) => state.modules !== state.classModules).length}, damaged tanks on ${read.filter((state) => state.capacity !== state.shipClass.FuelCapacity).length}, racial rate above the base ${BASE_RACIAL_RATE} on ${read.filter((state) => state.input.rate !== BASE_RACIAL_RATE).length}`)
 
@@ -693,8 +749,10 @@ const main = async () => {
     status: new Report('harvesting state on the page', APP_RULES),
     output: new Report('annual rate on the page', APP_RULES),
     obtainable: new Report(`fuel that fits over ${options.years} yr on the page`, APP_RULES),
+    version: new Report('formula version on the page', [], 'the version the page\'s loader states, against the columns of the line signature read from the schema here, and the status each result carries for it'),
   }
 
+  reports.version.compare({ id: world.game.GameID, name: path.basename(options.save) }, 'formula version', world.formulaVersion, await versionByColumns(database, app), 'exact')
   reconcileShips(world, read, app, reports, options.years)
   reports.fuelService = await checkFuelService(database, world, app).catch((error) => fail(`The fuel service read fails on this save: ${error.message}`))
 
@@ -715,7 +773,7 @@ const main = async () => {
 
   console.log()
 
-  const cases = workedCases(app)
+  const cases = await workedCases(app)
   const failedCases = printWorkedCases(cases)
   let observed = null
 
@@ -728,7 +786,7 @@ const main = async () => {
     observed.lines.forEach((line) => console.log(`  ${line}`))
     console.log(`  clean increment observation: ${observed.available ? 'available' : `unavailable - ${observed.reason}`}`)
   } else {
-    console.log('\nobserved reconciliation: not run (no --since <earlier save of the same 2.7 campaign>)')
+    console.log('\nobserved reconciliation: not run (no --since <earlier save of the same campaign>)')
   }
 
   const registered = app.registry.listRules().filter((rule) => !APP_RULES.includes(rule.id) && rule.id.startsWith('logistics.harvester'))

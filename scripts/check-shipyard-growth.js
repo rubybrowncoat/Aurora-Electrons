@@ -5,7 +5,7 @@
 
   The utility is run on yards worked by hand: upgrade prices follow the capacity, slipways and the race's lowest held operations factor, with the commercial/repair discount; continual upgrades are priced on tons added and timed by the Recap's construction-period rule. The script/computed contracts run through page-loader on four independent yards. The actual app also runs in Chromium through page-server and browser-observe: visible titles, prose, view controls, task columns, capacity sort order and player-usable Production/Warnings/Tech Tree links are read with the shared opacity-aware readers. A disposable copy of the real save supplies three yards with low, high and unknown capacities; the owner's saves are never changed. The real persisted-view mixin and an in-memory settings store prove storage keys, scope and validation. Source/template syntax is not mutation credit; only a named check's own marked comparison of an observed value is.
 
-  The loaders run on an in-memory save built in this script, and on the fixture save (scripts/lib/fixtures.js, read-only), whether or not the save is there: a save that is not there is skipped. On a save that holds activities, the stored build points of every yard activity of types 1 to 6 (the slipway and the five capacity steps) are compared with the rules' price; the stored build points of a continual activity are 0, so the continual price has no stored comparison. The fixture holds no activity of types 1 to 6, so the stored comparisons and the totals pinned from two 2.7 saves (64 of 64 equal once the race's operations factor applies, 63 of them at a factor of 1) are printed as needs tier b. No save holds an activity of the 500 or 2,000 ton steps, so those two rest on the pattern of the others.
+  The loaders run on an in-memory save built in this script, and on the fixture save (scripts/lib/fixtures.js, read-only), whether or not the save is there: a save that is not there is skipped. On a save that holds activities, the stored build points of every yard activity of types 1 to 6 (the slipway and the five capacity steps) are compared with the rules' price; the stored build points of a continual activity are 0, so the continual price has no stored comparison. The fixture holds no activity of types 1 to 6, so the stored comparisons and the totals pinned from two saves of the earlier line (64 of 64 equal once the race's operations factor applies, 63 of them at a factor of 1) are printed as needs tier b. No save holds an activity of the 500 or 2,000 ton steps, so those two rest on the pattern of the others.
   A mapped mutation is rejected if a required save fixture is absent; it never drops that mapping. Page faults share one warm browser/server within their child section, and restore every source override before the next variant. Unreachable one-panel summary attributes and malformed-template compiler failures have been replaced with visible prose/title faults; their original classes are explicitly retired in the batch-two catalog ledger, not claimed retained.
 
   A Light yard (type 4: 1,000 t, five slipways, no tooling) and a task that repeats (NumShips 3) are worked by hand. The Light yard is offered the slipway alone, priced and timed at the full weight of a naval yard; a repeating task's date is its balance plus the whole cost of each later ship over the rate, worked here from the seconds of the game's own date (Population.cs `RefreshShipyardTasksListView`: |TotalBP - CompletedBP| / BuildRate x SecondsPerYear, plus |TotalBP| / BuildRate x SecondsPerYear x (NumShips - 1)) and the class weight of its rate (Shipyard.cs `RecalculateBuildRateForClass`), never from the utility. The fixture's own Light yards are read as they are, and a copy of the fixture in the OS temp directory holds a task of three ships at its naval yard and a task of two ships moved to one of the Light yards; the owner's saves are never changed. The mineral projection of a task of three ships is its ship in hand's alone (MineralData.cs: the ship's minerals times the share of its build points left), so planting the count changes no colony's need.
@@ -45,7 +45,7 @@ const NAMES = ['shipyard-growth', 'refits', 'production', 'provenance', 'deep-li
 const SAVES = [FIXTURE.file]
 // The checks of the saves that a save with no case for them leaves out, by the reason (the fixture holds no stored activity of types 1 to 6): needs tier b. The head prints them and a mutation is not required to fail them.
 const NO_CASE = new Map()
-const NO_ACTIVITY = 'the fixture holds no stored shipyard activity of types 1 to 6, so the counts and prices pinned from two 2.7 saves have no case in it'
+const NO_ACTIVITY = 'the fixture holds no stored shipyard activity of types 1 to 6, so the counts and prices pinned from two saves of the earlier line have no case in it'
 const NO_LIGHT = 'the save holds no light yard, so the slipway-only offer and the full naval weight of a light yard have no case in it'
 // The yards of each save that belong to a ship (FCT_Shipyard.ParentShipID above 0), read by hand from the saves: two yards of race 784 in the fixture (24, 25).
 const SHIP_BASED_YARDS = { [path.basename(FIXTURE.file)]: [24, 25] }
@@ -582,9 +582,9 @@ const pure = (ctx) => {
     const yard = { type: 4, capacity: 1000, slipways: 5, tasks: 0, tooledId: null }
     const at = (over, version) => m.refits.yardEligibility({ ...yard, ...over }, nine, 'build', { ...eligibilityContext(nine), version })
 
-    return same([at({ tasks: 5 }, '3.2.0').state, at({ tasks: 4 }, '3.2.0').state, at({}, '3.2.0').result.assumptions.length, at({}, '3.0.0').state, at({}, '2.7.1').state], ['busy', 'capable', 0, 'unknown', 'capable'])
+    return same([at({ tasks: 5 }, '3.2.0').state, at({ tasks: 4 }, '3.2.0').state, at({}, '3.2.0').result.assumptions.length, at({}, '3.0.0').state], ['busy', 'capable', 0, 'unknown'])
   })
-  add('rules: the finish rule of a shipyard task covers the 3.2 line and names the repeat count it reads, and the yard\'s no-retool and eligibility rules cover both lines', () => same([p.getRule('production.shipFinish').versions, p.getRule('production.shipFinish').structure.some((text) => text.includes('NumShips')), ['refit.noRetool', 'refit.yardEligibility'].map((id) => p.getRule(id).versions)], [['2.7.x', '3.2.x'], true, [['2.7.x', '3.2.x'], ['2.7.x', '3.2.x']]]))
+  add('rules: the finish rule of a shipyard task covers the 3.2 line and names the repeat count it reads, and the yard\'s no-retool and eligibility rules cover the same line', () => same([p.getRule('production.shipFinish').versions, p.getRule('production.shipFinish').structure.some((text) => text.includes('NumShips')), ['refit.noRetool', 'refit.yardEligibility'].map((id) => p.getRule(id).versions)], [['3.2.x'], true, [['3.2.x'], ['3.2.x']]]))
 
   // ----- the continual upgrade -----
   add('continual: the price is the tons added over 500 times the slipways times 120 times the operations: 7,680 BP for 10,000 t at a naval yard of 4 slipways, a tenth at a commercial yard, an estimated result of its rule', () => {
@@ -1523,7 +1523,7 @@ const saveStatements = async (ctx, file) => {
   return { skipped: false, statements, activities, close: () => database.close() }
 }
 
-// The counts over the two 2.7 saves this check was written on: 64 activities of types 1 to 6 (types 1, 3, 5, 6 in the saves; 2 and 4 in none), all 64 equal once the operations factor applies, 63 at a factor of 1. The fixture holds none, so the counts have no case in it: needs tier b.
+// The counts over the two saves of the earlier line this check was written on: 64 activities of types 1 to 6 (types 1, 3, 5, 6 in the saves; 2 and 4 in none), all 64 equal once the operations factor applies, 63 at a factor of 1. The fixture holds none, so the counts have no case in it: needs tier b.
 const totalStatements = (reads) => {
   const all = reads.flatMap((read) => read.activities || [])
   const byType = (type) => all.filter((row) => row.TaskType === type).length
@@ -1635,7 +1635,7 @@ const MUTATIONS = [
   { name: 'a light yard not told from the others', file: R, find: 'const light = yard.type === SHIPYARD_TYPE.LIGHT', replace: 'const light = false', fails: ['light'] },
   { name: 'another race\'s class listed by a light yard', file: R, find: 'flagged(hard, gaps, target.otherRace,', replace: 'void (hard, gaps, target.otherRace,', fails: ['light'] },
   { name: 'a class over a light yard\'s capacity taken', file: R, find: 'blockers.push(\'A light yard can be neither retooled nor given more capacity\')', replace: 'void 0', fails: ['light'] },
-  { name: 'the yard rules left out of the 3.2 line', file: R, find: 'const YARD_VERSIONS = [\'2.7.x\', \'3.2.x\']', replace: 'const YARD_VERSIONS = [\'2.7.x\']', fails: ['light', 'rules'] },
+  { name: 'the yard rules left out of the 3.2 line', file: R, find: 'const REFIT_VERSIONS = [\'3.2.x\']', replace: 'const REFIT_VERSIONS = [\'3.0.x\']', fails: ['light', 'rules'] },
   { name: 'a task\'s count of ships read as 1', file: R, find: 'hulls: numberOf(row.NumShips),', replace: 'hulls: 1,', fails: ['loader', 'save-repeat'] },
   { name: 'a light yard offered the capacity steps', file: G, find: '...(yard.type === SHIPYARD_TYPE.LIGHT ? [] : CAPACITY_STEPS.map(', replace: '...(false ? [] : CAPACITY_STEPS.map(', fails: ['light', 'save-light'] },
   { name: 'a light yard priced for growing its capacity', file: G, find: 'else if (capacityGrowth && !growsInCapacity(yard.type)) {', replace: 'else if (false) {', fails: ['light', 'save-light'] },

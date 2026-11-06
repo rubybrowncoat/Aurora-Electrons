@@ -48,16 +48,6 @@ const TRANSPORT_VERSIONS = ['2.7.x']
 // The loading rules the later line states: the colony's spaceport or cargo shuttle station joins the base of a ship's strength before any officer multiplies it, and a ship with no undamaged cargo shuttle bays counts one bay, so that no ship's bays keep it from loading at a colony.
 const LOADING_VERSIONS = ['3.2.x']
 
-// Source of the later line's difference: it has no landing size, since every loader tests Ship.GetCargoShuttleTransferMultiplier against zero (rule transport.cargoEligibility) and its own term keeps only the Size <= 10m branch (rule transport.ownStrength).
-registerRule({
-  id: 'transport.landingThreshold',
-  versions: TRANSPORT_VERSIONS,
-  units: 'HS',
-  verification: 'confirmed',
-  structure: ['FCT_ShipClass.Size'],
-  note: 'A craft of 10 hull spaces (500 t) or less, the limit included, lands at a colony and loads with a base strength of 1 whatever bays it has; a larger craft needs undamaged cargo shuttle bays or a spaceport or cargo shuttle station at the colony. Settled by a read-only check of the rule and by the creator\'s public clarification of 500 t. The later line does not have this landing rule: a ship with its crew aboard loads at any colony there, so this rule is registered for the earlier line only. The 1000 t limit of the later patch notes is not what the source does: its shuttle limit is 10 hull spaces, and 20 hull spaces is the light naval classification limit.',
-})
-
 // Source of the eligibility: the loaders Ship.LoadShipComponentsFromPopulation (Ship.cs 6092-6096), Ship.LoadMineralsFromPopulation, Ship.LoadColonistsFromPopulation and the installation loaders, and the unloaders Ship.UnloadShipComponentsToPopulation, Ship.UnloadColonistsToPopulation and the mineral and installation unloaders, proceed when Ship.GetCargoShuttleTransferMultiplier is not zero and do nothing otherwise; the multiplier is the own term plus the colony term times four Logistics multipliers (Ship.cs 5150-5201), and Commander.method_5 counts an absent percentage bonus as 1. The order list's move requirement HasSelfShuttledCargoCapacity (Fleet.cs) is the only test of bays at a colony with no spaceport or cargo shuttle station, and the loaders do not repeat it.
 registerRule({
   id: 'transport.cargoEligibility',
@@ -190,8 +180,8 @@ export const UNVERIFIED_VERSION = 'the landing and shuttle rules, though the sav
 // The sentence a note states when the save does not state its game rules, or an empty text when it does.
 export const describeFormulaVersion = (version) => (version ? '' : 'The save does not state which game rules it was played under, so the landing rule is not verified against the save.')
 
-// The largest craft, in hull spaces, whose own loading strength is the race's technology alone whatever bays it has: the limit of the rule for a version one of them holds for, null when the version is not known (the patch notes' 1000 t is not the game source's shuttle limit, which is 10 hull spaces, and 20 hull spaces is the light naval classification limit). On the earlier line it is also the size that lands at a colony with no spaceport; on the later line (`Size <= 10m` in `Ship.GetCargoShuttleTransferMultiplier`) it is the shuttle branch of the ship's own strength alone, since no ship's bays keep it from a colony there.
-export const landingThreshold = (version) => (ruleSupports('transport.landingThreshold', version) || ruleSupports('transport.ownStrength', version) ? SMALL_CRAFT_SIZE : null)
+// Whether the loading rules hold for a game version: true for the line they are registered for, false for any other version and for a save that states none (the patch notes' 1000 t is not the game source's shuttle limit, which is 10 hull spaces, and 20 hull spaces is the light naval classification limit). Where they do not hold, a ship's verdict and strength are not settled. On the line (`Size <= 10m` in `Ship.GetCargoShuttleTransferMultiplier`) the 10 hull spaces are the shuttle branch of the ship's own strength alone, since no ship's bays keep it from a colony there.
+export const loadingRulesHold = (version) => ruleSupports('transport.ownStrength', version) === true
 
 // Move actions that unload ship components at a colony or hand them to another fleet: Unload Ship Component and Unload All Ship Components are the only cargo unloads that take a fleet as their destination (a destination of type 10), and there the transfer is between ships, not cargo at a colony.
 const FLEET_UNLOADS = new Set([141, 189])
@@ -231,10 +221,7 @@ const shipNameOf = (ship) => ship.ShipName || ship.ClassName || 'A ship'
 
 const tonnes = (size) => `${size * TONNES_PER_HULL_SPACE} t`
 
-// Whether a line's loaders can refuse a ship with no undamaged cargo shuttle bays: false where the ship's own term counts one bay for it (`Ship.method_159`), so that its transfer multiplier is positive at any colony and only the crew can stop it.
-const zeroBayBase = (version) => ruleSupports('transport.ownStrength', version)
-
-// Whether one ship can load or unload cargo at an endpoint by the game's rule: `status` 'permitted' (`via` says what lets it), 'blocked' (`reasons` names the ship or endpoint that lacks what is needed and what is missing: no crew aboard, a place with no colony and, on a line whose loaders can refuse a ship, bays that are all damaged or a craft over the landing size with no bays at a colony with no spaceport or cargo shuttle station) or 'unsupported' (an input is not in the save, or the game version is not known, so the answer is not known). Where the version's loaders test the transfer multiplier alone (`zeroBayBase`) a ship with its crew aboard loads at any colony, with or without bays, a spaceport or a cargo shuttle station; its time then needs the inputs `strengthGaps` names. The ship is { ShipName, ClassName, Size, ShuttleStrength, DesignedShuttleStrength, CurrentCrew, ClassCrew }.
+// Whether one ship can load or unload cargo at an endpoint by the game's rule: `status` 'permitted' (`via` says what lets it), 'blocked' (`reasons` names the ship or endpoint that lacks what is needed and what is missing: no crew aboard or a place with no colony) or 'unsupported' (an input is not in the save, or the game version is not known, so the answer is not known). Where the loading rules hold for the version (`loadingRulesHold`), the loaders test the transfer multiplier alone and a ship with its crew aboard loads at any colony, with or without bays, a spaceport or a cargo shuttle station; its time then needs the inputs `strengthGaps` names. The ship is { ShipName, ClassName, Size, ShuttleStrength, DesignedShuttleStrength, CurrentCrew, ClassCrew }.
 export const shipEligibility = (ship, given, version) => {
   const endpoint = endpointOf(given)
   const name = shipNameOf(ship)
@@ -260,23 +247,11 @@ export const shipEligibility = (ship, given, version) => {
 
   if (helped.length) {
     return verdict('permitted', null, '', helped)
-  } else if (zeroBayBase(version)) {
+  } else if (loadingRulesHold(version)) {
     return verdict('permitted', null, '', [ship.Size <= SMALL_CRAFT_SIZE ? `a craft of ${tonnes(SMALL_CRAFT_SIZE)} or less` : 'one bay counted for a ship with no undamaged cargo shuttle bays'])
-  } else if (!Number.isFinite(ship.Size)) {
-    return verdict('unsupported', 'size', `${name}'s size is not in the save`)
-  } else if (landingThreshold(version) === null) {
-    return verdict('unsupported', 'landing-unverified', `whether ${name} (${tonnes(ship.Size)}) loads at ${place} depends on the landing size, which is not verified for this save's game version`)
-  } else if (ship.Size <= SMALL_CRAFT_SIZE) {
-    return verdict('permitted', null, '', [`landing craft of ${tonnes(SMALL_CRAFT_SIZE)} or less`])
-  } else if (endpoint.service === null) {
-    return verdict('unsupported', 'service', `whether ${place} has a spaceport or cargo shuttle station is not in the save`)
-  } else if (bays === null || bays === undefined) {
-    return verdict('unsupported', 'bays', `${name}'s cargo shuttle bays are not in the save`)
   }
 
-  const damaged = ship.DesignedShuttleStrength > bays
-
-  return verdict('blocked', damaged ? 'damaged-bays' : 'no-bays', `${name} is over ${tonnes(SMALL_CRAFT_SIZE)} with ${damaged ? 'all its cargo shuttle bays damaged' : 'no cargo shuttle bays'}, and ${place} has no spaceport or cargo shuttle station`)
+  return verdict('unsupported', 'landing-unverified', `whether ${name} loads at ${place} depends on the landing size, which is not verified for this save's game version`)
 }
 
 // What a loading strength needs besides a ship that may load: the race's technology, whether the colony has a spaceport or cargo shuttle station (true or false, not unknown), a loading rule verified for the game version, and the ship's size and (over `SMALL_CRAFT_SIZE`) its undamaged bays' strength. Each missing one is a code, said by `GAP_TEXT`.
@@ -501,7 +476,7 @@ export const roundTrip = (ships, km, endpoints, shuttleTechnology, { colonists =
   return {
     status,
     problems: [...problems, ...timingProblems],
-    versionSupported: landingThreshold(version) !== null,
+    versionSupported: loadingRulesHold(version),
     stops: stops.map(({ where, colonists: moves, seconds, limiting, strength, breakdown, estimate, known, unknown, eligibility }) => ({ where, kind: moves ? 'colonists' : 'cargo', seconds, limiting, strength, breakdown, estimate, known, unknown, via: eligibility.via })),
     limiting: slowest ? { where: slowest.where, ship: slowest.limiting, strength: slowest.strength } : null,
     estimate: merged.some((factor) => factor.state === 'unknown'),

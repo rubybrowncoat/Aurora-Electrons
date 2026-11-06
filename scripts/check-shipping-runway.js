@@ -695,7 +695,7 @@ const runs = (m) => {
     const published = provenance.getRule('civilianTariff.rates').versions
     const holds = (version) => provenance.ruleSupports('shippingRunway.contractFlow', version) === true
 
-    return published.length && published.every(holds) && ['2.6.0', '2.7.1', '3.0.0', null, 'x'].every((version) => !holds(version)) ? true : 'the gate'
+    return published.length && published.every(holds) && ['2.8.0', '3.0.0', '3.20.0', null, 'x'].every((version) => !holds(version)) ? true : 'the gate'
   })
 
   // ----- the windows -----

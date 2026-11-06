@@ -1494,7 +1494,7 @@ const eachSave = async (name, body) => {
 check('tonnage', 'the race\'s military and commercial tonnage is the hull spaces of its ships summed as the class sizes are stored and converted once at 50 t each: on every save it equals a sum written apart from the module, while a cut of the summed hull spaces or a rounding of each class size gives another figure', async (w) => {
   const { history, provenance } = await w.history()
 
-  assert.deepEqual(provenance.getRule('history.fleetTonnage').versions, ['2.7.x', '3.2.x'], 'the tonnage rule holds for the earlier line and for this one')
+  assert.deepEqual(provenance.getRule('history.fleetTonnage').versions, ['3.2.x'], 'the tonnage rule holds for the line')
 
   await eachSave('tonnage', async (database, save) => {
     const { snapshot } = await history.takeSnapshot(database, { GameID: save.game, RaceID: save.race })

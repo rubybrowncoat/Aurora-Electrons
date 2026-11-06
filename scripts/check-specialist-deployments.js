@@ -29,7 +29,7 @@ const { runChild } = require('./lib/check-pool')
 const { runSuite, step: sayStep } = require('./lib/suite-runner')
 const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
 const pageLoading = require('./page-loading')
-const { FIXTURE, convertedSave } = require('./lib/fixtures')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -267,8 +267,8 @@ const runSql = (raw, sql, params = []) => new Promise((resolve, reject) => {
 const wrap = (raw) => ({ query: async (sql) => [await allRows(raw, sql)], close: () => new Promise((resolve) => raw.close(() => resolve())) })
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.
-const openSave = (file, recorded = false) => new Promise((resolve, reject) => {
-  const resolved = recorded ? convertedSave(file) : path.resolve(root, file)
+const openSave = (file) => new Promise((resolve, reject) => {
+  const resolved = path.resolve(root, file)
 
   if (!fs.existsSync(resolved)) {
     resolve(null)
@@ -338,10 +338,9 @@ const plantedFixture = () => {
   return target
 }
 
-// What the saves are known to hold: the specialist formations by state, the ground survey bodies the race knows, the ruins by state and those it has not surveyed, the colonies of the race. The first is the migrated Galactic Shogunate save, whose specialists are all aboard ships; the second is a recorded 2.x game read through the copy with the star's component number renamed (`convertedSave` of scripts/lib/fixtures.js); the third is the planted save.
+// What the saves are known to hold: the specialist formations by state, the ground survey bodies the race knows, the ruins by state and those it has not surveyed, the colonies of the race. The first is the migrated Galactic Shogunate save, whose specialists are all aboard ships; the second is the planted save.
 const FIXTURES = [
   { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, colonies: 52, specialists: 10, states: { idle: 0, busy: 0, embarked: 10, unresolved: 0, unknown: 0 }, geoBodies: 0, geoColonies: 0, ruins: { found: 0, hidden: 5 }, constructs: { bodies: 2, inactive: 0 } },
-  { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', recorded: true, GameID: 141, RaceID: 791, colonies: 102, specialists: 27, states: { idle: 27, busy: 0, embarked: 0, unresolved: 0, unknown: 0 }, geoBodies: 16, geoColonies: 2, ruins: { found: 3, hidden: 6 }, constructs: { bodies: 3, inactive: 2 } },
   { file: plantedFixture(), source: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, colonies: 52, specialists: 10, states: { idle: 0, busy: 1, embarked: 9, unresolved: 0, unknown: 0 }, geoBodies: 0, geoColonies: 0, ruins: { found: 1, hidden: 5 }, constructs: { bodies: 2, inactive: 0 } },
 ]
 
@@ -1038,7 +1037,7 @@ const judge = async (ctx, list = results) => judged(await runChecks(list, ctx))
 // ---------- the page in a browser ----------
 
 // The save the browser opens and the game and race to pick on the Empires page: a race with formations in two states and a ruin worked by one of them, which tells every control apart. Each variant of the page gets a new browser context, so nothing it stores reaches another.
-const BROWSER_SAVE = 2
+const BROWSER_SAVE = 1
 const BROWSER_NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const CAPABILITIES_FILE = path.join(utilitiesDirectory, 'capabilities.js')
 const WITHHELD_TIMEOUT = 15000
@@ -1411,8 +1410,8 @@ const MUTANTS = [
   ['a formation too large for every bay is carried', "verdict(candidate.id, 'none'))", "verdict(candidate.id, 'one'))", SPEC_FILE, ['lifts', 'lifts-bays']],
   ['every formation weighs nothing for the lift', 'formation: { ownSize: row.mass }', 'formation: { ownSize: 0 }', SPEC_FILE, ['lifts', 'lifts-bays']],
   ['unread troop bays read as none', "kind: 'unknown', lift: null, lifts: null, largest }", "kind: 'none', lift: null, lifts: null, largest }", SPEC_FILE, ['lifts-unavailable']],
-  ['a ruin whose builders are known is still a target', 'known: Boolean(row.Known)', 'known: false', SPEC_FILE, ['targets-eligible', 'target-rows', 'save-1-formations', 'save-1-ruins']],
-  ['a ruin on a colony body the race has not surveyed is not read', 'or FCT_Population.PopulationID is not null) order by', 'or false) order by', SPEC_FILE, ['targets-eligible', 'save-1-states']],
+  ['a ruin whose builders are known is still a target', 'known: Boolean(row.Known)', 'known: false', SPEC_FILE, ['targets-eligible', 'target-rows']],
+  ['a ruin on a colony body the race has not surveyed is not read', 'or FCT_Population.PopulationID is not null) order by', 'or false) order by', SPEC_FILE, ['targets-eligible']],
   ['a ruin in a system the race does not know counts as surveyed', 'Boolean(row.Surveyed) && Boolean(row.SystemKnown)', 'Boolean(row.Surveyed)', SPEC_FILE, ['targets-eligible', 'target-rows']],
   ['a formation on a ruin outside the known ones is idle', 'index.unseen.has(bodyId)', 'false', SPEC_FILE, ['states', 'state-details', 'unknown-sites']],
   ['a known ruin with no installations count is no place the game may work', 'if (!RUIN_STATES.includes(state) && isId(row.PopulationID)) {', 'if (false) {', SPEC_FILE, ['targets-eligible', 'states']],
@@ -1420,9 +1419,9 @@ const MUTANTS = [
   ['a geological formation is of unknown activity wherever the ruins are unread', 'if (roles.xeno !== false) {', 'if (true) {', SPEC_FILE, ['unknown-sites']],
   ['a formation of unknown activity is packed with the idle ones', '(row) => row.state === \'idle\')', '(row) => row.state === \'idle\' || row.state === \'unknown\')', SPEC_FILE, ['lifts']],
   ['every formation is packed with the idle ones', '(row) => row.state === \'idle\')', '() => true)', SPEC_FILE, ['lifts', 'save-0-lifts']],
-  ['the base rating of a colony is not summed', 'team.base += node.geo.value\n', 'team.base += 0\n', SPEC_FILE, ['save-0-all-rates', 'save-1-all-rates', 'save-2-all-rates']],
-  ['a colony with a team of one formation only keeps the last', 'team.units += node.geo.from.reduce((sum, item) => sum + item.units, 0)', 'team.units = node.geo.from.reduce((sum, item) => sum + item.units, 0)', SPEC_FILE, ['rates', 'save-0-all-rates', 'save-1-all-rates', 'save-2-all-rates']],
-  ['the multiplier of a formation is not taken from its commander', 'multiplier: multipliers === null ? null : multipliers.has(node.id) ? multipliers.get(node.id) : 1', 'multiplier: 1', SPEC_FILE, ['rates', 'save-2-all-rates']],
+  ['the base rating of a colony is not summed', 'team.base += node.geo.value\n', 'team.base += 0\n', SPEC_FILE, ['save-0-all-rates', 'save-1-all-rates']],
+  ['a colony with a team of one formation only keeps the last', 'team.units += node.geo.from.reduce((sum, item) => sum + item.units, 0)', 'team.units = node.geo.from.reduce((sum, item) => sum + item.units, 0)', SPEC_FILE, ['rates', 'save-0-all-rates', 'save-1-all-rates']],
+  ['the multiplier of a formation is not taken from its commander', 'multiplier: multipliers === null ? null : multipliers.has(node.id) ? multipliers.get(node.id) : 1', 'multiplier: 1', SPEC_FILE, ['rates', 'save-1-all-rates']],
   ['a formation of unknown rating counts as unrated', 'if (node.geo.value === null) {', 'if (node.geo.value === null && false) {', SPEC_FILE, ['rates']],
   ['the state filter is ignored', 'states.includes(row.state))', 'true)', SPEC_FILE, ['select']],
   ['a formation with two ratings is counted once as geo only', 'xeno += row.roleKeys.includes(\'xeno\') ? 1 : 0', 'xeno += row.roleKeys.includes(\'xeno\') && !row.roleKeys.includes(\'geo\') ? 1 : 0', SPEC_FILE, ['rows-once', 'select']],
@@ -1431,10 +1430,10 @@ const MUTANTS = [
   ['a candidate body is counted for each of its colonies', 'const key = `${role}:${target.bodyId}`', 'const key = target.key', SPEC_FILE, ['targets-totals']],
   ['the persisted filter is shared by every race', "key: 'deployRoles', scope: 'race'", "key: 'deployRoles', scope: 'game'", SPEC_FILE, ['views']],
   ['the persisted filter shares the key of the other', "key: 'deployStates', scope: 'race'", "key: 'deployRoles', scope: 'race'", SPEC_FILE, ['views']],
-  ['a body the race has not surveyed is a ground survey target', 'inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', 'left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', SURVEY_FILE, ['targets-eligible', 'save-1-targets']],
+  ['a body the race has not surveyed is a ground survey target', 'inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', 'left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', SURVEY_FILE, ['targets-eligible']],
   ['a body in a system the race does not know is a target', 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', SURVEY_FILE, ['targets-eligible', 'ruins-unsupported']],
   ['the ground rate ignores a formation of unknown rating', 'groundSurveyRate(teamUnknown ? null : team.formations, this.surveySpeed)', 'groundSurveyRate(team ? team.formations : [], this.surveySpeed)', SURVEY_FILE, ['rates']],
-  ['the commanders are not given to the colony teams', 'colonyGeoTeams(this.formationModel, this.commanderMultipliers)', 'colonyGeoTeams(this.formationModel, new Map())', SURVEY_FILE, ['rates', 'save-2-all-rates']],
+  ['the commanders are not given to the colony teams', 'colonyGeoTeams(this.formationModel, this.commanderMultipliers)', 'colonyGeoTeams(this.formationModel, new Map())', SURVEY_FILE, ['rates', 'save-1-all-rates']],
   ['commanders that were not read count as none', 'groundCommandMultipliers(this.groundCommanders.rows) : null', 'groundCommandMultipliers(this.groundCommanders.rows) : new Map()', SURVEY_FILE, ['rates']],
   ['a multiplier counts once in the rate of a formation', 'total + base * multiplier * multiplier', 'total + base * multiplier', SURVEY_UTILITY_FILE, ['rates']],
   ['a multiplier that is not known counts as a rate of nothing', '} else if (formations.some((formation) => !Number.isFinite(formation.multiplier))) {', '} else if (false) {', SURVEY_UTILITY_FILE, ['rates']],
@@ -1448,7 +1447,6 @@ const MUTANTS = [
   ['a superior at another colony gives its share', '|| parent.PopulationID !== row.PopulationID ', '', SURVEY_UTILITY_FILE, ['rates']],
   ['a rating that is not known is taken as a rating of nothing', ' || formations.some((formation) => !Number.isFinite(formation.base))', '', SURVEY_UTILITY_FILE, ['rates']],
   ['a descendant whose class has no headquarters capacity leaves its size unknown', 'row.Elements > row.Known || !Number.isFinite(row.Size)', 'row.Elements > row.Known || row.Elements > row.Capable || !Number.isFinite(row.Size)', SURVEY_UTILITY_FILE, ['rates']],
-  ['a body with no colony is of unknown rate', 'teams.get(row.PopulationID) || NO_TEAM : null) : NO_TEAM', 'teams.get(row.PopulationID) || NO_TEAM : null) : null', SURVEY_FILE, ['save-1-rates']],
   ['the unstaffed switch does nothing', "(!this.deployUnstaffed || row.status !== 'worked')", 'true', SURVEY_FILE, ['target-rows']],
   ['the Candidates column sorts by a value the rows do not carry', "{ text: 'Candidates', value: 'candidateSort' }", "{ text: 'Candidates', value: 'candidateCount' }", SURVEY_FILE, ['headers']],
   ['a table view is shared by every race', "{ ...tableView('surveyDeployTable', { sortBy: ['stateOrder'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }), scope: 'race' }", "tableView('surveyDeployTable', { sortBy: ['stateOrder'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES })", SURVEY_FILE, ['views']],
@@ -1464,7 +1462,7 @@ const MUTANTS = [
   ['a construct with no stored state is not marked', "reasons.push({ kind: 'construct-unknown', message:", "({ kind: 'construct-unknown', message:", SPEC_FILE, ['states', 'state-details', 'construct-sites']],
   ['a formation of unknown rating at an inactive construct is not marked', ' || (roles.xeno === null && index.constructs && index.constructs.inactive.has(bodyId))', '', SPEC_FILE, ['construct-sites']],
   ['a construct on a body with a ruin worked is counted as a second work', "if (construct && !work.some((item) => item.role === 'xeno')) {", 'if (construct) {', SPEC_FILE, ['construct-sites']],
-  ['the constructs of bodies with no colony of the race are read', 'from FCT_AncientConstruct inner join FCT_Population on', 'from FCT_AncientConstruct left join FCT_Population on', SPEC_FILE, ['targets-eligible', 'construct-sites', 'save-1-constructs']],
+  ['the constructs of bodies with no colony of the race are read', 'from FCT_AncientConstruct inner join FCT_Population on', 'from FCT_AncientConstruct left join FCT_Population on', SPEC_FILE, ['targets-eligible', 'construct-sites']],
   ['the deployments panel has no summary', 'data-summary="Review geological survey and xenoarchaeology formations', 'data-hint="Review geological survey and xenoarchaeology formations', SURVEY_FILE, ['browser-panels'], true],
   ['the roles filter is disconnected from its chips', 'v-model="deployRoles"', ':value="deployRoles"', SURVEY_FILE, ['browser-roles', 'browser-restored'], true],
   ['the states filter is disconnected from its chips', 'v-model="deployStates"', ':value="deployStates"', SURVEY_FILE, ['browser-states', 'browser-restored'], true],
@@ -1652,7 +1650,7 @@ const setUp = async () => {
   const databases = []
 
   for (const fixture of FIXTURES) {
-    databases.push(await openSave(fixture.file, fixture.recorded))
+    databases.push(await openSave(fixture.file))
   }
 
   const schemaSource = databases.find(Boolean)

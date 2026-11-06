@@ -1141,7 +1141,7 @@ const defineCases = (modules) => {
     assert.ok(designedTech.figureResult(noCost, 'MeasurePerCost').inputs.missing.some((name) => name.includes('build cost')))
   })
 
-  invariant('designed tech', 'two otherwise identical designs of the current rule, one with electronic hardening and one without, show the same stored cost and strength per BP in the designs table, while a design stored under the 2.7.1 rule shows the cost it stored', () => {
+  invariant('designed tech', 'two otherwise identical designs of the current rule, one with electronic hardening and one without, show the same stored cost and strength per BP in the designs table, while a design stored under the earlier rule shows the cost it stored', () => {
     const designed = (hardeningRating) => designRules.activeSensorDesign({ sizeHS: 1, resolution: 100, strengthTech: 21, emTech: 1, hardeningRating, eccmRating: 3, eccmCost: 1.3, mode: designRules.SENSOR_MODES.missileFireControl })
     const rowOf = (id, figures) => designedTech.augmentComponent({ SDComponentID: id, Name: `Design ${id}`, CategoryID: 24, ComponentTypeID: 25, Size: figures.sizeHS, Cost: figures.cost, Crew: figures.crew, HTK: figures.htk, ComponentValue: figures.strength, MaxSensorRange: figures.rangeKm, Resolution: 100, ECCM: figures.eccm, ElectronicCTD: figures.ctd, Uridium: figures.uridium, Corbomite: figures.corbomite, Obsolete: 0, MilitarySystem: 1, ShippingLineSystem: 0, Baseline: 0 })
     const columns = designedTech.columnsFor(24)
@@ -1159,7 +1159,7 @@ const defineCases = (modules) => {
     assert.equal(hardened.MeasurePerCost, plain.MeasurePerCost)
     assert.equal(cell(perCost, hardened).text, cell(perCost, plain).text)
 
-    // The 1973 save's 154931 (a missile fire control of size 1 and strength 21, ECCM 3, CTD 70) was designed under the 2.7.1 rule, which multiplied its 1.15 hardening cost factor into the stored 31.46 BP; this rule gives 27.3. The table shows the figure the save stores.
+    // The 1973 save's 154931 (a missile fire control of size 1 and strength 21, ECCM 3, CTD 70) was designed under the earlier rule, which multiplied its 1.15 hardening cost factor into the stored 31.46 BP; this rule gives 27.3. The table shows the figure the save stores.
     const stored = rowOf(154931, { sizeHS: 1, cost: 31.46, crew: 2, htk: 1, strength: 21, rangeKm: 79602591.77778593, eccm: 3, ctd: 70, uridium: 24.2, corbomite: 7.26 })
 
     assert.equal(cell(cost, stored).text, '31.46')

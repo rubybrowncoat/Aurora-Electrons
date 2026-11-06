@@ -9,7 +9,7 @@
   - `post`: the post and share the Commanders page suggests for a survey ship without a Science Department (the captain at the full share up to 20 hull spaces, half above), the science officer's post and the miner's and terraformer's captain unmoved by size, and a class whose size is not stored unavailable, never read as small;
   - `save`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the two survey ships of the class Intrepid (1,220 hull spaces, no survey order, so no saved progress) rate by the half bonus, and on copies whose class is cut to 20, 20.0001 and 10 hull spaces the loader's rows rate by the full bonus at the limit and below and by the half above it, each against the figure worked out here from the commanders' stored bonuses;
   - `page`: the Commanders page's own ships read, taken from its source and run on the same copies, delivers the class size and gives the post and share the size decides;
-  - `landing`: the landing size is 10 hull spaces on the line the rule is registered for, where a craft over it with no bays at a colony with no spaceport is blocked, and the 10 hull space limit of the 3.1 source's shuttle branch (`Ship.GetCargoShuttleTransferMultiplier`) does not keep any craft from loading there (the multiplier is positive, `Ship.method_159` counting one bay for none), the light naval limit of 20 moving nothing;
+  - `landing`: the 10 hull space limit of the 3.1 source's shuttle branch (`Ship.GetCargoShuttleTransferMultiplier`) does not keep any craft from loading at a colony with no spaceport (the multiplier is positive, `Ship.method_159` counting one bay for none), the light naval limit of 20 moving nothing, and a version the loading rules are not registered for gets no verdict;
   - `names`: the production type 2 and the idle capacity column read Light Naval, the Industry check of free light naval capacity says so in its title and rule, the capacity rule names installation 35, the Light Naval Factory, and the terms a missing capacity names are light naval ones;
   - `reads`: no source or script reads `FighterClass`, the mission brief check reads `LightNavalUnit`, and the shipped 3.1 fixtures hold `LightNavalUnit` and no `FighterClass`, installation 35 named Light Naval Factory with the rating the capacity reads.
   The fixture holds no survey craft of 20 hull spaces or less, so the light naval cases of `save` are planted into copies; a saved case needs the specimen S7 of AE-310-03, played under 3.1. A save that is not there reads UNSUPPORTED.
@@ -358,31 +358,28 @@ check('page', 'the Commanders page\'s own ships read delivers the class size, an
   }
 })
 
-check('landing', 'the landing size is 10 hull spaces on the line the rule is registered for (a craft of 10 lands, one over it with no bays at a colony with no spaceport is blocked) and on the 3.2 line the same limit is the source\'s shuttle branch, over which a bayless craft still loads at a colony with no spaceport (its ship term counts one bay), the light naval limit of 20 moving nothing', async (w) => {
+check('landing', 'the 10 hull space limit is the source\'s shuttle branch, over which a bayless craft still loads at a colony with no spaceport (its ship term counts one bay), the light naval limit of 20 moving nothing, and a game version the loading rules are not registered for gets no verdict', async (w) => {
   const { transport: t } = await w.modules()
   const colony = t.colonyEndpoint({ PopName: 'Mars', ShuttleCapacity: 0, ServiceNames: '', PopulationID: 7, SystemID: 3 })
   const ship = (size) => ({ ShipName: 'Hauler', ClassName: 'Hauler', Size: size, ShuttleStrength: 0, DesignedShuttleStrength: 0, CurrentCrew: 10, ClassCrew: 10 })
   const verdict = (size, version) => t.shipEligibility(ship(size), colony, version)
 
-  assert.equal(t.landingThreshold('2.7.1'), 10, 'the landing size is 10 hull spaces, not the light naval 20')
-  assert.equal(verdict(10, '2.7.1').status, 'permitted', 'a craft of 10 hull spaces, the limit included, lands')
-  assert.equal(verdict(10.5, '2.7.1').status, 'blocked', 'a bayless craft of 10.5 hull spaces is blocked at a colony with no spaceport on the line the rule is registered for')
-  assert.equal(verdict(15, '2.7.1').status, 'blocked', 'a bayless craft of 15 hull spaces, 750 t, is blocked there too: the light naval limit does not move the landing size')
-  assert.equal(verdict(20, '2.7.1').status, 'blocked', 'nor does 20 hull spaces, 1,000 t')
-
-  assert.equal(t.landingThreshold('3.2.x'), 10, 'the shuttle limit of the 3.1 source is 10 hull spaces, not the light naval 20')
+  assert.equal(t.loadingRulesHold('3.2.x'), true, 'the loading rules hold for the 3.2 line')
   assert.equal(verdict(5, '3.2.x').status, 'permitted', 'a small craft loads at a colony with no spaceport on the 3.2 line')
   assert.equal(verdict(10, '3.2.x').status, 'permitted', 'the limit included')
+  assert.deepEqual(verdict(10, '3.2.x').via, ['a craft of 500 t or less'], 'a craft of 10 hull spaces loads as a craft of 500 t or less')
 
   for (const size of [10.5, 15, 20]) {
     assert.equal(verdict(size, '3.2.x').status, 'permitted', `a bayless craft of ${size} hull spaces loads at a colony with no spaceport on the 3.2 line, not ${verdict(size, '3.2.x').status}: its ship term counts one bay`)
+    assert.deepEqual(verdict(size, '3.2.x').via, ['one bay counted for a ship with no undamaged cargo shuttle bays'], `a bayless craft of ${size} hull spaces is over the shuttle branch of 10 hull spaces, whatever the light naval limit`)
   }
 
   const unknown = verdict(15, null)
 
-  assert.equal(t.landingThreshold(null), null, 'a save that states no game rules has no landing size')
+  assert.equal(t.loadingRulesHold(null), false, 'a save that states no game rules has no loading rules')
   assert.equal(unknown.status, 'unsupported', `a bayless craft over 10 hull spaces gets no verdict when the save states no game rules, not ${unknown.status}`)
   assert.equal(unknown.reasons[0].code, 'landing-unverified', 'the reason is the unverified landing rule')
+  assert.equal(verdict(15, '3.0.0').status, 'unsupported', 'nor does it get one on another line')
 })
 
 check('names', 'the production type 2 and the idle capacity column read Light Naval, the Industry check names light naval capacity in its title, rule and kind, the capacity rule names installation 35, the Light Naval Factory, and the terms a missing capacity names are light naval ones', async (w) => {
@@ -462,7 +459,7 @@ const FAULTS = [
   { name: 'a class whose size is not stored is read as a small ship by the Commanders post', target: 'commanders', from: '} else if (!isKnownNumber(ship.ClassSize)) {', to: '} else if (false) {', fails: ['post'] },
   { name: 'the Commanders page\'s ships read leaves the class size out', target: 'commandersPage', from: 'FCT_ShipClass.Size as ClassSize, ', to: '', fails: ['page'] },
   { name: 'the landing size follows the light naval limit, 20 hull spaces', target: 'transport', from: 'const SMALL_CRAFT_SIZE = 10', to: 'const SMALL_CRAFT_SIZE = 20', fails: ['landing'] },
-  { name: 'a bayless craft over 10 hull spaces is refused at a colony with no spaceport on the 3.2 line as on the 2.7 line', target: 'transport', from: '} else if (zeroBayBase(version)) {', to: '} else if (false) {', fails: ['landing'] },
+  { name: 'a bayless craft over 10 hull spaces gets no verdict at a colony with no spaceport on the 3.2 line', target: 'transport', from: '} else if (loadingRulesHold(version)) {', to: '} else if (false) {', fails: ['landing'] },
   { name: 'the Production page names the production type 2 Fighter again', target: 'productionTypes', from: '[PRODUCTION_TYPE.LIGHT_NAVAL]: \'Light Naval\',', to: '[PRODUCTION_TYPE.LIGHT_NAVAL]: \'Fighter\',', fails: ['names'] },
   { name: 'the idle capacity column reads Fighters again', target: 'productionPage', from: '{ key: \'fighter\', text: \'Light Naval\', bp: true }', to: '{ key: \'fighter\', text: \'Fighters\', bp: true }', fails: ['names'] },
   { name: 'the Industry check is titled free fighter production capacity again', target: 'industry', from: 'with free light naval production capacity', to: 'with free fighter production capacity', fails: ['names'] },

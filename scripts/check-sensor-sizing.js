@@ -6,12 +6,12 @@
   Groups (each check's name begins with its group):
   - pair: a search sensor and a missile fire control sized at every legal resolution, each member the smallest legal size that reaches the wanted range (the next smaller size falls short) against the target's cross-section, the resolution cut and a jammer; the totals, the reach of the pair as the shorter member, the best row (the fewest BP, then the fewest HS, then the higher resolution, a tie included), the resolution chosen, and an unknown target, range, jammer or tech giving an unavailable figure, never 0;
   - limiting: the member of a saved pair that falls short (and the one that is shorter when both do), a pair that meets and one with no target naming none, the alternative proposed at the saved resolution or the best overall, and the member of a sizing row that is beyond the largest size;
-  - minerals: the Uridium is the size times the strength tech and the ECCM factor the Corbomite of each level pair, so the Uridium does not move with the hardening or the ECCM, and the stored Uridium, cost and Corbomite of the saved active sensors rebuilt through the levels of the module, but for the stored figures of designs made under the 2.7.1 rule, each pinned;
+  - minerals: the Uridium is the size times the strength tech and the ECCM factor the Corbomite of each level pair, so the Uridium does not move with the hardening or the ECCM, and the stored Uridium, cost and Corbomite of the saved active sensors rebuilt through the levels of the module, but for the stored figures of designs made under the earlier rule, each pinned;
   - research: the planner's tech lines are registered tech types, a candidate is never researched, a hypothetical level marks the figures built on it and only those, an unresolved choice designs with the pick, a line with no level is unavailable, a hardening tech row that stores no cost factor leaves every figure available while an ECCM tech row that stores none leaves the cost unavailable, and the single weapon switch is offered only for a researched or chosen level;
   - beam: the range and the tracking axes sized apart, the range cap, a single weapon control against an unrestricted one, the table of designs, and a saved control's limiting axis;
   - target: a size in tons, a missile and a saved class as the target, the floor of 0.3 HS, the cloak as a second scenario, and a blank or unreadable size unavailable;
   - loaders: the active sensors and the beam fire controls read as stored for the race and the game, a save without an optional column giving null figures, one without a required column refused by name, and the obsolete flag read only when the save has it;
-  - saves: the saved sensors and beam fire controls of every save in saves/ rebuilt from the tech levels of the module (read-only), the saved sensors sized at their own size, the beam controls of two saves pinned by their first figure that differs and by their stored and rebuilt range, tracking speed, size and cost (a copy of the migrated save in the temp folder with one stored figure moved must leave its control unexplained, in a run that plants faults), and the stored cost figures of the designs made under the 2.7.1 rule pinned by their exact figures (a pin of a save that is not in saves/ is not checked, a stale pin of one that is there is a failure); a save that is not there is reported as skipped, never as passed.
+  - saves: the saved sensors and beam fire controls of every save of the line in saves/ (`LINE_SAVE_FILES`) rebuilt from the tech levels of the module (read-only), the saved sensors sized at their own size, the beam controls of the migrated save pinned by their first figure that differs and by their stored and rebuilt range, tracking speed, size and cost (a copy of the migrated save in the temp folder with one stored figure moved must leave its control unexplained, in a run that plants faults), and the stored cost figures of its designs made under the earlier rule pinned by their exact figures (a pin of a save that is not in saves/ is not checked, a stale pin of one that is there is a failure); a save that is not there is reported as skipped, never as passed.
 
   Mutations: each deliberate fault planted in the source of a module (the module is loaded from its text, scripts/lib/utilities.js, with a registry of provenance rules of its own, so no fault reaches another) runs the checks it names and must fail them. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
@@ -22,7 +22,7 @@ const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
-const { INTERIM } = require('./lib/fixtures')
+const { INTERIM, LINE_SAVE_FILES } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1511,7 +1511,7 @@ const openSave = (file, directory = savesDirectory) => new Promise((resolve, rej
 })
 
 const openSaves = async () => {
-  const files = fs.existsSync(savesDirectory) ? fs.readdirSync(savesDirectory).filter((name) => name.endsWith('.db')).sort() : []
+  const files = LINE_SAVE_FILES.filter((name) => fs.existsSync(path.join(savesDirectory, name)))
 
   for (const file of files) {
     SAVES.push(await openSave(file))
@@ -1527,7 +1527,7 @@ const racesOf = async (save) => {
   return rows
 }
 
-// The beam fire controls of the saves the rules do not reproduce, one pin each by the file, game, race and component, with the first figure that differs, the two multipliers the component stores, and its stored and rebuilt range, tracking speed, size and cost (`BEAM_FIGURES`; a rebuilt figure is null where nothing rebuilds it). A pin explains a control only while every one of these is still what was observed: a control that differs in another first figure, or with the same first figure but another stored or rebuilt figure, is a mismatch. In the modded save: two whose Uridium and cost are a tenth of the rule's, six whose stored range is above the 1,400,000 km cap (their cost is a tenth of the rule's too) and six whose range or tracking speed no distance or speed level the race holds gives. In the migrated save (the owner's campaign before it was migrated): two whose stored size is a fraction of the size of their multipliers, and thirteen whose stored range, 1,600,000 km to 120,000,000 km, is no range a distance level the race holds gives at the multiplier the component stores, so the first figure to differ is the level (their rebuilt range and tracking speed are those of the nearest level the race holds at their multipliers, and their size and cost are not rebuilt). None is a formula of the line: the played save and the shipped saves reproduce every beam fire control they hold.
+// The beam fire controls of the migrated save the rules do not reproduce, one pin each by the file, game, race and component, with the first figure that differs, the two multipliers the component stores, and its stored and rebuilt range, tracking speed, size and cost (`BEAM_FIGURES`; a rebuilt figure is null where nothing rebuilds it). A pin explains a control only while every one of these is still what was observed: a control that differs in another first figure, or with the same first figure but another stored or rebuilt figure, is a mismatch. In the migrated save (the owner's campaign before it was migrated): two whose stored size is a fraction of the size of their multipliers, and thirteen whose stored range, 1,600,000 km to 120,000,000 km, is no range a distance level the race holds gives at the multiplier the component stores, so the first figure to differ is the level (their rebuilt range and tracking speed are those of the nearest level the race holds at their multipliers, and their size and cost are not rebuilt). None is a formula of the line: the played save and the shipped saves reproduce every beam fire control they hold.
 const INTERIM_FILE = path.basename(INTERIM.file)
 const beamPin = (file, game, race, id, field, inputs, stored, rebuilt) => Object.freeze({ key: `${file}|${game}|${race}|${id}`, file, game, race, id, field, inputs: Object.freeze(inputs), stored: Object.freeze(stored), rebuilt: Object.freeze(rebuilt) })
 const PINNED_BEAMS = Object.freeze([
@@ -1546,20 +1546,6 @@ const PINNED_BEAMS = Object.freeze([
   beamPin(INTERIM_FILE, 141, 784, 500397, 'level', [1, 0.75], [16000000, 75000, 0.6, 3281.2], [350000, 75000, null, null]),
   beamPin(INTERIM_FILE, 141, 784, 500398, 'level', [1, 0.75], [16000000, 75000, 0.3, 1640.6], [350000, 75000, null, null]),
   beamPin(INTERIM_FILE, 141, 784, 500422, 'level', [1, 1], [120000000, 100000, 0.075, 1367.25], [350000, 100000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500213, 'cost', [0.1, 1], [1120000, 300000, 0.05, 2625], [1120000, 300000, 0.05, 21000]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500238, 'level', [0.2, 1], [3600000, 100000, 0.05, 1406.3], [3200000, 100000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500240, 'level', [0.2, 2], [2400000, 200000, 0.2, 3750], [2240000, 200000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500265, 'cost', [0.1, 1], [560000, 300000, 0.02, 656.3], [560000, 300000, 0.02, 5250]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500380, 'level', [0.35, 0.33], [5600000, 100000, 0.03, 2165.6], [5600000, 99000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500389, 'range', [1.2, 0.2], [19200000, 60000, 0.06, 4500], [1400000, 60000, 0.06, 2625]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500390, 'range', [0.75, 0.2], [12000000, 60000, 0.04, 2812.5], [1400000, 60000, 0.04, 2625]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500391, 'range', [1.2, 0.2], [19200000, 60000, 0.12, 9000], [1400000, 60000, 0.12, 5250]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500392, 'range', [0.75, 0.2], [12000000, 60000, 0.08, 5625], [1400000, 60000, 0.08, 5250]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500598, 'level', [0.45, 0.33], [7200000, 100000, 0.07, 5568.8], [7200000, 99000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500599, 'level', [0.45, 0.33], [7200000, 100000, 0.04, 2784.4], [7200000, 99000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500809, 'level', [0.35, 0.33], [5600000, 100000, 0.06, 4331.2], [5600000, 99000, null, null]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500810, 'range', [2, 0.2], [32000000, 60000, 0.2, 15001.1], [1400000, 60000, 0.2, 5250]),
-  beamPin('AuroraDB_270_unknown.db', 140, 784, 500811, 'range', [2, 0.2], [32000000, 60000, 0.1, 7500.6], [1400000, 60000, 0.1, 2625]),
 ])
 
 const cache = new WeakMap()
@@ -1666,34 +1652,18 @@ const rebuildActive = (m, save) => once(m, `active ${save.file}`, async () => {
   return { tally, mismatches }
 })
 
-// The saved sensors and beam fire controls whose stored cost figures were made under the 2.7.1 rule, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not, so each stored figure is the rebuilt one times the factor of the hardening level the row's CTD names (1.25 in the modded and migrated saves, 2 in the 2.6 save). 500400 of the migrated save stores a further tenth of that rule's figures (the rebuilt ones times 1.25, divided by 10), a difference of its own that this rule does not explain. The list is exact: a row that differs and is not here, a pinned row that no longer differs, and any move of a pinned row's stored or rebuilt figures is a change to look at. The stored figures are the designs' own and are kept as stored, never rewritten. A pinned row is only checked where the save it belongs to is among those read: with a save not there its rows cannot be observed, and reporting them as no longer differing would be a claim about a file no check opened.
+// The saved sensors whose stored cost figures were made under the earlier rule, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not, so each stored figure is the rebuilt one times the factor of the hardening level the row's CTD names (1.25 in the migrated save). 500400 of the migrated save stores a further tenth of that rule's figures (the rebuilt ones times 1.25, divided by 10), a difference of its own that this rule does not explain. The list is exact: a row that differs and is not here, a pinned row that no longer differs, and any move of a pinned row's stored or rebuilt figures is a change to look at. The stored figures are the designs' own and are kept as stored, never rewritten. A pinned row is only checked where the save it belongs to is among those read: with a save not there its rows cannot be observed, and reporting them as no longer differing would be a claim about a file no check opened.
 const premiumRow = (file, game, race, id, factor, stored, rebuilt, scale = 1) => Object.freeze({ key: `${file}|${game}|${race}|${id}`, file, factor, scale, stored: Object.freeze(stored), rebuilt: Object.freeze(rebuilt) })
-// The first five rows are the stored premiums of the interim fixture as recorded (INTERIM, not the default: the figures are of that very save and stay with it when `FIXTURE` moves); the others are recorded saves of earlier releases, named as saved.
+// The rows are the stored premiums of the interim fixture as recorded (INTERIM, not the default: the figures are of that very save and stay with it when `FIXTURE` moves).
 const PREMIUM_ROWS = Object.freeze([
   premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500351, 1.25, [10, 12.5, 2.5], [8, 10, 2]),
   premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500363, 1.25, [450, 562.5, 112.5], [360, 450, 90]),
   premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500394, 1.25, [1350, 1687.5, 337.5], [1080, 1350, 270]),
   premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500400, 1.25, [14400, 18000, 3600], [115200, 144000, 28800], 0.1),
   premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500426, 1.25, [180, 225, 45], [144, 180, 36]),
-  premiumRow('AuroraDB_26Simple.db', 139, 779, 154008, 2, [720, 1440, 720], [360, 720, 360]),
-  premiumRow('AuroraDB_270_unknown.db', 140, 784, 500211, 1.25, [22.5, 28.125, 5.625], [18, 22.5, 4.5]),
-  premiumRow('AuroraDB_270_unknown.db', 140, 784, 500262, 1.25, [90, 112.5, 22.5], [72, 90, 18]),
-  premiumRow('AuroraDB_270_unknown.db', 140, 784, 500381, 1.25, [90, 112.5, 22.5], [72, 90, 18]),
-  premiumRow('AuroraDB_270_unknown.db', 140, 784, 500382, 1.25, [180, 225, 45], [144, 180, 36]),
-  premiumRow('AuroraDB_270_unknown.db', 140, 784, 500393, 1.25, [86400, 108000, 21600], [69120, 86400, 17280]),
-  premiumRow('AuroraDB_270_unknown.db', 140, 784, 500729, 1.25, [1440, 1800, 360], [1152, 1440, 288]),
 ])
 
-// The saved beam fire controls whose stored cost was made the same way, a single figure rather than the three of an active sensor's design: 154420 and 154421 of the 2.6 save at the hardening cost factor 2, 500239 and 500823 of the modded save at 1.25. The rebuilt cost is the rule's Uridium times the ECCM factor; the stored one is that times the hardening level's factor as well.
-const premiumBeam = (file, game, race, id, factor, stored, rebuilt, scale = 1) => Object.freeze({ key: `${file}|${game}|${race}|${id}`, file, factor, scale, stored, rebuilt })
-const PREMIUM_BEAMS = Object.freeze([
-  premiumBeam('AuroraDB_26Simple.db', 139, 779, 154420, 2, 5250, 2625),
-  premiumBeam('AuroraDB_26Simple.db', 139, 779, 154421, 2, 21000, 10500),
-  premiumBeam('AuroraDB_270_unknown.db', 140, 784, 500239, 1.25, 2734.375, 2187.5),
-  premiumBeam('AuroraDB_270_unknown.db', 140, 784, 500823, 1.25, 109.375, 87.5),
-])
-
-// Why an active sensor's stored cost figures are not the rebuilt ones: the pinned row's figures and hardening factor must still match, both as observed and as the 2.7.1 rule's (the rebuilt figures times the factor, and times its scale where the row stores a tenth).
+// Why an active sensor's stored cost figures are not the rebuilt ones: the pinned row's figures and hardening factor must still match, both as observed and as the earlier rule's (the rebuilt figures times the factor, and times its scale where the row stores a tenth).
 const pinnedMineralFailure = (pin, mismatch) => {
   const factor = pin.scale === 1 ? `${pin.factor}` : `${pin.factor} and a further ${pin.scale}`
   const shown = `${mismatch.label}: stored Uridium, cost and Corbomite ${mismatch.stored.join(', ')}, rebuilt ${mismatch.rebuilt ? mismatch.rebuilt.join(', ') : 'nothing'}, at the hardening level's cost factor ${mismatch.factor}`
@@ -1708,15 +1678,6 @@ const pinnedMineralFailure = (pin, mismatch) => {
   return matches ? null : `${shown}; the pinned row is stored ${pin.stored.join(', ')} and rebuilt ${pin.rebuilt.join(', ')} at ${factor}, so the figures moved`
 }
 
-// Why a beam fire control's stored cost is not the rebuilt one: the pinned cost and hardening factor must still match, both as observed and as the 2.7.1 rule's (the rebuilt cost times the factor, and times its scale where the row stores a fraction of it).
-const pinnedBeamCostFailure = (pin, mismatch) => {
-  const factor = pin.scale === 1 ? `${pin.factor}` : `${pin.factor} and a further ${pin.scale}`
-  const shown = `${mismatch.file} game ${mismatch.game} race ${mismatch.race} ${mismatch.id} ${mismatch.name}: stored cost ${mismatch.stored}, rebuilt ${mismatch.rebuilt}, at the hardening level's cost factor ${mismatch.factor}`
-  const matches = near(mismatch.factor, pin.factor) && near(mismatch.stored, pin.stored) && near(mismatch.rebuilt, pin.rebuilt) && near(mismatch.stored, pin.rebuilt * pin.scale * pin.factor)
-
-  return matches ? null : `${shown}; the pinned row is stored ${pin.stored} and rebuilt ${pin.rebuilt} at ${factor}, so the figures moved`
-}
-
 // Why a beam fire control that differs from the rules is not the pinned one: its first figure that differs, the two multipliers it stores and its stored and rebuilt range, tracking speed, size and cost must all still be the observed ones, and a figure that moved is named with the pinned one.
 const pinnedBeamFailure = (pin, mismatch) => {
   const same = (pinned, found) => (pinned === null || found === null ? pinned === found : near(pinned, found))
@@ -1729,7 +1690,7 @@ const pinnedBeamFailure = (pin, mismatch) => {
   return moved.length ? `${mismatch.file} game ${mismatch.game} race ${mismatch.race} ${mismatch.id} ${mismatch.name}: ${moved.join('; ')}` : null
 }
 
-check('minerals (save): the Uridium, cost and Corbomite of every saved active sensor are rebuilt from the ECCM cost factor, but for the stored figures of designs made under the 2.7.1 rule, each pinned', async (m) => {
+check('minerals (save): the Uridium, cost and Corbomite of every saved active sensor are rebuilt from the ECCM cost factor, but for the stored figures of designs made under the earlier rule, each pinned', async (m) => {
   if (!SAVES.length) {
     return skipped('no save in saves/')
   }
@@ -1773,7 +1734,7 @@ check('minerals (save): the Uridium, cost and Corbomite of every saved active se
       continue
     }
 
-    unexplained.push(`${pin.key} no longer differs: its stored figures are the 2.7.1 rule's (${pin.rebuilt.join(', ')} at ${pin.factor}), not this rule's`)
+    unexplained.push(`${pin.key} no longer differs: its stored figures are the earlier rule's (${pin.rebuilt.join(', ')} at ${pin.factor}), not this rule's`)
   }
 
   const absent = [...new Set(PREMIUM_ROWS.filter((pin) => !openedSave(pin.file)).map((pin) => pin.file))]
@@ -1785,7 +1746,7 @@ check('minerals (save): the Uridium, cost and Corbomite of every saved active se
   lines.push(...unexplained)
 
   try {
-    assert.deepEqual(unexplained.slice(0, 40), [], 'the stored minerals the levels do not reproduce, but for the pinned rows of the 2.7.1 rule')
+    assert.deepEqual(unexplained.slice(0, 40), [], 'the stored minerals the levels do not reproduce, but for the pinned rows of the earlier rule')
   } catch (error) {
     error.lines = lines
     throw error
@@ -1793,7 +1754,7 @@ check('minerals (save): the Uridium, cost and Corbomite of every saved active se
 
   assert.equal(unmatched, 0, 'saved sensors that name no EM, hardening or ECCM level the race holds')
   assert.ok(rebuilt > 0, 'no sensor was rebuilt')
-  lines.push(`${rebuilt} saved active sensors over ${SAVES.length} saves, ${pinned} of them with the stored cost figures of the 2.7.1 rule`)
+  lines.push(`${rebuilt} saved active sensors over ${SAVES.length} saves, ${pinned} of them with the stored cost figures of the earlier rule`)
 
   return { lines }
 })
@@ -1887,13 +1848,11 @@ const rebuildBeams = (m, save) => once(m, `beam ${save.file}`, async () => {
   return { tally, mismatches }
 })
 
-// Every mismatch of the beam fire controls of one save against the pins: the ones nothing explains (`unexplained`, as text), the pinned controls found differing (`seen`, as `file|id`), the controls explained by the stored cost of the 2.7.1 rule (`pinnedCost`, and how many, `premium`) and how many of the mismatches a pin explains (`own`).
+// Every mismatch of the beam fire controls of one save against the pins: the ones nothing explains (`unexplained`, as text), the pinned controls found differing (`seen`, as `file|id`) and how many of the mismatches a pin explains (`own`).
 const explainBeams = (mismatches) => {
   const unexplained = []
   const seen = new Set()
-  const pinnedCost = new Set()
   let own = 0
-  let premium = 0
 
   for (const mismatch of mismatches) {
     const pinned = PINNED_BEAMS.find((entry) => entry.key === `${mismatch.file}|${mismatch.game}|${mismatch.race}|${mismatch.id}`)
@@ -1911,26 +1870,10 @@ const explainBeams = (mismatches) => {
       continue
     }
 
-    const pin = mismatch.field === 'cost' ? PREMIUM_BEAMS.find((entry) => entry.key === `${mismatch.file}|${mismatch.game}|${mismatch.race}|${mismatch.id}`) : null
-
-    if (pin) {
-      const failure = pinnedBeamCostFailure(pin, mismatch)
-
-      if (failure) {
-        unexplained.push(failure)
-      } else {
-        pinnedCost.add(pin.key)
-        premium++
-        own++
-      }
-
-      continue
-    }
-
     unexplained.push(`${mismatch.file} game ${mismatch.game} race ${mismatch.race} ${mismatch.id} ${mismatch.name}: ${mismatch.field}${mismatch.field === 'cost' ? `, stored ${mismatch.stored}, rebuilt ${mismatch.rebuilt} at the hardening level's cost factor ${mismatch.factor}` : ''}`)
   }
 
-  return { unexplained, seen, pinnedCost, own, premium }
+  return { unexplained, seen, own }
 }
 
 check('saves: the beam fire controls of every save are rebuilt from the distance, speed, hardening and ECCM levels, but for the pinned rows', async (m) => {
@@ -1941,9 +1884,7 @@ check('saves: the beam fire controls of every save are rebuilt from the distance
   const lines = []
   const unexplained = []
   const seen = new Set()
-  const pinnedCost = new Set()
   let rebuilt = 0
-  let premium = 0
 
   for (const save of SAVES) {
     const { tally, mismatches } = await rebuildBeams(m, save)
@@ -1951,19 +1892,11 @@ check('saves: the beam fire controls of every save are rebuilt from the distance
 
     unexplained.push(...explained.unexplained)
     explained.seen.forEach((key) => seen.add(key))
-    explained.pinnedCost.forEach((key) => pinnedCost.add(key))
-    premium += explained.premium
     rebuilt += tally.rebuilt
     lines.push(`${save.file}: ${tally.rows} beam fire controls in ${tally.races} races, ${tally.rebuilt} rebuilt (${tally.planner} through the planner's table, the rest at a multiplier off the legal ladder), ${mismatches.length} differing, of which ${explained.own} pinned`)
   }
 
-  for (const pin of PREMIUM_BEAMS) {
-    if (!pinnedCost.has(pin.key) && openedSave(pin.file)) {
-      unexplained.push(`${pin.key} no longer differs: its stored cost is the 2.7.1 rule's (${pin.rebuilt} at ${pin.factor}), not this rule's`)
-    }
-  }
-
-  const absent = [...new Set([...PREMIUM_BEAMS.map((pin) => pin.file), ...PINNED_BEAMS.map((pin) => pin.file)])].filter((file) => !openedSave(file))
+  const absent = [...new Set(PINNED_BEAMS.map((pin) => pin.file))].filter((file) => !openedSave(file))
 
   if (absent.length) {
     lines.push(`pinned rows of a save that is not in saves/, not checked: ${absent.join(', ')}`)
@@ -1983,7 +1916,7 @@ check('saves: the beam fire controls of every save are rebuilt from the distance
   }
 
   assert.ok(rebuilt > 0, 'no beam fire control was rebuilt')
-  lines.push(`${rebuilt} beam fire controls rebuilt over ${SAVES.length} saves${premium ? `, ${premium} of them with the stored cost of the 2.7.1 rule` : ''}`)
+  lines.push(`${rebuilt} beam fire controls rebuilt over ${SAVES.length} saves`)
 
   return { lines }
 })

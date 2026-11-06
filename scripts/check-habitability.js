@@ -1,5 +1,5 @@
 /*
-  Checks the orbital-temperature rule of SystemBody.method_1/method_2/method_3 (Aurora 3.1.0) on hand-worked bodies, including moons and the distinct temperature floors. The save comparison requires a finite stored temperature, prediction and delta: a non-finite figure is a failed comparison, never a match. The optional saves are read only: the migrated save records a 2.7-versus-3.1 delta, not an oracle; the shipped save records a time-zero comparison, but its body rows are identical to the shipped 3.0.0 save (root measurement, AE-302-02 evidence). Specimen S2 of AE-310-03 remains the played-and-saved moon oracle.
+  Checks the orbital-temperature rule of SystemBody.method_1/method_2/method_3 (Aurora 3.1.0) on hand-worked bodies, including moons and the distinct temperature floors. The save comparison requires a finite stored temperature, prediction and delta: a non-finite figure is a failed comparison, never a match. The optional saves are read only: the migrated save records the delta between the temperatures the earlier game stored and the 3.1 rule's, not an oracle; the shipped save records a time-zero comparison, but its body rows are identical to the shipped 3.0.0 save (root measurement, AE-302-02 evidence). Specimen S2 of AE-310-03 remains the played-and-saved moon oracle.
   bun scripts/check-habitability.js [--no-mutations]
 */
 const fs = require('fs')
@@ -191,9 +191,9 @@ const compared = (h, bodies) => {
   return { count: bodies.length, match: valid.length - different.length, differ: different.length, invalid: invalid.length, moons: deltas.filter(({ moon }) => moon).length, minAbsDelta: abs[0] || 0, maxAbsDelta: abs[abs.length - 1] || 0, meanAbsDelta: abs.length ? abs.reduce((sum, delta) => sum + delta, 0) / abs.length : 0, maxAbsError: Math.max(0, ...abs), differences: different, invalidBodies: invalid }
 }
 
-// The first specimen is the interim fixture as recorded (INTERIM, not the default): its oracle is the 2.7 game's own stored temperatures and the count of its 59 bodies of eccentricity above 0.1, which stay with that save when `FIXTURE` moves.
+// The first specimen is the interim fixture as recorded (INTERIM, not the default): its oracle is the earlier game's own stored temperatures and the count of its 59 bodies of eccentricity above 0.1, which stay with that save when `FIXTURE` moves.
 const oracle = async (h) => {
-  for (const [name, fixture] of [['migrated-2.7-temperatures', INTERIM.file], ['shipped-3.1-time-zero', 'saves/AuroraDB_310_shipped.db']]) {
+  for (const [name, fixture] of [['migrated-earlier-temperatures', INTERIM.file], ['shipped-3.1-time-zero', 'saves/AuroraDB_310_shipped.db']]) {
     const filename = path.join(root, fixture)
 
     if (!fs.existsSync(filename)) {
@@ -208,7 +208,7 @@ const oracle = async (h) => {
       const eccentricWet = (body) => (body.BodyClass === 2 ? body.ParentEccentricity : body.Eccentricity) > 0 && (body.AtmosPress > 0 || body.HydroExt > 0)
       const summary = compared(h, bodies.filter(eccentricWet))
 
-      if (name === 'migrated-2.7-temperatures') {
+      if (name === 'migrated-earlier-temperatures') {
         const specified = bodies.filter((body) => body.Eccentricity > 0.1 && (body.AtmosPress > 0 || body.HydroExt > 0))
 
         assert.equal(specified.length, 59, 'the AE-310-01 interim specimen identifies 59 bodies with eccentricity above 0.1')

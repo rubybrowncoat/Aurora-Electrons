@@ -390,9 +390,10 @@ const loadedFrom = async (mod, options) => {
 // The reconciliation of scripts/check-harvesters.js (`checkFuelService`, the one run over the saves, with the independent reading of scripts/lib/fuel-service-oracle.js) over a constructed save, with the module under test as the page's own: its report of mismatches, and the independent reading itself.
 const reconciledFrom = async (mod, options) => {
   const raw = await constructedSave(options)
+  const { capabilities } = await loadUtilities(['capabilities'])
 
   try {
-    const report = await through('checkFuelService', () => checkFuelService(raw, { race: { GameID: 1, RaceID: 1 }, ships: [], shape: '2.7' }, { fuelDonors: mod }))
+    const report = await through('checkFuelService', () => checkFuelService(raw, { race: { GameID: 1, RaceID: 1 }, ships: [], formulaVersion: capabilities.STATED_FORMULA_VERSION }, { fuelDonors: mod }))
 
     return { report, truth: await fuelServiceTruth((sql) => all(raw, sql), { GameID: 1, RaceID: 1 }) }
   } finally {

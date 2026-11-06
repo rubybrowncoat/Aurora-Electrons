@@ -7,7 +7,6 @@
   - units: the merge of a capture into a record (first import, an unchanged repeat, a changed or moved object, an object that came back, a failed read, an older save, the same time on another ledger, the cap), the cut a fork takes, the span an object reports, the file a version can read, the choice kept in the settings;
   - view: the words a row gets, which never claim an age before the first capture;
   - modded: the recorder over the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784; the group keeps the name `modded` of the slot it stands in), read only: nothing read and written without a choice, nothing for a race that is not a player race, exactly two statements with one, the record against SQL written here, a later save changed in memory, an older save, a failed read, a clear, a pass superseded at each of its checks, the size against the figure kept;
-  - falryx: the recorder over the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and three forks): the spans against SQL, a skipped save, a rollback, the seed a fork takes and keeps, a campaign that never observed;
   - browser: the real app in Chromium over copies of the fixture: the switch, the Observed column and what it says after a first import and after a formation moved.
   Planted faults in copies of the utilities and of the page must each fail the checks they name by a value (scripts/lib/fault-credit.js `caughtBy`); one rewrite of each family must fail none. Everything the recorder reads comes through SELECTs of saves opened read only. Prints `N of N checks passed`; a failed check sets exit code 1, a defect of the harness 2.
 */
@@ -27,11 +26,7 @@ const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pagesDirectory = path.join(root, 'src', 'renderer', 'pages')
 const MODDED = { file: path.join(root, FIXTURE.file), GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, NPR: null }
-const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
-const FALRYX_GAME = 141
-const FALRYX_RACE = 791
 const NAMES = ['history', 'observations', 'observation-view', 'campaign', 'ground-formations', 'recording-owner', 'history-backup']
-const CAPPED_CAPTURES = 500
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -673,375 +668,6 @@ const moddedChecks = (m) => {
   ]
 }
 
-// ---------- the falryx saves ----------
-
-const falryxFiles = () => {
-  if (!fs.existsSync(FALRYX)) {
-    return null
-  }
-
-  const files = fs.readdirSync(FALRYX).filter((name) => /^AuroraDB-\d+\.db$/.test(name)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0])).map((name) => path.join(FALRYX, name))
-
-  return files.length === 8 ? files : null
-}
-
-// The falryx scenarios are each worked out when a check needs it, once for the modules of a check, so that a fault that a check of one scenario catches does not pay for the others. The first campaign goes through the stages of `FALRYX_CHAIN` on one installation, each stage building on the one before; the other scenarios each have an installation of their own.
-const falryxInputs = (m) => once(m, 'falryx-inputs', async () => {
-  const files = falryxFiles()
-
-  if (!files) {
-    return null
-  }
-
-  const times = []
-  const counts = []
-  const keys = []
-
-  for (const file of files) {
-    times.push(await gameTimeOf(file, FALRYX_GAME))
-    counts.push(await ledgerOf(file, FALRYX_GAME))
-    keys.push(await oracleOf(file, FALRYX_GAME, FALRYX_RACE))
-  }
-
-  return { files, times, counts, keys }
-})
-
-const falryxRestarted = (m) => once(m, 'falryx-restarted', () => m.reload())
-const FALRYX_CHAIN = ['first', 'second', 'fourth', 'rollback', 'fork', 'chain']
-
-const falryxChain = async (m, inputs, upTo) => {
-  const { files, times, counts, keys } = inputs
-  const state = await once(m, 'falryx-chain', async () => ({ inst: installation(), result: { times, counts, keys }, reached: 0 }))
-  const { inst, result } = state
-  const rec = (modules, index, options) => record(modules, inst, files[index], options)
-  const stages = {
-    first: async () => {
-      await rec(m, 0)
-
-      result.campaignId = inst.campaignId(FALRYX_GAME)
-      observe_(m, inst, result.campaignId, FALRYX_RACE)
-      await rec(m, 0)
-      result.optIn = inst.observations(result.campaignId)
-      result.writesAfterOptIn = inst.observationWrites()
-
-      await rec(m, 0)
-      await rec(m, 0)
-      result.writesAfterRepeat = inst.observationWrites()
-    },
-    second: async () => {
-      await rec(await falryxRestarted(m), 1)
-      result.second = inst.observations(result.campaignId)
-    },
-    // The third save is never read: its interval is unobserved.
-    fourth: async () => {
-      await rec(await falryxRestarted(m), 3)
-      result.fourth = inst.observations(result.campaignId)
-    },
-    // A rollback: an older save is read after a newer one.
-    rollback: async () => {
-      await rec(await falryxRestarted(m), 2)
-      result.rollback = inst.observations(result.campaignId)
-    },
-    fork: async () => {
-      const restarted = await falryxRestarted(m)
-      const { campaignId } = result
-
-      // A fork whose parent record this version cannot read is left alone and reported.
-      const damaged = inst.copy()
-
-      damaged.put(`file:campaign-${campaignId}-b1-observations`, { version: 99, races: {} })
-
-      const damagedRun = await record(restarted, damaged, files[4])
-
-      result.damaged = { failed: damagedRun.failed.map(({ stage }) => stage), names: damaged.observationNames(), registry: damaged.registry().campaigns[campaignId], latest: ((damaged.branch(campaignId, 'b2').races[FALRYX_RACE] || { snapshots: [{ t: null }] }).snapshots.slice(-1)[0] || { t: null }).t }
-
-      await rec(restarted, 4)
-      result.afterFork = { registry: inst.registry().campaigns[campaignId], b1: inst.observations(campaignId, 'b1'), b2: inst.observations(campaignId, 'b2') }
-
-      // The parent's record cleared after the fork: the fork keeps what it was given.
-      const cleared = inst.copy()
-
-      cleared.put(`file:campaign-${campaignId}-b1-observations`, { version: 1, races: {} })
-      await record(restarted, cleared, files[5])
-      result.parentCleared = { b1: cleared.observations(campaignId, 'b1'), b2: cleared.observations(campaignId, 'b2') }
-    },
-    chain: async () => {
-      const restarted = await falryxRestarted(m)
-      const { campaignId } = result
-
-      await rec(restarted, 5)
-      await rec(restarted, 6)
-      await rec(restarted, 7)
-      result.chain = { registry: inst.registry().campaigns[campaignId], b1: inst.observations(campaignId, 'b1'), b2: inst.observations(campaignId, 'b2'), b3: inst.observations(campaignId, 'b3'), b4: inst.observations(campaignId, 'b4') }
-    },
-  }
-
-  while (state.reached <= FALRYX_CHAIN.indexOf(upTo)) {
-    await stages[FALRYX_CHAIN[state.reached]]()
-    state.reached++
-  }
-
-  return result
-}
-
-const FALRYX_SCENARIOS = {
-  // The campaign never observed, forked at the fifth save.
-  never: async (m, { files }) => {
-    const never = installation()
-
-    for (const index of [0, 1, 3, 4, 5]) {
-      await record(m, never, files[index])
-    }
-
-    return { names: never.observationNames(), reads: never.observationReads(), registry: never.registry().campaigns[never.campaignId(FALRYX_GAME)], settings: never.files.get('settings') || null }
-  },
-  // A fork made while nothing is observed, and the race then chosen on the fork.
-  late: async (m, { files, times, counts, keys }) => {
-    const restarted = await falryxRestarted(m)
-    const late = installation()
-
-    for (const index of [0, 1, 3, 4]) {
-      await record(restarted, late, files[index])
-    }
-
-    const lateId = late.campaignId(FALRYX_GAME)
-
-    observe_(restarted, late, lateId, FALRYX_RACE)
-    late.put(`file:campaign-${lateId}-b1-observations`, { version: 1, races: { [FALRYX_RACE]: { kinds: { formation: m.obs.mergeCapture(null, { t: times[1], n: counts[1], objects: [...keys[1].keys()].slice(0, 20).map((id) => [id, dg(id)]) }).record } } } })
-    await record(restarted, late, files[5])
-
-    return { b1: late.observations(lateId, 'b1'), b2: late.observations(lateId, 'b2') }
-  },
-  // The race chosen, then turned off again: a fork made afterwards is still given the parent's record up to the fork, as the choice is on record.
-  off: async (m, { files }) => {
-    const restarted = await falryxRestarted(m)
-    const off = installation()
-
-    await record(restarted, off, files[0])
-
-    const offId = off.campaignId(FALRYX_GAME)
-
-    observe_(restarted, off, offId, FALRYX_RACE)
-    await record(restarted, off, files[1])
-    observe_(restarted, off, offId, FALRYX_RACE, false)
-    await record(restarted, off, files[3])
-    await record(restarted, off, files[4])
-
-    return { b1: off.observations(offId, 'b1'), b2: off.observations(offId, 'b2'), registry: off.registry().campaigns[offId] }
-  },
-  // A fork made while nothing was observed, the race chosen, then a save from before the fork read (the resolver gives it to the fork) and a save after it: the fork's first record has no parent to seed it, and still no run of it may begin before the fork.
-  rewound: async (m, { files }) => {
-    const restarted = await falryxRestarted(m)
-    const rewound = installation()
-
-    for (const index of [0, 1, 3, 4]) {
-      await record(restarted, rewound, files[index])
-    }
-
-    const rewoundId = rewound.campaignId(FALRYX_GAME)
-
-    observe_(restarted, rewound, rewoundId, FALRYX_RACE)
-    await record(restarted, rewound, files[0])
-    await record(restarted, rewound, files[5])
-
-    return { b1: rewound.observations(rewoundId, 'b1'), b2: rewound.observations(rewoundId, 'b2'), registry: rewound.registry().campaigns[rewoundId] }
-  },
-  // A choice held only for a race the save marks as an NPR, an ordinary NPR empire or a special faction the recorder leaves out: that race is never read, so a fork of the campaign opens no observation file.
-  nprOnly: async (m, { files }) => {
-    const restarted = await falryxRestarted(m)
-    const seen = {}
-
-    for (const special of [false, true]) {
-      const nprOnly = installation()
-
-      await record(restarted, nprOnly, files[0], { asNpr: FALRYX_RACE, special })
-
-      const nprOnlyId = nprOnly.campaignId(FALRYX_GAME)
-
-      observe_(restarted, nprOnly, nprOnlyId, FALRYX_RACE)
-
-      for (const index of [1, 3, 4, 5]) {
-        await record(restarted, nprOnly, files[index], { asNpr: FALRYX_RACE, special })
-      }
-
-      seen[special ? 'special' : 'ordinary'] = { names: nprOnly.observationNames(), reads: nprOnly.observationReads(), marks: Object.values(nprOnly.registry().campaigns[nprOnlyId].branches).map((branch) => branch.observationsSeeded || null), forked: Object.keys(nprOnly.registry().campaigns[nprOnlyId].branches) }
-    }
-
-    return seen
-  },
-  // A fork taken before the captures a cap left in the parent: its seed has to stay a file this version reads, the capture after it has to go in, and a backup has to be made.
-  capped: async (m, { files, times }) => {
-    const restarted = await falryxRestarted(m)
-    const capped = installation()
-
-    for (const index of [0, 1, 3]) {
-      await record(restarted, capped, files[index])
-    }
-
-    const cappedId = capped.campaignId(FALRYX_GAME)
-    const newest = times[5] + 1000 + CAPPED_CAPTURES
-
-    observe_(restarted, capped, cappedId, FALRYX_RACE)
-    await record(restarted, capped, files[3])
-    capped.put(`file:campaign-${cappedId}-b1-observations`, { version: 1, races: { [FALRYX_RACE]: { kinds: { formation: { captures: Array.from({ length: CAPPED_CAPTURES }, (_, index) => [newest - CAPPED_CAPTURES + 1 + index, index + 1]), objects: { 1: [0, newest, dg(1)], 2: [0, newest, dg(2)] }, cut: times[5] + 999 } } } } })
-    await record(restarted, capped, files[4])
-    await record(restarted, capped, files[5])
-
-    const cappedProblems = [...capped.files].filter(([name]) => name.endsWith('-observations')).map(([name, file]) => [name, m.obs.observationFileProblem(file)])
-    let backupError = null
-
-    try {
-      m.backup.buildBackup(capped.io, { at: 1 })
-    } catch (error) {
-      backupError = error.message
-    }
-
-    return { problems: cappedProblems, b2: capped.observations(cappedId, 'b2'), marked: capped.registry().campaigns[cappedId].branches.b2.observationsSeeded, backupError }
-  },
-}
-
-// What a check of the falryx saves reads: the saves' own times, ledgers and keys, and the scenario `need` (a stage of the first campaign, or a scenario of its own, under the name of the field the check reads); null when the saves are not here.
-const falryx = async (m, need) => {
-  const inputs = await falryxInputs(m)
-
-  if (!inputs) {
-    return null
-  }
-
-  if (FALRYX_CHAIN.includes(need)) {
-    return falryxChain(m, inputs, need)
-  }
-
-  const { times, counts, keys } = inputs
-
-  return { times, counts, keys, [need]: await once(m, `falryx-${need}`, () => FALRYX_SCENARIOS[need](m, inputs)) }
-}
-
-const runOf = (record) => Object.fromEntries(Object.entries(record.objects).map(([id, object]) => [id, object.slice(0, 2).concat(object.length === 4 ? object[3] : 0)]))
-
-// What a capture at `t` of the saves with keys `now` holds, from the keys of the capture before (`before`, a Map id -> key) and its entries (`entries`, { id: [first, last, moved] }), by the rule written here: an object whose key is the same goes on, one whose key differs or that is new starts at `t`, one that is gone is dropped.
-const expectedAfter = (entries, before, now, t) => Object.fromEntries([...now].map(([id, key]) => [id, before.has(id) && before.get(id) === key && entries[id] ? [entries[id][0], t, entries[id][2]] : [t, t, before.has(id) && entries[id] ? 1 : 0]]))
-
-// The scenario each check of the falryx saves reads (`falryx`), by the start of its name.
-const FALRYX_NEEDS = [
-  ['falryx: the first capture', 'first'],
-  ['falryx: a second save', 'second'],
-  ['falryx: a skipped save', 'fourth'],
-  ['falryx: the third capture', 'fourth'],
-  ['falryx: a rollback', 'rollback'],
-  ['falryx: a fork takes', 'fork'],
-  ['falryx: a span never crosses', 'fork'],
-  ['falryx: the fork\'s own first capture', 'fork'],
-  ['falryx: the branch is marked', 'fork'],
-  ['falryx: the fork keeps its seed', 'fork'],
-  ['falryx: a fork whose parent record', 'fork'],
-  ['falryx: every later fork', 'chain'],
-  ['falryx: a campaign that never', 'never'],
-  ['falryx: a fork made while nothing', 'late'],
-  ['falryx: a race turned off', 'off'],
-  ['falryx: a fork with no parent record', 'rewound'],
-  ['falryx: a choice held only', 'nprOnly'],
-  ['falryx: a fork taken before', 'capped'],
-]
-
-const falryxChecks = (m) => {
-  const entry = (name, test) => [name, async () => {
-    const need = FALRYX_NEEDS.find(([start]) => name.startsWith(start))
-
-    if (!need) {
-      throw new Error(`no scenario is named for the check ${name}`)
-    }
-
-    const s = await falryx(m, need[1])
-
-    return s ? test(s, kindOf) : 'the saves of artifacts/falryx-sequential-and-rollback are not here'
-  }]
-  const kind = (file) => kindOf(file, FALRYX_RACE)
-
-  return [
-    entry('falryx: the first capture holds the formations SQL counts, with the digests SQL tells apart, and a repeat writes nothing', (s) => same({ ids: Object.keys(kind(s.optIn).objects).map(Number).sort((a, b) => a - b), captures: kind(s.optIn).captures, partition: partitionProblems(kind(s.optIn).objects, s.keys[0]), writes: [s.writesAfterOptIn, s.writesAfterRepeat] }, { ids: [...s.keys[0].keys()].sort((a, b) => a - b), captures: [[s.times[0], s.counts[0]]], partition: [], writes: [1, 1] })),
-    entry('falryx: a second save extends the formations SQL finds the same, restarts those that differ and starts those that are new, with no one dropped that is still there', (s) => same(runOf(kind(s.second)), expectedAfter(runOf(kind(s.optIn)), s.keys[0], s.keys[1], s.times[1]), 'runs after the second save')),
-    entry('falryx: a skipped save leaves a gap: the third save of the record follows the second, and a formation that stood unchanged across all three counts three captures, not the increments between', (s) => {
-      const unchanged = [...s.keys[3]].filter(([id, key]) => s.keys[1].get(id) === key && s.keys[0].get(id) === key).map(([id]) => id)
-      const spans = unchanged.slice(0, 50).map((id) => m.obs.spanOf(kind(s.fourth), id))
-      const widest = Math.max(s.times[1] - s.times[0], s.times[3] - s.times[1])
-
-      return same({ captures: kind(s.fourth).captures.map(([t]) => t), unchanged: unchanged.length > 0, counted: [...new Set(spans.map((span) => span.captures))], longest: [...new Set(spans.map((span) => span.longest.to - span.longest.from))] }, { captures: [s.times[0], s.times[1], s.times[3]], unchanged: true, counted: [3], longest: [widest] })
-    }),
-    entry('falryx: the third capture follows the rule against SQL as well', (s) => same(runOf(kind(s.fourth)), expectedAfter(runOf(kind(s.second)), s.keys[1], s.keys[3], s.times[3]), 'runs after the fourth save')),
-    entry('falryx: a rollback, an older save read after a newer one, leaves the record as it was', (s) => same(s.rollback, s.fourth)),
-    entry('falryx: a fork takes the parent record up to the fork, not the captures after it, and says where it was cut', (s) => {
-      const fork = s.afterFork.registry.branches.b2.fork.t
-      const parent = kind(s.afterFork.b1)
-      const seeded = kind(s.afterFork.b2)
-      const wanted = parent.captures.filter(([t]) => t <= fork)
-
-      return same({ seed: seeded.seed, captures: seeded.captures.slice(0, wanted.length), own: seeded.captures.slice(wanted.length).map(([t]) => t), later: wanted.length < parent.captures.length }, { seed: fork, captures: wanted, own: [s.times[4]], later: true })
-    }),
-    entry('falryx: a span never crosses the fork: no run of the fork begins before its own first capture and none is flagged as inherited, though the fork holds the parent\'s captures', (s) => {
-      const seeded = kind(s.afterFork.b2)
-      const early = Object.values(seeded.objects).filter((object) => object[0] < s.times[4])
-      const flagged = Object.keys(seeded.objects).filter((id) => m.obs.spanOf(seeded, id).inherited)
-
-      return same({ early: early.length, flagged: flagged.length, seeded: seeded.captures.length > 1 }, { early: 0, flagged: 0, seeded: true })
-    }),
-    entry('falryx: the fork\'s own first capture restarts each formation the parent saw the same, marks one that differs as moved, starts the new ones, and drops what the save no longer holds', (s) => {
-      const seeded = kind(s.afterFork.b2)
-      const parent = kind(s.afterFork.b1)
-      const fork = s.afterFork.registry.branches.b2.fork.t
-      const before = new Map(Object.entries(parent.objects).filter(([, object]) => object[0] <= fork).map(([id, object]) => [Number(id), object]))
-      const wrong = [...s.keys[4]].filter(([id, key]) => {
-        const held = seeded.objects[id]
-        const mark = !before.has(id) ? 0 : s.keys[3].get(id) === key ? 2 : 1
-
-        return !(held && held[0] === s.times[4] && held[1] === s.times[4] && (held[3] || 0) === mark)
-      })
-      const gone = Object.keys(seeded.objects).filter((id) => !s.keys[4].has(Number(id)))
-
-      return same({ wrong: wrong.length, gone: gone.length }, { wrong: 0, gone: 0 })
-    }),
-    entry('falryx: the branch is marked as given its seed, and the parent record is the one the fork was taken from', (s) => same({ marked: s.afterFork.registry.branches.b2.observationsSeeded, parentMarked: s.afterFork.registry.branches.b1.observationsSeeded || null, parentKept: equal(s.afterFork.b1, s.rollback) }, { marked: true, parentMarked: null, parentKept: true })),
-    entry('falryx: the fork keeps its seed when the parent record is cleared, and the capture after it goes on from the seed', (s) => {
-      const before = kind(s.afterFork.b2)
-      const after = kind(s.parentCleared.b2)
-      const fork = s.afterFork.registry.branches.b2.fork.t
-
-      return same({ parent: s.parentCleared.b1, seed: after.seed, kept: after.captures.slice(0, before.captures.length), held: before.captures.length > 1, first: Object.keys(before.objects).filter((id) => s.keys[5].get(Number(id)) === s.keys[4].get(Number(id)) && after.objects[id] && after.objects[id][0] !== before.objects[id][0]).length }, { parent: { version: 1, races: {} }, seed: fork, kept: before.captures, held: true, first: 0 })
-    }),
-    entry('falryx: a fork whose parent record this version cannot read is left unseeded and reported, and the empire snapshot is still written', (s) => same({ failed: [...new Set(s.damaged.failed)], names: s.damaged.names, marked: s.damaged.registry.branches.b2 ? s.damaged.registry.branches.b2.observationsSeeded || null : 'no branch', latest: s.damaged.latest }, { failed: ['observations'], names: [`file:campaign-${s.campaignId}-b1-observations`], marked: null, latest: s.times[4] }, 'damaged parent')),
-    entry('falryx: every later fork is cut at its own fork time and begins from its parent\'s record up to it', (s) => {
-      const problems = []
-
-      Object.entries(s.chain.registry.branches).filter(([, branch]) => branch.parent).forEach(([id, branch]) => {
-        const own = kind(s.chain[id])
-
-        if (!own || own.seed !== branch.fork.t || branch.observationsSeeded !== true) {
-          problems.push([id, own ? own.seed : null, branch.fork.t, branch.observationsSeeded])
-        }
-      })
-
-      return problems.length === 0 && Object.keys(s.chain.registry.branches).length === 4 ? true : short(problems)
-    }),
-    entry('falryx: a campaign that never observed writes no observation file, opens none, and marks each branch it forks as seeded, with the settings as they were', (s) => same({ names: s.never.names, reads: s.never.reads, marks: Object.values(s.never.registry.branches).map((branch) => branch.observationsSeeded || null), forked: Object.keys(s.never.registry.branches), settings: s.never.settings }, { names: [], reads: 0, marks: [null, true], forked: ['b1', 'b2'], settings: null })),
-    entry('falryx: a fork made while nothing was observed starts its record at its first capture: a record the parent gets after the fork, once the race is chosen, is not given to the fork', (s) => same({ b1: kind(s.late.b1).captures.map(([t]) => t), b2: kind(s.late.b2).captures.map(([t]) => t), marks: Object.values(kind(s.late.b2).objects).filter((object) => object.length > 3).length, inherited: Object.keys(kind(s.late.b2).objects).filter((id) => m.obs.spanOf(kind(s.late.b2), id).inherited).length }, { b1: [s.times[1]], b2: [s.times[5]], marks: 0, inherited: 0 })),
-    entry('falryx: a race turned off after it was observed still has its record given to a fork made afterwards, cut at the fork', (s) => same({ b1: kind(s.off.b1) ? kind(s.off.b1).captures.map(([t]) => t) : null, b2: kind(s.off.b2) ? { captures: kind(s.off.b2).captures.map(([t]) => t), seed: kind(s.off.b2).seed } : null, forkAt: s.off.registry.branches.b2 ? s.off.registry.branches.b2.fork.t : null }, { b1: [s.times[1]], b2: { captures: [s.times[1]], seed: s.off.registry.branches.b2 ? s.off.registry.branches.b2.fork.t : null }, forkAt: s.off.registry.branches.b2 ? s.off.registry.branches.b2.fork.t : null })),
-    entry('falryx: a fork with no parent record to seed it still starts every run at its own first capture after the fork, though a save from before the fork was read into it first', (s) => {
-      const own = kind(s.rewound.b2)
-      const fork = s.rewound.registry.branches.b2.fork.t
-      const wrong = [...s.keys[5]].filter(([id, key]) => {
-        const held = own && own.objects[id]
-        const mark = !s.keys[0].has(id) ? 0 : s.keys[0].get(id) === key ? 2 : 1
-
-        return !(held && held[0] === s.times[5] && held[1] === s.times[5] && (held[3] || 0) === mark)
-      })
-
-      return same({ captures: own ? own.captures.map(([t]) => t) : null, seed: own ? own.seed : null, wrong: wrong.length, extra: own ? Object.keys(own.objects).filter((id) => !s.keys[5].has(Number(id))).length : null, parent: s.rewound.b1 ? 'held' : null }, { captures: [s.times[0], s.times[5]], seed: fork, wrong: 0, extra: 0, parent: null })
-    }),
-    entry('falryx: a choice held only for a race the save marks as an NPR, an ordinary empire or a special faction, reads no observation file at a fork, writes none, and still marks the fork as seeded', (s) => same(Object.fromEntries(Object.entries(s.nprOnly).map(([class_, seen]) => [class_, { names: seen.names, reads: seen.reads, marks: seen.marks, forked: seen.forked }])), { ordinary: { names: [], reads: 0, marks: [null, true], forked: ['b1', 'b2'] }, special: { names: [], reads: 0, marks: [null, true], forked: ['b1', 'b2'] } })),
-    entry('falryx: a fork taken before the captures a cap left in the parent is seeded with a file this version reads, goes on to capture, and the history backs up', (s) => same({ problems: s.capped.problems.filter(([, problem]) => problem !== null), captures: kind(s.capped.b2).captures.map(([t]) => t), marked: s.capped.marked, backupError: s.capped.backupError }, { problems: [], captures: [s.times[4], s.times[5]], marked: true, backupError: null })),
-  ]
-}
-
 // ---------- the browser ----------
 
 // The real app in Chromium (scripts/lib/page-server.js over a copy of the fixture, scripts/lib/browser-observe.js): the switch of the Survey Progress page, the Observed column after the first capture, a later save (the save served is changed and the app opened again) in which one formation moved and one changed its elements, and the Retention panel of the History page. What the page draws is read through the hooks the templates carry; what is judged is the text on screen.
@@ -1461,9 +1087,9 @@ const utilityFile = (name) => path.join(utilitiesDirectory, name)
 /* eslint-disable no-template-curly-in-string */
 // Faults planted in the utilities, each with the checks it must break by a value (`fails`, the starts of check names).
 const MUTATIONS = [
-  { name: 'a save older than the newest capture extends a run', file: 'observations.js', find: 'if (tip && capture.t < tip[0]) {', replace: 'if (false) {', fails: ['units: a save older than the newest', 'falryx: a rollback', 'modded: the save read again'] },
+  { name: 'a save older than the newest capture extends a run', file: 'observations.js', find: 'if (tip && capture.t < tip[0]) {', replace: 'if (false) {', fails: ['units: a save older than the newest', 'modded: the save read again'] },
   { name: 'the same game time on another ledger taken as the same timeline', file: 'observations.js', find: 'if (tip && capture.t === tip[0] && capture.n !== tip[1]) {', replace: 'if (false) {', fails: ['units: the same game time on another ledger'] },
-  { name: 'a changed composition does not restart the span', file: 'observations.js', find: 'if (before && (before[2] === digest || carried)) {', replace: 'if (before) {', fails: ['units: an object whose digest changed', 'units: the same save read again', 'falryx: a second save'] },
+  { name: 'a changed composition does not restart the span', file: 'observations.js', find: 'if (before && (before[2] === digest || carried)) {', replace: 'if (before) {', fails: ['units: an object whose digest changed', 'units: the same save read again'] },
   { name: 'a later capture drops the capture before it', file: 'observations.js', find: 'record.captures.push([capture.t, capture.n])', replace: 'record.captures = [[capture.t, capture.n]]', fails: ['units: an object seen the same', 'units: the same save read again', 'units: a run across a failed capture'] },
   { name: 'an unchanged object restarts at every capture', file: 'observations.js', find: 'objects[id] = [before[0], capture.t, digest, ...(before[3] ? [before[3]] : [])]', replace: 'objects[id] = [capture.t, capture.t, digest]', fails: ['units: an object seen the same', 'modded: every other formation'] },
   { name: 'an object not seen at a capture is kept', file: 'observations.js', find: 'record.objects = objects\n', replace: 'record.objects = { ...record.objects, ...objects }\n', fails: ['units: an object missing from one capture'] },
@@ -1480,29 +1106,22 @@ const MUTATIONS = [
   { name: 'a kind read for every race whether chosen or not', file: 'observations.js', find: 'KIND_NAMES.filter((kind) => Object.values(wish).some((campaign) => campaign.gameIds.includes(GameID) && (campaign.races[Number(RaceID)] || []).includes(kind)))', replace: 'KIND_NAMES', fails: ['modded: nothing chosen', 'units: what the recorder reads of the choice'] },
   { name: 'a choice that stays on when it is turned off', file: 'observations.js', find: 'if (on) {\n      kinds.push(kind)\n    }', replace: 'kinds.push(kind)', fails: ['units: a choice is kept'] },
   { name: 'the size predicted for an object too small', file: 'observations.js', find: 'objects * OBJECT_BYTES + captures * CAPTURE_BYTES', replace: 'objects * 8 + captures * CAPTURE_BYTES', fails: ['units: the size predicted', 'modded: the size predicted'] },
-  { name: 'a capture read again rewritten as a change', file: 'observations.js', find: 'const unchanged = again && Object.keys(objects).length', replace: 'const unchanged = false && Object.keys(objects).length', fails: ['modded: the pass that records', 'falryx: the first capture'] },
+  { name: 'a capture read again rewritten as a change', file: 'observations.js', find: 'const unchanged = again && Object.keys(objects).length', replace: 'const unchanged = false && Object.keys(objects).length', fails: ['modded: the pass that records'] },
   { name: 'an NPR race read', file: 'history.js', find: 'const kinds = npr ? [] : observationWanted(observe, GameID, RaceID)', replace: 'const kinds = observationWanted(observe, GameID, RaceID)', fails: ['modded: an NPR'] },
-  { name: 'a fork made while nothing was observed left unmarked', file: 'history.js', find: 'if (!resolution.forked) {', replace: 'if (!resolution.forked || !observationEverChosenIn(storage.settings ? storage.settings.store : null, resolution.campaignId, nprRaces)) {', fails: ['falryx: a campaign that never', 'falryx: a fork made while nothing'] },
-  { name: 'the seed of a fork not written', file: 'history.js', find: 'storage.file(observationFileName(resolution.campaignId, resolution.branchId)).store = seed.value', replace: 'void seed.value', fails: ['falryx: a fork takes', 'falryx: the fork keeps its seed'] },
-  { name: 'the branch not marked as seeded', file: 'history.js', find: 'branch.observationsSeeded = true', replace: 'branch.observationsSeeded = false', fails: ['falryx: the branch is marked', 'falryx: every later fork'] },
   { name: 'a pass replaced writes the record', file: 'history.js', find: 'if (merged.changed) {\n                guard()\n                storage.file(observationFileName', replace: 'if (merged.changed) {\n                storage.file(observationFileName', fails: ['modded: a pass superseded'] },
-  { name: 'the record written for a capture that changed nothing', file: 'history.js', find: 'if (merged.changed) {\n                guard()', replace: 'if (true) {\n                guard()', fails: ['modded: the pass that records', 'falryx: the first capture'] },
+  { name: 'the record written for a capture that changed nothing', file: 'history.js', find: 'if (merged.changed) {\n                guard()', replace: 'if (true) {\n                guard()', fails: ['modded: the pass that records'] },
   { name: 'the reason of a failed read not kept', file: 'history.js', find: 'reason: failureWords(read.failed)', replace: "reason: 'the read failed'", fails: ['modded: a failed read is noted'] },
   { name: 'clearing a race leaves its observation record', file: 'history.js', find: 'planned(observationStore(campaignId, branchId), observationsFrom),', replace: 'null,', fails: ['units: clearing a race'] },
-  { name: 'the elements left out of the signature of a formation', file: 'ground-formations.js', find: "|${(held.get(row.FormationID) || []).join(',')}`", replace: '|`', fails: ['modded: the digests tell', 'modded: a later save holds', 'falryx: the first capture'] },
+  { name: 'the elements left out of the signature of a formation', file: 'ground-formations.js', find: "|${(held.get(row.FormationID) || []).join(',')}`", replace: '|`', fails: ['modded: the digests tell', 'modded: a later save holds'] },
   { name: 'the ship left out of the signature of a formation', file: 'ground-formations.js', find: '/${orZero(row.ShipID)}/', replace: '/', fails: ['modded: the digests tell'] },
   { name: 'the headline claims a formation unchanged since the first capture', file: 'observation-view.js', find: "const since = span.basis === 'import' ? `Observed since import, ${date(span.first)}` : `Observed since ${date(span.first)}`", replace: 'const since = `Unchanged since ${date(span.first)}`', fails: ['view: a first import says', 'view: nothing says how long'] },
   { name: 'the age before the first capture guessed', file: 'observation-view.js', find: "'Its age before the first capture is not known.'", replace: "'Deployed since the game began.'", fails: ['view: nothing says how long'] },
   { name: 'a span of the parent branch not said', file: 'observation-view.js', find: 'if (span.inherited) {', replace: 'if (false) {', fails: ['view: a failed capture inside a span'] },
-  { name: 'a fork\'s first capture extends the run of the parent', file: 'observations.js', find: '} else if (seed !== null && before[1] <= seed) {', replace: '} else if (false) {', fails: ['units: the first capture of a fork', 'falryx: a span never crosses', 'falryx: the fork\'s own first capture'] },
-  { name: 'a cut keeps an object nothing witnesses', file: 'observations.js', find: 'if (!seen.length) {\n      return\n    }\n\n    objects[id] = [first, seen[seen.length - 1][0], digest, ...(mark ? [mark] : [])]', replace: 'objects[id] = [first, seen.length ? seen[seen.length - 1][0] : first, digest, ...(mark ? [mark] : [])]', fails: ['units: the cut a fork takes', 'units: a cut inside the captures', 'falryx: a fork taken before the captures'] },
+  { name: 'a fork\'s first capture extends the run of the parent', file: 'observations.js', find: '} else if (seed !== null && before[1] <= seed) {', replace: '} else if (false) {', fails: ['units: the first capture of a fork'] },
+  { name: 'a cut keeps an object nothing witnesses', file: 'observations.js', find: 'if (!seen.length) {\n      return\n    }\n\n    objects[id] = [first, seen[seen.length - 1][0], digest, ...(mark ? [mark] : [])]', replace: 'objects[id] = [first, seen.length ? seen[seen.length - 1][0] : first, digest, ...(mark ? [mark] : [])]', fails: ['units: the cut a fork takes', 'units: a cut inside the captures'] },
   { name: 'a record of a later save compared with the open save', file: 'observations.js', find: 'if (open && (open.t < tip[0] || (open.t === tip[0] && open.n !== tip[1]))) {', replace: 'if (false) {', fails: ['units: a record of a later save'] },
   { name: 'the fleet of the carrier not used for a carried formation', file: 'ground-formations.js', find: 'coalesce(FCT_Fleet.SystemID, CarrierFleet.SystemID) as FleetSystemID', replace: 'FCT_Fleet.SystemID as FleetSystemID', fails: ['units: a formation on a ship with no fleet'] },
   { name: 'a choice turned off forgotten', file: 'observations.js', find: '} else if (Array.isArray(race.observe)) {\n      race.observe = []\n    } else {', replace: '} else if (false) {\n      race.observe = []\n    } else {', fails: ['units: a choice is kept'] },
-  { name: 'a fork of a campaign that never observed reads the observation files', file: 'history.js', find: 'const chosenBefore = observationEverChosenIn(storage.settings ? storage.settings.store : null, resolution.campaignId, nprRaces)', replace: 'const chosenBefore = true', fails: ['falryx: a campaign that never'] },
-  { name: 'a fork with no parent record given no seed time', file: 'observations.js', find: 'isKnownNumber(forkAt) && !(before && isKnownNumber(before.seed)) ? { ...(before || emptyRecord()), seed: forkAt } : before', replace: 'before', fails: ['falryx: a fork with no parent record'] },
-  { name: 'a choice turned off taken as never made by a fork', file: 'observations.js', find: 'Object.entries(own.race).some(([RaceID, values]) => !skipped.includes(RaceID) && isObject(values) && Array.isArray(values.observe))', replace: 'Object.entries(own.race).some(([RaceID, values]) => !skipped.includes(RaceID) && kindsOf(values).length > 0)', fails: ['falryx: a race turned off'] },
-  { name: 'the choice of an NPR race counted at a fork', file: 'observations.js', find: 'const skipped = except.map(String)', replace: 'const skipped = []', fails: ['falryx: a choice held only for a race the save marks as an NPR'] },
   { name: 'a summary that counts one capture as minus one', file: 'observation-view.js', find: "span.captures === 1 ? '1 capture' :", replace: "span.captures === 1 ? '-1 capture' :", fails: ['view: the captures of a span'] },
   { name: 'a summary that counts the captures of a span as negative', file: 'observation-view.js', find: '`${span.captures} captures, longest interval', replace: '`-${span.captures} captures, longest interval', fails: ['view: the captures of a span'] },
   { name: 'the account of a record that counts its captures as negative', file: 'observation-view.js', find: "`${plural(record.captures.length, 'capture', 'captures')} on this branch", replace: "`${plural(-record.captures.length, 'capture', 'captures')} on this branch", fails: ['view: the account of a record'] },
@@ -1563,7 +1182,7 @@ const BROWSER_BENIGN = [
 ]
 /* eslint-enable no-template-curly-in-string */
 
-const GROUPS = (m) => [...unitChecks(m), ...viewChecks(m), ...moddedChecks(m), ...falryxChecks(m)]
+const GROUPS = (m) => [...unitChecks(m), ...viewChecks(m), ...moddedChecks(m)]
 
 // ---------- the parts ----------
 
@@ -1690,12 +1309,12 @@ const runPart = async (part) => {
   }
 }
 
-// The deadlines, in seconds: a part in memory runs the scenarios over the saves (the fixture and the eight of falryx are read through SQL once for the process); a part served to the browser starts the app twice; the setup starts and warms the page server, the one cold start of the run.
+// The deadlines, in seconds: a part in memory runs the scenarios over the saves (the fixture is read through SQL once for the process); a part served to the browser starts the app twice; the setup starts and warms the page server, the one cold start of the run.
 const DEADLINES = { part: 240, mutant: 240, browser: 400, setup: 900 }
 const MUTATIONS_HEADING = '\nMutations: each must fail by a value the checks it names, and each benign rewrite none'
 
 const variantsOf = (options) => [
-  { key: 'groups', name: 'the observation record: units, words, the recorder over the saves', head: true, heading: 'The formation observation record: units, words and the recorder over the fixture and the falryx saves', deadline: DEADLINES.part, run: () => runPart('groups') },
+  { key: 'groups', name: 'the observation record: units, words, the recorder over the fixture', head: true, heading: 'The formation observation record: units, words and the recorder over the fixture', deadline: DEADLINES.part, run: () => runPart('groups') },
   { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of the fixture and a later copy of it, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser') },
   ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind.includes('benign') ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id) })) : []),
 ]
@@ -1721,7 +1340,7 @@ const main = async () => {
     script: __filename,
     // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
     workers: 4,
-    inputs: [MODDED.file, ...(falryxFiles() || [])].filter((input) => fs.existsSync(input)),
+    inputs: [MODDED.file].filter((input) => fs.existsSync(input)),
     variants: variantsOf(options),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

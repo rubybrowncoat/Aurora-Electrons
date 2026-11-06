@@ -7,7 +7,7 @@
   - planted rows: a copy of the played save with one log row of each type the line split or added (143, 211, 233, 373 to 382) is read by the page's own statement, so every row is named from the copy's own event table and drawn with the icon of its type;
   - interrupt mark: a type the copy flags carries the mark and a type it does not flag carries none, and the flag of a second opening of the copy, changed here, changes the mark, so the flags are read per opened save and never kept from the first; an event table that cannot be read marks no row;
   - the page: the list and the event dialog draw the mark under the gate, and the footer says what it means.
-  Every planted fault (the icon of the neutral alien ship kept on the 2.7 type, the flags kept from the first save read, the gate or the read ignoring the flag) is credited only when the check named for it fails by an assertion of its own.
+  Every planted fault (the icon of the neutral alien ship kept on the earlier type, the flags kept from the first save read, the gate or the read ignoring the flag) is credited only when the check named for it fails by an assertion of its own.
   Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
@@ -40,14 +40,14 @@ const PLANTED_PREFIX = 'Event catalogue: '
 const FIELDS = Object.freeze(['IncrementID', 'GameID', 'RaceID', 'SMOnly', 'Time', 'EventType', 'MessageText', 'SystemID', 'Xcor', 'Ycor', 'IDType', 'PopulationID'])
 const PLANTED_INCREMENT = 999999
 
-// The events the line split, every type each became, and the icon the 2.7 branch drew for the one event (release/2.7 src/renderer/utilities/event-icons.js): the one alien ship became hostile, neutral, friendly and allied; the one civilian mining colony became the colony and its update; the one mineral exhausted became the mineral and all minerals. The line's IDs and names are held against `.github/exports/DIM_EventType.csv`, the icon against this table rather than the module's own mapping, so a mapping that does not keep the old icon fails here even when the module and its reader agree.
+// The events the line split, every type each became, and the icon the release/2.7 branch drew for the one event (release/2.7 src/renderer/utilities/event-icons.js): the one alien ship became hostile, neutral, friendly and allied; the one civilian mining colony became the colony and its update; the one mineral exhausted became the mineral and all minerals. The line's IDs and names are held against `.github/exports/DIM_EventType.csv`, the icon against this table rather than the module's own mapping, so a mapping that does not keep the old icon fails here even when the module and its reader agree.
 const SPLITS = Object.freeze([
   { old: { id: 233, name: 'New Alien Ship' }, icon: 'mdi-rocket', types: [[233, 'New Hostile Alien Ship'], [377, 'New Neutral Alien Ship'], [378, 'New Friendly Alien Ship'], [379, 'New Allied Alien Ship']] },
   { old: { id: 211, name: 'Civilian Mining Colony' }, icon: 'mdi-mine', types: [[211, 'Civilian Mining Colony'], [380, 'Mining Colony Update']] },
   { old: { id: 66, name: 'Mineral Exhausted' }, icon: 'mdi-diamond-outline', types: [[66, 'Mineral Exhausted'], [376, 'All Minerals Exhausted']] },
 ])
 
-// The icon the 2.7 branch drew for the ground survey the milestone names beside the splits (release/2.7 src/renderer/utilities/event-icons.js); its ID did not change, so it is no split group.
+// The icon the release/2.7 branch drew for the ground survey the milestone names beside the splits (release/2.7 src/renderer/utilities/event-icons.js); its ID did not change, so it is no split group.
 const KEPT_ICONS = Object.freeze({ 143: 'mdi-radar' })
 
 // The statement that reads the flags, written out so the planted fault that keeps them from the first save names the source's own line.
@@ -215,15 +215,15 @@ const CHECKS = [
     name: 'the split events keep the icon of the event they split from',
     run: ({ icons }) => {
       SPLITS.forEach(({ old, icon, types }) => {
-        assert.ok(types.length >= 2, `2.7 type ${old.id} (${old.name}) became ${types.length} line type(s)`)
+        assert.ok(types.length >= 2, `earlier type ${old.id} (${old.name}) became ${types.length} line type(s)`)
 
         types.forEach(([type, name]) => {
           assert.equal((EXPORT.get(type) || {}).name, name, `type ${type} is not ${name} in the line export`)
-          assert.equal(icons.EVENT_ICONS[type], icon, `type ${type} (${name}) does not keep the ${icon} of 2.7 type ${old.id} (${old.name})`)
+          assert.equal(icons.EVENT_ICONS[type], icon, `type ${type} (${name}) does not keep the ${icon} of earlier type ${old.id} (${old.name})`)
         })
       })
 
-      assert.equal(icons.EVENT_ICONS[143], KEPT_ICONS[143], 'type 143 (Geo Survey Complete) does not keep the icon the 2.7 branch drew for it')
+      assert.equal(icons.EVENT_ICONS[143], KEPT_ICONS[143], 'type 143 (Geo Survey Complete) does not keep the icon the release/2.7 branch drew for it')
     },
   },
   {
@@ -347,7 +347,7 @@ const CHECKS = [
 
 const MUTANTS = [
   {
-    name: 'the icon of the neutral alien ship kept on the 2.7 type',
+    name: 'the icon of the neutral alien ship kept on the earlier type',
     utility: { file: 'event-icons.js', find: "  377: 'mdi-rocket', // New Neutral Alien Ship", replace: "  233: 'mdi-rocket', // New Neutral Alien Ship" },
     fails: ['a planted row of each split or added type'],
   },

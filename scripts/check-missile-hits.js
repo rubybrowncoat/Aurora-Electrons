@@ -195,7 +195,7 @@ const synthetic = ({ hit, provenance }) => {
     const limit = versionLimit(null)
     const carried = scenario({ version: null }).capped.assumptions.includes(limit)
 
-    return /does not state which game rules/.test(limit) && carried && versionLimit('3.2.x') === '' && versionLimit('3.2') === '' && versionLimit('2.7.1') !== '' && versionLimit('2.6') !== ''
+    return /does not state which game rules/.test(limit) && carried && versionLimit('3.2.x') === '' && versionLimit('3.2') === '' && versionLimit('3.0.0') !== '' && versionLimit('3.0') !== ''
   })
   add('multi-warhead: 4 warheads at 70% expect 2.8 hits, each warhead rolling alone', () => {
     const scene = scenario({}, { ...arrow, warheads: 4 })
@@ -290,7 +290,7 @@ const synthetic = ({ hit, provenance }) => {
   add('the rules hold for the line of the migrated fixture; a save of no known version adds the unverified assumption, a save of that line does not', () => {
     const unknown = raw({ version: null })
     const stock = raw({ version: '3.2.x' })
-    const other = raw({ version: '2.7.1' })
+    const other = raw({ version: '3.0.0' })
     const text = (result) => result.assumptions.join(' | ')
 
     return /does not state which game rules/.test(text(unknown)) && !/does not state which game rules/.test(text(stock)) && /does not state which game rules/.test(text(other)) && close(unknown.value, stock.value) ? true : `${text(unknown)} / ${text(stock)}`

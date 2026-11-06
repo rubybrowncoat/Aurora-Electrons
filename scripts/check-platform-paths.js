@@ -101,7 +101,7 @@ const fixtures = (m) => {
   const cls = (id, over = {}) => ({ id, name: `Class ${id}`, sizeHS: 10, cost: 52, commercial: false, obsolete: false, shippingLine: false, otherRace: false, prototype: false, counts: { 1: 1, 2: 2, 3: 1 }, ...over })
   const PLAT = cls(100, { name: 'Platform' })
   const FAR = cls(101, { name: 'Far', sizeHS: 20, cost: 100, counts: { 1: 2, 2: 4 } })
-  const context = { classesById: { 100: PLAT, 101: FAR }, components, version: '2.7.1', cache: new Map() }
+  const context = { classesById: { 100: PLAT, 101: FAR }, components, version: '3.2.0', cache: new Map() }
   const capacity = (value) => m.provenance.ofRule({ rule: 'platformPaths.industry', value, inputs: { present: ['capacity'] }, units: 'BP/yr' })
   const unknownCapacity = m.provenance.unavailable({ rule: 'platformPaths.industry', missing: ['the colony\'s production modifiers'], units: 'BP/yr' })
   const MODIFIERS = { ShipyardBuildRate: 1000, ShipyardOperations: 1 }
@@ -618,7 +618,7 @@ const saveStatements = async (ctx, save) => {
   const [{ n: componentCount }] = await rowsOf(database, `select count(distinct ComponentID) as n from FCT_ClassComponent where ClassID in (select ShipClassID from FCT_ShipClass where ${where})`, scope)
   const stations = await rowsOf(database, `select ShipClassID, Cost from FCT_ShipClass where ${where} and NoArmour = 1 and MiningModules > 0 and Obsolete = 0 order by Size desc`, scope)
   const classById = Object.fromEntries(classes.map((shipClass) => [shipClass.id, shipClass]))
-  const context = { classesById: classById, components, version: '2.7.1', cache: new Map() }
+  const context = { classesById: classById, components, version: '3.2.0', cache: new Map() }
   const modifiers = { ShipyardBuildRate: 1000, ShipyardOperations: 1 }
   const capacity = m.provenance.ofRule({ rule: 'platformPaths.industry', value: 1000, inputs: { present: ['capacity'] }, units: 'BP/yr' })
   const colonies = Object.fromEntries(Object.entries(read.colonies).map(([id, colony]) => [id, { ...colony, modifiers, capacity }]))

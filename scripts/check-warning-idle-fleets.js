@@ -4,7 +4,7 @@
   Run: bun scripts/check-warning-idle-fleets.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   - Fixtures: an in-memory save of four systems with colonies (one with a deep space population on a body beside another body with a colony, one a rival's, one on a body with no stored position), a jump point, command types and idle fleets set at distances from them and from fleets of the race with maintenance and recreational modules: modules damaged, not counted, not stored, on a ship docked in a hangar, aboard the idle fleet itself, in another system, of another race, exactly 1 km and less than 1 km away, fleets under a Training command, under another command, under none stored and under one whose type is not stored, and fleets with no stored position. Each case is read back through the module's word tables and compared with what is written here.
-  - Saves, read only: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784) and saves/AuroraDB_270_Falryx_date_issue.db (game 141, race 786, a recorded 2.x game, read through the copy with the star's component number renamed that `convertedSave` of scripts/lib/fixtures.js makes): every idle fleet against SQL written here from the game's rules, with the option off and on.
+  - Save, read only: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784): every idle fleet against SQL written here from the game's rules, with the option off and on.
   - The page in a browser: scripts/lib/page-server.js serves a copy of the fixture save in which one idle fleet is put beside a fleet with a maintenance module, one on the position of a colony that its orbit does not name and one without a stored position. The Warnings page is opened on the check, every row shown, the screen read, and then the option switched on and read again. Rows are paired with SQL by the id of their fleet, never by their place; the figures are read whole in the grouping of the setting, the text from the text nodes drawn, and each element by whether it is on screen.
   - Planted faults in copies of the module, the shared module and the page, each of which must make a check named for it fail by a value, never by a throw of the code under test; benign rewrites, one of each family, that must leave every check passing; controls of the harness.
 
@@ -21,7 +21,7 @@ const { observe, validate, failureLine, describe, HarnessError, installScreen, G
 const { caughtBy, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
-const { FIXTURE, fixtureSave, convertedSave } = require('./lib/fixtures')
+const { FIXTURE, fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILE = {
@@ -296,7 +296,6 @@ const openFixture = async () => {
 
 const SAVES = [
   { id: 'save-fixture', file: fixtureSave().file, GameID: fixtureSave().game, RaceID: fixtureSave().race },
-  { id: 'save-falryx', file: 'saves/AuroraDB_270_Falryx_date_issue.db', GameID: 141, RaceID: 786, recorded: true },
 ]
 const PAGE_SAVE = SAVES[0]
 
@@ -986,7 +985,7 @@ const setUp = async () => {
   cleanups.push(() => closeRaw(env.fixture.raw))
 
   for (const save of SAVES) {
-    const raw = await openRaw(save.recorded ? convertedSave(save.file) : path.join(root, save.file), sqlite3.OPEN_READONLY)
+    const raw = await openRaw(path.join(root, save.file), sqlite3.OPEN_READONLY)
 
     cleanups.push(() => closeRaw(raw))
     env.saves.push(standIn(raw))

@@ -119,7 +119,7 @@ const resultStatuses = (totals) => Object.fromEntries(Object.entries(totals.resu
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities(['design-data', 'design-rules', 'provenance'])
+  const utilities = await loadUtilities(['capabilities', 'design-data', 'design-rules', 'provenance'])
   const data = utilities['design-data']
   const { packTanks } = utilities['design-rules']
   const { STATUS, exportFields, isAvailable, passes, ruleSupports } = utilities.provenance
@@ -138,7 +138,11 @@ const run = async () => {
     const [[gameRow]] = await database.query('select GameTime from FCT_Game where GameID = :GameID', { replacements: { GameID: game } })
     const [ledger] = (await database.query('select count(*) as n, max(IncrementID) as tip from FCT_Increments where GameID = :GameID', { replacements: { GameID: game } }))[0]
     const [tip] = (await database.query('select GameTime from FCT_Increments where IncrementID = :Tip', { replacements: { Tip: ledger.tip } }))[0]
-    const shaped = (await database.query("select count(*) as n from pragma_table_info('FCT_Game') where name = 'AllowCMC'"))[0][0].n > 0
+    const shaped = (await Promise.all(utilities.capabilities.LINE_SIGNATURE.map(async (field) => {
+      const [table, column] = field.split('.')
+
+      return (await database.query(`select count(*) as n from pragma_table_info('${table}') where name = '${column}'`))[0][0].n > 0
+    }))).every(Boolean)
 
     check('source: ids, formula version and revision match independent queries', source.gameId === game && source.raceId === race && (source.formulaVersion === '3.2.x') === shaped && source.revision.gameTime === gameRow.GameTime && source.revision.increments === ledger.n && source.revision.tipIncrementId === ledger.tip && source.revision.tipGameTime === tip.GameTime && /^[0-9a-f]{32,}$/.test(source.revision.ledgerDigest) && /^[0-9a-f]{32,}$/.test(source.componentState), `formula ${source.formulaVersion}, ${source.revision.increments} increments, ${source.fingerprint ? source.fingerprint.length : 0} anchor systems, ledger ${source.revision.ledgerDigest.slice(0, 8)}, components ${source.componentState.slice(0, 8)}`)
 

@@ -2386,7 +2386,7 @@ const MUTATIONS = [
   { name: 'the colony\'s workers not passed', file: P, find: 'const workers = { now: target.workersNow, later: target.workersLater, cost: valueOrNull(target.r.cost) }', replace: 'const workers = { now: null, later: null, cost: valueOrNull(target.r.cost) }', fails: ['page'] },
   { name: 'the number of mines ignored', file: P, find: 'mineRequirements(this.bootstrapType, this.bootstrapCount)', replace: 'mineRequirements(this.bootstrapType, 1)', fails: ['page'] },
   { name: 'the troop lift not passed', file: P, find: 'troopCapacity: troops, workers, stock,', replace: 'troopCapacity: null, workers, stock,', fails: ['page'] },
-  { name: 'the formula version not passed to the engineers', file: P, find: 'usage, version: this.bootstrapVersion, troopCapacity: troops', replace: 'usage, version: \'2.7.x\', troopCapacity: troops', fails: ['page'] },
+  { name: 'the formula version not passed to the engineers', file: P, find: 'usage, version: this.bootstrapVersion, troopCapacity: troops', replace: 'usage, version: \'3.0.x\', troopCapacity: troops', fails: ['page'] },
   { name: 'the chosen builder ignored', file: P, find: 'this.bootstrapBuilders.find((option) => option.colony.PopulationID === this.bootstrapBuilderId) || this.bootstrapBuilders[0]', replace: 'this.bootstrapBuilders[0]', fails: ['page'] },
   { name: 'the read\'s label under another name', file: P, find: 'bootstrapSources: \'the mine bootstrap reads\'', replace: 'bootstrapSource: \'the mine bootstrap reads\'', fails: ['page'] },
   { name: 'the read tracked under another name', file: P, find: 'tracked(\'bootstrapSources\'', replace: 'tracked(\'bootstrapSource\'', fails: ['page'] },

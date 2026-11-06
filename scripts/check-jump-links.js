@@ -4,7 +4,7 @@
   Run: bun scripts/check-jump-links.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   The expected values are written here from the rule of the game (a race knows the far side of a point it has explored, and an explored point is explored at both ends), in SQL over the save and in a constructed save, never from the module under test:
-  - Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141): for each of the seven races the rows of every reader equal the ones the survey rows give. Race 789 (Ancients) has charted 150 points and explored none, so every reader finds 0 links where the charted-only reading drew 44 pairs of systems; race 791 has 84 charted points it has not explored, which the charted-only reading linked 4 times over.
+  - The fixture (scripts/lib/fixtures.js, game 141): for each of the six races the rows of every reader equal the ones the survey rows give. Race 787 has charted 362 points in the systems it knows and explored none, so every reader finds 0 links where the charted-only reading drew 131 pairs of systems; the player (race 784) has explored 300 of its 392 surveyed points, which join 150 pairs of systems.
   - A constructed save holds the cases the save does not: a point explored from the far end only, a point whose far point is not charted, one whose far point lies in a system the race does not know, and a far point that is explored but not charted.
   Every planted fault must fail the checks it names by a wrong value, never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -18,13 +18,14 @@ const { HarnessError } = require('./lib/browser-observe')
 const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, boundary } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
-const GAME = 141
-const RACES = [785, 786, 787, 788, 789, 790, 791]
-const ANCIENTS = 789
-const PLAYER = 791
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACES = [784, 785, 786, 787, 788, 789]
+const UNEXPLORED = 787
+const PLAYER = FIXTURE.raceId
 const UTILITIES = path.join(root, 'src', 'renderer', 'utilities')
 const GRAPH = path.join(UTILITIES, 'jump-graph.js')
 const ADMINS = path.join(UTILITIES, 'naval-admins.js')
@@ -153,10 +154,10 @@ const identityChecks = {
       })
     }
 
-    const ancients = await readPoints(mod, save, ANCIENTS, GAME)
+    const unexplored = await readPoints(mod, save, UNEXPLORED, GAME)
 
-    assert.equal(ancients.length, 150, 'the Ancients have charted 150 points')
-    assert.equal(ancients.filter((row) => row.WPLink !== null).length, 0, 'the Ancients have explored none, so none of the 150 names a link')
+    assert.equal(unexplored.length, 362, 'race 787 has charted 362 points in the systems it knows')
+    assert.equal(unexplored.filter((row) => row.WPLink !== null).length, 0, 'it has explored none, so none of the 362 names a link')
 
     for (const race of [1, 2]) {
       const rows = await readPoints(mod, fixture, race, FIXTURE_GAME)
@@ -178,15 +179,15 @@ const linksChecks = {
       assert.deepEqual(pairsOf(mod['jump-graph'].jumpLinks(rows)), expected.pairs, `race ${race}: the links of the points read`)
     }
 
-    const ancients = expectation(save, ANCIENTS)
+    const unexplored = expectation(save, UNEXPLORED)
 
-    assert.equal(ancients.pairs.length, 0, 'the explored rule gives the Ancients 0 links')
-    assert.equal(pairsOf(mod['jump-graph'].jumpLinks(await readPoints(mod, save, ANCIENTS, GAME))).length, 0, 'and none is drawn')
-    assert.equal(joined(ancients.chartedPairs), 44, 'where reading every charted link gave 44 pairs of systems')
+    assert.equal(unexplored.pairs.length, 0, 'the explored rule gives race 787 0 links')
+    assert.equal(pairsOf(mod['jump-graph'].jumpLinks(await readPoints(mod, save, UNEXPLORED, GAME))).length, 0, 'and none is drawn')
+    assert.equal(joined(unexplored.chartedPairs), 131, 'where reading every charted link gave 131 pairs of systems')
 
     const player = expectation(save, PLAYER)
 
-    assert.equal(joined(player.chartedPairs) - joined(player.pairs), 4, 'race 791 has 4 pairs of systems in the charted reading that the explored one leaves out')
+    assert.equal(joined(player.pairs), 150, 'the player has 150 pairs of systems joined by explored links')
 
     for (const race of [1, 2]) {
       assert.deepEqual(pairsOf(mod['jump-graph'].jumpLinks(await readPoints(mod, fixture, race, FIXTURE_GAME))), TARGETS[race].pairs, `constructed race ${race}: the links`)
@@ -212,7 +213,7 @@ const directChecks = {
       assert.deepEqual(pairsOf(rows), expected.pairs, `race ${race}: the links read from the save`)
     }
 
-    assert.equal((await mod['jump-graph'].loadJumpLinks(adapter(save), { GameID: GAME, RaceID: ANCIENTS })).length, 0, 'the Ancients have explored none, so the save gives them 0 links')
+    assert.equal((await mod['jump-graph'].loadJumpLinks(adapter(save), { GameID: GAME, RaceID: UNEXPLORED })).length, 0, 'race 787 has explored none, so the save gives it 0 links')
 
     for (const race of [1, 2]) {
       assert.deepEqual(pairsOf(await mod['jump-graph'].loadJumpLinks(adapter(fixture), { GameID: FIXTURE_GAME, RaceID: race })), TARGETS[race].pairs, `constructed race ${race}: the links read from the save`)
@@ -242,7 +243,7 @@ const surveyChecks = {
   id: 'survey',
   name: 'the links of the survey page are the explored ones',
   run: async ({ page, save }) => {
-    for (const race of [ANCIENTS, PLAYER, 785]) {
+    for (const race of [UNEXPLORED, PLAYER, 785]) {
       const vm = instantiate(page, { boundary, $store: { getters: {}, state: {} }, database: adapter(save), GameID: GAME, RaceID: race, data: { loadErrors: {} } })
       const links = await vm.runAsync('links')
 
@@ -266,7 +267,7 @@ const haulingChecks = {
       db.run('create temp table FCT_Fleet as select * from main.FCT_Fleet where 0')
       db.run('create temp table FCT_MoveOrders as select * from main.FCT_MoveOrders where 0')
 
-      for (const race of [ANCIENTS, PLAYER, 785]) {
+      for (const race of [UNEXPLORED, PLAYER]) {
         const expected = expectation(save, race)
         const sent = []
         const vm = instantiate(page, { $store: HAULING_STORE, database: { query: async (sql) => { sent.push(sql); return [[]] } }, GameID: GAME, RaceID: race, data: { loadErrors: {} } })
@@ -291,7 +292,7 @@ const haulingChecks = {
           assert.equal(row.ExitSystemID, link == null ? null : expected.points.get(link).SystemID, `race ${race}, point ${row.DestinationID}: the system the order comes out in`)
         })
 
-        if (race === ANCIENTS) {
+        if (race === UNEXPLORED) {
           assert.ok(rows.length > 0 && rows.every((row) => row.ExitDestinationID == null), 'the race that has explored no point has no order coming out anywhere')
         } else {
           assert.ok(rows.some((row) => row.ExitDestinationID != null), `race ${race}: an order through an explored point comes out at its far side`)
@@ -322,11 +323,10 @@ const FAULTS = [
   { name: 'a charted point names its link whether or not it is explored', file: 'graph', change: swap('case when ${LINK_KNOWN_SQL} then FCT_JumpPoint.WPLink else null end as WPLink', 'FCT_JumpPoint.WPLink'), fails: ['identity'] },
   { name: 'the links of the points read draw a point that is explored at neither end', file: 'graph', change: swap(' && (jumpPoint.Explored || byId[jumpPoint.WPLink].Explored))', ')'), fails: ['links'] },
   { name: 'the links of the points read need the point\'s own end explored', file: 'graph', change: swap('(jumpPoint.Explored || byId[jumpPoint.WPLink].Explored)', 'jumpPoint.Explored'), fails: ['links'] },
-  { name: 'the links read from the save include a point that is explored at neither end', file: 'graph', change: swap('where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)', 'where FCT_JumpPoint.GameID = ${GameID}`)'), fails: ['direct', 'admins', 'survey'] },
+  { name: 'the links read from the save include a point that is explored at neither end', file: 'graph', change: swap('where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)', 'where FCT_JumpPoint.GameID = ${GameID}`)'), fails: ['direct', 'survey'] },
   { name: 'the links read from the save need the point\'s own end explored', file: 'graph', change: swap('where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)', 'where FCT_JumpPoint.GameID = ${GameID} and FCT_RaceJumpPointSurvey.Explored = 1`)'), fails: ['direct'] },
   { name: 'the link of a point is known only when its own end is explored', file: 'graph', change: swap('\'(FCT_RaceJumpPointSurvey.Explored = 1 or VIR_FarSurvey.Explored = 1)\'', '\'(FCT_RaceJumpPointSurvey.Explored = 1)\''), fails: ['identity', 'direct'] },
   { name: 'a far point that is not charted counts when it is explored', file: 'graph', change: swap('and VIR_FarSurvey.RaceID = ${RaceID} and VIR_FarSurvey.GameID = FCT_JumpPoint.GameID and VIR_FarSurvey.Charted = 1', 'and VIR_FarSurvey.RaceID = ${RaceID} and VIR_FarSurvey.GameID = FCT_JumpPoint.GameID'), fails: ['identity'] },
-  { name: 'the naval admin chain links the points that are charted', file: 'admins', change: swap('const links = await loadJumpLinks(database, { GameID, RaceID })', `const links = await database.query(\`${OLD_LINKS}\`).then(([items]) => items)`), fails: ['admins'] },
   { name: 'the survey page links the points that are charted', file: 'survey', change: swap('return await loadJumpLinks(this.database, { GameID: this.GameID, RaceID: this.RaceID })', `const { GameID, RaceID } = this\n\n        return await this.database.query(\`${OLD_LINKS}\`).then(([items]) => Object.freeze(items))`), fails: ['survey'] },
   { name: 'the hauling page follows the saved link of a transit order whether or not it is explored', file: 'hauling', change: swap('else (case when VIR_ExitSurvey.Explored = 1 or VIR_ExitFar.Explored = 1 then VIR_Exit.WPLink else null end) end', 'else VIR_Exit.WPLink end'), fails: ['hauling'] },
 ]

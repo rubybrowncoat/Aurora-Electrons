@@ -1,4 +1,4 @@
-// Intelligence: what one race knows about the others, decoded. Codes and thresholds come from the maintainer's reference for Aurora 2.7.1, references/mechanics/intelligence.md; the queries and their sample checks are in docs/plans/aurcalcs/sql-fleet.md § 7.
+// Intelligence: what one race knows about the others, decoded. Codes and thresholds come from the maintainer's reference, references/mechanics/intelligence.md, which was written for the earlier line; the queries and their sample checks are in docs/plans/aurcalcs/sql-fleet.md § 7.
 // Every read goes through the viewing race's own intelligence tables. The `Actual*` columns (and alien ship or population IDs) point at the real objects, so they're never joined.
 
 import { STATUS, UNVERIFIED_SAVE, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull, weakestStatus } from './provenance'

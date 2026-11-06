@@ -2,7 +2,7 @@
 //
 // The envelope is { value, status, rule: { id, versions, note }, inputs: { present, missing }, units, assumptions }.
 // - `status`: 'confirmed' (observed in the save, or reproduced exactly by a rule checked against saved data), 'estimated' (the rule is approximate or not checked against saved data), 'assumed' (the figure rests on a number the player entered or the planner chose) or 'unavailable' (a needed input is missing: the value is null, never 0).
-// - `rule`: `id` is `<area>.<name>`, `versions` the game versions the rule is known to hold for ('2.7.x' matches every 2.7 release), `note` a neutral verification note or public source.
+// - `rule`: `id` is `<area>.<name>`, `versions` the game versions the rule is known to hold for ('3.2.x' matches every 3.2 release), `note` a neutral verification note or public source.
 // - `inputs`: names of the inputs the calculation read that the save had (`present`) and had not (`missing`).
 // Three things stay apart: structural support (`structure` on the rule: the tables and columns it reads), formula verification (`verification` on the rule) and scenario assumptions (`assumptions`, on the rule as its standing ones and on the result for the ones this run made).
 
@@ -76,7 +76,7 @@ const requireRule = (id) => {
   return rule
 }
 
-// Whether a rule holds for a game version ('2.7.1'): true or false, or null when the version is not known. A pattern's segments match the version's one for one, 'x' matching any, and a version longer than the pattern still matches it.
+// Whether a rule holds for a game version ('3.2.0'): true or false, or null when the version is not known. A pattern's segments match the version's one for one, 'x' matching any, and a version longer than the pattern still matches it.
 export const ruleSupports = (id, gameVersion) => {
   const rule = requireRule(id)
 

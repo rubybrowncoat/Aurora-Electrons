@@ -225,7 +225,7 @@ const syntheticChecks = (m) => {
   const checks = []
   const add = (name, test) => checks.push([name, test])
 
-  pv.registerRule({ id: 'check.figure', versions: ['2.7.x'], note: 'A figure of this check.', verification: 'confirmed' })
+  pv.registerRule({ id: 'check.figure', versions: ['3.2.x'], note: 'A figure of this check.', verification: 'confirmed' })
 
   const figure = (statusName, extra = {}) => (statusName === 'unavailable' ? pv.unavailable({ rule: 'check.figure', missing: ['a value'] }) : pv.envelope({ value: 5, status: statusName, rule: 'check.figure', inputs: { present: ['a'] }, units: 'km/s', ...extra }))
 
@@ -1023,7 +1023,7 @@ const saveChecks = async (m, database, { GameID, RaceID }, label) => {
     add(`a candidate of this save chosen from the research graph is hypothetical and marks a result (line ${open.typeId}, ${open.next.name})`, (() => {
       const resolved = ts.resolveChoices(tech, { [open.typeId]: { techId: open.next.id, source: 'scenario' } })[open.typeId]
       const { assumptions } = ts.hypotheticalOf(ts.resolveChoices(tech, { [open.typeId]: { techId: open.next.id, source: 'scenario' } }), [open.typeId])
-      pv.registerRule({ id: 'check.figure', versions: ['2.7.x'], note: 'A figure of this check.', verification: 'confirmed' })
+      pv.registerRule({ id: 'check.figure', versions: ['3.2.x'], note: 'A figure of this check.', verification: 'confirmed' })
       const marked = ts.markHypothetical(pv.envelope({ value: 1, status: 'confirmed', rule: 'check.figure', inputs: { present: ['a'] } }), assumptions)
 
       return resolved.hypothetical && resolved.level.id === open.next.id && resolved.level !== open.pick && marked.status === 'assumed' && ts.isHypothetical(marked) ? true : short([resolved.kind, marked.status])

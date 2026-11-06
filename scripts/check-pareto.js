@@ -992,7 +992,7 @@ const mutatedSources = (file, from, to) => {
 
 const DEFAULT_INPUT = { hullHS: 100, speed: 2500, fraction: 0.5, goal: { mode: 'range', value: 5e9 }, kind: 'either', minCount: 1, maxCount: 100, share: 0.5 }
 
-// The digest of the default search on the fixture, recorded at AE-301-07 from the search as it stands (the search of the 2.7 saves it was first taken from no longer has a save to run on by default); a save with no digest recorded prints a skip.
+// The digest of the default search on the fixture, recorded at AE-301-07 from the search as it stands (the search of the earlier line's saves it was first taken from no longer has a save to run on by default); a save with no digest recorded prints a skip.
 const ANCHORS = {
   [`${path.basename(FIXTURE.file)}:${FIXTURE.gameId}:${FIXTURE.raceId}`]: { evaluated: 181995, matched: 151846, digest: 'c99ce21b99e53ccc' },
 }

@@ -4,8 +4,8 @@ import { roundToDecimal } from './math'
 import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const CREW_VERSIONS = ['2.7.x']
-// The stabilisation time also holds on 3.2, which skips a ship with no crew aboard instead of failing its division by zero (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime` of the 3.1.0 source, the reference for the 3.2 line; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918).
-const STABILISATION_VERSIONS = ['2.7.x', '3.2.x']
+// The stabilisation time holds on 3.2, which skips a ship with no crew aboard instead of failing its division by zero (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime` of the 3.1.0 source, the reference for the 3.2 line; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
+const STABILISATION_VERSIONS = ['3.2.x']
 // The share of its class crew a ship has aboard, as the game scales a ship's modules and its cargo handling: Current Crew / Class Crew, 1 once the class crew is aboard (an over-crewed ship is no faster) and 1 for a class without crew (the game never scales it, so there is no division by zero). A ship with no crew aboard has 0, and a missing crew or class crew gives null, never 1. `ship`: { CurrentCrew, ClassCrew }.
 export const crewFraction = (ship) => {
   if (!Number.isFinite(ship.ClassCrew)) {

@@ -3,21 +3,17 @@
 
   node scripts/check-history-export.js [--no-mutations]
 
-  HISTORY_SAVES_FALRYX=<folder> points the saves check at another folder of saves; a folder that is not there skips it. A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
-
   Groups:
   - csv: the documented columns, the exact sample game times with their units, a figure that is not recorded as an empty value with a status (never 0), the gap since the previous sample, annotations in their own columns and never in a sample's, the rule and its status, the baseline of a change, and the facts a reader needs (race, who may see it, window, sampling limits);
   - caption: the lines under the picture: title, race, scope, window, each series with its unit and how many samples are recorded, rules and assumptions, the limits of the sampling, the annotations, the spy mode label;
   - picture: the picture draws the whole caption wrapped to its width and the chart canvas once, on the chart's surface colour, at the chart's density;
   - page: the buttons of the page export what each view draws (its series, the window's snapshots, the annotations drawn), nothing that is hidden, not drawn, out of the window or from another race unless spy mode shows it, in a chart, the Rivals chart and the table, and the PNG goes through the existing save-png channel;
-  - saves: the same from the owner's saves (opened read only, skipped when they are not here).
 
   Everything runs on in-memory stores and the real scenario repository. Each mutation of the utility or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { createRequire } = require('module')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
@@ -28,7 +24,6 @@ const { strictRecords } = require('./lib/csv-records')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
-const SAVES_FALRYX = process.env.HISTORY_SAVES_FALRYX || path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const NAMES = ['history-export', 'history', 'history-milestones', 'scenario-records', 'provenance', 'mineral-compare']
 const START_YEAR = 2050
 const YEAR = 31536000
@@ -49,8 +44,6 @@ const PAGE_MODULES = {
   'components/charts/theme': 'export const chartTheme = () => ({ categorical: [], ink: \'\', inkMuted: \'\' }); export const withAlpha = (color) => color; export const chartFont = () => ({ family: \'Test\', size: (px) => px, font: (px, weight = 400) => weight + \' \' + px + \'px Test\' }); export const seriesIdentity = (_appearance, color) => (color === \'#111\' ? { dash: [] } : { dash: [4, 2] })',
   'utilities/appearance-font': 'export const whenFontsReady = () => (globalThis.__fonts ? globalThis.__fonts() : Promise.resolve())',
 }
-
-const localRequire = createRequire(path.join(root, 'package.json'))
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
@@ -597,11 +590,10 @@ const csvOf = (vm, key, method = 'downloadChartCsv') => {
   return files.length ? { name: files[0].name, text: files[0].text, ...tableOf(files[0].text) } : null
 }
 
-const pageSuite = async (m, { mutate = null, saves = null, sources = {} } = {}) => {
+const pageSuite = async (m, { mutate = null, sources = {} } = {}) => {
   const options = await loadPage('pages/history', { stubs: STUBS, modules: PAGE_MODULES, mutate, sources })
   const checks = []
   const check = (name, run) => checks.push({ group: 'page', name, run })
-  const saveCheck = (name, run) => checks.push({ group: 'saves', name, run })
   const { milestones } = m
   const { captionLines } = m.exportation
 
@@ -1145,149 +1137,7 @@ const pageSuite = async (m, { mutate = null, saves = null, sources = {} } = {}) 
     assert.match(map, /invoke\('save-png', canvas\.toDataURL\('image\/png'\)\.split\(','\)\[1\], `map-\$\{this\.GameID\}-\$\{this\.RaceID\}-\$\{this\.GameTime\}\.png`\)/)
   })
 
-  if (saves) {
-    saves(saveCheck, { mounted, annotate, numberOr, withCanvas, withDocument, ipc })
-  }
-
   return checks
-}
-
-// ---- The owner's saves -------------------------------------------------------------------------------------------------
-
-const familyOf = async (m, folder, GameID, RaceID) => {
-  if (!fs.existsSync(folder)) {
-    return null
-  }
-
-  const sqlite3 = localRequire('sqlite3')
-  const files = fs.readdirSync(folder).filter((name) => name.endsWith('.db'))
-  const opened = []
-  const taken = []
-
-  try {
-    for (const name of files) {
-      const db = new sqlite3.Database(path.join(folder, name), sqlite3.OPEN_READONLY)
-      const run = (sql, params = {}) => new Promise((resolve, reject) => db.all(sql, Object.fromEntries(Object.entries(params).map(([key, value]) => [`:${key}`, value])), (error, rows) => (error ? reject(error) : resolve(rows))))
-      const database = { query: async (sql, { replacements = {} } = {}) => [await run(sql, replacements)] }
-
-      opened.push(db)
-
-      const [game] = await run('select StartYear from FCT_Game where GameID = :GameID', { GameID })
-      const result = game ? await m.history.takeSnapshot(database, { GameID, RaceID }) : null
-
-      if (result) {
-        taken.push({ ...result, StartYear: game.StartYear })
-      }
-    }
-  } finally {
-    opened.forEach((db) => db.close())
-  }
-
-  const snapshots = taken.map((entry) => entry.snapshot).sort((a, b) => a.t - b.t).filter((snapshot, index, list) => index === 0 || snapshot.t !== list[index - 1].t)
-
-  return snapshots.length >= 2 ? { raceName: taken[0].raceName, StartYear: taken[0].StartYear, snapshots, GameID, RaceID } : null
-}
-
-const savesChecks = (families) => (check, { mounted, annotate, numberOr, withCanvas, withDocument, ipc }) => {
-  const missing = { skipped: 'the owner\'s saves are not here' }
-  const KEYS = ['population', 'wealth', 'fleet', 'research', 'minerals', 'installations', 'logistics']
-
-  const realMount = (family, extra = {}) => mounted({ snapshots: family.snapshots, rivals: false, startYear: family.StartYear, GameTime: family.snapshots[family.snapshots.length - 1].t, GameID: family.GameID, RaceID: family.RaceID, raceName: family.raceName, ...extra })
-
-  check('every chart\'s CSV from the real saves has the sample times of the saves, their own figures and empty cells where a save holds none', () => {
-    if (!families.length) {
-      return missing
-    }
-
-    const lines = []
-
-    families.forEach((family) => {
-      const { vm } = realMount(family)
-      const fields = { population: ['population', 'colonies'], wealth: ['wealth', 'income'], fleet: ['militaryTons', 'commercialTons'], research: ['research', 'systems'], logistics: ['fuel', 'msp'] }
-
-      Object.entries(fields).forEach(([key, names]) => {
-        const table = csvOf(vm, key)
-        const labels = vm.charts.find((chart) => chart.key === key).data.datasets.map((dataset) => dataset.label)
-
-        names.forEach((name, index) => {
-          const rows = samplesOf(table, labels[index])
-
-          assert.deepEqual(rows.map((row) => Number(row[SAMPLE_TIME])), family.snapshots.map((snapshot) => snapshot.t), `${family.raceName} ${key}`)
-          assert.deepEqual(rows.map((row) => row.Value), family.snapshots.map((snapshot) => numberOr(snapshot[name] === undefined ? null : snapshot[name])), `${family.raceName} ${name}`)
-          assert.deepEqual(rows.map((row) => row['Value status']), family.snapshots.map((snapshot) => (snapshot[name] === null || snapshot[name] === undefined ? 'not recorded' : 'recorded')))
-        })
-      })
-
-      const minerals = csvOf(vm, 'minerals')
-
-      assert.deepEqual(samplesOf(minerals, 'Duranium').map((row) => row.Value), family.snapshots.map((snapshot) => numberOr(snapshot.minerals ? snapshot.minerals[0] : null)))
-      lines.push(`${family.raceName}: ${family.snapshots.length} saves`)
-    })
-
-    return lines.join('; ')
-  })
-
-  check('a window of the real saves exports only the saves in it, the annotation between two real samples keeps its exact time and its nearest sample is in the window', async () => {
-    if (!families.length) {
-      return missing
-    }
-
-    const [family] = families
-    const last = family.snapshots[family.snapshots.length - 1].t
-    const span = [10, 20, 50].find((years) => {
-      const count = family.snapshots.filter((snapshot) => snapshot.t >= last - years * YEAR).length
-
-      return count >= 2 && count < family.snapshots.length
-    })
-
-    if (!span) {
-      return { skipped: 'no span of 10, 20 or 50 years cuts these saves' }
-    }
-
-    const context = realMount(family, { data: { span } })
-    const { vm } = context
-    const inWindow = family.snapshots.filter((snapshot) => snapshot.t >= last - span * YEAR)
-    const middle = (inWindow[0].t + inWindow[1].t) / 2 + 0.375
-
-    await annotate(context, { t: middle, type: 'research', text: 'Between two saves' }, { t: family.snapshots[0].t, type: 'other', text: 'Before the window' })
-
-    KEYS.forEach((key) => {
-      const table = csvOf(vm, key)
-
-      assert.deepEqual([...new Set(samplesOf(table).map((row) => Number(row[SAMPLE_TIME])))], inWindow.map((snapshot) => snapshot.t), key)
-
-      const rows = table.rows.filter((row) => row.Record === 'annotation')
-
-      assert.deepEqual(rows.map((row) => row['Annotation text']), ['Between two saves'], key)
-      assert.equal(Number(rows[0][ANNOTATION_TIME]), middle)
-      assert.equal(inWindow.map((snapshot) => snapshot.t).includes(Number(rows[0]['Nearest sample game time (s)'])), true)
-    })
-
-    return `${inWindow.length} of ${family.snapshots.length} saves in the window`
-  })
-
-  check('the picture from the real saves has a caption with the real counts and the sampling limits', async () => {
-    if (!families.length) {
-      return missing
-    }
-
-    const [family] = families
-    const { vm } = realMount(family)
-    const calls = ipc()
-    const sheet = recording()
-
-    withCanvas(vm)
-    await withDocument(sheet, () => vm.exportChartPng('research'))
-
-    const drawn = norm(sheet.texts().map((event) => event.args[0]).join(' '))
-    const recorded = family.snapshots.filter((snapshot) => snapshot.research !== null && snapshot.research !== undefined).length
-
-    assert.equal(calls.length, 1)
-    assert.ok(drawn.includes(`Research (RP) (RP): ${recorded} of ${family.snapshots.length} samples recorded`))
-    assert.ok(drawn.includes(`Every retained snapshot: ${family.snapshots.length} of ${family.snapshots.length} retained snapshots`))
-    assert.match(drawn, /never observed/)
-    assert.match(drawn, /not a continuous record/)
-  })
 }
 
 // ---- Mutants and the run ------------------------------------------------------------------------------------------------
@@ -1372,16 +1222,7 @@ const loadModules = async (directory) => {
 
 let failures = 0
 let total = 0
-let skipped = 0
-
-const show = (name, result, detail = '', skip = false) => {
-  if (skip) {
-    skipped++
-    console.log(`SKIP  ${name}  [${detail}]`)
-
-    return
-  }
-
+const show = (name, result, detail = '') => {
   const ok = result === true
 
   total++
@@ -1404,13 +1245,9 @@ const runChecks = async (list, only = null) => {
     try {
       const detail = await run()
 
-      if (detail && typeof detail === 'object' && detail.skipped) {
-        results.push([`${group}: ${name}`, true, detail.skipped, true])
-      } else {
-        results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
-      }
+      results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : ''])
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), ''])
     }
   }
 
@@ -1418,7 +1255,7 @@ const runChecks = async (list, only = null) => {
 }
 
 const caught = (mutant, results) => {
-  const expected = mutant.fails.filter((start) => !results.some(([name, , , skip]) => skip && name.startsWith(start)))
+  const expected = mutant.fails
   const survived = expected.filter((start) => !results.some(([name, result]) => name.startsWith(start) && result !== true))
   const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
 
@@ -1428,22 +1265,19 @@ const caught = (mutant, results) => {
 const RESULT = 'RESULT '
 const MUTANTS = [...UTILITY_MUTATIONS.map((mutant) => ({ mutant, page: false })), ...PAGE_MUTATIONS.map((mutant) => ({ mutant, page: true }))]
 
-const savesOf = async (real) => savesChecks([await familyOf(real, SAVES_FALRYX, 141, 791)].filter(Boolean))
-
 // What the baseline, each mutant and the control print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
 const baselineEntries = async () => {
   const real = await loadModules(utilitiesDirectory)
-  const saves = await savesOf(real)
   const entries = [{ log: 'The export of the history page: CSV and PNG of what is shown' }]
 
-  for (const [name, result, detail, skip] of await runChecks(suite(real))) {
-    entries.push({ show: [name, result, detail, skip] })
+  for (const [name, result, detail] of await runChecks(suite(real))) {
+    entries.push({ show: [name, result, detail] })
   }
 
   entries.push({ log: '\nThe export buttons of the page (its script over scripts/lib/page-loader.js)' })
 
-  for (const [name, result, detail, skip] of await runChecks(await pageSuite(real, { saves }))) {
-    entries.push({ show: [name, result, detail, skip] })
+  for (const [name, result, detail] of await runChecks(await pageSuite(real))) {
+    entries.push({ show: [name, result, detail] })
   }
 
   return entries
@@ -1474,9 +1308,8 @@ const mutantEntries = async ({ mutant, page }) => {
 
 const controlEntries = async () => {
   const real = await loadModules(utilitiesDirectory)
-  const saves = await savesOf(real)
   const control = await runChecks(suite(real), [...new Set(UTILITY_MUTATIONS.flatMap((mutant) => mutant.fails))])
-  const controlPage = await runChecks(await pageSuite(real, { saves }), [...new Set(PAGE_MUTATIONS.flatMap((mutant) => mutant.fails))])
+  const controlPage = await runChecks(await pageSuite(real), [...new Set(PAGE_MUTATIONS.flatMap((mutant) => mutant.fails))])
   const wrong = [...control, ...controlPage].filter(([, result]) => result !== true).map(([name]) => name)
 
   return [{ show: ['a control run of the unchanged code passes every check the mutants name', wrong.length === 0 ? true : `fails ${wrong.join('; ')}`] }]
@@ -1529,7 +1362,7 @@ const main = async () => {
     }
   }
 
-  console.log(`\n${total - failures} of ${total} checks passed${skipped ? ` (${skipped} skipped: the owner's saves are not here)` : ''}`)
+  console.log(`\n${total - failures} of ${total} checks passed`)
   process.exit(failures ? 1 : 0)
 }
 

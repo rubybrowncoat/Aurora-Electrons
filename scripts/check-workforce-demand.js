@@ -11,7 +11,7 @@
 
   The yards aboard a ship run on the saves that hold them, whatever saves are named (SHIP_YARD_SAVES, read-only; a copy is a temporary table over the save's own; a save that is not there reads UNSUPPORTED): the page's colonies read gives each colony the workers of the yards no ship holds, value for value against a sum worked out here from the save's yard and ship rows, and the colonies named for a yard aboard a ship read the figure worked out by hand; with the queue counted, an activity given to a yard aboard a ship in a copy is not read, and the workers the colony's activities change leave it out. A rewrite of both filters that says the same thing must leave those checks green.
 
-  The species growth modifier is applied to positive growth only (3.1: Population.RecalculateAnnualSurfaceGrowthAndOvercrowding, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since 2.7.1, line 229). A worked case runs a colony of 100 M people at a species modifier of 1.5, and one whose governor bonus takes its growth below zero, through the growth rate, the Outlook's growth figure and its projection, and reads the rate alone of a colony with no people and an unreadable modifier and of one with no people at a radiation level. The save whose own colonies are run beside it is read by hand (population, species, body and installation rows), not through the Outlook's colonies read, which is of the 2.7 schema: the interim 3.1 fixture of scripts/lib/fixtures.js (a 2.7 game migrated to the 3.1 schema, game 141, race 784), UNSUPPORTED when it is not there. A save whose colonies all read a species modifier of 1 cannot tell either growth mutant apart: its save case is no credit for the mutant, and where no save can tell it apart the worked case carries the kill. Every colony's rate is compared with the rule worked out here, the species modifier on growth that is positive and left off growth that is not, with the zero case (no people) and the negative one (a governor bonus below zero) taken from the same colonies.
+  The species growth modifier is applied to positive growth only (3.1: Population.RecalculateAnnualSurfaceGrowthAndOvercrowding, docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since the earlier line, line 229). A worked case runs a colony of 100 M people at a species modifier of 1.5, and one whose governor bonus takes its growth below zero, through the growth rate, the Outlook's growth figure and its projection, and reads the rate alone of a colony with no people and an unreadable modifier and of one with no people at a radiation level. The save whose own colonies are run beside it is read by hand (population, species, body and installation rows), not through the Outlook's colonies read, which is of the earlier schema: the interim 3.1 fixture of scripts/lib/fixtures.js (a game of the earlier line migrated to the 3.1 schema, game 141, race 784), UNSUPPORTED when it is not there. A save whose colonies all read a species modifier of 1 cannot tell either growth mutant apart: its save case is no credit for the mutant, and where no save can tell it apart the worked case carries the kill. Every colony's rate is compared with the rule worked out here, the species modifier on growth that is positive and left off growth that is not, with the zero case (no people) and the negative one (a governor bonus below zero) taken from the same colonies.
 
   The mutants load a temp copy of the utilities folder with one thing changed; each must fail the check named with it. The faults of the yards aboard a ship are planted in the page and must fail their checks by a value on every save that holds the case, never by a throw of the page.
 */
@@ -24,15 +24,14 @@ const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { assert, boundary, caughtAll, judged, runChecks } = require('./lib/fault-credit')
-const { fixtureSave, convertedSave } = require('./lib/fixtures')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FIXTURE_SAVE = fixtureSave()
 const DEFAULT_SAVES = [FIXTURE_SAVE]
-// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In the migrated 3.1 fixture (game 141, race 784) the homeworld Aurelia (48979) holds two repair yards aboard ships, a shipbreaker's (1,500,000 t, 37.5 M were it counted) and a smaller one's (31,000 t, 0.775 M), beside 91.5 M of yards of its own (eight yards, from 1.25 M to 17.25 M each: the three commercial and five naval yards and a Light yard of 1,000 t and five slipways, which needs the whole 1.25 M as a naval yard does, not a tenth of it); `activity` is the shipbreaker's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In the recorded 2.x save saves/AuroraDB_270_unknown.db (game 140, race 784, read through its converted copy: `recorded`) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`).
+// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In the migrated 3.1 fixture (game 141, race 784) the homeworld Aurelia (48979) holds two repair yards aboard ships, a shipbreaker's (1,500,000 t, 37.5 M were it counted) and a smaller one's (31,000 t, 0.775 M), beside 91.5 M of yards of its own (eight yards, from 1.25 M to 17.25 M each: the three commercial and five naval yards and a Light yard of 1,000 t and five slipways, which needs the whole 1.25 M as a naval yard does, not a tenth of it); `activity` is the shipbreaker's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship.
 const SHIP_YARD_SAVES = [
   { file: FIXTURE_SAVE.file, game: FIXTURE_SAVE.game, race: FIXTURE_SAVE.race, named: { 48979: 91.5 }, activity: 25 },
-  { file: 'saves/AuroraDB_270_unknown.db', game: 140, race: 784, named: { 49025: 0, 49026: 0 }, peopled: [49025, 49026], recorded: true },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {
@@ -87,8 +86,8 @@ const parseArguments = (argv) => {
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does, and counts the queries that name each table it is asked about. `run(sql)` runs a statement on a temporary table that shadows one of the save's own, so the save itself is never written.
-const openSave = (file, recorded = false) => new Promise((resolve, reject) => {
-  const resolved = recorded && fs.existsSync(path.resolve(root, file)) ? convertedSave(file) : path.resolve(root, file)
+const openSave = (file) => new Promise((resolve, reject) => {
+  const resolved = path.resolve(root, file)
 
   if (!fs.existsSync(resolved)) {
     resolve(null)
@@ -699,12 +698,12 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
 
 // ---------- the species growth modifier ----------
 
-// The save whose own colonies are run through the growth rule: the interim 3.1 fixture (a 2.7 game migrated to the 3.1 schema, race 784 of game 141). Its tables are read by hand rather than through the Outlook's colonies read, which is of the 2.7 schema; a save that is not there reads UNSUPPORTED.
+// The save whose own colonies are run through the growth rule: the interim 3.1 fixture (a game of the earlier line migrated to the 3.1 schema, race 784 of game 141). Its tables are read by hand rather than through the Outlook's colonies read, which is of the earlier schema; a save that is not there reads UNSUPPORTED.
 const GROWTH_SAVES = [fixtureSave()]
 
 // The faults planted in the growth rule, each with the worked case and the save case that must fail with it.
 const GROWTH_MUTANTS = [
-  { name: 'a species growth modifier applied to growth that is not positive, as 2.7 did', file: COLONIES_FILE, from: '(growth > 0 ? growth * colony.PopulationGrowthModifier : growth)', to: '(growth * colony.PopulationGrowthModifier)', fails: 'growthModifier', save: 'growthSaveUnscaled' },
+  { name: 'a species growth modifier applied to growth that is not positive, as the earlier line did', file: COLONIES_FILE, from: '(growth > 0 ? growth * colony.PopulationGrowthModifier : growth)', to: '(growth * colony.PopulationGrowthModifier)', fails: 'growthModifier', save: 'growthSaveUnscaled' },
   { name: 'a species growth modifier left out of growth that is positive', file: COLONIES_FILE, from: 'growth > 0 ? growth * colony.PopulationGrowthModifier : growth', to: 'growth', fails: 'growthModifier', save: 'growthSaveScaled' },
 ]
 
@@ -828,11 +827,10 @@ const yardOracle = async (database, save) => {
 // The checks of one save that holds yards aboard a ship, as { id, name, run } for `runChecks` (scripts/lib/fault-credit.js): the page runs behind its `boundary`, so a read that throws is told apart from a wrong value.
 const shipYardChecks = (database, save) => {
   const named = Object.entries(save.named).map(([id, workers]) => `${id} at ${workers} M`).join(', ')
-  const peopled = save.peopled ? { FCT_Population: [`update FCT_Population set Population = 10 where PopulationID in (${save.peopled.join(', ')})`] } : {}
   const checks = [{
     id: 'yards-colony',
-    name: `${database.file}: each colony's shipyards need the workers of the yards no ship holds: the page's colonies read gives every colony the sum over its yards whose ParentShipID names no ship of the game (capacity x slipways / 4,000 at a naval yard, a tenth of it at any other), and the colonies that hold a yard aboard a ship read ${named}${save.peopled ? ' (on a copy that gives them 10 M people)' : ''}`,
-    run: ({ pageOptions, store }) => onCopy(database, peopled, async () => {
+    name: `${database.file}: each colony's shipyards need the workers of the yards no ship holds: the page's colonies read gives every colony the sum over its yards whose ParentShipID names no ship of the game (capacity x slipways / 4,000 at a naval yard, a tenth of it at any other), and the colonies that hold a yard aboard a ship read ${named}`,
+    run: ({ pageOptions, store }) => onCopy(database, {}, async () => {
       const oracle = await yardOracle(database, save)
       const vm = instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race, boundary })
       const colonies = await vm.runAsync('colonies')
@@ -877,7 +875,7 @@ const shipYardCases = async (pageOptions, store) => {
   const opened = []
 
   for (const save of SHIP_YARD_SAVES) {
-    const database = await openSave(save.file, save.recorded)
+    const database = await openSave(save.file)
 
     if (database) {
       opened.push({ database, save })

@@ -200,7 +200,6 @@ const openSave = (file) => new Promise((resolve, reject) => {
 // What the saves are known to hold: formations, those stationed at no colony of the race, the roles of all and of those, and the systems of the marks (null where no figure is held).
 const FIXTURES = [
   { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, formations: 5337, remote: 268, systems: 21, colony: 5069, remoteRoles: { formations: 268, geo: 10, xeno: 10, other: 258, both: 10, unknown: 0 } },
-  { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', GameID: 141, RaceID: 791, formations: 1455, remote: 0, systems: 0, colony: 1455, allRoles: { geo: 25, xeno: 2 } },
 ]
 
 // The formations of the race that are stationed at no colony of it, those at a colony the save lacks, and the system of each remote one the race has named, in SQL written here and apart from the module's.
@@ -421,14 +420,6 @@ FIXTURES.forEach((fixture, index) => {
       const { formations, geo, xeno, other, both, unknown } = totals
 
       assert.deepEqual({ formations: formations - state(ctx).truth.unknown.size, geo, xeno, other, both, unknown }, fixture.remoteRoles)
-    })
-  }
-
-  if (fixture.allRoles) {
-    add(`save-${index}-all-roles`, `${label}: the formations of the race with a geological or xenoarchaeology rating are ${JSON.stringify(fixture.allRoles)}`, (ctx) => {
-      const totals = ctx.mod.rowTotals(state(ctx).model, { remoteOnly: false })
-
-      assert.deepEqual({ geo: totals.geo, xeno: totals.xeno }, fixture.allRoles)
     })
   }
 })
@@ -733,7 +724,7 @@ const main = async () => {
   const missing = FIXTURES.map((fixture, index) => (saves[index] ? null : fixture.file)).filter(Boolean)
 
   check('every named save is there', missing.length === 0, missing.join(', '))
-  check('every save check ran', base.filter((result) => result.id.startsWith('save-')).length === FIXTURES.reduce((sum, fixture) => sum + 4 + (fixture.remoteRoles ? 1 : 0) + (fixture.allRoles ? 1 : 0), 0))
+  check('every save check ran', base.filter((result) => result.id.startsWith('save-')).length === FIXTURES.reduce((sum, fixture) => sum + 4 + (fixture.remoteRoles ? 1 : 0), 0))
 
   if (options.mutations) {
     console.log('\nPlanted faults')

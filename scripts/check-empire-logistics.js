@@ -716,7 +716,7 @@ check('rule', 'the summary rule is registered for the 3.2 line alone, confirmed,
   assert.ok(rule, 'the rule is registered')
   assert.deepEqual(rule.versions, ['3.2.x'], 'for the 3.2 line')
   assert.equal(provenance.ruleSupports('logistics.empireSummary', '3.2.x'), true, 'it holds there')
-  assert.equal(provenance.ruleSupports('logistics.empireSummary', '2.7.x'), false, 'and not on the earlier line')
+  assert.equal(provenance.ruleSupports('logistics.empireSummary', '3.0.x'), false, 'and not on another line')
   assert.equal(rule.verification, 'confirmed', 'confirmed against the capture')
   assert.ok(rule.structure.length >= 6 && rule.assumptions.length >= 2, 'it names its reads and its assumptions')
   assert.ok(rule.structure.some((line) => line.includes('MassOrdnanceTransfer')) && rule.structure.some((line) => line.includes('CivilianFunction')), 'including the columns the page did not read before')
@@ -854,8 +854,8 @@ const FAULTS = [
   { name: 'the fuel counts in thousands', target: 'util', from: 'export const FUEL_UNIT = 1e6', to: 'export const FUEL_UNIT = 1e3', fails: ['rounding', 's4', 'component'] },
   { name: 'the listing is read by ID', target: 'util', from: 'order by FCT_Population.rowid`', to: 'order by FCT_Population.PopulationID`', fails: ['s4', 'oracle', 'loader'] },
   { name: 'the colonies of every race are listed', target: 'util', from: 'where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} order by', to: 'where FCT_Population.GameID = ${GameID} order by', fails: ['loader'] },
-  { name: 'the rule is registered for the earlier line', target: 'util', from: "const SUMMARY_VERSIONS = ['3.2.x']", to: "const SUMMARY_VERSIONS = ['2.7.x']", fails: ['rule'] },
-  { name: 'the rule is registered for both lines', target: 'util', from: "const SUMMARY_VERSIONS = ['3.2.x']", to: "const SUMMARY_VERSIONS = ['2.7.x', '3.2.x']", fails: ['rule'] },
+  { name: 'the rule is registered for another line', target: 'util', from: "const SUMMARY_VERSIONS = ['3.2.x']", to: "const SUMMARY_VERSIONS = ['3.0.x']", fails: ['rule'] },
+  { name: 'the rule is registered for another line as well', target: 'util', from: "const SUMMARY_VERSIONS = ['3.2.x']", to: "const SUMMARY_VERSIONS = ['3.0.x', '3.2.x']", fails: ['rule'] },
   { name: 'the rule is estimated', target: 'util', from: "verification: 'confirmed',", to: "verification: 'estimated',", fails: ['rule'] },
   { name: 'the component writes M-PROD amber for red', target: 'component', from: "return row.productionState === 'short' ? 'warning--text' : 'error--text'", to: "return row.productionState === 'short' ? 'error--text' : 'warning--text'", fails: ['s4', 'component'] },
   { name: 'the component writes the tonnage with no colour', target: 'component', from: "if (key === 'tons' && row.tonsAbove) {\n        return 'warning--text'", to: "if (key === 'tons' && row.tonsAbove) {\n        return ''", fails: ['component'] },

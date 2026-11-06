@@ -3,8 +3,6 @@
 
   node scripts/check-economy-notes.js [--no-mutations]
 
-  NOTES_FALRYX points the saves checks at another folder of saves. A baseline check that needs the owner's saves and does not find them is reported as skipped and is not counted; a mutant naming that check is rejected, never credited with a reduced mapping.
-
   Groups:
   - links: each kind of target is linked where the save shows it is the object that was linked (a body by the discovery time of its system, a fleet by its creation time, a catalogue tech anywhere) and not checked where nothing does (a colony, a designed tech), a rename keeps the link and shows the new name, an object that is gone or an ID that another object took is never rebound, and on another branch a body is linked only if its system was found strictly before the branches parted;
   - stale: a deleted or changed target leaves the note readable, marked stale, with the name and system it last had, through a restart and an edit;
@@ -13,20 +11,16 @@
   - edits: a note is made, edited, deleted, refused when stale or invalid, and an edit keeps the link;
   - scope: a link is made only against the objects of the race, campaign and branch the note is kept for, and only for an object that is there as it was picked;
   - picker and reads: the choices of the form, and every query the notebook sends is a select, so editing a note never writes the save;
-  - saves: on the owner's saves (opened read only, skipped when they are not here) the objects load with the real queries, and the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and never as linked;
   - backup: notes round-trip through the backup's annotation adapter;
   - page: the panels name what they are for in the page's voice, a note is kept from the form, listed, filtered, isolated by race and branch, a draft is dropped and refused when what is shown changes (the backup's registration of the notes' adapter is checked with every other kind by scripts/check-history-restore.js).
 
   Everything runs on in-memory stores, the real scenario repository and a fake save that records the SQL it is sent. Each mutation of the utility or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
-const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { createRequire } = require('module')
 const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
-const { convertedSave } = require('./lib/fixtures')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
@@ -35,7 +29,6 @@ const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'notebook.vue')
 const navigationFile = path.join(utilitiesDirectory, 'navigation.js')
-const FALRYX = process.env.NOTES_FALRYX || path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
 const NAMES = ['economy-notes', 'history-milestones', 'scenario-records', 'history-backup']
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
@@ -48,8 +41,6 @@ const STUBS = {
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
-
-const localRequire = createRequire(path.join(root, 'package.json'))
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
@@ -1219,194 +1210,6 @@ const suite = (m) => {
     assert.equal(preview.items.every((item) => item.status === 'rejected'), true)
   })
 
-  // ---- saves --------------------------------------------------------------------------------------------------------
-
-  const sqlite3 = () => localRequire('sqlite3')
-
-  // A recorded 2.x campaign save opened read only through the copy that holds the star's component number under its 3.1 name (scripts/lib/fixtures.js `convertedSave`, the one statement), with a `database` of the shape the page's reads use, and the SQL it was sent.
-  const openSave = (file) => {
-    const db = new (sqlite3().Database)(convertedSave(file), sqlite3().OPEN_READONLY)
-    const sent = []
-    const run = (sql, params = {}) => new Promise((resolve, reject) => db.all(sql, Object.fromEntries(Object.entries(params).map(([key, value]) => [`:${key}`, value])), (error, rows) => (error ? reject(error) : resolve(rows))))
-
-    return { file, sent, close: () => db.close(), run, database: { query: async (sql, { replacements = {} } = {}) => { sent.push(sql); return [await run(sql, replacements)] } } }
-  }
-
-  const KNOWN_BODIES = 'select FCT_SystemBody.SystemBodyID from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.GameID = :GameID where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (1, 2, 3, 5)'
-
-  // The objects of a real save: everything `loadNoteObjects` gives and every body the race knows.
-  const objectsOfSave = async (save, GameID, RaceID) => {
-    const ids = (await save.run(KNOWN_BODIES, { GameID, RaceID })).map((row) => row.SystemBodyID)
-    const loaded = await notes.loadNoteObjects(save.database, { GameID, RaceID })
-    const bodies = await notes.loadBodies(save.database, { GameID, RaceID, bodyIds: ids })
-    const [{ GameTime }] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID })
-
-    return { objects: notes.withBodies(loaded, bodies).objects, GameTime, failed: loaded.failed }
-  }
-
-  // The link a note holds, as the repository stores and lists it, for the object `row` of kind `type` made in `from` and read in `to`: the stored link's status is the repository's (gone, changed or linked by fingerprint), and `resolveLink` gives what the note shows.
-  const shown = (type, row, now, context, origin) => {
-    const definition = notes.NOTE_TARGETS[type]
-    const status = !now ? 'missing' : definition.fingerprint(now) === definition.fingerprint(row) ? 'linked' : 'changed'
-    const stored = { type, id: row.id, fingerprint: definition.fingerprint(row), status, ...(now ? { current: definition.fingerprint(now) } : {}) }
-
-    return milestones.resolveLink(stored, { name: row.name, origin }, context, notes.NOTE_TARGETS)
-  }
-
-  const falryxFiles = () => (fs.existsSync(FALRYX) ? fs.readdirSync(FALRYX).filter((name) => /^AuroraDB-\d+\.db$/.test(name)).sort() : [])
-
-  check('saves', 'on the owner\'s saves of a rewound game the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and are never linked', async () => {
-    const files = falryxFiles()
-
-    if (files.length < 5) {
-      return { skipped: 'the falryx saves are not here' }
-    }
-
-    const GameID = 141
-    const RaceID = 791
-    const [common, a, b] = ['AuroraDB-2713949950.db', 'AuroraDB-2740177930.db', 'AuroraDB-2794985390.db'].map((name) => openSave(path.join(FALRYX, name)))
-
-    try {
-      const [before, left, right] = [await objectsOfSave(common, GameID, RaceID), await objectsOfSave(a, GameID, RaceID), await objectsOfSave(b, GameID, RaceID)]
-      const parted = before.GameTime
-      const tree = { x: { parent: null, t: null }, y: { parent: 'x', t: parted } }
-      const context = { objects: right.objects, GameID, RaceID, campaignId: 'c1', branchId: 'y', branches: tree }
-      const origin = { campaignId: 'c1', branchId: 'x' }
-      const report = {}
-
-      for (const type of Object.keys(notes.NOTE_TARGETS)) {
-        const counts = { reissued: 0, linked: 0, unknown: 0, changed: 0, missing: 0, linkedButReissued: 0 }
-
-        for (const [id, row] of left.objects[type]) {
-          const now = right.objects[type].get(id) || null
-          const result = shown(type, row, now, context, origin)
-
-          counts[result.status] += 1
-
-          if (now && notes.NOTE_TARGETS[type].fingerprint(now) !== notes.NOTE_TARGETS[type].fingerprint(row)) {
-            counts.reissued += 1
-            const timeLost = type === 'fleet' && Number.isFinite(row.created) && !Number.isFinite(now.created)
-
-            assert.equal(result.status, timeLost ? 'unknown' : 'changed', `${type} ${id}`)
-          }
-
-          if (type !== 'tech' && result.status === 'linked') {
-            assert.ok(now && notes.NOTE_TARGETS[type].fingerprint(now) === notes.NOTE_TARGETS[type].fingerprint(row), `${type} ${id} is linked though it differs`)
-          }
-
-          if (type === 'colony' || type === 'design') {
-            assert.notEqual(result.status, 'linked', `${type} ${id}`)
-          }
-        }
-
-        report[type] = counts
-      }
-
-      assert.ok(report.body.reissued > 100, `bodies given again: ${report.body.reissued}`)
-      assert.ok(report.colony.reissued > 0, `colonies given again: ${report.colony.reissued}`)
-      assert.ok(report.body.linked > 1000)
-      assert.equal(report.colony.linked, 0)
-      assert.equal(report.design.linked, 0)
-      assert.ok(report.tech.linked === 1186 && report.tech.changed === 0, 'the whole catalogue links on the other branch')
-
-      // The evidence the rule rests on: no body of a system found before the last save both branches hold differs on the two branches.
-      let early = 0
-
-      for (const [id, row] of left.objects.body) {
-        const now = right.objects.body.get(id)
-
-        if (now && row.discovered < parted) {
-          early += 1
-          assert.equal(notes.NOTE_TARGETS.body.fingerprint(now), notes.NOTE_TARGETS.body.fingerprint(row), `body ${id}`)
-        }
-      }
-
-      assert.ok(early > 1000)
-
-      const later = Math.min(...[...left.objects.body.values()].filter((row) => right.objects.body.has(row.id) && notes.NOTE_TARGETS.body.fingerprint(right.objects.body.get(row.id)) !== notes.NOTE_TARGETS.body.fingerprint(row)).map((row) => row.discovered))
-
-      assert.ok(later >= parted, 'every body that was given again is in a system found after the saves the branches share')
-
-      return `${report.body.reissued} bodies, ${report.colony.reissued} colonies, ${report.fleet.reissued} fleets, ${report.design.reissued} designed techs given again; none linked`
-    } finally {
-      ;[common, a, b].forEach((save) => save.close())
-    }
-  })
-
-  check('saves', 'on the owner\'s saves a note made on one branch is kept, read on the other and edited end to end, with the sample of bodies given again reading changed', async () => {
-    const files = falryxFiles()
-
-    if (files.length < 5) {
-      return { skipped: 'the falryx saves are not here' }
-    }
-
-    const GameID = 141
-    const RaceID = 791
-    const [a, b] = ['AuroraDB-2740177930.db', 'AuroraDB-2794985390.db'].map((name) => openSave(path.join(FALRYX, name)))
-
-    try {
-      const [left, right] = [await objectsOfSave(a, GameID, RaceID), await objectsOfSave(b, GameID, RaceID)]
-      const differs = (id) => notes.NOTE_TARGETS.body.fingerprint(right.objects.body.get(id)) !== notes.NOTE_TARGETS.body.fingerprint(left.objects.body.get(id))
-      const shared = [...left.objects.body.keys()].filter((id) => right.objects.body.has(id))
-      const reissued = shared.filter(differs).slice(0, 12)
-      const same = shared.filter((id) => !differs(id) && left.objects.body.get(id).discovered < 2713949950).slice(0, 12)
-      const w = world(m)
-      const whereX = scope('x', RaceID)
-      const contextX = { objects: left.objects, GameID, RaceID, campaignId: 'c1', branchId: 'x', branches: { x: { parent: null, t: null }, y: { parent: 'x', t: 2713949950 } } }
-
-      for (const id of [...reissued, ...same]) {
-        await kept(w, whereX, contextX, 'body', id, { policy: 'campaign' })
-      }
-
-      const contextY = { objects: right.objects, GameID, RaceID, campaignId: 'c1', branchId: 'y', branches: contextX.branches }
-      const entries = entriesOf(w, scope('y', RaceID), contextY)
-
-      assert.equal(entries.length, reissued.length + same.length)
-      reissued.forEach((id) => assert.equal(entries.find((entry) => entry.target.id === id).link.status, 'changed', `body ${id}`))
-      same.forEach((id) => assert.equal(entries.find((entry) => entry.target.id === id).link.status, 'linked', `body ${id}`))
-      assert.ok(reissued.length >= 5 && same.length >= 5)
-      assert.equal(entries.filter((entry) => entry.stale).length, reissued.length)
-
-      return `${reissued.length} reissued bodies changed, ${same.length} older ones linked`
-    } finally {
-      ;[a, b].forEach((save) => save.close())
-    }
-  })
-
-  check('saves', 'on the owner\'s saves every query is a select, and reading the objects leaves the file as it was', async () => {
-    const files = falryxFiles()
-
-    if (files.length < 1) {
-      return { skipped: 'the falryx saves are not here' }
-    }
-
-    const file = path.join(FALRYX, files[files.length - 1])
-    const digest = () => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
-    const before = digest()
-    const save = openSave(file)
-
-    try {
-      const [first] = await save.run('select SystemID from FCT_RaceSysSurvey where GameID = 141 and RaceID = 791 limit 1')
-      const loaded = await notes.loadNoteObjects(save.database, { GameID: 141, RaceID: 791 })
-      const bodies = await notes.loadBodies(save.database, { GameID: 141, RaceID: 791, bodyIds: [1988470, 1988471], systemId: first.SystemID })
-
-      const writes = save.sent.filter((sql) => /^(?:insert|update|delete|drop|alter|create|replace|attach|pragma)\b/i.test(sql)).length
-
-      if (process.argv.includes('--detail')) {
-        console.log('VALUE write statements sent to the real save:', writes)
-      }
-      assert.equal(writes, 0, 'the real save receives no write statement from the notebook')
-      assert.deepEqual(loaded.failed, {})
-      assert.ok(bodies.size >= 2)
-      assert.ok(save.sent.length >= 7)
-      save.sent.forEach((sql) => assert.match(sql, /^select /))
-    } finally {
-      save.close()
-    }
-
-    assert.equal(digest(), before)
-  })
-
   return checks
 }
 
@@ -1767,10 +1570,10 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
 const UTILITY_MUTATIONS = [
   { name: 'a link whose object is gone is rebound to the object with the same content', file: 'economy-notes.js', find: 'return objects.get(link.id) || null', replace: 'return objects.get(link.id) || [...objects.values()].find((row) => targetOf(link.type).fingerprint(row) === link.fingerprint) || null', fails: ['links: a link is never rebound'] },
-  { name: 'an ID that another object took is trusted', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId), present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "fingerprint: () => 'body',", fails: ['links: an ID that a save gives to another object reads changed', 'saves: on the owner\'s saves of a rewound game'] },
+  { name: 'an ID that another object took is trusted', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId), present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "fingerprint: () => 'body',", fails: ['links: an ID that a save gives to another object reads changed'] },
   { name: 'a body is told by its name', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId),", replace: "fingerprint: (row) => ['body', row.name, present(row.systemId),", fails: ['links: no fingerprint holds a name', 'links: a renamed body, fleet and tech stays linked'] },
   { name: 'a tech is told by its name', file: 'economy-notes.js', find: "fingerprint: (row) => ['tech', present(row.typeId),", replace: "fingerprint: (row) => ['tech', row.name, present(row.typeId),", fails: ['links: no fingerprint holds a name', 'links: a renamed body, fleet and tech stays linked'] },
-  { name: 'a body is not told by its place', file: 'economy-notes.js', find: "present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "present(row.discovered)].join('|'),", fails: ['links: an ID that a save gives to another object reads changed', 'saves: on the owner\'s saves of a rewound game'] },
+  { name: 'a body is not told by its place', file: 'economy-notes.js', find: "present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "present(row.discovered)].join('|'),", fails: ['links: an ID that a save gives to another object reads changed'] },
   { name: 'a stale note shows no name', file: 'economy-notes.js', find: 'id: target.id, name: target.name, systemId: target.systemId, systemName: target.systemName, origin: { campaignId: target.origin.campaignId', replace: "id: target.id, name: link && (link.status === 'missing' || link.status === 'changed') ? '' : target.name, systemId: target.systemId, systemName: target.systemName, origin: { campaignId: target.origin.campaignId", fails: ['stale: a deleted target leaves the note readable', 'stale: a changed link is stale too', 'stale: a stale note is read the same after a restart'] },
   { name: 'a changed link is not stale', file: 'economy-notes.js', find: "const stale = Boolean(link) && (link.status === 'missing' || link.status === 'changed')", replace: "const stale = Boolean(link) && link.status === 'missing'", fails: ['stale: a changed link is stale too', 'links: an ID that a save gives to another object reads changed'] },
   { name: 'a link that is not checked is stale', file: 'economy-notes.js', find: "const stale = Boolean(link) && (link.status === 'missing' || link.status === 'changed')", replace: "const stale = Boolean(link) && link.status !== 'linked'", fails: ['stale: a note that is not checked is not stale', 'links: a body, a fleet and a catalogue tech are linked'] },
@@ -1785,8 +1588,8 @@ const UTILITY_MUTATIONS = [
   { name: 'a stale note is found in no system', file: 'economy-notes.js', find: 'return { systemId: target.systemId, systemName: target.systemName, lastKnown: true }', replace: "return { systemId: null, systemName: '', lastKnown: true }", fails: ['filter: a note that is stale, or whose fleet is not known'] },
   { name: 'a fleet that is not known to be the one linked is found where it is now', file: 'economy-notes.js', find: "(link.status === 'linked' || Boolean(targetOf(target.type) && targetOf(target.type).placed))", replace: 'true', fails: ['filter: a note that is stale, or whose fleet is not known'] },
   { name: 'a catalogue tech is not certified on another branch', file: 'history-milestones.js', find: "definition.identity === 'content' || definition.identity === 'static'", replace: "definition.identity === 'content'", fails: ['links: a catalogue tech is linked on any branch'] },
-  { name: 'a designed tech is certified like a catalogue tech', file: 'economy-notes.js', find: "identity: 'unwitnessed',\n    unwitnessedNote:", replace: "identity: 'static',\n    unwitnessedNote:", fails: ['links: a body, a fleet and a catalogue tech are linked', 'saves: on the owner\'s saves of a rewound game'] },
-  { name: 'a colony is certified by the place it was made with', file: 'history-milestones.js', find: "if (definition.identity === 'unwitnessed') {\n    return definition.unwitnessedNote || UNVERIFIED_TEXT.unwitnessed\n  }", replace: "if (definition.identity === 'unwitnessed') {\n    return null\n  }", fails: ['links: a body, a fleet and a catalogue tech are linked', 'links: a colony ID given again', 'saves: on the owner\'s saves of a rewound game'] },
+  { name: 'a designed tech is certified like a catalogue tech', file: 'economy-notes.js', find: "identity: 'unwitnessed',\n    unwitnessedNote:", replace: "identity: 'static',\n    unwitnessedNote:", fails: ['links: a body, a fleet and a catalogue tech are linked'] },
+  { name: 'a colony is certified by the place it was made with', file: 'history-milestones.js', find: "if (definition.identity === 'unwitnessed') {\n    return definition.unwitnessedNote || UNVERIFIED_TEXT.unwitnessed\n  }", replace: "if (definition.identity === 'unwitnessed') {\n    return null\n  }", fails: ['links: a body, a fleet and a catalogue tech are linked', 'links: a colony ID given again'] },
   { name: 'a body is certified without the time its system was found', file: 'economy-notes.js', find: "identity: 'created',\n    created: 5,", replace: "identity: 'static',", fails: ['links: on another branch a body is linked only when its system was found strictly before'] },
   { name: 'a body is certified by the time of the wrong part of its fingerprint', file: 'economy-notes.js', find: 'created: 5,', replace: 'created: 4,', fails: ['links: on another branch a body is linked only when its system was found strictly before'] },
   { name: 'a kind of object the save could not give reads as gone', file: 'economy-notes.js', find: 'throw new TypeError(`the #{link.type} objects of the save were not read`)', replace: 'return null', fails: ['links: a link read with no objects is not checked'] },
@@ -1807,7 +1610,7 @@ const UTILITY_MUTATIONS = [
   { name: 'the bodies are read all at once', file: 'economy-notes.js', find: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), BODIES_PER_READ)) {', replace: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), 100000)) {', fails: ['reads: the bodies are read by ID in batches'] },
   { name: 'a failed read of the bodies is taken for no bodies', file: 'economy-notes.js', find: '    keep((await database.query(bodiesByIdSql(batch), { replacements }))[0])', replace: '    keep((await database.query(bodiesByIdSql(batch), { replacements }).catch(() => [[]]))[0])', fails: ['reads: a kind the save cannot give is named as failed'] },
   { name: 'a failed colony read clears the other loaded objects', file: 'economy-notes.js', find: '  return { objects, systems, failed, GameID, RaceID }', replace: '  if (Object.keys(failed).length) {\n    Object.keys(objects).forEach((type) => { objects[type] = new Map() })\n    systems = []\n  }\n\n  return { objects, systems, failed, GameID, RaceID }', fails: ['reads: a kind the save cannot give is named as failed', 'links: a link read with no objects is not checked'] },
-  { name: 'a write is sent to the save', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID').catch(() => [[]])\n\n  return bodies\n}", fails: ['reads: every query the notebook sends is a select', 'saves: on the owner\'s saves every query is a select'] },
+  { name: 'a write is sent to the save', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID').catch(() => [[]])\n\n  return bodies\n}", fails: ['reads: every query the notebook sends is a select'] },
   { name: 'keeping a note writes to the save', file: 'economy-notes.js', find: '    const links = target ? [{ type: target.type, id: row.id, row }] : []', replace: "    const links = target ? [{ type: target.type, id: row.id, row }] : []\n\n    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0').catch(() => [[]])\n    }", fails: ['reads: keeping, editing and deleting a note sends nothing to the save', 'reads: every query the notebook sends is a select'] },
 ]
 

@@ -3,7 +3,7 @@
 
   node scripts/check-refits.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784) and the other saves that are known to hold a refit task or a retool activity (saves/AuroraDB_270_Falryx_date_issue.db, game 141, race 791; AuroraDB_TerranFederation.db, whose game and race are read from the save); a save that is not there is reported as not run.
+  With no options it runs on the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784); `--save` names others.
 
   It proves: the worked examples (an added component, a removal that earns no credit, a size change, A to B against B to A, the one-decimal rounding of a refit's minerals, the retool cost with and without a tooled class, the no-retool test, a yard's eligibility including a Light yard's, which lists every class of the race within its capacity with no tooling and no retool, a refit's source class in the size band of the yard's tooled class and a Light yard asking no band, an unknown figure staying unknown); and, on every save, that each stored refit task's TotalBP and minerals and each stored retool activity's RequiredBP are what the rules give for its two classes, that a stored construction task sits in a yard that takes its class, that the retool and refit rules agree on the yards' own tooling, that every task row carries the stored count of ships it makes, and that each Light yard in the save gives a class of 900 t and of 1,100 t the verdicts its 1,000 t capacity decides. A save with no refit task or retool activity is reported as having nothing to compare: the fixture holds none. Any failed check sets exit code 1.
 */
@@ -17,7 +17,7 @@ const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const MINERALS = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
-const DEFAULT_SAVES = [fixtureSave(), { file: 'saves/AuroraDB_270_Falryx_date_issue.db', game: 141, race: 791 }, { file: 'AuroraDB_TerranFederation.db', game: null, race: null }]
+const DEFAULT_SAVES = [fixtureSave()]
 const TOLERANCE = 1e-6
 
 let failures = 0
@@ -107,42 +107,42 @@ const worked = (refits, provenance) => {
   const make = (name, sizeHS, cost, counts, extra = {}) => ({ id: name, name, sizeHS, cost, commercial: false, obsolete: false, shippingLine: false, otherRace: false, prototype: false, counts, ...extra })
   const A = make('A', 10, 100, { 1: 2, 2: 1 })
   const B = make('B', 12, 500, { 1: 3, 3: 1 })
-  const ab = refitCost(A, B, components, '2.7.1')
-  const ba = refitCost(B, A, components, '2.7.1')
+  const ab = refitCost(A, B, components, '3.2.0')
+  const ba = refitCost(B, A, components, '3.2.0')
 
   Object.values(ab).forEach((value) => value && value.rule && note(value))
   check('worked: A to B adds one part 1 (10) and one part 3 (20); the lost part 2 earns no credit', near(valueOrNull(ab.added), 30) && ab.changes.filter((change) => change.added > 0).length === 2 && ab.changes.find((change) => change.id === 2).removed === 1)
   check('worked: A to B adds 20% overhead and 2/10 for the size change: 30 x 1.4 = 42', near(valueOrNull(ab.overhead), 6) && near(valueOrNull(ab.surcharge), 6) && near(valueOrNull(ab.total), 42))
   check('worked: B to A is a different figure, 30 x (1.2 + 2/12) = 41', near(valueOrNull(ba.total), 41) && !near(valueOrNull(ba.total), valueOrNull(ab.total)))
   check('worked: the minerals of A to B are the added parts\' (2 Duranium, 1 Uridium)', near(valueOrNull(ab.minerals).Duranium, 2) && near(valueOrNull(ab.minerals).Uridium, 1) && near(valueOrNull(ab.minerals).Corbomite, 0))
-  check('worked: a refit of a class to itself costs 0, not unknown', near(valueOrNull(refitCost(A, A, components, '2.7.1').total), 0) && classChanges(A, A, components).length === 0)
+  check('worked: a refit of a class to itself costs 0, not unknown', near(valueOrNull(refitCost(A, A, components, '3.2.0').total), 0) && classChanges(A, A, components).length === 0)
 
   const armourA = make('X', 10, 100, { 4: 10 })
   const armourB = make('Y', 10, 100, { 4: 10.25 })
-  check('worked: a refit\'s minerals use each added count at one decimal, 0.25 to 0.2 (midpoint to even): 0.2 x 10 = 2 Duranium', near(valueOrNull(refitCost(armourA, armourB, components, '2.7.1').minerals).Duranium, 2))
-  check('worked: its cost uses the unrounded 0.25: 0.25 x 4 x 1.2 = 1.2', near(valueOrNull(refitCost(armourA, armourB, components, '2.7.1').total), 1.2))
+  check('worked: a refit\'s minerals use each added count at one decimal, 0.25 to 0.2 (midpoint to even): 0.2 x 10 = 2 Duranium', near(valueOrNull(refitCost(armourA, armourB, components, '3.2.0').minerals).Duranium, 2))
+  check('worked: its cost uses the unrounded 0.25: 0.25 x 4 x 1.2 = 1.2', near(valueOrNull(refitCost(armourA, armourB, components, '3.2.0').total), 1.2))
 
-  const unknownCost = refitCost(A, make('Z', 10, 100, { 1: 2, 2: 1, 5: 1 }), components, '2.7.1')
+  const unknownCost = refitCost(A, make('Z', 10, 100, { 1: 2, 2: 1, 5: 1 }), components, '3.2.0')
   check('worked: an added part with no known cost makes the refit unavailable and names the part', !isAvailable(unknownCost.total) && unknownCost.total.inputs.missing.some((name) => name.includes('part 5')))
-  check('worked: an unknown class size makes the refit unavailable, never 0', !isAvailable(refitCost(A, make('S', null, 100, { 1: 2 }), components, '2.7.1').total) && valueOrNull(refitCost(A, make('S', null, 100, { 1: 2 }), components, '2.7.1').total) === null)
-  check('worked: a save with no version label gives an estimate with the standing caveat', refitCost(A, B, components, null).total.status === STATUS.ESTIMATED && refitCost(A, B, components, null).total.assumptions.length > 0 && refitCost(A, B, components, '2.7.1').total.status === STATUS.CONFIRMED)
+  check('worked: an unknown class size makes the refit unavailable, never 0', !isAvailable(refitCost(A, make('S', null, 100, { 1: 2 }), components, '3.2.0').total) && valueOrNull(refitCost(A, make('S', null, 100, { 1: 2 }), components, '3.2.0').total) === null)
+  check('worked: a save with no version label gives an estimate with the standing caveat', refitCost(A, B, components, null).total.status === STATUS.ESTIMATED && refitCost(A, B, components, null).total.assumptions.length > 0 && refitCost(A, B, components, '3.2.0').total.status === STATUS.CONFIRMED)
 
   const share = costShare(ab.total, { name: 'A', cost: 100 })
   check('worked: the share of the source class\'s cost is 42%, of the target\'s 8.4%', near(valueOrNull(share), 42) && near(valueOrNull(costShare(ab.total, { name: 'B', cost: 500 })), 8.4) && !isAvailable(costShare(ab.total, { name: 'N', cost: null })) && !isAvailable(costShare(ab.total, { name: 'Z', cost: 0 })))
   note(share)
 
-  const noRetool = noRetoolCheck(A, B, '2.7.1')
+  const noRetool = noRetoolCheck(A, B, '3.2.0')
   const cheap = make('C', 11, 500, { 1: 2, 2: 1, 3: 0.5 })
-  const cheapRefit = refitCost(A, cheap, components, '2.7.1')
+  const cheapRefit = refitCost(A, cheap, components, '3.2.0')
   const W = make('W', 12.5, 500, { 1: 2, 2: 1 })
   note(noRetool.result)
-  check('worked: only the class a yard is tooled for needs no retool: a yard tooled for A takes A and needs a retool for B, whatever the refit\'s cost', noRetoolCheck(A, A, '2.7.1').ok === true && noRetool.ok === false)
-  check('worked: a class within 80% to 120% of the tooled class\'s size (11 against 10, a refit of 13, under a fifth of the cost) is not admitted, and neither is one at 12.5: the window and the cost share are no test the game makes', near(valueOrNull(cheapRefit.total), 13) && noRetoolCheck(A, cheap, '2.7.1').ok === false && noRetoolCheck(A, W, '2.7.1').ok === false)
-  check('worked: the no-retool check\'s size window and cost share are null, never a figure the game does not test', [noRetool, noRetoolCheck(A, cheap, '2.7.1')].every((test) => test.withinSize === null && test.affordable === null && test.limit === null))
-  check('worked: a class with no id leaves the no-retool test unknown (null, not a pass)', noRetoolCheck({ ...A, id: null }, B, '2.7.1').ok === null && !isAvailable(noRetoolCheck({ ...A, id: null }, B, '2.7.1').result))
+  check('worked: only the class a yard is tooled for needs no retool: a yard tooled for A takes A and needs a retool for B, whatever the refit\'s cost', noRetoolCheck(A, A, '3.2.0').ok === true && noRetool.ok === false)
+  check('worked: a class within 80% to 120% of the tooled class\'s size (11 against 10, a refit of 13, under a fifth of the cost) is not admitted, and neither is one at 12.5: the window and the cost share are no test the game makes', near(valueOrNull(cheapRefit.total), 13) && noRetoolCheck(A, cheap, '3.2.0').ok === false && noRetoolCheck(A, W, '3.2.0').ok === false)
+  check('worked: the no-retool check\'s size window and cost share are null, never a figure the game does not test', [noRetool, noRetoolCheck(A, cheap, '3.2.0')].every((test) => test.withinSize === null && test.affordable === null && test.limit === null))
+  check('worked: a class with no id leaves the no-retool test unknown (null, not a pass)', noRetoolCheck({ ...A, id: null }, B, '3.2.0').ok === null && !isAvailable(noRetoolCheck({ ...A, id: null }, B, '3.2.0').result))
 
-  const priced = retoolCost({ tooling: A, target: B, refit: ab.total, slipways: 2, operations: 0.5, version: '2.7.1' })
-  const capped = retoolCost({ tooling: A, target: make('T', 12, 30, {}), refit: ab.total, slipways: 2, operations: 0.5, version: '2.7.1' })
+  const priced = retoolCost({ tooling: A, target: B, refit: ab.total, slipways: 2, operations: 0.5, version: '3.2.0' })
+  const capped = retoolCost({ tooling: A, target: make('T', 12, 30, {}), refit: ab.total, slipways: 2, operations: 0.5, version: '3.2.0' })
   note(priced.cost)
   check('worked: a retool costs the lesser of the refit and the target\'s cost x (0.5 + 0.25 x slipways) x operations: 42 x 1.0 x 0.5 = 21', priced.kind === 'priced' && near(valueOrNull(priced.cost), 21))
   check('worked: when the target costs less than the refit, its cost is the base: 30 x 1.0 x 0.5 = 15', near(valueOrNull(capped.cost), 15))
@@ -151,7 +151,7 @@ const worked = (refits, provenance) => {
 
   const naval = { type: 1, capacity: 600, slipways: 2, tasks: 0 }
   const commercial = { type: 2, capacity: 600, slipways: 2, tasks: 0 }
-  const contextOf = (...shipClasses) => ({ classesById: Object.fromEntries([A, B, ...shipClasses].map((shipClass) => [shipClass.id, shipClass])), components, version: '2.7.1', cache: new Map() })
+  const contextOf = (...shipClasses) => ({ classesById: Object.fromEntries([A, B, ...shipClasses].map((shipClass) => [shipClass.id, shipClass])), components, version: '3.2.0', cache: new Map() })
   const stateOf = (yard, target, operation = 'build', source = null, context = contextOf(target, ...(source ? [source] : []))) => yardEligibility(yard, target, operation, context, source).state
   const merchant = make('Merchant', 12, 1, {}, { commercial: true })
   const tooledB = { ...naval, tooledId: 'B' }
@@ -226,14 +226,14 @@ const worked = (refits, provenance) => {
   const lightNaval = { type: 1, capacity: 1000, slipways: 1, tasks: 0, tooledId: 'A' }
   const nineHundred = make('Nine', 18, 500, { 1: 4 })
 
-  check('worked: a 2.7 naval yard of 1000 t still needs tooling for a hull of 900 t, where a light yard of the same capacity lists it', stateOf(lightNaval, nineHundred, 'build', null, contextOf(nineHundred)) === 'retool' && stateOf({ ...lightNaval, type: 4, tooledId: null }, nineHundred, 'build', null, contextOf(nineHundred)) === 'capable')
+  check('worked: a naval yard of 1000 t still needs tooling for a hull of 900 t, where a light yard of the same capacity lists it', stateOf(lightNaval, nineHundred, 'build', null, contextOf(nineHundred)) === 'retool' && stateOf({ ...lightNaval, type: 4, tooledId: null }, nineHundred, 'build', null, contextOf(nineHundred)) === 'capable')
 
   const light = { type: 4, capacity: 1000, slipways: 5, tasks: 0, tooledId: null }
   const elevenHundred = make('Eleven', 22, 600, { 1: 4 })
   const lightIn = (yard, target, operation = 'build', source = null, context = contextOf(target, ...(source ? [source] : []))) => yardEligibility(yard, target, operation, context, source)
   const lightNine = lightIn(light, nineHundred)
   const lightEleven = lightIn(light, elevenHundred)
-  const lightFormula = { ...contextOf(nineHundred), version: '3.2.0' }
+  const lightFormula = contextOf(nineHundred)
   const listed = listedNoRetool('3.2.0')
 
   note(lightNine.tooling.check.result)
@@ -252,13 +252,13 @@ const worked = (refits, provenance) => {
   check('worked: a refit at a light yard needs no tooling and no size band: a source of 5 hull spaces for a target of 18 is capable, where the same refit at a naval yard tooled for the target is refused for the band, and a light yard of 6,000 t takes the 50 hull space source its tooled counterpart refuses', lightIn(light, nineHundred, 'refit', tiny).state === 'capable' && lightIn(light, nineHundred, 'refit', tiny).tooling.kind === 'listed' && refitFrom({ ...naval, capacity: 1000, tooledId: 'Nine' }, tiny, nineHundred, contextOf(tiny, nineHundred)).state === 'ineligible' && refitFrom({ ...naval, capacity: 1000, tooledId: 'Nine' }, tiny, nineHundred, contextOf(tiny, nineHundred)).blockers.some((reason) => reason.includes('size band')) && lightIn({ ...light, capacity: 6000 }, hundred, 'refit', fifty).state === 'capable' && lightIn({ ...light, capacity: 6000 }, hundred, 'refit', fifty).tooling.kind === 'listed' && refitFrom(bandYard, fifty, hundred, contextOf(hundred, fifty)).state === 'ineligible')
   check('worked: a refit at a light yard still needs its source within the capacity, and a target over it is refused with its own reason', lightIn(light, nineHundred, 'refit', huge).state === 'ineligible' && lightIn(light, nineHundred, 'refit', huge).blockers.some((reason) => reason.includes('source class') && reason.includes('capacity')) && lightIn(light, elevenHundred, 'refit', tiny).state === 'ineligible' && lightIn(light, nineHundred, 'refit', nineHundred).state === 'ineligible')
   check('worked: a repair at a light yard needs no tooling and a ship within its capacity, the 900 t class is repaired and the 1100 t one is not', lightIn(light, nineHundred, 'repair').state === 'capable' && lightIn(light, nineHundred, 'repair').tooling === null && lightIn(light, elevenHundred, 'repair').state === 'ineligible')
-  check('worked: a light yard is decided on the 3.2 line and the 2.7 one, with no standing caveat on the 3.2 line, and unknown for a line the rule does not cover', yardEligibility(light, nineHundred, 'build', lightFormula).state === 'capable' && yardEligibility(light, nineHundred, 'build', lightFormula).result.assumptions.length === 0 && yardEligibility(light, nineHundred, 'build', { ...lightFormula, version: '3.0.0' }).state === 'unknown' && yardEligibility(light, nineHundred, 'build', { ...lightFormula, version: '2.7.1' }).state === 'capable')
+  check('worked: a light yard is decided on the 3.2 line with no standing caveat, and unknown for a line the rule does not cover', yardEligibility(light, nineHundred, 'build', lightFormula).state === 'capable' && yardEligibility(light, nineHundred, 'build', lightFormula).result.assumptions.length === 0 && yardEligibility(light, nineHundred, 'build', { ...lightFormula, version: '3.0.0' }).state === 'unknown')
   check('worked: a light yard asks no retool of a naval class its capacity fits, so the retool the naval yard needs for the 600 t class B (tooled for A, a refit that costs 42 against 20) is not asked of it', lightIn(light, B).state === 'capable' && yardEligibility(tooledA, B, 'build', contextOf()).state === 'retool')
   check('worked: a game version the rule does not cover is unknown, naming the version, never decided; a save with no version label is decided as an estimate with the standing caveat', stateOf(tooledB, B, 'build', null, { ...contextOf(), version: '3.0.0' }) === 'unknown' && yardEligibility(tooledB, B, 'build', { ...contextOf(), version: '3.0.0' }).missing.some((name) => name.includes('3.0.0')) && yardEligibility(tooledB, B, 'build', { ...contextOf(), version: null }).result.assumptions.length > 0 && yardEligibility(tooledB, B, 'build', contextOf()).result.status === STATUS.ESTIMATED)
   check('worked: an operation the rule does not know is an error', (() => { try { yardEligibility(tooledB, B, 'scrap', contextOf()) } catch (error) { return error instanceof Error } return false })())
   note({ rule: 'refit.yardEligibility' })
   note(yardEligibility(tooledA, A, 'build', contextOf()).result)
-  check('worked: refitTotal agrees with refitCost without the minerals', near(valueOrNull(refitTotal(A, B, components, '2.7.1').total), valueOrNull(ab.total)) && refitTotal(A, B, components, '2.7.1').minerals === undefined)
+  check('worked: refitTotal agrees with refitCost without the minerals', near(valueOrNull(refitTotal(A, B, components, '3.2.0').total), valueOrNull(ab.total)) && refitTotal(A, B, components, '3.2.0').minerals === undefined)
   const rate = refitRate({ ShipyardBuildRate: 1000, ShipyardOperations: 1 }, B)
   const time = refitTime(ab.total, rate)
   check('worked: a refit\'s time is its cost over the rate (a yard that is not read gives no time)', isAvailable(time) && rate.value > 0 && near(time.value, 42 / rate.value * 365) && !isAvailable(refitTime(ab.total, refitRate(undefined, B))))
@@ -273,8 +273,8 @@ const worked = (refits, provenance) => {
 
   const unknownTarget = make('U', 10, 100, { 1: null, 2: 1 })
   const unknownSource = make('V', 10, 100, { 1: 2, 2: null })
-  const toUnknown = refitCost(A, unknownTarget, components, '2.7.1')
-  const fromUnknown = refitCost(unknownSource, B, components, '2.7.1')
+  const toUnknown = refitCost(A, unknownTarget, components, '3.2.0')
+  const fromUnknown = refitCost(unknownSource, B, components, '3.2.0')
   check('worked: a component whose count on the target class is not known leaves the refit total and minerals unavailable, naming the count', !isAvailable(toUnknown.total) && !isAvailable(toUnknown.minerals) && toUnknown.total.inputs.missing.some((name) => name.includes('count of part 1') && name.includes('target')) && toUnknown.minerals.inputs.missing.some((name) => name.includes('count of part 1')))
   check('worked: a component whose count on the source class is not known does the same, naming the source', !isAvailable(fromUnknown.total) && !isAvailable(fromUnknown.minerals) && fromUnknown.total.inputs.missing.some((name) => name.includes('count of part 2') && name.includes('source')))
   check('worked: that change row has no added or removed figure, and the unknown count is not 0', classChanges(A, unknownTarget, components).find((change) => change.id === 1).added === null && classChanges(A, unknownTarget, components).find((change) => change.id === 1).unknown.length === 1 && classChanges(A, unknownTarget, components).find((change) => change.id === 1).removed === null)
@@ -313,18 +313,6 @@ const raceOperations = async (database, race) => {
   }
 }
 
-const resolveIds = async (database, save) => {
-  if (save.game !== null) {
-    return save
-  }
-
-  const [rows] = await database.query('select FCT_ShipyardTask.GameID, FCT_ShipyardTask.RaceID, count(*) as Tasks from FCT_ShipyardTask where FCT_ShipyardTask.TaskTypeID in (2, 4) group by FCT_ShipyardTask.GameID, FCT_ShipyardTask.RaceID order by Tasks desc')
-  const [retools] = await database.query('select FCT_Shipyard.GameID, FCT_Shipyard.RaceID, count(*) as Tasks from FCT_Shipyard where FCT_Shipyard.TaskType = 7 group by FCT_Shipyard.GameID, FCT_Shipyard.RaceID order by Tasks desc')
-  const [first] = [...rows, ...retools]
-
-  return first ? { ...save, game: first.GameID, race: first.RaceID } : null
-}
-
 const runSave = async (utilities, save, label) => {
   const { refits, provenance, capabilities } = utilities
   const database = await openSave(save.file)
@@ -335,23 +323,16 @@ const runSave = async (utilities, save, label) => {
   }
 
   try {
-    const ids = await resolveIds(database, save)
-
-    if (!ids) {
-      console.log(`INFO  ${label}: no game and race with a refit task or retool activity could be read (nothing to compare)`)
-      return
-    }
-
-    const scope = { GameID: ids.game, RaceID: ids.race }
+    const scope = { GameID: save.game, RaceID: save.race }
     const version = await capabilities.loadFormulaVersion(database).catch(() => null)
-    const operations = await raceOperations(database, ids.race)
+    const operations = await raceOperations(database, save.race)
     const { classes, components } = await refits.loadRefitClasses(database, scope)
     const classesById = Object.fromEntries(classes.map((shipClass) => [shipClass.id, shipClass]))
     const tasks = await refits.loadRefitTasks(database, scope).catch((error) => { check(`${label}: refit tasks load`, false, error.message); return [] })
     const retools = await refits.loadRetoolTasks(database, scope).catch((error) => { check(`${label}: retool activities load`, false, error.message); return [] })
     const yards = await refits.loadYards(database, scope).catch((error) => { check(`${label}: yards load`, false, error.message); return [] })
 
-    console.log(`INFO  ${label}: ${database.file} game ${ids.game} race ${ids.race}, version ${version || 'not shown'}, shipyard operations ${operations}, ${classes.length} classes, ${yards.length} yards, ${tasks.length} refit tasks, ${retools.length} retool activities`)
+    console.log(`INFO  ${label}: ${database.file} game ${save.game} race ${save.race}, version ${version || 'not shown'}, shipyard operations ${operations}, ${classes.length} classes, ${yards.length} yards, ${tasks.length} refit tasks, ${retools.length} retool activities`)
 
     if (!tasks.length && !retools.length) {
       console.log(`INFO  ${label}: the save holds no refit task and no retool activity: nothing to compare with the rules`)

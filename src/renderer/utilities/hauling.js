@@ -3,7 +3,7 @@
 import { bonusProvenance, mergeFactors } from './handling-bonuses'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { RETRY_ASSUMPTION, SQUADRON_ASSUMPTION, flyEvent, handleEvent, heldSpeedIn, nebulaGapOf, speedIn, timingGaps, transitModeOf, unsupportedGaps, waitResult, walkEvents } from './route-time'
-import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, landingThreshold, missingInputsOf, stopHandling } from './transport'
+import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, loadingRulesHold, missingInputsOf, stopHandling } from './transport'
 import { ITEM_LOADS, ITEM_UNLOADS } from './cargo-actions'
 
 // Orders that move up to MaxItems tonnes of one mineral (Load Mineral Type, Unload Mineral Type, Load Mineral when X available); "Load All Minerals" (62) and "...Until Full" (223) take whatever the colony has, up to a full hold.
@@ -328,7 +328,7 @@ export const cycleHandling = (orders, cargo, fleet, ships, { version = null, sup
     estimate: merged.some((factor) => factor.state === 'unknown'),
     known: merged.filter((factor) => factor.state === 'applies'),
     unsettled: merged.filter((factor) => factor.state === 'unknown'),
-    versionSupported: landingThreshold(version) !== null,
+    versionSupported: loadingRulesHold(version),
   }
 }
 

@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-routes-gates.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791, a recorded save of an earlier release that scripts/lib/fixtures.js `convertedSave` gives the star's component number under its present name). The check copies it into a folder of its own and adds one life pod of the race and two of another race, one of a class the race holds an alias for and one of a class it holds none for (the save holds no pod). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy. A pod of another race must show the race's alias for its class and its id and never its ship name or crew, which the game shows only the owner of the pod (check `pods`).
+  The saved game is the fixture (scripts/lib/fixtures.js, game 141, race 784). The check copies it into a folder of its own and plants what the save lacks: one waypoint of the race and one marked for deletion, one aether gate in a system the race knows and one in a system it does not, one life pod of the race and two of another race, one of a class the race holds an alias for and one of a class it holds none for. The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy. A pod of another race must show the race's alias for its class and its id and never its ship name or crew, which the game shows only the owner of the pod (check `pods`).
 
   Every planted fault must fail the checks it names by a wrong value or by the read error the page reports (`loadErrors.smallPlaces`), never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -17,19 +17,22 @@ const { runSuite } = require('./lib/suite-runner')
 const { HarnessError } = require('./lib/browser-observe')
 const { assert, boundary, harnessOwn, subjectModule, isSubjectThrow, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
 const { loadModule, loadPage, instantiate } = require('./lib/page-loader')
-const { convertedSave } = require('./lib/fixtures')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
-const GAME = 141
-const RACE = 791
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const ADDED_LIFEPOD = 900000001
-// The life pods added besides the race's own, each of another race with a ship name and a crew the race must not see: one whose class the race holds an alias for (an `FCT_AlienClass` row of the race, class 62894 'Apollo') and one whose class it holds none for.
+// The life pods added besides the race's own, each of another race with a ship name and a crew the race must not see: one whose class the race holds an alias for (an `FCT_AlienClass` row of the race, class 62898 'Hillman') and one whose class it holds none for.
 const FOREIGN_RACE = 785
-const ALIASED_POD = { id: 900000002, name: 'Hidden Zulu Pod', crew: 7771, classId: 62894 }
+const ALIASED_POD = { id: 900000002, name: 'Hidden Zulu Pod', crew: 7771, classId: 62898 }
 const UNALIASED_POD = { id: 900000003, name: 'Hidden Alpha Pod', crew: 4242, classId: 1 }
-// The anchors to a Lagrange point (`OrbitLagrangeID`) the 3.2 line gives a waypoint, a wreck and a life pod, which a recorded 2.x save lacks and the copy carries with their default of none.
-const ANCHORS = [['FCT_Waypoint', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0']]
+// The waypoints and gates the copy gains: the save holds none. The waypoint marked for deletion (4) is gone at the next increment and is not offered; the gate of a system the race does not know is not offered either.
+const ADDED_WAYPOINT = 900000004
+const DELETED_WAYPOINT = 900000005
+const KNOWN_GATE = 900000006
+const UNKNOWN_GATE = 900000007
 const DETAIL = process.argv.includes('--detail')
 const RENDERER = path.join(root, 'src', 'renderer')
 const FILES = {
@@ -57,7 +60,7 @@ const copies = () => {
 
   const intactFile = path.join(FOLDER, 'intact.db')
 
-  fs.copyFileSync(convertedSave(SAVE, { columns: ANCHORS }), intactFile)
+  fs.copyFileSync(path.join(root, SAVE), intactFile)
 
   const edit = new Database(intactFile)
   const [system] = edit.query(`select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 1`).all()
@@ -67,6 +70,17 @@ const copies = () => {
   }
 
   edit.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, ShipName, Crew, Xcor, Ycor) values (${ADDED_LIFEPOD}, ${GAME}, ${RACE}, ${system.SystemID}, 'Added pod', 3, 1500, 2500)`)
+
+  const [stranger] = edit.query(`select SystemID from FCT_System where GameID = ${GAME} and SystemID not in (select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE}) order by SystemID limit 1`).all()
+
+  if (!stranger) {
+    throw new HarnessError('the save holds no system the race does not know to put a gate in')
+  }
+
+  edit.run(`insert into FCT_Waypoint (WaypointID, GameID, RaceID, SystemID, Xcor, Ycor, Number, WaypointType, Name) values (${ADDED_WAYPOINT}, ${GAME}, ${RACE}, ${system.SystemID}, 1700, 2700, 41, 1, 'Added waypoint')`)
+  edit.run(`insert into FCT_Waypoint (WaypointID, GameID, RaceID, SystemID, Xcor, Ycor, Number, WaypointType, Name) values (${DELETED_WAYPOINT}, ${GAME}, ${RACE}, ${system.SystemID}, 1800, 2800, 42, 4, 'Deleted waypoint')`)
+  edit.run(`insert into FCT_AetherGates (AetherGateID, GameID, SystemID, Xcor, Ycor, CreationTime, CooldownTime) values (${KNOWN_GATE}, ${GAME}, ${system.SystemID}, 1900, 2900, 0, 0)`)
+  edit.run(`insert into FCT_AetherGates (AetherGateID, GameID, SystemID, Xcor, Ycor, CreationTime, CooldownTime) values (${UNKNOWN_GATE}, ${GAME}, ${stranger.SystemID}, 2000, 3000, 0, 0)`)
 
   ;[ALIASED_POD, UNALIASED_POD].forEach((pod) => edit.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, ClassID, ShipName, Crew, Xcor, Ycor) values (${pod.id}, ${GAME}, ${FOREIGN_RACE}, ${system.SystemID}, ${pod.classId}, '${pod.name}', ${pod.crew}, 1600, 2600)`))
 

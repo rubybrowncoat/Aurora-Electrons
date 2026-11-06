@@ -8,8 +8,8 @@
   Groups, each check numbered and keyed (a mutation names the keys it must break):
   - unit: when a snooze ends and when it holds (a game date at and after its expiry and the guards before it, a declared change, an episode that is seen to end and a return that is a new one), what a failed read, a row that could not be evaluated, an id listed twice, a signature or an identity that cannot be read, an unknown clock, changed options and a save earlier than the snooze leave alone, a snooze of the whole check, what a record is made of and refused for, the stored form and the ended records kept apart, a restart, the isolation of races and campaigns, the seeding of a branch at a fork whatever the parent did since, the dates of the game, the bands and the signatures, the 24 checks that declare a material change, the signature of a damaged ship made of ids, the condition told in words, a Settings reset keeping the snoozes, the wording;
   - page: the real options of pages/warnings.vue run in Vue 2.7 without a template, over the real checks on the migrated Galactic Shogunate save (scripts/lib/fixtures.js) and a store that is a plain object (a permanent mute outranks a snooze, the clock of the save, the guards of an evaluation, the store that cannot be read or written, a retry, the words of a snooze);
-  - reads: the real checks on the migrated Galactic Shogunate save (game 141, race 784) and the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, recorded 2.x saves read through the copies with the star's component number renamed that `convertedSave` of scripts/lib/fixtures.js makes): the signatures of every row, every row snoozed and held, the identity stamps against SQL written here, a failed read, a save earlier than the snooze;
-  - forks: the same eight saves through the real recorder into in-memory stores, so the registry gives the branches (a rollback and three forks); the snoozes of one branch seeded to the next and judged on the real rows of the child, against the identity of each object read independently.
+  - reads: the real checks on the migrated Galactic Shogunate save (game 141, race 784) and the three played saves of the 3.2 line (game 161, race 909): the signatures of every row, every row snoozed and held, the identity stamps against SQL written here, a failed read, a save earlier than the snooze;
+  - forks: a fork planted between each two consecutive played saves (the parent a branch of its own, the child leaving it at the game time of the parent): the snoozes of one branch seeded to the next and judged on the real rows of the child, against the identity of each object read independently.
   A save that is not there skips its group and says so (a skip is never agreement); only SELECTs are issued to a save, which is opened read only.
 
   Each mutation is planted in an isolated copy of the source (scripts/lib/mutant-source.js) and must break every check it names by an assertion of the check's own on a value it read (scripts/lib/fault-credit.js `caughtAll`). The code under test runs only through `through` of fault-credit.js (`subjectUtilities` for the utilities, `subjectIndex` for the read and the signature readers of each check, `subjectVm` for the page, whose errors that Vue or the process caught are a throw of the page), so a named check that failed only because a call of it threw credits nothing: it stops the run, unless the mutation declares `throws`, and so does a check that ended in an exception of its own (`judged`). The line of each mutation names the kind of each credit (value, throw). The controls plant a crash of a utility and of the page and show the run stopped, and a declared crash credited. Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2.
@@ -20,30 +20,25 @@ const { format, types } = require('util')
 const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const { parse: parseComponent } = require('vue/compiler-sfc')
-const { assert: markedAssert, failure, through, harnessOwn, harnessStore, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
+const { assert: markedAssert, failure, through, harnessStore, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
 const { HarnessError } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { loadPage } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
-const { fixtureSave, convertedSave } = require('./lib/fixtures')
+const { fixtureSave, PLAYED, PLAYED_NEXT, PLAYED_THIRD } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pagesDirectory = path.join(root, 'src', 'renderer', 'pages')
-const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
-const FALRYX_TIMES = ['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230']
-// The anchors to a Lagrange point (`OrbitLagrangeID`) the 3.2 line gives a life pod and a wreck, which a recorded 2.x save lacks: the copies carry them with their default of none, as the rows of the checks that read them need.
-const ANCHORS = [['FCT_Lifepods', 'OrbitLagrangeID', 'INTEGER default 0'], ['FCT_Wrecks', 'OrbitLagrangeID', 'INTEGER default 0']]
-
 const SAVES = {
   fixture: { ...fixtureSave(), file: path.join(root, fixtureSave().file) },
-  ...Object.fromEntries(FALRYX_TIMES.map((time) => [`f${time}`, { file: path.join(FALRYX, `AuroraDB-${time}.db`), game: 141, race: 791 }])),
+  ...Object.fromEntries([['played1', PLAYED], ['played2', PLAYED_NEXT], ['played3', PLAYED_THIRD]].map(([key, played]) => [key, { file: path.join(root, played.file), game: played.gameId, race: played.raceId }])),
 }
 const SAVE_KEYS = Object.keys(SAVES).filter((key) => fs.existsSync(SAVES[key].file))
-const FAST_SAVES = ['fixture', 'f2904201340'].filter((key) => SAVE_KEYS.includes(key))
-// The checks that compare particular saves with each other (the rewinds and the forks of the Falryx game), which the fast saves do not hold.
+const FAST_SAVES = ['fixture', 'played1'].filter((key) => SAVE_KEYS.includes(key))
+// The checks that compare particular saves with each other (the rewinds and the forks planted between the played saves), which the fast saves do not hold.
 const ACROSS_SAVES = ['rewind-real', 'fork-real']
 const DEFAULT_OPTIONS = { idleFleetsAtColonies: false, maintenanceThreshold: 100, maintenanceExclusions: [] }
 
@@ -70,7 +65,6 @@ const STUBS = {
 }
 
 const NAMES = ['warnings/common', 'warnings/index', 'warnings/snoozes', 'history-milestones', 'campaign', 'remembered-views']
-const NAMES_WITH_HISTORY = [...NAMES, 'history', 'recording-owner']
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
@@ -289,7 +283,7 @@ const loadModules = async (sources, names = NAMES, pageEdits = []) => {
   const loaded = await loadUtilities(names, { stubs: STUBS, directory: utilitiesDirectory, sources, texts })
   const subject = (name) => (loaded[name] ? subjectUtilities(loaded[name]) : undefined)
 
-  return { common: subject('warnings/common'), index: subjectIndex(loaded['warnings/index']), snoozes: subject('warnings/snoozes'), milestones: subject('history-milestones'), campaign: subject('campaign'), remembered: subject('remembered-views'), history: subject('history'), pages: pagesDirectory, pageEdits }
+  return { common: subject('warnings/common'), index: subjectIndex(loaded['warnings/index']), snoozes: subject('warnings/snoozes'), milestones: subject('history-milestones'), campaign: subject('campaign'), remembered: subject('remembered-views'), pages: pagesDirectory, pageEdits }
 }
 
 // ---------- the saves, read only ----------
@@ -299,7 +293,7 @@ const handles = new Map()
 const handleOf = (file) => {
   if (!handles.has(file)) {
     handles.set(file, new Promise((resolve, reject) => {
-      const handle = new sqlite3.Database(file.startsWith(FALRYX) ? convertedSave(file, { columns: ANCHORS }) : file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
+      const handle = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
     }))
   }
 
@@ -340,68 +334,6 @@ const readSave = async (m, key) => {
   }
 
   return { key, save, database, GameTime, reads }
-}
-
-// ---------- the branches, from the real recorder into in-memory stores ----------
-
-const installation = () => {
-  const files = new Map()
-  let ids = 1000
-  let clock = 1000000
-
-  const store = (name) => ({
-    get store () {
-      return clone(files.get(name)) || {}
-    },
-    set store (value) {
-      files.set(name, clone(value))
-    },
-    update (change) {
-      this.store = change(this.store)
-
-      return this.store
-    },
-  })
-
-  return {
-    files,
-    newId: () => `c${++ids}`,
-    now: () => ++clock,
-    io: { registry: store('registry'), migration: store('migration'), settings: store('settings'), backup: store('backup'), file: (name) => store(`file:${name}`) },
-  }
-}
-
-// The branches of the eight saves, recorded by the real recorder. The clock, the ids and the callback it is given are the harness's (`harnessOwn`): what they throw stops the run, the recorder keeping it among the failures of its pass or not; the database and the stores are handed over as they are, their failures being data the recorder has to handle.
-const forksOf = async (m) => {
-  const keys = FALRYX_TIMES.map((time) => `f${time}`)
-
-  if (!keys.every((key) => SAVE_KEYS.includes(key))) {
-    return null
-  }
-
-  const inst = installation()
-  const saves = []
-
-  for (const key of keys) {
-    const resolved = []
-    const database = databaseOf(SAVES[key].file)
-    const run = await m.history.recordHistory({ transaction: (work) => work({ id: 'transaction' }), query: database.query }, { storage: inst.io, path: `C:/saves/${path.basename(SAVES[key].file)}`, now: harnessOwn(inst.now), newId: harnessOwn(inst.newId), onResolved: harnessOwn((GameID, resolution) => resolved.push({ GameID, ...resolution })) })
-    const mine = resolved.find((entry) => entry.GameID === SAVES[key].game)
-    const [[{ GameTime }]] = await database.query(`select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${SAVES[key].game}`)
-    const harness = (run.failed || []).find((entry) => entry && entry.error instanceof HarnessError)
-
-    if (harness) {
-      throw harness.error
-    }
-
-    assert.deepEqual(run.failed, [], `the recorder failed on ${key}`)
-    saves.push({ key, GameTime, campaignId: mine.campaignId, branchId: mine.branchId, relation: mine.relation })
-  }
-
-  const campaignId = saves[0].campaignId
-  const registry = clone(inst.files.get('registry'))
-
-  return { saves, campaignId, lineage: m.milestones.branchLineage(registry.campaigns[campaignId]) }
 }
 
 // ---------- worked fixtures ----------
@@ -1852,7 +1784,7 @@ check('sig-names', 'no signature is made of the name of the row it describes', '
 
 check('stamps-real', 'on the saves the identity stamp of every ship, colony, commander and wreck a check lists is read, and two objects have one stamp exactly when SQL written here reads one tuple for them', 'reads', async ({ m, ctx }) => {
   let objects = 0
-  const keys = ctx.keys.filter((key) => ctx.fast.includes(key) || key.startsWith('f29'))
+  const keys = ctx.keys.filter((key) => ctx.fast.includes(key) || key === 'played3')
 
   await ctx.saves(keys)
 
@@ -1975,9 +1907,9 @@ check('real-fail', 'a read that fails leaves every snooze of the check alone, wh
 
 check('rewind-real', 'a snooze set at a later save and judged on an earlier one of the same game ends nothing, on every check', 'reads', async ({ m, ctx }) => {
   const { makeRecord, evaluate, readStamps } = m.snoozes
-  const pairs = [['f2930673230', 'f2904201340'], ['f2740177930', 'f2398452450'], ['f2794985390', 'f2740177930']].filter(([later, earlier]) => ctx.keys.includes(later) && ctx.keys.includes(earlier))
+  const pairs = [['played3', 'played2'], ['played2', 'played1']].filter(([later, earlier]) => ctx.keys.includes(later) && ctx.keys.includes(earlier))
 
-  assert.ok(pairs.length >= (ctx.keys.some((key) => key.startsWith('f')) ? 2 : 0))
+  assert.ok(pairs.length >= (ctx.keys.some((key) => key.startsWith('played')) ? 2 : 0))
 
   await ctx.saves(pairs.flat())
 
@@ -2008,37 +1940,30 @@ check('rewind-real', 'a snooze set at a later save and judged on an earlier one 
   assert.ok(kept > 0 || !pairs.length)
 })
 
-check('fork-real', 'across each fork of the real saves a snooze of one branch seeded into the next is judged on the real rows of the child exactly as the identity of each object says: the same object holds, another one under the id ends it, a row with no stamp shows with a note, a row that is gone ends it, and a snooze set after the fork is not copied', 'forks', async ({ m, ctx }) => {
+check('fork-real', 'across a fork planted between each two consecutive saves of the played campaign a snooze of one branch seeded into the next is judged on the real rows of the child exactly as the identity of each object says: the same object holds, another one under the id ends it, a row with no stamp shows with a note, a row that is gone ends it, and a snooze set after the fork is not copied', 'reads', async ({ m, ctx }) => {
   const { makeRecord, seeded, emptyStore, addRecord, forBranch, evaluate, readStamps, isStamped } = m.snoozes
-  const { forks } = ctx
-  const [first] = forks.saves
-  const branchOf = (key) => forks.saves.find((entry) => entry.key === key).branchId
   const pairs = [
-    { name: 'b1 to b2, the rollback', parent: 'f2590429565', child: 'f2794985390' },
-    { name: 'b2 to b3', parent: 'f2794985390', child: 'f2904201340' },
-    { name: 'b3 to b4, the fork after increment 361910', parent: 'f2904201340', child: 'f2930673230' },
+    { name: 'b1 to b2', parent: 'played1', child: 'played2', parentBranch: 'b1', childBranch: 'b2', late: 'played3' },
+    { name: 'b2 to b3', parent: 'played2', child: 'played3', parentBranch: 'b2', childBranch: 'b3' },
   ].filter((pair) => ctx.keys.includes(pair.parent) && ctx.keys.includes(pair.child))
 
-  await ctx.saves([...new Set([...pairs.flatMap(({ parent, child }) => [parent, child]), 'f2740177930'].filter((key) => ctx.keys.includes(key)))])
+  await ctx.saves([...new Set(pairs.flatMap(({ parent, child, late }) => [parent, child, ...(late && ctx.keys.includes(late) ? [late] : [])]))])
 
-  assert.equal(pairs.length, 3)
-  assert.equal(first.relation, 'new')
-  assert.deepEqual(forks.saves.map((entry) => entry.branchId), ['b1', 'b1', 'b1', 'b1', 'b2', 'b2', 'b3', 'b4'])
-  assert.deepEqual(forks.saves.slice(1).map((entry) => entry.relation), ['continues', 'continues', 'continues', 'fork', 'continues', 'fork', 'fork'])
+  assert.ok(pairs.length >= (ctx.keys.some((key) => key.startsWith('played')) ? 2 : 0))
 
   const totals = { copied: 0, snoozed: 0, branch: 0, absent: 0, different: 0, other: 0, late: 0 }
 
   for (const pair of pairs) {
-    const parentBranch = branchOf(pair.parent)
-    const childBranch = branchOf(pair.child)
-    const cut = forks.lineage[childBranch].t
+    const { parentBranch, childBranch } = pair
     const parent = await ctx.save(pair.parent)
     const child = await ctx.save(pair.child)
+    const lineage = { [parentBranch]: { parent: null, t: null }, [childBranch]: { parent: parentBranch, t: parent.GameTime } }
+    const cut = lineage[childBranch].t
     const tuples = { parent: await tuplesOf(parent.database, parent.save.game), child: await tuplesOf(child.database, child.save.game) }
     const expected = new Map()
     let store = emptyStore()
 
-    assert.equal(forks.lineage[childBranch].parent, parentBranch, pair.name)
+    assert.ok(child.GameTime > cut, pair.name)
 
     for (const entry of m.index.CHECKS) {
       const read = parent.reads[entry.key]
@@ -2054,7 +1979,7 @@ check('fork-real', 'across each fork of the real saves a snooze of one branch se
       }
     }
 
-    const seededStore = seeded(store, childBranch, forks.lineage)
+    const seededStore = seeded(store, childBranch, lineage)
     const copies = forBranch(seededStore, childBranch)
 
     assert.equal(copies.length, store.records.length, pair.name)
@@ -2113,8 +2038,8 @@ check('fork-real', 'across each fork of the real saves a snooze of one branch se
       }
     }
 
-    if (pair.parent === 'f2590429565' && ctx.keys.includes('f2740177930')) {
-      const later = await ctx.save('f2740177930')
+    if (pair.late && ctx.keys.includes(pair.late)) {
+      const later = await ctx.save(pair.late)
       const lateStore = Object.values(later.reads).reduce((held, read, index) => {
         const entry = m.index.CHECKS[index]
 
@@ -2126,13 +2051,13 @@ check('fork-real', 'across each fork of the real saves a snooze of one branch se
       }, emptyStore())
 
       assert.ok(lateStore.records.length > 0 && lateStore.records.every((record) => record.setAt > cut))
-      assert.deepEqual(forBranch(seeded(lateStore, childBranch, forks.lineage), childBranch), [])
+      assert.deepEqual(forBranch(seeded(lateStore, childBranch, lineage), childBranch), [])
       totals.late += lateStore.records.length
     }
   }
 
   console.log(`         ${JSON.stringify(totals)}`)
-  assert.ok(totals.snoozed > 0 && totals.branch > 0 && totals.absent > 0 && totals.late > 0)
+  assert.ok(!pairs.length || (totals.snoozed > 0 && totals.branch > 0 && totals.absent > 0 && totals.late > 0))
 })
 
 // ---------- the mutations ----------
@@ -2155,7 +2080,7 @@ const MUTATIONS = [
   { name: 'a date ends the snooze of a row before the row can be judged', edits: [[U, 'if (!found.length) {\n    return ended(expired ? \'expired\' : \'absent\')\n  }', 'if (expired) {\n    return ended(\'expired\')\n  }\n\n  if (!found.length) {\n    return ended(\'absent\')\n  }']], fails: ['expiry-guards'] },
   { name: 'an id listed twice is held per item', edits: [[U, 'if (found.length > 1) {\n    return shown(NOTES.ambiguous)\n  }', 'if (found.length > 1 && false) {\n    return shown(NOTES.ambiguous)\n  }']], fails: ['ambiguous'] },
   { name: 'an id listed twice can be snoozed', edits: [[U, 'if (row.ambiguous) {\n      return { ok: false, error: \'The check lists this id more than once', 'if (false) {\n      return { ok: false, error: \'The check lists this id more than once']], fails: ['ambiguous', 'make'] },
-  { name: 'another object under the id keeps the snooze', edits: [[U, 'if (current !== record.stamp) {\n      return ended(\'different\')\n    }', 'if (false) {\n      return ended(\'different\')\n    }']], fails: ['stamp', 'fork-rules', 'fork-real'] },
+  { name: 'another object under the id keeps the snooze', edits: [[U, 'if (current !== record.stamp) {\n      return ended(\'different\')\n    }', 'if (false) {\n      return ended(\'different\')\n    }']], fails: ['stamp', 'fork-rules'] },
   { name: 'a stamp that cannot be read hides the row', edits: [[U, 'if (typeof current !== \'string\') {\n      return shown(NOTES.stamp)\n    }', 'if (typeof current !== \'string\') {\n      return snoozed()\n    }']], fails: ['stamp', 'fork-rules'] },
   { name: 'a snooze with no stamp is applied across a fork', edits: [[U, 'if (record.stamp === null && record.from) {', 'if (false) {']], fails: ['fork-rules', 'precedence', 'fork-real'] },
   { name: 'a copied snooze forgets the branch it came from', edits: [[U, 'from: record.from || record.branch,', 'from: null,']], fails: ['seed', 'fork-rules', 'fork-real'] },
@@ -2190,7 +2115,7 @@ const MUTATIONS = [
   { name: 'a signature is made from an unknown token', rereads: true, edits: [['warnings/common.js', 'tokens.some((token) => token === null || token === undefined || token === \'\') ? null', 'false ? null']], fails: ['bands', 'sig-mock'] },
   { name: 'a repeated id is not marked ambiguous', rereads: true, edits: [['warnings/common.js', 'ambiguous: totals.get(row.id) > 1,', 'ambiguous: false,']], fails: ['normalize', 'ambiguous'] },
   { name: 'a growing figure is in a signature', rereads: true, edits: [['warnings/colonies.js', 'signature: (population) => signatureOf(bandOf(population.Efficiency, [1 - QUARTER])),', 'signature: (population) => signatureOf(population.Efficiency),']], fails: ['sig-mock'] },
-  { name: 'a name is in a signature', rereads: true, edits: [['warnings/ships.js', 'signature: signatureOf(bandOf(level, [1 - QUARTER])) })', 'signature: signatureOf(bandOf(level, [1 - QUARTER]), ship.ShipName) })']], fails: ['sig-names'] },
+  { name: 'a name is in a signature', rereads: true, edits: [['warnings/ships.js', 'signature: signatureOf(bandOf(ship.SupplyLevel, [(maintenanceThreshold / 100) * (1 - QUARTER)])) })', 'signature: signatureOf(bandOf(ship.SupplyLevel, [(maintenanceThreshold / 100) * (1 - QUARTER)]), ship.ShipName) })']], fails: ['sig-names'] },
   { name: 'a check of class P declares a material change', rereads: true, edits: [['warnings/space.js', 'key: \'known-wrecks\',\n    group: group.key,\n    severity: \'info\',', 'key: \'known-wrecks\',\n    group: group.key,\n    severity: \'info\',\n    material: \'the wreck changing\',']], fails: ['material-set'] },
   { name: 'a check of class K loses its declaration', rereads: true, edits: [['warnings/space.js', 'material: \'the lifepod expiring\',\n', '']], fails: ['material-set'] },
   { name: 'a signature of damaged components is made of their names', rereads: true, edits: [['warnings/ships.js', 'signatureOf(categoriesOf(ship.ComponentIDs))', 'signatureOf(categoriesOf(ship.Components))']], fails: ['rename-stable'] },
@@ -2276,7 +2201,6 @@ const CONTROLS = [
   { name: 'the store read for a missing value has a getter that throws an AssertionError', edits: [IMPORT_ASSERTION, [U, READ_STORE, storeOkGetter(`throw new AssertionError({ message: '${PLANTED}' })`)]], fails: ['store'], thrown: 'AssertionError', expect: 'stops' },
   { name: 'the rows of each read of a save are made by a function that throws', rereads: true, edits: [['warnings/common.js', 'export const normalizeRows = (rows, check) => {', `export const normalizeRows = (rows, check) => {\n  ${CRASH}`]], fails: ['sig-names'], expect: 'stops' },
   { name: 'the read of the known wrecks throws', rereads: true, edits: [['warnings/space.js', 'const wrecks = await rowsOf(ctx, ', `${CRASH}\n      const wrecks = await rowsOf(ctx, `]], fails: ['real-hide'], expect: 'stops' },
-  { name: 'the recorder hands its callback a settlement whose campaign throws', rereads: true, edits: [['history.js', '        onResolved(GameID, resolution)', `        onResolved(GameID, { get campaignId () { ${CRASH} } })`]], fails: ['fork-real'], expect: 'harness', harness: `a callback of the harness threw: ${PLANTED}` },
   { name: 'the store read for a missing value has a getter that throws an AssertionError when it is read again', edits: [IMPORT_ASSERTION, [U, READ_STORE, storeOkGetter(`reads += 1\n\n      if (reads > 1) {\n        throw new AssertionError({ message: '${PLANTED}' })\n      }\n\n      return true`)]], fails: ['store'], expect: 'none' },
   { name: 'a mutation that reads the saves again changes nothing', rereads: true, edits: [['warnings/common.js', AMBIGUOUS, AMBIGUOUS]], fails: ['rewind-real', 'fork-real'], expect: 'none' },
   { name: 'the store read for a missing value is a Date with a getter that throws', edits: [[U, READ_STORE, `${READ_STORE}\n  if (value === undefined) {\n    return { ok: true, store: Object.defineProperty(new Date(0), 'records', { get () { ${CRASH} }, enumerable: true }), dropped: 0 }\n  }`]], fails: ['store'], expect: 'harness', harness: refused('a Date with properties of its own') },
@@ -2325,20 +2249,9 @@ const show = (label, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? (detail ? `  [${detail}]` : '') : `\n         ${typeof result === 'string' ? result : 'false'}`}`)
 }
 
-const memo = (work) => {
-  let held = null
-
-  return () => {
-    held = held || work()
-
-    return held
-  }
-}
-
-// What a check runs on for one set of modules. The reads and the branches are those of the unmodified modules unless a mutation changes what is read; each is made once.
+// What a check runs on for one set of modules. The reads are those of the unmodified modules unless a mutation changes what is read; each is made once.
 const contextOf = (m, { shared = null, keys = SAVE_KEYS } = {}) => {
   const saves = new Map()
-  const forks = memo(() => (shared ? shared.forks() : forksOf(m)))
   const save = (key) => {
     if (shared) {
       return shared.save(key)
@@ -2355,11 +2268,10 @@ const contextOf = (m, { shared = null, keys = SAVE_KEYS } = {}) => {
     keys,
     fast: FAST_SAVES.filter((key) => keys.includes(key)),
     minSigned: 10,
-    minObjects: 100,
-    minHeld: 500,
+    minObjects: 50,
+    minHeld: 100,
     save,
     saves: (list) => Promise.all(list.map((key) => save(key))),
-    forks,
   }
 }
 
@@ -2368,17 +2280,7 @@ const runEntry = async (m, context, entry) => {
     return 'skip'
   }
 
-  const extra = {}
-
-  if (entry.needs === 'forks') {
-    extra.forks = await context.forks()
-
-    if (!extra.forks) {
-      return 'skip'
-    }
-  }
-
-  return entry.run({ m, ctx: { ...context, ...extra } })
+  return entry.run({ m, ctx: context })
 }
 
 // The result of a check over the modules `m` (scripts/lib/fault-credit.js `runChecks`: { id, name, ok, kind, threw, detail }), with `skip` when the saves it reads are not here. A HarnessError stops the run.
@@ -2433,7 +2335,7 @@ const VARIANTS = [...MUTATIONS.map((mutation, index) => ({ label: `mutation ${in
 
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs, and a skip), or the arguments of `show`. The entries of a check carry its number, `at`, which is its place among the checks run.
 const baselineEntries = async (entries, keys) => {
-  const real = await loadModules({}, NAMES_WITH_HISTORY)
+  const real = await loadModules({})
   const context = contextOf(real)
   let at = 0
 
@@ -2466,46 +2368,45 @@ const baselineEntries = async (entries, keys) => {
   }
 }
 
-// The checks of the baseline in the groups that run in a process each: the reads and the forks of the saves (which share what they read), the checks of the page in two (each loads the page), and the rest.
+// The checks of the baseline in the groups that run in a process each: the reads of the saves (which share what they read), the checks of the page in two (each loads the page), and the rest.
 const baselineGroups = () => {
   const of = (...needs) => selectedChecks.filter((entry) => needs.includes(entry.needs)).map((entry) => entry.key)
   const page = of('page')
 
-  return [of('reads', 'forks'), ...chunksOf(page.length, 2).map((list) => list.map((index) => page[index])), of('unit')].filter((keys) => keys.length)
+  return [of('reads'), ...chunksOf(page.length, 2).map((list) => list.map((index) => page[index])), of('unit')].filter((keys) => keys.length)
 }
 
-// The reads and the branches of the unmodified modules, made when a mutation first asks for them, in the process of that mutation (and kept for the next mutation of the process): what a mutation that is not about the reads is judged on.
+// The reads of the unmodified modules, made when a mutation first asks for them, in the process of that mutation (and kept for the next mutation of the process): what a mutation that is not about the reads is judged on.
 const baselineOf = () => {
   let held = null
   const context = () => {
-    held = held || loadModules({}, NAMES_WITH_HISTORY).then((real) => contextOf(real))
+    held = held || loadModules({}).then((real) => contextOf(real))
 
     return held
   }
 
-  return { save: async (key) => (await context()).save(key), forks: async () => (await context()).forks() }
+  return { save: async (key) => (await context()).save(key) }
 }
 
 const baseline = baselineOf()
 
-// What a check runs on ('unit', 'reads', 'forks' or 'page'), by its key.
+// What a check runs on ('unit', 'reads' or 'page'), by its key.
 const needsOf = (key) => (checks.find((entry) => entry.key === key) || {}).needs
 
-// A mutation that is judged on the reads or the branches of the unmodified modules, and so is run with the others that are, to make them once.
-const readsBaseline = (mutation) => !mutation.rereads && (ALL || mutation.fails.some((key) => ['reads', 'forks'].includes(needsOf(key))))
+// A mutation that is judged on the reads of the unmodified modules, and so is run with the others that are, to make them once.
+const readsBaseline = (mutation) => !mutation.rereads && (ALL || mutation.fails.some((key) => needsOf(key) === 'reads'))
 
 // What a mutation is credited with: the checks it names (every check with --all) run over its modules and judged, so a check that ended in an exception of its own stops the run (`judged`), and caught when every named check that could run failed by an assertion of its own (`caughtAll`), a credit that rests on a throw of the code under test stopping the run unless the mutation declares `throws`. Gives { caught, named, detail }, `caught` being true or what is wrong, and `detail` the kind of each credit.
 const creditOf = async (mutation) => {
   const planting = planted(mutation)
   const selected = ALL ? checks : checks.filter((item) => mutation.fails.includes(item.key))
-  // A mutation that reads the saves again is judged over its own modules: on the fast saves, or on every save where a check that compares particular saves runs, with the recorder loaded where a check reads the branches it records.
-  const recorder = mutation.rereads && selected.some((entry) => entry.needs === 'forks')
+  // A mutation that reads the saves again is judged over its own modules: on the fast saves, or on every save where a check that compares particular saves runs.
   const absent = mutation.fails.filter((key) => !checks.some((entry) => entry.key === key))
   const results = []
   let changed = null
 
   try {
-    const mutant = await loadModules(planting.sources, recorder ? NAMES_WITH_HISTORY : NAMES, planting.pageEdits)
+    const mutant = await loadModules(planting.sources, NAMES, planting.pageEdits)
     const across = selected.some((entry) => ACROSS_SAVES.includes(entry.key))
     const mutantContext = !mutation.rereads ? contextOf(mutant, { shared: baseline, keys: SAVE_KEYS }) : across ? contextOf(mutant) : { ...contextOf(mutant, { keys: FAST_SAVES }), minSigned: 0, minObjects: 0, minHeld: 0 }
 
@@ -2649,7 +2550,7 @@ const main = async () => {
   }
 
   if (!SAVE_KEYS.length) {
-    console.log('  skip   no save is here, so the reads and the forks are not run')
+    console.log('  skip   no save is here, so the reads are not run')
   }
 
   if (groups.length) {

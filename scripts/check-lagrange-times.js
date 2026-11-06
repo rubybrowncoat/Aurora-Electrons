@@ -1,5 +1,5 @@
 /*
-  Checks the stabilisation time of the Lagrange page (src/renderer/utilities/lagrange.js `stabilisationMultiplier`, `bestStabilisation` and `stabilisationDays`, and the stabilisation activity of utilities/crew.js `crewEffects`) against the 3.1 rule: a ship with no crew aboard is skipped and contributes nothing, and the duration is capped at Int32.MaxValue seconds before the game converts it to an integer (`Fleet.CalculateGateBuildTime`, `Fleet.CalculateLagrangePointStabilisationTime`; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since 2.7.1, line 918).
+  Checks the stabilisation time of the Lagrange page (src/renderer/utilities/lagrange.js `stabilisationMultiplier`, `bestStabilisation` and `stabilisationDays`, and the stabilisation activity of utilities/crew.js `crewEffects`) against the 3.1 rule: a ship with no crew aboard is skipped and contributes nothing, and the duration is capped at Int32.MaxValue seconds before the game converts it to an integer (`Fleet.CalculateGateBuildTime`, `Fleet.CalculateLagrangePointStabilisationTime`; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
 
   Run: bun scripts/check-lagrange-times.js [--no-mutations]
 
@@ -8,9 +8,9 @@
   - a ship with no crew aboard is not a candidate, whatever its class needs, so a class that needs none but carries none is skipped too: a fleet times at its quickest ready ship whatever zero-crew ships sail with it, and a fleet of zero-crew and damaged ships has no time (no figure, never 0) and names no division by the crew;
   - a current crew that is not in the save is unknown, not crewless, whatever its class needs: a class that needs none with its crew missing gives no time and is disclosed in a mixed fleet as possibly quicker, while its activities that the class never scales keep the share of 1;
   - the duration is 60 / sqrt(mass) months of 30 days times that multiplier, and the game's 32-bit integer time caps it at 2,147,483,647 seconds (24855.13 days): a tiny body or a very short crew gives the cap and never a larger or non-finite figure;
-  - on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784: the values the 2.7 game stored under the 3.1 schema) every body of the page's list is timed from the save's stored mass, crew and captain's Production bonus read by SQL here, a crew of 0 planted in a copy of the save leaves no ship and no time, and a crew of 1 gives the cap on the light bodies and a figure below it on the heavy ones;
+  - on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784: the values the earlier game stored under the 3.1 schema) every body of the page's list is timed from the save's stored mass, crew and captain's Production bonus read by SQL here, a crew of 0 planted in a copy of the save leaves no ship and no time, and a crew of 1 gives the cap on the light bodies and a figure below it on the heavy ones;
   - the stabilisation activity of a zero-crew ship is blocked at factor 0, never an unsupported figure, a class that needs none whose current crew is missing is unknown there rather than blocked, and the two timing rules and `crew.stabilisation` stand for 3.2.x.
-  The fixture holds no zero-crew stabilisation ship of the race (specimen S18 is tier b of AE-310-03), so the zero-crew cases are written into copies of the save here, and the fixture's own stored values are the 2.7 game's. A save that is not there reads UNSUPPORTED.
+  The fixture holds no zero-crew stabilisation ship of the race (specimen S18 is tier b of AE-310-03), so the zero-crew cases are written into copies of the save here, and the fixture's own stored values are the earlier game's. A save that is not there reads UNSUPPORTED.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -292,7 +292,7 @@ const daysWrong = (results, expected, bodies) => results.map((result, index) => 
 
 // ---- The faults and the rewrites ----------------------------------------------------------------------------------
 const FAULTS = [
-  { name: 'a ship with no crew is timed as the quickest one, the division by zero that 2.7 aborted on', target: 'lagrange', from: '} else if (!aboard) {', to: '} else if (false) {', fails: ['multiplier', 'skip', 'days'] },
+  { name: 'a ship with no crew is timed as the quickest one, the division by zero that the earlier line aborted on', target: 'lagrange', from: '} else if (!aboard) {', to: '} else if (false) {', fails: ['multiplier', 'skip', 'days'] },
   { name: 'the no-crew skip keyed on the crew fraction, so a class that needs no crew is timed as ready with none aboard', target: 'lagrange', from: '} else if (!aboard) {', to: '} else if (fraction === 0) {', fails: ['multiplier', 'skip'] },
   { name: 'a missing current crew read as crewless, so a class that needs no crew is timed as no-crew rather than unknown', target: 'lagrange', from: 'const aboard = Number.isFinite(ship.CurrentCrew) ? ship.CurrentCrew > 0 : null', to: 'const aboard = ship.CurrentCrew > 0', fails: ['multiplier', 'skip'] },
   { name: 'a missing current crew read as crewless in the crew effects, so a class that needs no crew reads blocked at 0 rather than unknown', target: 'crew', from: 'const aboard = Number.isFinite(ship.CurrentCrew) ? ship.CurrentCrew > 0 : null', to: 'const aboard = ship.CurrentCrew > 0', fails: ['crew'] },

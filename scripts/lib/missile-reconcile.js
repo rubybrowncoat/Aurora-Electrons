@@ -192,7 +192,7 @@ export const createMissileReconciler = ({ rules, data }) => {
 
     add('MSPReactor', 'size', row.MSPReactor, built.contributions.reactor.msp, 'decimal', { basis: basisOf('reactor') })
     add('MSPDecoys', 'size', row.MSPDecoys, built.contributions.decoys.msp)
-    add('MSPMultipleWarheads', 'size', row.MSPMultipleWarheads, built.contributions.extraWarheads.msp, 'decimal', unwritten ? { explain: 'the design stores 0 for the size of the warheads after the first although its cost and Tritanium include 0.1 each, as game 137 of the 2.6 and 2.7.1 saves and game 139 of the 2.7.0 save store it; seen in the modded sample and in game 143 of the 2.7.0 save, where the designs sit at the size floor or at their size limit, which hides whether the size adds it' } : {})
+    add('MSPMultipleWarheads', 'size', row.MSPMultipleWarheads, built.contributions.extraWarheads.msp, 'decimal', unwritten ? { explain: 'the design stores 0 for the size of the warheads after the first although its cost and Tritanium include 0.1 each, as game 137 of the saves from before Aurora 3.0 and game 139 of the earliest of them store it; seen in the modded sample and in game 143 of the earliest of them, where the designs sit at the size floor or at their size limit, which hides whether the size adds it' } : {})
     add('WarheadStrength', 'warhead', row.WarheadStrength, figures.warheadStrength, 'decimal', { warheadDependent: true, basis: basisOf('warhead') })
     add('RadDamage', 'warhead', row.RadDamage, decoy ? 0 : figures.warheadStrength, 'decimal', { warheadDependent: true, basis: basisOf('warhead') })
     add('LaserWarhead', 'warhead', row.LaserWarhead, figures.laserWarhead, 'decimal', { warheadDependent: true, basis: basisOf('laserEfficiency') })

@@ -3,8 +3,8 @@
 
   Run: bun scripts/check-unsupported-save-page.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The decision (utilities/capabilities.js `lineResult`, the store's `refused` getter) is checked by scripts/check-capabilities.js; this script proves that it reaches the screen. It reads the screen through the shared readers of scripts/lib/browser-observe.js (`installScreen`): hooks the templates carry only identify an element, and every decision is read from the text the element draws, through the module's own words (utilities/capabilities.js `REFUSALS`), against what SQL written here says of each copy. Three copies are served one after another: the stock 2.7.1 save as it is, none of the seven columns Aurora 3.0 added in it (refused as a save from before 3.0), the migrated 3.1 fixture as it is (accepted), and a copy of the fixture with FCT_Game.LostColonies dropped (damaged: still of the 3.2 line, never refused).
-  - on the refused copy the Empires page draws the notice, in the words of the reason SQL gives, with the version of the package, the line the app reads, the latest release of the 2.7 line that reads such saves (its text and its link) and every column the copy lacks, each once, and no list of empires; the Save panel stays on screen and can be used;
+  The decision (utilities/capabilities.js `lineResult`, the store's `refused` getter) is checked by scripts/check-capabilities.js; this script proves that it reaches the screen. It reads the screen through the shared readers of scripts/lib/browser-observe.js (`installScreen`): hooks the templates carry only identify an element, and every decision is read from the text the element draws, through the module's own words (utilities/capabilities.js `REFUSALS`), against what SQL written here says of each copy. Three copies are served one after another: the stock save from before 3.0 as it is, none of the seven columns Aurora 3.0 added in it (refused as a save from before 3.0), the migrated 3.1 fixture as it is (accepted), and a copy of the fixture with FCT_Game.LostColonies dropped (damaged: still of the 3.2 line, never refused).
+  - on the refused copy the Empires page draws the notice, in the words of the reason SQL gives, with the version of the package, the line the app reads, the latest release of the line that reads such saves (its text and its link) and every column the copy lacks, each once, and no list of empires; the Save panel stays on screen and can be used;
   - on the refused copy a report route (Finances, which the line's saves support) draws the same notice in place of the page, none of the page's panels; Settings and About draw their panels and no notice; the status line of the app says the save is refused in the words of the module; the button that checks the save again asks the database for its schema again, and the notice is there afterwards;
   - on the accepted copy and on the damaged copy the Empires page lists the games of the save and the Save panel is there, and a report route draws its panels and no notice, and the status line says nothing of a refusal;
   - the page raises no error on any of them.
@@ -28,7 +28,7 @@ const root = path.resolve(__dirname, '..')
 // The refusal test: a recorded save from before the line, which the page must refuse, and the fixture, which it must accept.
 const SAVE_271 = 'saves/AuroraDB_271_skoormit_saved.db'
 const SAVE_310 = FIXTURE.file
-// The game and race each copy lists: the 2.7 save's own, and the 3.1 fixture's, whose race is the one the picker settles.
+// The game and race each copy lists: the save from before 3.0's own, and the 3.1 fixture's, whose race is the one the picker settles.
 const NAMES = { refused: { game: 'EggSample', race: 'Khanate of Inarcs' }, accepted: { game: FIXTURE.gameName, race: 'Galactic Shogunate' }, damaged: { game: FIXTURE.gameName, race: 'Galactic Shogunate' } }
 const TIMEOUT = 120000
 const RELEASE = '2.7.11'
@@ -38,7 +38,7 @@ const INDEX = 'src/renderer/pages/index.vue'
 const STATUS = 'src/renderer/components/navigation/SaveStatus.vue'
 const STORE = 'src/renderer/store/capabilities.js'
 const FILES = [COMPONENT, LAYOUT, INDEX, STATUS, STORE]
-// The seven columns Aurora 3.0 added over 2.7.1, written here (the oracle of the copy that is refused).
+// The seven columns Aurora 3.0 added over the releases before it, written here (the oracle of the copy that is refused).
 const LINE_COLUMNS = [
   'FCT_Game.LostColonies',
   'FCT_Game.GenerateNonOxygenRaces',
@@ -51,9 +51,9 @@ const LINE_COLUMNS = [
 // The one the damaged copy lacks: a save of the line missing part of the signature is accepted.
 const DAMAGED_COLUMNS = ['FCT_Game.LostColonies']
 const dropStatements = (fields) => fields.map((field) => `alter table ${field.split('.')[0]} drop column ${field.split('.')[1]}`)
-// The copies served, in the order they are read: the 2.7 save as it is (refused as a save from before 3.0), the 3.1 fixture as it is, and a copy of the line without part of the signature (still of the line).
+// The copies served, in the order they are read: the save from before 3.0 as it is (refused as a save from before 3.0), the 3.1 fixture as it is, and a copy of the line without part of the signature (still of the line).
 const SCENES = [
-  { key: 'refused', what: 'the 2.7 save', source: SAVE_271, statements: [] },
+  { key: 'refused', what: 'the save from before 3.0', source: SAVE_271, statements: [] },
   { key: 'accepted', what: 'the 3.1 save as it is', source: SAVE_310, statements: [] },
   { key: 'damaged', what: 'the copy without FCT_Game.LostColonies', source: SAVE_310, statements: dropStatements(DAMAGED_COLUMNS) },
 ]
@@ -345,7 +345,7 @@ const acceptedProblems = (o, scene) => {
 }
 
 const CHECKS = [
-  ['refused-notice', 'the Empires page of the 2.7 save (none of the seven columns of the line) draws one notice, in the words of the reason SQL gives, with the version, the line, the release and each missing column', (o, t) => verdict(noticeProblems(o.refused.home, t.scenes.refused, t).length === 0, noticeProblems(o.refused.home, t.scenes.refused, t))],
+  ['refused-notice', 'the Empires page of the save from before 3.0 (none of the seven columns of the line) draws one notice, in the words of the reason SQL gives, with the version, the line, the release and each missing column', (o, t) => verdict(noticeProblems(o.refused.home, t.scenes.refused, t).length === 0, noticeProblems(o.refused.home, t.scenes.refused, t))],
   ['refused-no-list', 'the Empires page of that copy lists no empire', (o) => verdict(shown(o.refused.home.games).length === 0, shown(o.refused.home.games))],
   ['refused-save-panel', 'the Save panel stays on screen under the notice and can be used', (o) => verdict(o.refused.home.savePanel.visible && !o.refused.home.savePanel.disabled, o.refused.home.savePanel)],
   ['refused-page', 'a report route of that copy draws the same notice in place of its panels', (o, t) => verdict(noticeProblems(o.refused.page, t.scenes.refused, t).length === 0 && o.refused.page.path === '/finances' && o.refused.page.panels === 0, { problems: noticeProblems(o.refused.page, t.scenes.refused, t), path: o.refused.page.path, panels: o.refused.page.panels })],

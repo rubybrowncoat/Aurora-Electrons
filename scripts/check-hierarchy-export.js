@@ -26,7 +26,7 @@ const Vue = require('vue')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage } = require('./lib/page-loader')
-const { FIXTURE } = require('./lib/fixtures')
+const { FIXTURE, LINE_SAVE_FILES } = require('./lib/fixtures')
 const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const rawAssert = require('./lib/bounded-assert')
@@ -1982,13 +1982,7 @@ const MUTANTS = [
 
 // ---------- the saves ----------
 
-const breadthFiles = () => {
-  const listing = (directory) => (fs.existsSync(directory) ? fs.readdirSync(directory).filter((name) => /^AuroraDB.*\.db$/i.test(name)).sort().map((name) => path.join(directory, name)) : [])
-  const artifacts = path.join(root, 'artifacts')
-  const folders = fs.existsSync(artifacts) ? fs.readdirSync(artifacts, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(artifacts, entry.name)).sort() : []
-
-  return [root, path.join(root, 'saves'), ...folders].flatMap(listing)
-}
+const breadthFiles = () => LINE_SAVE_FILES.map((name) => path.join(root, 'saves', name)).filter((file) => fs.existsSync(file))
 
 const stateOfLink = (raw, own, foreign) => (raw === 0 ? 'none' : !Number.isInteger(raw) ? 'unknown' : own.has(raw) ? 'resolved' : foreign.has(raw) ? 'foreign' : 'orphan')
 

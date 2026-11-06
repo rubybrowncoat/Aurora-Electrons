@@ -16,7 +16,7 @@
   - `landing-date`: a landing date is dated as an estimate ("about", on a project's line, on the techs queued behind it and on the Next to land tile) with the landing rule's mark on it, the day is the calendar day of the continuous time (a second either side of midnight), a landing 1.1 days away is not dated as the end of a 5-day increment, and an unknown clock is no date;
   - `view`: the Research page's tables (components/research/FieldsView.vue) and the path fact of a tech (PathView.vue) word the saved points with their decimals and mark a not researchable tech, and draw the marks; an available design of the race words its saved points and one with none words none;
   - `cost`: the cost the page shows for a tech is the stored one (the fixture's Research Rate 500 RP at 64,000, a planted 640,000 at 640,000), and no code hard-codes it;
-  - `lookups`: the research field names shown are the stored abbreviations (a changed one is shown changed), and no code keeps a name the lookup replaced (the 2.7 abbreviations EW and MK, Jump Engines);
+  - `lookups`: the research field names shown are the stored abbreviations (a changed one is shown changed), and no code keeps a name the lookup replaced (the earlier abbreviations EW and MK, Jump Engines);
   - `queue`: the Production page's queue read carries the points saved on each queued tech and `queuedRemaining` is the cost less them (never below 0, null when either is not stored);
   - `rules`: the rules of the remaining RP and the landing year are registered for the 3.2 line too, and say what they now say.
   Where the source does not give a rule the check does not guess it: what a played 3.1 save holds (the carry of an increment with no queue, saved points on a tech that a game then lists) is not asserted.
@@ -678,7 +678,7 @@ check('lookups', 'the research field names the page shows are the stored abbrevi
     }
   }
 
-  assert.ok(!stored.some((row) => ['EW', 'MK'].includes(row.Abbreviation)), 'the lookup of the 3.2 line has neither of the 2.7 abbreviations')
+  assert.ok(!stored.some((row) => ['EW', 'MK'].includes(row.Abbreviation)), 'the lookup of the 3.2 line has neither of the earlier abbreviations')
 
   const names = ['\'E' + 'W\'', '\'M' + 'K\'', 'Jump ' + 'Engines']
   const hits = []
@@ -884,14 +884,14 @@ check('queue', 'the Production page\'s research read carries the points saved on
   assert.equal(p.queuedRemaining({ DevelopCost: 640000, Saved: 40000.25 }), 599999.75, 'a large stored cost is used whole')
 })
 
-check('rules', 'the rules of the remaining RP and of the landing year are registered for the 2.7 and the 3.2 lines and say the saved points are read as stored with their decimals, the cost is the stored one and the game hands the part of an increment a project does not need to the tech behind it', async (w) => {
+check('rules', 'the rules of the remaining RP and of the landing year are registered for the 3.2 line and say the saved points are read as stored with their decimals, the cost is the stored one and the game hands the part of an increment a project does not need to the tech behind it', async (w) => {
   const { provenance } = await w.modules()
 
   for (const id of ['research.remaining', 'research.landing']) {
     const rule = provenance.getRule(id)
 
     assert.ok(rule, `${id} is registered`)
-    assert.deepEqual(rule.versions, ['2.7.x', '3.2.x'], `${id} is registered for both lines`)
+    assert.deepEqual(rule.versions, ['3.2.x'], `${id} is registered for the line`)
   }
 
   assert.ok(/saved points are read as stored, decimals included, and the cost is the stored one whatever its size/.test(provenance.getRule('research.remaining').note), 'the remaining RP rule says what it reads')
@@ -932,7 +932,7 @@ const FAULTS = [
   { name: 'a prerequisite not researched is never marked', target: 'research', from: REASONS, to: 'entry.notResearchable = entry.inList ? [...(tech.ruinOnly ? [\'ruin\'] : [])] : []', fails: ['saved', 'view'] },
   { name: 'every listed tech is marked not researchable', target: 'research', from: REASONS, to: 'entry.notResearchable = entry.inList ? [\'ruin\'] : []', fails: ['saved', 'view'] },
   { name: 'the reason of a ruin-only tech reads as another', target: 'research', from: 'ruin: \'Found only in ancient ruins\',', to: 'ruin: \'Found in ruins\',', fails: ['view'] },
-  { name: 'the remaining RP rule is registered for the old line only', target: 'research', from: 'const SAVED_VERSIONS = [\'2.7.x\', \'3.2.x\']', to: 'const SAVED_VERSIONS = [\'2.7.x\']', fails: ['rules'] },
+  { name: 'the remaining RP rule is registered for another line only', target: 'research', from: 'const SAVED_VERSIONS = [\'3.2.x\']', to: 'const SAVED_VERSIONS = [\'3.0.x\']', fails: ['rules'] },
   { name: 'the landing rule says nothing of the carry', target: 'research', from: 'The game hands the part of a landing increment the project does not need to the next queued tech at that tech\\\'s own rate, so this figure is the carry in continuous time: the game lands the tech at the end of the first increment at or after it. ', to: '', fails: ['rules'] },
   { name: 'the points of a view are rounded to a whole number', target: 'fieldsView', from: POINTS, to: 'return this.count(value, 0)', fails: ['view'] },
   { name: 'the points of a view keep one decimal', target: 'fieldsView', from: POINTS, to: 'return this.count(value, Number.isInteger(value) ? 0 : 1)', fails: ['view'] },
