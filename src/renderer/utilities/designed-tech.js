@@ -26,7 +26,7 @@ const COMMERCIAL_JUMP_FUNCTION = 2
 
 const PROTOTYPES = { 1: 'Prototype', 2: 'Future prototype', 3: 'Research prototype' }
 
-const DESIGNED_VERSIONS = ['2.7.x']
+const DESIGNED_VERSIONS = ['3.2.x']
 const STORED = 'designedTech.stored'
 const MEASURE = 'designedTech.measure'
 const PER_SPACE = 'designedTech.perSpace'
@@ -201,7 +201,7 @@ registerRule({
 
 registerRule({
   id: 'designedTech.reload',
-  versions: DESIGNED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'min or h',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.RateOfFire'],
@@ -219,7 +219,7 @@ registerRule({
 
 registerRule({
   id: COMPARE_VERDICT,
-  versions: DESIGNED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'designs ranked',
   verification: 'confirmed',
   structure: ['the figures of the designs picked'],

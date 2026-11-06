@@ -139,7 +139,7 @@ registerRule({
 
 registerRule({
   id: ORIGIN_RULES.recomputed,
-  versions: ['2.7.x'],
+  versions: ['x'],
   verification: 'confirmed',
   structure: ['FCT_TechSystem'],
   note: 'A component whose figures a registered design rule worked out from the race\'s technology rather than read from a stored row; each figure takes the verification of the rule the component names.',

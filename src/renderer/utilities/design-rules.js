@@ -1381,8 +1381,6 @@ export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating
 
 // The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
 const DESIGN_VERSIONS = ['3.2.x']
-// The rules no check compares with a stored figure of the line or exercises on a planted case: the save stores no range, burn, endurance, live signature, emission, repair cost, maintenance life or failure chance to compare them with, and the jump drive sizing loop, the propulsion share, crew and costs have no check that asserts their figure. They stay as AE-301-07 left them until a case on the played fixture exercises each (scripts/check-design-rules.js lists them as rules no check covers).
-const UNEXERCISED_VERSIONS = ['2.7.x']
 
 registerRule({
   id: 'design.engineDesign',
@@ -1404,7 +1402,7 @@ registerRule({
 
 registerRule({
   id: 'design.burnPerHour',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'L/h',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.ComponentValue, FuelEfficiency', 'FCT_ClassComponent.NumComponent'],
@@ -1413,7 +1411,7 @@ registerRule({
 
 registerRule({
   id: 'design.fullPowerRangeKm',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.FuelCapacity, FuelEfficiency, EnginePower, MaxSpeed'],
@@ -1422,7 +1420,7 @@ registerRule({
 
 registerRule({
   id: 'design.enduranceHours',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'hours',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.FuelCapacity, FuelEfficiency, EnginePower'],
@@ -1431,7 +1429,7 @@ registerRule({
 
 registerRule({
   id: 'design.thermalSignature',
-  versions: UNEXERCISED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'thermal signature',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.StealthRating, ComponentValue', 'FCT_ClassComponent.NumComponent', 'FCT_ShipClass.ClassThermal, EnginePower, Size'],
@@ -1471,7 +1469,7 @@ registerRule({
 
 registerRule({
   id: 'design.emEmission',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'EM signature',
   verification: 'estimated',
   structure: ['FCT_ShipClass.ShieldStrength', 'FCT_ShipDesignComponents.ComponentValue, Resolution of the active sensors'],
@@ -1500,7 +1498,7 @@ registerRule({
 
 registerRule({
   id: 'design.selfJumpDrive',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'HS, BP',
   verification: 'estimated',
   structure: ['FCT_TechSystem.AdditionalInfo of the race\'s jump drive efficiency, squadron size and radius techs'],
@@ -1510,7 +1508,7 @@ registerRule({
 
 registerRule({
   id: 'design.propulsionShare',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: '%, HS',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size', 'FCT_ShipDesignComponents.Size'],
@@ -1519,7 +1517,7 @@ registerRule({
 
 registerRule({
   id: 'design.propulsionCrew',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'crew',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Crew'],
@@ -1528,7 +1526,7 @@ registerRule({
 
 registerRule({
   id: 'design.savedPropulsionCost',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Cost', 'FCT_ClassComponent.NumComponent'],
@@ -1537,7 +1535,7 @@ registerRule({
 
 registerRule({
   id: 'design.propulsionSetCost',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: 'BP',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.Cost of the stock tanks', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the engine, fuel and thermal techs'],
@@ -1593,7 +1591,7 @@ registerRule({
 
 registerRule({
   id: 'design.averageRepairCost',
-  versions: UNEXERCISED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost'],
@@ -1602,7 +1600,7 @@ registerRule({
 
 registerRule({
   id: 'design.maintenanceLifeSeries',
-  versions: UNEXERCISED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'years, MSP',
   verification: 'estimated',
   structure: ['FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
@@ -1612,7 +1610,7 @@ registerRule({
 
 registerRule({
   id: 'design.incrementFailureChance',
-  versions: UNEXERCISED_VERSIONS,
+  versions: DESIGN_VERSIONS,
   units: '% an increment',
   verification: 'estimated',
   structure: ['FCT_ShipClass.BaseFailureChance', 'FCT_Ship.LastOverhaul'],

@@ -13,7 +13,7 @@ import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
 import { combine, failureWords, ofRule, registerRule, sumResults, unavailable } from './provenance'
 import { ReadOnly, recordingOwner, requireRecording, withRegistry } from './recording-owner'
 
-const HISTORY_VERSIONS = ['2.7.x']
+const HISTORY_VERSIONS = ['3.2.x']
 // The tonnage rule holds for the line: it is exercised on the interim fixture and on a save the game wrote under the present line by scripts/check-fleet-profile.js.
 const TONNAGE_VERSIONS = ['3.2.x']
 // Tons of ship in one hull space.
@@ -121,7 +121,7 @@ registerRule({
 
 registerRule({
   id: 'history.change',
-  versions: HISTORY_VERSIONS,
+  versions: ['x'],
   units: 'as the figure',
   verification: 'confirmed',
   structure: ['two snapshots of the app\'s history file'],

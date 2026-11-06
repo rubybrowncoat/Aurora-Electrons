@@ -5,7 +5,7 @@ import { buildDistanceMap } from './jump-graph'
 import { scaleValue } from './math'
 import { UNVERIFIED_SAVE, isAvailable, ofRule, registerRule, ruleSupports, unavailable, weakestStatus } from './provenance'
 
-const MAP_VERSIONS = ['2.7.x']
+const MAP_VERSIONS = ['3.2.x']
 
 // The assumptions a rule that depends on the game version makes when the save's version is not known (`loadFormulaVersion`).
 export const versionAssumptions = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE])
@@ -96,7 +96,7 @@ registerRule({
 
 registerRule({
   id: 'map.linkStraightShare',
-  versions: MAP_VERSIONS,
+  versions: ['x'],
   units: '%',
   verification: 'confirmed',
   note: 'The share of the map\'s links that run straight or at 45 degrees on its current layout, rounded. With no links there is nothing to measure.',
@@ -123,7 +123,7 @@ registerRule({
 
 registerRule({
   id: 'map.legendCount',
-  versions: MAP_VERSIONS,
+  versions: ['x'],
   units: 'systems',
   verification: 'confirmed',
   note: 'The number of systems with each colour, glyph or mark in the legend, counted from what the map shows. A system whose state is unknown is counted apart, in none of the others.',

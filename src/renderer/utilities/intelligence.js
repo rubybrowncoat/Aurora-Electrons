@@ -3,7 +3,7 @@
 
 import { STATUS, UNVERIFIED_SAVE, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull, weakestStatus } from './provenance'
 
-const INTELLIGENCE_VERSIONS = ['2.7.x']
+const INTELLIGENCE_VERSIONS = ['3.2.x']
 const START_YEAR = 'the game\'s start year'
 
 export const SECONDS_PER_YEAR = 31536000

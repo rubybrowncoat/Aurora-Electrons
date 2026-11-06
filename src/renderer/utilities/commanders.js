@@ -106,7 +106,7 @@ export const formerKind = ({ RetireStatus, Prisoner }) => (RETIRE_STATUSES[Retir
 
 const EPSILON = 1e-9
 const SECONDS_PER_YEAR = 31536000
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const COUNT = 'commanders.count'
 const UNASSIGNED = 'commanders.unassigned'
 const VACANT = 'commanders.vacantGovernor'
@@ -213,7 +213,7 @@ registerRule({
 
 registerRule({
   id: SUGGESTIONS,
-  versions: VERSIONS,
+  versions: ['x'],
   units: 'assignments',
   verification: 'estimated',
   structure: ['the governor, specialist ship and research suggestion rules'],
@@ -231,7 +231,7 @@ registerRule({
 
 registerRule({
   id: AGE,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_Species.GraduationAge', 'FCT_Commander.CareerStart', 'FCT_Game.GameTime', 'FCT_CommanderHistory.GameTime (last record, for the dead)'],

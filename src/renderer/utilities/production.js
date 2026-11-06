@@ -7,7 +7,7 @@ import { capacityKind } from './production-types'
 import { isFullCapacityYard } from './shipyard-types'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
 
-const PRODUCTION_VERSIONS = ['2.7.x']
+const PRODUCTION_VERSIONS = ['3.2.x']
 // The versions of the rules written against the line's source: the credit of stored components and the cycle forecast's mineral floor.
 const LINE_VERSIONS = ['3.2.x']
 const SECONDS_PER_YEAR = 31536000
@@ -25,7 +25,7 @@ const ESTIMATE = 'The rate is not compared with a saved figure of the job.'
 
 registerRule({
   id: 'production.jobCount',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'jobs',
   verification: 'confirmed',
   structure: ['FCT_ResearchProject', 'FCT_IndustrialProjects.Queue, Pause', 'FCT_ShipyardTask', 'FCT_Shipyard.TaskType, PauseActivity', 'FCT_GroundUnitTraining', 'FCT_Population.TerraformingGasID, MaxAtm'],
@@ -34,7 +34,7 @@ registerRule({
 
 registerRule({
   id: 'production.capacityFree',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.populationCapacity', 'production.trainingCapacity', 'FCT_IndustrialProjects.Percentage, Queue, Pause, ProductionType', 'FCT_GroundUnitTraining.TaskPercentage'],
@@ -43,7 +43,7 @@ registerRule({
 
 registerRule({
   id: 'production.trainingCapacity',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['FCT_Race.GroundFormationConstructionRate, EconomicProdModifier', 'FCT_Species.ProductionRateModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'FCT_Commander, FCT_CommanderBonuses', 'DIM_PlanetaryInstallation.GroundTrainingValue', 'FCT_PopulationInstallations.Amount'],
@@ -70,7 +70,7 @@ registerRule({
 
 registerRule({
   id: 'production.researchRate',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'RP/yr',
   verification: 'estimated',
   structure: ['FCT_ResearchProject.Facilities', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses (Research)', 'FCT_AncientConstruct.ResearchField, ResearchBonus', 'FCT_Race.Research', 'FCT_Species.ResearchRateModifier', 'FCT_Game.ResearchSpeed'],
@@ -107,7 +107,7 @@ registerRule({
 
 registerRule({
   id: 'production.trainingRate',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.trainingCapacity', 'FCT_GroundUnitTraining.TaskPercentage'],
@@ -135,16 +135,16 @@ registerRule({
 })
 
 ;[
-  { key: 'research', note: 'The remaining research points over the project\'s rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs.' },
+  { key: 'research', versions: ['2.7.x'], note: 'The remaining research points over the project\'s rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs.' },
   { key: 'ship', versions: ['3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
-  { key: 'training', note: 'The task\'s remaining build points over its rate, in days.' },
-  { key: 'terraform', note: 'The pressure still to add or remove over the local rate, in days; for water vapour over liquid water, the construction cycles it takes as the vapour condenses and the oceans evaporate. Not within 200 years reads as no date.' },
+  { key: 'training', versions: ['2.7.x'], note: 'The task\'s remaining build points over its rate, in days.' },
+  { key: 'terraform', versions: ['2.7.x'], note: 'The pressure still to add or remove over the local rate, in days; for water vapour over liquid water, the construction cycles it takes as the vapour condenses and the oceans evaporate. Not within 200 years reads as no date.' },
 ].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}` }))
 
 registerRule({
   id: 'production.timeline',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'jobs',
   verification: 'estimated',
   structure: ['production.researchFinish, industryFinish, shipFinish, shipyardUpgradeFinish, trainingFinish, terraformFinish'],
