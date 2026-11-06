@@ -247,9 +247,10 @@ import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
+import { REFIT_TASK_TYPES } from '../utilities/refits'
 import { SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES } from '../utilities/shipyard-growth'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
 import { NO_PROCUREMENT_SOURCES, loadProcurementSources } from '../utilities/procurement-data'
@@ -609,7 +610,7 @@ export default {
         const modifiers = this.populationProductionModifiers[ship.PopulationID]
         const paused = flagOf(ship.Paused)
         const rate = shipRate(modifiers, ship)
-        const finish = finishDays({ rule: 'production.shipFinish', rate, remaining: ship.RemainingProduction, remainingName: 'the task\'s remaining build points', paused })
+        const finish = shipTaskFinish({ rate, task: { remaining: ship.RemainingProduction, totalBP: ship.TotalBP, hulls: ship.Hulls }, paused })
 
         return this.job({
           key: `ship-${ship.ID}`,
@@ -618,7 +619,7 @@ export default {
           ShipyardID: ship.ShipyardID,
           yardName: ship.ShipyardName,
           name: ship.Name,
-          detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName].filter(Boolean).join(' · '),
+          detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName, ship.Hulls > 1 ? `1 of ${this.count(ship.Hulls)} ships left` : ''].filter(Boolean).join(' · '),
           rate,
           finish,
           rateText: this.rateText(rate, this.bp, 'BP/yr'),
@@ -1142,7 +1143,7 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, TaskClass.ClassName, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then TargetClass.Size else TaskClass.Size end) as Size, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.NumShips as Hulls, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then (case when TargetClass.Commercial = 0 then 1.0 when TargetClass.Commercial is null then null else 0.25 end) else (case when TaskClass.Commercial = 0 then 1.0 when TaskClass.Commercial is null then null else 0.25 end) end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass TaskClass on TaskClass.ShipClassID = FCT_ShipyardTask.ClassID left join FCT_ShipClass TargetClass on TargetClass.ShipClassID = FCT_ShipyardTask.RefitID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
 
         return rows
       }),

@@ -29,9 +29,9 @@ const { fixtureSave, convertedSave } = require('./lib/fixtures')
 const root = path.resolve(__dirname, '..')
 const FIXTURE_SAVE = fixtureSave()
 const DEFAULT_SAVES = [FIXTURE_SAVE]
-// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In the migrated 3.1 fixture (game 141, race 784) the homeworld Aurelia (48979) holds two repair yards aboard ships, a shipbreaker's (1,500,000 t, 37.5 M were it counted) and a smaller one's (31,000 t, 0.775 M), beside 90.375 M of yards of its own (eight yards, from 0.125 M to 17.25 M each); `activity` is the shipbreaker's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In the recorded 2.x save saves/AuroraDB_270_unknown.db (game 140, race 784, read through its converted copy: `recorded`) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`).
+// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In the migrated 3.1 fixture (game 141, race 784) the homeworld Aurelia (48979) holds two repair yards aboard ships, a shipbreaker's (1,500,000 t, 37.5 M were it counted) and a smaller one's (31,000 t, 0.775 M), beside 91.5 M of yards of its own (eight yards, from 1.25 M to 17.25 M each: the three commercial and five naval yards and a Light yard of 1,000 t and five slipways, which needs the whole 1.25 M as a naval yard does, not a tenth of it); `activity` is the shipbreaker's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In the recorded 2.x save saves/AuroraDB_270_unknown.db (game 140, race 784, read through its converted copy: `recorded`) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`).
 const SHIP_YARD_SAVES = [
-  { file: FIXTURE_SAVE.file, game: FIXTURE_SAVE.game, race: FIXTURE_SAVE.race, named: { 48979: 90.375 }, activity: 25 },
+  { file: FIXTURE_SAVE.file, game: FIXTURE_SAVE.game, race: FIXTURE_SAVE.race, named: { 48979: 91.5 }, activity: 25 },
   { file: 'saves/AuroraDB_270_unknown.db', game: 140, race: 784, named: { 49025: 0, 49026: 0 }, peopled: [49025, 49026], recorded: true },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
@@ -240,6 +240,12 @@ const syntheticCases = (apps, capacities) => {
     const year = lowOf(5475)
 
     return events.length === 1 && event.kind === 'yard' && event.status === 'dated' && near(event.earliest, 200) && near(event.delta, 0.25) && near(value.required.low[6], 20) && near(value.required.low[7], 20.25) && near(value.required.high[7], 20.25) && near(value.required.high[6], 20) && near(thirty[0], 20) && near(thirty[1], 20.25) && near(thirtyOne[1], 20) && near(thirtyOne[2], 20.25) && near(year[11], 20) && near(year[12], 20.25)
+  })
+
+  holds('yardLight', 'a slipway at a light yard of 1,000 t with five slipways raises its workers by the whole 1,000 t over 4,000 (0.25 M), as at a naval yard, where a commercial yard of the same size needs a tenth of it (0.025 M)', () => {
+    const [light, naval, commercial] = [4, 1, 2].map((SYType) => scene({ yards: [yardRow({ SYType, Capacity: 1000, Slipways: 5, UpgradeTaskType: 1 })] }).events[0])
+
+    return light.kind === 'yard' && near(light.delta, 0.25) && near(naval.delta, 0.25) && near(commercial.delta, 0.025)
   })
 
   holds('yardPaused', 'a paused yard activity adds nothing, and one at a yard with no build rate (it makes no progress) adds nothing either', () => {
@@ -539,6 +545,8 @@ const MUTANTS = [
   { name: 'a retool that raises the yard\'s workers', file: DEMAND_FILE, from: 'if (type === 7) {\n    return { delta: 0 }', to: 'if (type === 7) {\n    return { delta: 0.1 }', fails: 'retool' },
   { name: 'a colony of a spied empire that is worked out from its own stock', file: DEMAND_FILE, from: 'if (npr && (needs.installation.length || needs.yards.length)) {', to: 'if (false) {', fails: 'unavailable' },
   { name: 'a queue forecast still running that is read as nothing queued', file: DEMAND_FILE, from: 'gaps.push(\'the queue forecast (still running)\')', to: 'void 0', fails: 'unavailable' },
+  { name: 'a light yard\'s workers counted at a tenth, as a commercial yard\'s', file: DEMAND_FILE, from: 'isFullCapacityYard(yardType) ? 1 : 0.1', to: 'yardType === 1 ? 1 : 0.1', fails: 'yardLight' },
+  { name: 'a light yard not counted among the yards that need the whole capacity', file: 'shipyard-types.js', from: 'export const isFullCapacityYard = (type) => type === SHIPYARD_TYPE.NAVAL || type === SHIPYARD_TYPE.LIGHT', to: 'export const isFullCapacityYard = (type) => type === SHIPYARD_TYPE.NAVAL', fails: 'yardLight' },
   { name: 'the lower and the higher demand swapped', file: DEMAND_FILE, from: 'const [low, high] = requiredSeries(events, colony.InstallationWorkers + colony.YardWorkers, months)', to: 'const [high, low] = requiredSeries(events, colony.InstallationWorkers + colony.YardWorkers, months)', fails: 'bounds' },
   { name: 'workers needed today that leave the yards out', file: COLONIES_FILE, from: 'required = colony.InstallationWorkers + colony.YardWorkers', to: 'required = colony.InstallationWorkers', fails: 'currentSplit' },
   { name: 'population orbiting aboard Arks that is added to the people who can work', file: DEMAND_FILE, from: 'workerSplit(colony, population, value, required[month])', to: 'workerSplit(colony, population + (colony.ArkOccupied || 0), value, required[month])', fails: 'ark' },
@@ -799,7 +807,7 @@ const onCopy = async (database, edits, work) => {
   }
 }
 
-// What the race's yards need, worked out here from the save's rows the way the game counts them: a yard counts at its colony unless its ParentShipID names a ship of the game, with capacity x slipways / 4,000 at a naval yard (type 1) and a tenth of that at any other. { workers: { [PopulationID]: M workers }, aboard: { [PopulationID]: [ShipyardID] }, activities: [ShipyardID] of the yards no ship holds that have an activity, in order }.
+// What the race's yards need, worked out here from the save's rows the way the game counts them: a yard counts at its colony unless its ParentShipID names a ship of the game, with capacity x slipways / 4,000 at a naval yard (type 1) or a Light yard (type 4) and a tenth of that at any other (Population.cs `GetTotalShipyardWorkers`). { workers: { [PopulationID]: M workers }, aboard: { [PopulationID]: [ShipyardID] }, activities: [ShipyardID] of the yards no ship holds that have an activity, in order }.
 const yardOracle = async (database, save) => {
   const yards = await rowsOf(database, `select ShipyardID, PopulationID, SYType, Slipways, Capacity, TaskType, ParentShipID from FCT_Shipyard where GameID = ${save.game} and RaceID = ${save.race}`)
   const ships = new Set((await rowsOf(database, `select ShipID from FCT_Ship where GameID = ${save.game}`)).map((row) => row.ShipID))
@@ -810,7 +818,7 @@ const yardOracle = async (database, save) => {
     if (ships.has(yard.ParentShipID)) {
       (aboard[yard.PopulationID] = aboard[yard.PopulationID] || []).push(yard.ShipyardID)
     } else {
-      workers[yard.PopulationID] = (workers[yard.PopulationID] || 0) + (yard.Capacity * yard.Slipways * (yard.SYType === 1 ? 1 : 0.1)) / 4000
+      workers[yard.PopulationID] = (workers[yard.PopulationID] || 0) + (yard.Capacity * yard.Slipways * (yard.SYType === 1 || yard.SYType === 4 ? 1 : 0.1)) / 4000
     }
   })
 

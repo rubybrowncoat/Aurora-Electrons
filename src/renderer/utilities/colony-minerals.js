@@ -30,7 +30,7 @@ registerRule({
   units: 't',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.<mineral>, Amount', 'FCT_ShipyardTask.<mineral>, TotalBP, CompletedBP, TaskTypeID'],
-  note: 'What a colony\'s queue still needs of a mineral: each industrial project\'s cost per unit times the units left (paused and queued ones too), plus each shipyard task\'s cost times the share of its build points left. A scrap task needs nothing, as the stock is neither checked nor spent for it. The sums were not compared with a saved shortage. A colony with no project or task needs 0; a colony whose queue was not read, or whose cost is not recorded, has no figure.',
+  note: 'What a colony\'s queue still needs of a mineral: each industrial project\'s cost per unit times the units left (paused and queued ones too), plus each shipyard task\'s cost times the share of its build points left. A task that repeats (a count of ships above 1) counts the ship in hand only, as the game\'s own projection does: the later ships take their minerals when each is made, so none of them is counted here. A scrap task needs nothing, as the stock is neither checked nor spent for it. The sums were not compared with a saved shortage. A colony with no project or task needs 0; a colony whose queue was not read, or whose cost is not recorded, has no figure.',
 })
 
 registerRule({

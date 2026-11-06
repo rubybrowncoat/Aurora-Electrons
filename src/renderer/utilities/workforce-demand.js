@@ -4,6 +4,7 @@ import { WORKER_TOLERANCE, workerSplit } from './colonies'
 import { FUEL } from './industry-cycle'
 import { combine, isAvailable, registerRule, unavailable } from './provenance'
 import { flagOf, shipyardFinish, shipyardUpgradeRate } from './production'
+import { isFullCapacityYard } from './shipyard-types'
 
 const RULE = 'colonies.committedWorkers'
 const DAYS_PER_YEAR = 365
@@ -51,8 +52,8 @@ export const YARD_ACTIVITIES = Object.freeze({
 
 const CAPACITY_ADDED = Object.freeze({ 2: 500, 3: 1000, 4: 2000, 5: 5000, 6: 10000 })
 
-// The workers a yard needs, in millions: capacity times slipways, a tenth of it at a commercial yard, over 4,000.
-export const yardWorkers = (yardType, capacity, slipways) => (capacity * slipways * (yardType === 1 ? 1 : 0.1)) / 4000
+// The workers a yard needs, in millions: capacity times slipways, a tenth of it at a commercial or repair yard, over 4,000 (a naval or a light yard counts the whole, Population.cs `GetTotalShipyardWorkers`).
+export const yardWorkers = (yardType, capacity, slipways) => (capacity * slipways * (isFullCapacityYard(yardType) ? 1 : 0.1)) / 4000
 
 // What one yard activity changes in the yard's workers: { delta } (0 for one that changes none, a retool) or { missing } naming what the save lacks or the activity this does not know.
 const yardChange = (yard) => {

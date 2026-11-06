@@ -4,6 +4,7 @@ import { admitQueued, forecastColonySteps, FUEL, HORIZON_DAYS } from './industry
 import { TERMINATION, UNPACED } from './search-run'
 import { MINERALS, projectShortages } from './minerals'
 import { capacityKind } from './production-types'
+import { isFullCapacityYard } from './shipyard-types'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
 
 const PRODUCTION_VERSIONS = ['2.7.x']
@@ -89,8 +90,8 @@ registerRule({
   versions: PRODUCTION_VERSIONS,
   units: 'BP/yr',
   verification: 'estimated',
-  structure: ['FCT_Population (shipbuilding modifiers)', 'FCT_ShipClass.Size', 'FCT_Shipyard.SYType'],
-  note: `The colony's shipyard build rate times a factor for the class's size: half of one plus the size in hull spaces over 100 (a quarter of it at a military yard). ${ESTIMATE}`,
+  structure: ['FCT_Population (shipbuilding modifiers)', 'FCT_ShipClass.Size, Commercial', 'FCT_ShipyardTask.TaskTypeID, RefitID'],
+  note: `The colony's shipyard build rate times a factor for the class's size: half of one plus the size in hull spaces over 100, the size counted at a quarter for a commercial class and in full for any other, whatever the yard's type: the quarter is the class's own commercial flag. A refit task counts its target class's size and flag, as the game dates one. ${ESTIMATE}`,
 })
 
 registerRule({
@@ -124,11 +125,11 @@ registerRule({
 ;[
   { key: 'research', note: 'The remaining research points over the project\'s rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs.' },
   { key: 'industry', note: 'The project\'s remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony\'s production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony\'s one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes.' },
-  { key: 'ship', note: 'The task\'s remaining build points over the yard\'s rate, in days. Minerals are not simulated.' },
+  { key: 'ship', versions: ['2.7.x', '3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
   { key: 'training', note: 'The task\'s remaining build points over its rate, in days.' },
   { key: 'terraform', note: 'The pressure still to add or remove over the local rate, in days; for water vapour over liquid water, the construction cycles it takes as the vapour condenses and the oceans evaporate. Not within 200 years reads as no date.' },
-].forEach(({ key, note }) => registerRule({ id: `production.${key}Finish`, versions: PRODUCTION_VERSIONS, units: 'days', verification: 'estimated', structure: [`production.${key}Rate`], note: `${note} ${ESTIMATE}` }))
+].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}` }))
 
 registerRule({
   id: 'production.timeline',
@@ -760,16 +761,43 @@ export const shortageOf = (project) => {
   return { shortage: null, covers: unknown.length ? unavailable({ rule: 'production.shortage', missing: unknown }) : null, unknown }
 }
 
-// A shipyard task's rate in BP a year: the colony's build rate times a factor for the class's size. `ship`: { Size, CommercialModifier }, null where the class or the yard is not in the save.
+// The weight a class's size carries in a shipyard's build rate: a quarter for a commercial class, the whole size for any other, and null when the save does not give the flag. It is the class's own `FCT_ShipClass.Commercial`, which `Shipyard.cs RecalculateBuildRateForClass` multiplies the size by, wherever the class is built and whatever the yard's type.
+export const commercialSizeFactor = (commercial) => (commercial === null || commercial === undefined ? null : commercial ? 0.25 : 1)
+
+// A shipyard task's rate in BP a year: the colony's build rate times a factor for the class's size. `ship`: { Size, CommercialModifier }, the class's size and `commercialSizeFactor` of its `Commercial` flag; a class or a rate the save does not give makes the rate unavailable and names it.
 export const shipRate = (modifiers, ship) => {
   const rule = 'production.shipRate'
-  const missing = [...modifierGaps(modifiers, ['ShipyardBuildRate']), ...(isNumber(ship.Size) ? [] : ['the class\'s size']), ...(isNumber(ship.CommercialModifier) ? [] : ['the shipyard\'s type'])]
+  const missing = [...modifierGaps(modifiers, ['ShipyardBuildRate']), ...(isNumber(ship.Size) ? [] : ['the class\'s size']), ...(isNumber(ship.CommercialModifier) ? [] : ['the class\'s commercial flag'])]
 
   if (missing.length) {
     return unavailable({ rule, missing })
   }
 
-  return ofRule({ rule, value: modifiers.ShipyardBuildRate * (1 + ((ship.Size * ship.CommercialModifier) / 100 - 1) / 2), inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the class\'s size', 'the shipyard\'s type'] } })
+  return ofRule({ rule, value: modifiers.ShipyardBuildRate * (1 + ((ship.Size * ship.CommercialModifier) / 100 - 1) / 2), inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the class\'s size and commercial flag'] } })
+}
+
+// The build points a shipyard task has left over all its hulls, the measure of the game's own completion date (Population.cs `RefreshShipyardTasksListView`): the current hull's balance plus the whole cost of each later hull, |TotalBP - CompletedBP| + max(NumShips - 1, 0) x |TotalBP|. A later hull counts at the current hull's cost, whatever stock credit it will take or repair it will be priced by. `task`: { remaining (TotalBP - CompletedBP), totalBP, hulls (the stored NumShips) }. { value, missing }: `missing` names what the save does not give, with `value` null.
+export const shipTaskLeft = (task) => {
+  if (!isNumber(task.remaining)) {
+    return { value: null, missing: 'the task\'s remaining build points' }
+  } else if (!isNumber(task.hulls)) {
+    return { value: null, missing: 'the number of ships the task builds' }
+  }
+
+  const later = Math.max(task.hulls - 1, 0)
+
+  if (later > 0 && !isNumber(task.totalBP)) {
+    return { value: null, missing: 'the task\'s build points' }
+  }
+
+  return { value: Math.abs(task.remaining) + (later > 0 ? later * Math.abs(task.totalBP) : 0), missing: null }
+}
+
+// A shipyard task's finish as { result, idle }, a result of 'production.shipFinish': the build points it has left over all its hulls (`shipTaskLeft`) over its rate (`shipRate`'s result), in days. `task` as for `shipTaskLeft`; `paused` true, false or null.
+export const shipTaskFinish = ({ rate, task, paused }) => {
+  const left = shipTaskLeft(task)
+
+  return finishDays({ rule: 'production.shipFinish', rate, remaining: left.value, remainingName: left.missing || 'the task\'s remaining build points', paused })
 }
 
 // A shipyard activity's rate in BP a year at the yard's capacity (`capacity`, which the continual upgrade raises): the colony's build rate times a factor for the capacity. `shipyard`: { SYType }.
@@ -781,7 +809,7 @@ export const shipyardUpgradeRate = (modifiers, shipyard, capacity = shipyard.Cap
     return unavailable({ rule, missing })
   }
 
-  const commercialModifier = shipyard.SYType === 1 ? 1 : 0.1
+  const commercialModifier = isFullCapacityYard(shipyard.SYType) ? 1 : 0.1
 
   return ofRule({ rule, value: (1 + (capacity * commercialModifier / 5000 - 1) / 2) * modifiers.ShipyardBuildRate, inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the yard\'s capacity and type'] } })
 }
@@ -806,7 +834,7 @@ export const shipyardContinualDays = (modifiers, shipyard) => {
     const wat = (120 * shipyard.Slipways) * modifiers.ShipyardOperations
     const step = shipyardUpgradeRate(modifiers, shipyard, newCapacity).value * roi
 
-    lastUpgrade = step / wat * (shipyard.SYType === 1 ? 500 : 5000)
+    lastUpgrade = step / wat * (isFullCapacityYard(shipyard.SYType) ? 500 : 5000)
 
     if (!(lastUpgrade > 0) || !Number.isFinite(lastUpgrade)) {
       return idle(rule, 'a yard that can grow (its build rate gives no step)')

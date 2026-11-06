@@ -8,6 +8,8 @@
   The loaders run on an in-memory save built in this script, and on the fixture save (scripts/lib/fixtures.js, read-only), whether or not the save is there: a save that is not there is skipped. On a save that holds activities, the stored build points of every yard activity of types 1 to 6 (the slipway and the five capacity steps) are compared with the rules' price; the stored build points of a continual activity are 0, so the continual price has no stored comparison. The fixture holds no activity of types 1 to 6, so the stored comparisons and the totals pinned from two 2.7 saves (64 of 64 equal once the race's operations factor applies, 63 of them at a factor of 1) are printed as needs tier b. No save holds an activity of the 500 or 2,000 ton steps, so those two rest on the pattern of the others.
   A mapped mutation is rejected if a required save fixture is absent; it never drops that mapping. Page faults share one warm browser/server within their child section, and restore every source override before the next variant. Unreachable one-panel summary attributes and malformed-template compiler failures have been replaced with visible prose/title faults; their original classes are explicitly retired in the batch-two catalog ledger, not claimed retained.
 
+  A Light yard (type 4: 1,000 t, five slipways, no tooling) and a task that repeats (NumShips 3) are worked by hand. The Light yard is offered the slipway alone, priced and timed at the full weight of a naval yard; a repeating task's date is its balance plus the whole cost of each later ship over the rate, worked here from the seconds of the game's own date (Population.cs `RefreshShipyardTasksListView`: |TotalBP - CompletedBP| / BuildRate x SecondsPerYear, plus |TotalBP| / BuildRate x SecondsPerYear x (NumShips - 1)) and the class weight of its rate (Shipyard.cs `RecalculateBuildRateForClass`), never from the utility. The fixture's own Light yards are read as they are, and a copy of the fixture in the OS temp directory holds a task of three ships at its naval yard and a task of two ships moved to one of the Light yards; the owner's saves are never changed. The mineral projection of a task of three ships is its ship in hand's alone (MineralData.cs: the ship's minerals times the share of its build points left), so planting the count changes no colony's need.
+
   Each mutation of the utility, the loader, the page or the other sources must fail the checks it names. Exit code 1 when a check fails.
 */
 const fs = require('fs')
@@ -34,14 +36,17 @@ const FILES = {
   W: path.join(renderer, 'utilities', 'warnings', 'industry.js'),
   L: path.join(renderer, 'components', 'research', 'LinesView.vue'),
   PV: path.join(renderer, 'components', 'research', 'PathView.vue'),
+  PD: path.join(renderer, 'utilities', 'production.js'),
+  T: path.join(renderer, 'utilities', 'shipyard-types.js'),
+  CM: path.join(renderer, 'utilities', 'colony-minerals.js'),
 }
-const { G, R, D, P, PR, W, L, PV } = Object.fromEntries(Object.keys(FILES).map((key) => [key, key]))
-const NAMES = ['shipyard-growth', 'refits', 'production', 'provenance', 'deep-links']
+const { G, R, D, P, PR, W, L, PV, PD, T, CM } = Object.fromEntries(Object.keys(FILES).map((key) => [key, key]))
+const NAMES = ['shipyard-growth', 'refits', 'production', 'provenance', 'deep-links', 'shipyard-types', 'colony-minerals']
 const SAVES = [FIXTURE.file]
-// The checks of the saves that a save with no case for them leaves out, by the reason (the fixture holds no stored activity of types 1 to 6 and no task at a commercial yard): needs tier b. The head prints them and a mutation is not required to fail them.
+// The checks of the saves that a save with no case for them leaves out, by the reason (the fixture holds no stored activity of types 1 to 6): needs tier b. The head prints them and a mutation is not required to fail them.
 const NO_CASE = new Map()
 const NO_ACTIVITY = 'the fixture holds no stored shipyard activity of types 1 to 6, so the counts and prices pinned from two 2.7 saves have no case in it'
-const NO_COMMERCIAL = 'the fixture holds no task at a commercial yard, so the quarter weight of a commercial yard\'s build rate has no case in it'
+const NO_LIGHT = 'the save holds no light yard, so the slipway-only offer and the full naval weight of a light yard have no case in it'
 // The yards of each save that belong to a ship (FCT_Shipyard.ParentShipID above 0), read by hand from the saves: two yards of race 784 in the fixture (24, 25).
 const SHIP_BASED_YARDS = { [path.basename(FIXTURE.file)]: [24, 25] }
 
@@ -121,7 +126,7 @@ const same = (actual, expected) => { assert.deepEqual(actual, expected); return 
 const sameNumber = (actual, expected) => { assert.ok(near(actual, expected), `${short(actual)} != ${short(expected)}`); return true }
 const sameNumbers = (actual, expected) => { assert.equal(actual.length, expected.length); actual.forEach((value, index) => sameNumber(value, expected[index])); return true }
 const finiteAll = (value) => (typeof value === 'number' ? Number.isFinite(value) : Array.isArray(value) ? value.every(finiteAll) : value !== null && typeof value === 'object' ? Object.values(value).every(finiteAll) : true)
-const BROWSER_KEYS = new Set(['page-template', 'named-links', 'labels'])
+const BROWSER_KEYS = new Set(['page-template', 'named-links', 'labels', 'rendered-light', 'rendered-repeat'])
 const browserFault = (fault) => fault.fails.some((key) => BROWSER_KEYS.has(key))
 const PAGE_TIMEOUT = 60000
 let pageSession = null
@@ -181,7 +186,7 @@ const browserSession = async () => {
         await execOf(raw, `update FCT_Shipyard set ShipyardName = 'Growth probe ${['low', 'high', 'unknown'][index]}', Capacity = ${[1000, 2000, 'null'][index]} where ShipyardID = ${yard.ShipyardID}`)
       }
 
-      const [task] = await rowsOf(database, `select t.UnitName, t.ShipyardID, t.PopulationID, y.ShipyardName from FCT_ShipyardTask t join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.GameID = ${FIXTURE.gameId} and t.RaceID = ${FIXTURE.raceId} and t.TaskTypeID = 0 and t.Paused = 0 and (select sum(s.Slipways) from FCT_Shipyard s where s.PopulationID = t.PopulationID) > (select count(*) from FCT_ShipyardTask s where s.PopulationID = t.PopulationID) order by t.TaskID limit 1`)
+      const [task] = await rowsOf(database, `select t.TaskID, t.UnitName, t.ShipyardID, t.PopulationID, y.ShipyardName from FCT_ShipyardTask t join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.GameID = ${FIXTURE.gameId} and t.RaceID = ${FIXTURE.raceId} and t.TaskTypeID = 0 and t.Paused = 0 and (select sum(s.Slipways) from FCT_Shipyard s where s.PopulationID = t.PopulationID) > (select count(*) from FCT_ShipyardTask s where s.PopulationID = t.PopulationID) order by t.TaskID limit 1`)
       const [tech] = await rowsOf(database, `select t.TechSystemID from FCT_TechSystem t join FCT_RaceTech r on r.TechID = t.TechSystemID where r.GameID = ${FIXTURE.gameId} and r.RaceID = ${FIXTURE.raceId} and t.TechTypeID = 30 order by t.TechSystemID limit 1`)
       const obsoleteYards = () => rowsOf(database, `select count(*) as n from FCT_Shipyard y join FCT_ShipClass c on c.ShipClassID = y.BuildClassID where y.GameID = ${FIXTURE.gameId} and y.RaceID = ${FIXTURE.raceId} and c.Obsolete = 1`)
 
@@ -198,7 +203,13 @@ const browserSession = async () => {
       task.ShipyardName = 'Growth task probe'
       await execOf(raw, `update FCT_Shipyard set ShipyardName = 'Growth task probe' where ShipyardID = ${task.ShipyardID}`)
 
-      held.truth = { task, tech }
+      // Two plants on the disposable copy, as a player's own play would make them: the task of the named links makes three ships (the count the game stores for a repeat), and two classes a light yard lists take the sizes of 900 t and 1,100 t (18 and 22 hull spaces).
+      const listed = await rowsOf(database, `select c.ShipClassID, c.ClassName from FCT_ShipClass c where c.GameID = ${FIXTURE.gameId} and c.RaceID = ${FIXTURE.raceId} and c.Obsolete = 0 and c.ClassShippingLineID = 0 and c.OtherRaceClassID = 0 and c.Commercial = 0 and not exists (select 1 from FCT_ClassComponent cc join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = c.ShipClassID and d.Prototype > 0) order by c.ShipClassID limit 2`)
+
+      if (listed.length !== 2) throw new HarnessError('The light yard fixture needs two classes a light yard lists')
+
+      await execOf(raw, `update FCT_ShipyardTask set NumShips = 3 where TaskID = ${task.TaskID}; update FCT_ShipClass set Size = 18 where ShipClassID = ${listed[0].ShipClassID}; update FCT_ShipClass set Size = 22 where ShipClassID = ${listed[1].ShipClassID}`)
+      held.truth = { task, tech, nine: listed[0], eleven: listed[1] }
     } finally {
       await new Promise((resolve, reject) => raw.close((error) => error ? reject(error) : resolve()))
     }
@@ -247,6 +258,10 @@ const readRendered = ({ kind }) => {
     const idle = cards.find((card) => visibleText(card.querySelector('.panel-head')).startsWith('Idle capacity by colony'))
 
     return { job: { text: visibleText(job), links: job ? routes(job) : [] }, idleLinks: routes(idle).filter((link) => link.path === '/shipyards') }
+  } else if (kind === 'class-rows') {
+    const table = [...document.querySelectorAll('.shipyards-page .v-data-table')].filter(visible).find((node) => [...node.querySelectorAll('thead th')].some((cell) => visibleText(cell).includes('Retool to the class')))
+
+    return { headers: [...table.querySelectorAll('thead th')].map((cell) => visibleText(cell).trim()), rows: [...table.querySelectorAll('tbody > tr')].filter(visible).map((row) => [...row.querySelectorAll('td')].map((cell) => visibleText(cell).replace(/\s+/g, ' ').trim())) }
   } else if (kind === 'warnings') {
     return Object.fromEntries(['idle-slipways', 'obsolete-shipyards'].map((key) => [key, [...document.querySelectorAll(`[data-check="${key}"] tr[data-row]`)].filter(visible).map((row) => ({ id: row.dataset.row, text: visibleText(row), links: routes(row) }))]))
   } else if (kind === 'lines' || kind === 'path') {
@@ -353,6 +368,10 @@ const observeScreen = async (ctx, kind) => {
       await settlePage()
 
       return read('recap')
+    } else if (kind === 'nine' || kind === 'eleven') {
+      await visit(`/shipyards?view=classes&to=${held.truth[kind].ShipClassID}`)
+
+      return read('class-rows')
     } else if (kind === 'warnings') {
       await visit('/warnings')
 
@@ -395,15 +414,30 @@ const screenOf = (ctx, kind) => {
 // ---------- the fixtures worked by hand ----------
 
 const MODIFIERS = { ShipyardBuildRate: 1000, ShipyardOperations: 0.8, MinConstructionPeriod: 864000 }
+
+// The days of a task's date by the game's own arithmetic, worked from its seconds: the balance over the build rate of the class (Shipyard.cs `RecalculateBuildRateForClass`: half of one plus the size, a quarter of it for a commercial class, over 100, times the colony's rate), and for a task of more than one ship the whole cost of each later ship over the same rate (Population.cs `RefreshShipyardTasksListView`). The game's year is 31,536,000 s and its day 86,400 s.
+const gameDays = ({ total, completed, ships, buildRate, size, commercial = false }) => {
+  const rate = buildRate * (1 + ((commercial ? size * 0.25 : size) / 100 - 1) / 2)
+  const seconds = (Math.abs(total - completed) / rate) * 31536000 + (ships > 1 ? (Math.abs(total) / rate) * 31536000 * (ships - 1) : 0)
+
+  return seconds / 86400
+}
+
+const ZERO_MINERALS = Object.fromEntries(['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite'].map((name) => [name, 0]))
+// A class as the eligibility reads it, for the Light yard's cases: 18 hull spaces are 900 t and 22 are 1,100 t.
+const classRecord = (id, sizeHS, extra = {}) => ({ id, name: id, sizeHS, cost: 500, commercial: false, obsolete: false, shippingLine: false, otherRace: false, prototype: false, counts: { 1: 4 }, ...extra })
+const eligibilityContext = (...classes) => ({ classesById: Object.fromEntries(classes.map((shipClass) => [shipClass.id, shipClass])), components: { 1: { id: 1, name: 'part 1', typeId: 1, cost: 10, minerals: ZERO_MINERALS } }, version: '3.2.0', cache: new Map() })
 const HELD = [{ id: 1, name: 'Level 1', multiplier: 1 }, { id: 2, name: 'Level 2', multiplier: 0.8 }]
 const version = '2.7.x'
 
 // The yards: A, a naval yard of 4 slipways and 5,000 t with a construction task (class of 2,000 size units, 5,250 BP left) and a refit (10,500 BP left); B, a commercial yard of 2 slipways with a construction task (3,000 BP left) adding 1,000 t (800 BP, 200 done); C, a repair yard with nothing; D, a naval yard of 3 slipways, all working, retooling for class 101 (1,000 BP).
-const task = (id, over = {}) => ({ id, taskType: 0, classId: 100, className: 'Alpha class', refitId: null, name: `Unit ${id}`, totalBP: 6000, completedBP: 750, remaining: 5250, paused: false, size: 2000, ...over })
-const yardA = { id: 1, populationId: 7, colony: 'Alpha', name: 'Yard A', type: 1, slipways: 4, capacity: 5000, tooledId: 100, retoolId: null, taskType: 0, requiredBP: 0, completedBP: 0, paused: false, capacityTarget: 0, tasks: 2, taskRows: [task(11), task(12, { taskType: 2, refitId: 101, remaining: 10500, totalBP: 10500, completedBP: 0 })], shipBased: false }
-const yardB = { id: 2, populationId: 7, colony: 'Alpha', name: 'Yard B', type: 2, slipways: 2, capacity: 5000, tooledId: null, retoolId: null, taskType: 3, requiredBP: 800, completedBP: 200, paused: false, capacityTarget: 0, tasks: 1, taskRows: [task(21, { remaining: 3000, totalBP: 3000, completedBP: 0 })], shipBased: false }
+const task = (id, over = {}) => ({ id, taskType: 0, classId: 100, className: 'Alpha class', refitId: null, name: `Unit ${id}`, totalBP: 6000, completedBP: 750, remaining: 5250, hulls: 1, paused: false, size: 2000, commercial: false, targetSize: null, targetCommercial: null, ...over })
+const yardA = { id: 1, populationId: 7, colony: 'Alpha', name: 'Yard A', type: 1, slipways: 4, capacity: 5000, tooledId: 100, retoolId: null, taskType: 0, requiredBP: 0, completedBP: 0, paused: false, capacityTarget: 0, tasks: 2, taskRows: [task(11), task(12, { taskType: 2, refitId: 101, remaining: 10500, totalBP: 10500, completedBP: 0, targetSize: 2000, targetCommercial: false })], shipBased: false }
+const yardB = { id: 2, populationId: 7, colony: 'Alpha', name: 'Yard B', type: 2, slipways: 2, capacity: 5000, tooledId: null, retoolId: null, taskType: 3, requiredBP: 800, completedBP: 200, paused: false, capacityTarget: 0, tasks: 1, taskRows: [task(21, { remaining: 3000, totalBP: 3000, completedBP: 0, commercial: true })], shipBased: false }
 const yardC = { id: 3, populationId: 8, colony: 'Beta', name: 'Yard C', type: 3, slipways: 1, capacity: 1000, tooledId: 100, retoolId: null, taskType: 0, requiredBP: 0, completedBP: 0, paused: false, capacityTarget: 0, tasks: 0, taskRows: [], shipBased: false }
 const yardD = { id: 4, populationId: 8, colony: 'Beta', name: 'Yard D', type: 1, slipways: 3, capacity: 5000, tooledId: 100, retoolId: 101, taskType: 7, requiredBP: 1000, completedBP: 0, paused: false, capacityTarget: 0, tasks: 3, taskRows: [task(41), task(42), task(43)], shipBased: false }
+// E, a Light yard of 5 slipways and 1,000 t, tooled for no class, with a task of three ships (a class of 18 hull spaces, 250 of 1,000 BP done).
+const yardE = { id: 5, populationId: 8, colony: 'Beta', name: 'Yard E', type: 4, slipways: 5, capacity: 1000, tooledId: null, retoolId: null, taskType: 0, requiredBP: 0, completedBP: 0, paused: false, capacityTarget: 0, tasks: 1, taskRows: [task(51, { className: 'Light class', totalBP: 1000, completedBP: 250, remaining: 750, hulls: 3, size: 18 })], shipBased: false }
 const YARDS = [yardA, yardB, yardC, yardD]
 const CLASSES = [{ id: 100, name: 'Alpha class', obsolete: true }, { id: 101, name: 'Beta class', obsolete: false }]
 
@@ -472,12 +506,12 @@ const pure = (ctx) => {
     return same(rows.map((row) => row.label), [1, 2, 3, 4, 5, 6].map((type) => g.SHIPYARD_UPGRADE_TYPES[type]))
   })
   add('price: a yard type the rules do not cover is unavailable and says so; a yard with no type, capacity or slipways names that input', () => {
-    const other = f.price({ type: 4, capacity: 5000, slipways: 4 })
+    const other = f.price({ type: 5, capacity: 5000, slipways: 4 })
     const typeless = f.price({ type: null, capacity: 5000, slipways: 4 })
     const noCapacity = f.price({ type: 1, capacity: null, slipways: 4 })
     const noSlipways = f.step({ type: 1, capacity: 5000, slipways: null }, 1000)
 
-    return same([other.status, missing(other), typeless.status, missing(typeless), noCapacity.status, missing(noCapacity), noSlipways.status, missing(noSlipways), value(other)], ['unavailable', ['the rules for yard type 4'], 'unavailable', ['the yard\'s type'], 'unavailable', ['the yard\'s capacity'], 'unavailable', ['the yard\'s slipways'], null])
+    return same([other.status, missing(other), typeless.status, missing(typeless), noCapacity.status, missing(noCapacity), noSlipways.status, missing(noSlipways), value(other)], ['unavailable', ['the rules for yard type 5'], 'unavailable', ['the yard\'s type'], 'unavailable', ['the yard\'s capacity'], 'unavailable', ['the yard\'s slipways'], null])
   })
   add('price: a price that needs no slipways is not held up by a yard that has none stored, and a step with no capacity stored still prices', () => same([f.price({ type: 1, capacity: 5000, slipways: null }).status, f.step({ type: 1, capacity: null, slipways: 4 }, 1000).status], ['confirmed', 'confirmed']))
   add('price: a yard that belongs to a ship has no price and no time, naming that it cannot be modified, in the slipway, every step and the continual upgrade; a yard whose ship link is not stored names that; a yard of no ship prices as before', () => {
@@ -501,6 +535,56 @@ const pure = (ctx) => {
 
     return same([rows.length > 0, finiteAll(rows), rows.every((item) => item >= 0)], [true, true, true])
   })
+
+  // ----- the Light yard -----
+  const lightYard = { type: 4, capacity: 1000, slipways: 5 }
+  const GROW_GAP = 'a yard whose capacity can grow (a light yard adds slipways only)'
+
+  add('light: a slipway at a light yard of 1,000 t costs the capacity over 500 t times 120 times the operations, at the full weight of a naval yard: 192 BP at 0.8 and 240 BP at 1, a confirmed result of its rule', () => same([value(f.price(lightYard)), value(g.slipwayPrice({ yard: lightYard, operations: f.factorOne, version })), value(f.price({ type: 1, capacity: 1000, slipways: 5 })), f.price(lightYard).status, ruleOf(f.price(lightYard))].map((item) => (typeof item === 'number' ? Math.round(item * 1000) / 1000 : item)), [192, 240, 192, 'confirmed', 'shipyardGrowth.slipwayPrice']))
+  add('light: a light yard is offered the slipway alone: its upgrade rows are the slipway, and no capacity step and no continual upgrade is priced, each unavailable and naming a yard whose capacity can grow', () => {
+    const rows = g.upgradePrices({ yard: lightYard, operations, version })
+    const steps = g.CAPACITY_STEPS.map((step) => g.capacityStepPrice({ yard: lightYard, step, operations, version }))
+    const continual = g.continualPrice({ yard: lightYard, target: 6000, operations, version })
+
+    return same([rows.map((row) => row.key), steps.map((result) => [result.status, value(result), missing(result)]), continual.status, value(continual), missing(continual)], [['slipway'], steps.map(() => ['unavailable', null, [GROW_GAP]]), 'unavailable', null, [GROW_GAP]])
+  })
+  add('light: a naval yard keeps the capacity steps and the continual upgrade a light yard is not offered (the six fixed rows and a continual price of the same capacity)', () => same([g.upgradePrices({ yard: { ...lightYard, type: 1 }, operations, version }).length, g.continualPrice({ yard: { ...lightYard, type: 1 }, target: 6000, operations, version }).status], [6, 'estimated']))
+  add('light: the slipway of a light yard is timed at the modification rate of a naval yard of its capacity: 600 BP a year at 1,000 t (510 at a tenth of the capacity), so 192 BP take 116.8 days', () => {
+    const time = g.upgradeTime(MODIFIERS, lightYard, 1, f.price(lightYard))
+
+    return sameNumbers([value(g.modificationRate(MODIFIERS, lightYard)), value(time.result)], [600, (192 / 600) * 365])
+  })
+  add('light: a light yard of 1,000 t lists a class of 900 t with no tooling (capable, listed, a no-retool verdict that holds) and refuses one of 1,100 t, naming the capacity and that it can be neither retooled nor given more capacity', () => {
+    const nine = classRecord('Nine', 18)
+    const eleven = classRecord('Eleven', 22)
+    const yard = { type: 4, capacity: 1000, slipways: 5, tasks: 0, tooledId: null }
+    const takes = m.refits.yardEligibility(yard, nine, 'build', eligibilityContext(nine))
+    const over = m.refits.yardEligibility(yard, eleven, 'build', eligibilityContext(eleven))
+
+    return same([takes.state, takes.tooling.kind, takes.tooling.check.ok, over.state, over.tooling, over.blockers.some((text) => text.includes('capacity')), over.blockers.some((text) => text.includes('neither retooled nor given more capacity'))], ['capable', 'listed', true, 'ineligible', null, true, true])
+  })
+  add('light: a light yard needs no retool where a naval yard of the same capacity and no tooled class takes the 900 t class after a retool, and it ignores the class it is said to be tooled for', () => {
+    const nine = classRecord('Nine', 18)
+    const yard = { type: 4, capacity: 1000, slipways: 5, tasks: 0 }
+    const light = [null, 'Gone', undefined].map((tooledId) => m.refits.yardEligibility({ ...yard, tooledId }, nine, 'build', eligibilityContext(nine)))
+    const naval = m.refits.yardEligibility({ ...yard, type: 1, tooledId: null }, nine, 'build', eligibilityContext(nine))
+
+    return same([light.map((result) => [result.state, result.tooling.kind]), naval.state, naval.tooling.kind], [[['capable', 'listed'], ['capable', 'listed'], ['capable', 'listed']], 'retool', 'unassigned'])
+  })
+  add('light: a light yard does not list another race\'s class, an obsolete one, a shipping line\'s or one with prototype components, each ineligible for its own reason', () => {
+    const yard = { type: 4, capacity: 1000, slipways: 5, tasks: 0, tooledId: null }
+    const verdicts = ['otherRace', 'obsolete', 'shippingLine', 'prototype'].map((flag) => { const shipClass = classRecord('F', 18, { [flag]: true }); return m.refits.yardEligibility(yard, shipClass, 'build', eligibilityContext(shipClass)) })
+
+    return same([verdicts.map((result) => result.state), verdicts[0].blockers.some((text) => text.includes('another race')), verdicts[1].blockers.some((text) => text.includes('obsolete'))], [['ineligible', 'ineligible', 'ineligible', 'ineligible'], true, true])
+  })
+  add('light: a light yard is busy with every slipway working, and its verdict is decided on the 3.2 line and unknown for a line the rule does not cover', () => {
+    const nine = classRecord('Nine', 18)
+    const yard = { type: 4, capacity: 1000, slipways: 5, tasks: 0, tooledId: null }
+    const at = (over, version) => m.refits.yardEligibility({ ...yard, ...over }, nine, 'build', { ...eligibilityContext(nine), version })
+
+    return same([at({ tasks: 5 }, '3.2.0').state, at({ tasks: 4 }, '3.2.0').state, at({}, '3.2.0').result.assumptions.length, at({}, '3.0.0').state, at({}, '2.7.1').state], ['busy', 'capable', 0, 'unknown', 'capable'])
+  })
+  add('rules: the finish rule of a shipyard task covers the 3.2 line and names the repeat count it reads, and the yard\'s no-retool and eligibility rules cover both lines', () => same([p.getRule('production.shipFinish').versions, p.getRule('production.shipFinish').structure.some((text) => text.includes('NumShips')), ['refit.noRetool', 'refit.yardEligibility'].map((id) => p.getRule(id).versions)], [['2.7.x', '3.2.x'], true, [['2.7.x', '3.2.x'], ['2.7.x', '3.2.x']]]))
 
   // ----- the continual upgrade -----
   add('continual: the price is the tons added over 500 times the slipways times 120 times the operations: 7,680 BP for 10,000 t at a naval yard of 4 slipways, a tenth at a commercial yard, an estimated result of its rule', () => {
@@ -582,23 +666,59 @@ const pure = (ctx) => {
 
     return same([value(g.activityFinish(MODIFIERS, yard).result), ruleOf(g.activityFinish(MODIFIERS, yard).result)], [10, 'production.shipyardContinual'])
   })
-  add('time: a task takes its remaining build points over the colony\'s rate for its class: 5,250 BP at 10,500 a year is 182.5 days at a naval yard, 3,000 BP at 3,000 a year 365 days at a commercial one', () => {
-    const naval1 = g.taskFinish(MODIFIERS, yardA, yardA.taskRows[0])
-    const commercial1 = g.taskFinish(MODIFIERS, yardB, yardB.taskRows[0])
+  add('time: a task takes its remaining build points over the colony\'s rate for its class, the quarter weight the class\'s own flag: 5,250 BP at 10,500 a year is 182.5 days for a military class, 3,000 BP at 3,000 a year 365 days for a commercial one', () => {
+    const naval1 = g.taskFinish(MODIFIERS, yardA.taskRows[0])
+    const commercial1 = g.taskFinish(MODIFIERS, yardB.taskRows[0])
 
     return sameNumbers([value(naval1.result), value(commercial1.result)], [182.5, 365]) === true && ruleOf(naval1.result) === 'production.shipFinish' ? true : short([naval1, commercial1])
   })
   add('time: a paused task is idle with no time, a task whose pause flag is not stored is unavailable', () => {
-    const paused = g.taskFinish(MODIFIERS, yardA, { ...yardA.taskRows[0], paused: true })
-    const unknown = g.taskFinish(MODIFIERS, yardA, { ...yardA.taskRows[0], paused: null })
+    const paused = g.taskFinish(MODIFIERS, { ...yardA.taskRows[0], paused: true })
+    const unknown = g.taskFinish(MODIFIERS, { ...yardA.taskRows[0], paused: null })
 
     return same([paused.idle, value(paused.result), unknown.idle, unknown.result.status], [true, null, false, 'unavailable'])
   })
-  add('time: a task of a class with no size, or a yard with no type, is unavailable and named', () => {
-    const sizeless = g.taskFinish(MODIFIERS, yardA, { ...yardA.taskRows[0], size: null })
-    const typeless = g.taskFinish(MODIFIERS, { ...yardA, type: null }, yardA.taskRows[0])
+  add('time: a task of a class with no size, or whose commercial flag is not stored, is unavailable and named', () => {
+    const sizeless = g.taskFinish(MODIFIERS, { ...yardA.taskRows[0], size: null })
+    const flagless = g.taskFinish(MODIFIERS, { ...yardA.taskRows[0], commercial: null })
 
-    return same([sizeless.result.status, typeless.result.status, missing(sizeless.result).includes('the class\'s size'), missing(typeless.result).includes('the shipyard\'s type')], ['unavailable', 'unavailable', true, true])
+    return same([sizeless.result.status, flagless.result.status, missing(sizeless.result).includes('the class\'s size'), missing(flagless.result).includes('the class\'s commercial flag')], ['unavailable', 'unavailable', true, true])
+  })
+
+  // ----- a task that repeats -----
+  const repeating = yardE.taskRows[0]
+  const sixHundred = gameDays({ total: 1000, completed: 250, ships: 3, buildRate: 1000, size: 18 })
+
+  add('time: a task of three ships at a light yard takes its balance and the whole cost of each later ship over the rate, as the game dates it: (750 + 2 x 1,000) BP at 590 BP a year is 1,701.27 days', () => {
+    const finish = g.taskFinish(MODIFIERS, repeating)
+
+    return sameNumbers([value(finish.rate), value(finish.result), sixHundred], [590, sixHundred, ((750 + 2 * 1000) / 590) * 365])
+  })
+  add('time: a later ship counts at the stored task\'s cost, not at its balance, and a task of one ship is dated to the current ship alone (750 BP at 590 a year is 464.07 days); a balance past the cost counts as its size', () => {
+    const days = (over, completed = 250, ships = 3) => value(g.taskFinish(MODIFIERS, { ...repeating, ...over }).result) - gameDays({ total: 1000, completed, ships, buildRate: 1000, size: 18 })
+
+    return same([near(days({ hulls: 1 }, 250, 1), 0), near(days({ hulls: 2 }, 250, 2), 0), near(days({ completedBP: 1100, remaining: -100, hulls: 2 }, 1100, 2), 0), near(value(g.taskFinish(MODIFIERS, { ...repeating, hulls: 1 }).result), (750 / 590) * 365)], [true, true, true, true])
+  })
+  add('time: a task whose count of ships or build points is not stored is unavailable and names it, never the current ship alone; one ship needs no count of build points', () => {
+    const unknown = g.taskFinish(MODIFIERS, { ...repeating, hulls: null })
+    const cost = g.taskFinish(MODIFIERS, { ...repeating, totalBP: null })
+    const single = g.taskFinish(MODIFIERS, { ...repeating, totalBP: null, hulls: 1 })
+
+    return same([unknown.result.status, missing(unknown.result), cost.result.status, missing(cost.result), value(single.result) !== null], ['unavailable', ['the number of ships the task builds'], 'unavailable', ['the task\'s build points'], true])
+  })
+  add('time: a refit dates by its target class, as the game does (Population.cs RefreshShipyardTasksListView): 2,000 BP left to a class of 40 hull spaces is 1,042.86 days at the target\'s 700 BP a year, where a construction task of the same row would take 1,237.29 at the source class\'s 590', () => {
+    const row = task(60, { taskType: 2, refitId: 103, size: 18, commercial: false, targetSize: 40, targetCommercial: false, remaining: 2000, totalBP: 2000, completedBP: 0 })
+    const finish = g.taskFinish(MODIFIERS, row)
+    const source = g.taskFinish(MODIFIERS, { ...row, taskType: 0, targetSize: null, targetCommercial: null })
+    const worked = gameDays({ total: 2000, completed: 0, ships: 1, buildRate: 1000, size: 40 })
+
+    return sameNumbers([value(finish.rate), value(finish.result), worked, value(source.rate), value(source.result)], [700, worked, (2000 / 700) * 365, 590, (2000 / 590) * 365]) === true && value(finish.result) !== value(source.result) ? true : short([finish, source])
+  })
+  add('time: a refit whose target class is not read is unavailable and names the target\'s size, never dated by its source class', () => {
+    const row = task(61, { taskType: 2, refitId: 103, size: 18, commercial: false, targetSize: null, targetCommercial: null, remaining: 2000, totalBP: 2000, completedBP: 0 })
+    const finish = g.taskFinish(MODIFIERS, row)
+
+    return same([finish.result.status, missing(finish.result).includes('the class\'s size'), value(finish.result)], ['unavailable', true, null])
   })
 
   // ----- the labels -----
@@ -630,12 +750,12 @@ const execOf = (raw, sql) => new Promise((resolve, reject) => raw.exec(sql, (err
 const loaderSql = (shape) => `
 create table FCT_Population (PopulationID integer, PopName text);
 insert into FCT_Population values (7, 'Alpha'), (8, 'Beta');
-create table FCT_ShipClass (ShipClassID integer, ClassName text, Size real);
-insert into FCT_ShipClass values (10, 'Ten', 2000), (11, 'Eleven', 3000);
+create table FCT_ShipClass (ShipClassID integer, ClassName text, Size real, Commercial integer);
+insert into FCT_ShipClass values (10, 'Ten', 2000, 0), (11, 'Eleven', 3000, 0);
 create table FCT_Shipyard (ShipyardID integer, GameID integer, RaceID integer, PopulationID integer, ShipyardName text, SYType integer, Slipways integer, Capacity real, BuildClassID integer, TaskType integer${shape === 'plain' ? '' : ', RetoolClassID integer, RequiredBP real, CompletedBP real, PauseActivity integer, CapacityTarget real, ParentShipID integer'});
 ${shape === 'plain' ? 'insert into FCT_Shipyard values (1, 1, 1, 7, \'Yard 1\', 1, 4, 5000, 10, 3), (2, 1, 1, 8, \'Yard 2\', 3, 1, 1000, 0, 0), (3, 1, 2, 8, \'Yard 3\', 1, 1, 100, 0, 0);' : 'insert into FCT_Shipyard values (1, 1, 1, 7, \'Yard 1\', 1, 4, 5000, 10, 3, 0, 800, 200, 0, 0, 0), (2, 1, 1, 8, \'Yard 2\', 3, 1, 1000, 0, 0, 0, 0, 0, null, 0, 5), (3, 1, 2, 8, \'Yard 3\', 1, 1, 100, 0, 0, 0, 0, 0, 0, 0, 0);'}
-${shape === 'notasks' ? '' : 'create table FCT_ShipyardTask (TaskID integer, GameID integer, RaceID integer, ShipyardID integer, TaskTypeID integer, ClassID integer, RefitID integer, UnitName text, TotalBP real, CompletedBP real, Paused integer);'}
-${shape === 'notasks' ? '' : 'insert into FCT_ShipyardTask values (101, 1, 1, 1, 0, 10, 0, \'First\', 6000, 750, 0), (102, 1, 1, 1, 2, 10, 11, null, 10500, 500, 1), (103, 1, 2, 3, 0, 11, 0, \'Other race\', 100, 0, 0), (104, 1, 1, 1, 0, 11, 0, \'Third\', 300, 0, null);'}
+${shape === 'notasks' ? '' : `create table FCT_ShipyardTask (TaskID integer, GameID integer, RaceID integer, ShipyardID integer, TaskTypeID integer, ClassID integer, RefitID integer, UnitName text, TotalBP real, CompletedBP real, Paused integer${shape === 'norepeat' ? '' : ', NumShips integer'});`}
+${shape === 'notasks' ? '' : `insert into FCT_ShipyardTask values (101, 1, 1, 1, 0, 10, 0, 'First', 6000, 750, 0${shape === 'norepeat' ? '' : ', 3'}), (102, 1, 1, 1, 2, 10, 11, null, 10500, 500, 1${shape === 'norepeat' ? '' : ', 1'}), (103, 1, 2, 3, 0, 11, 0, 'Other race', 100, 0, 0${shape === 'norepeat' ? '' : ', 1'}), (104, 1, 1, 1, 0, 11, 0, 'Third', 300, 0, null${shape === 'norepeat' ? '' : ', null'});`}
 create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer);
 insert into FCT_RaceTech values (1, 1, 1), (1, 1, 2), (1, 1, 3), (1, 1, 4), (1, 2, 5), (2, 1, 6);
 create table FCT_TechSystem (TechSystemID integer, Name text, TechTypeID integer, AdditionalInfo real);
@@ -667,11 +787,12 @@ const loader = (ctx) => {
 
     return same([yards.map((yard) => yard.id), yards.map((yard) => yard.tasks), yards.map((yard) => yard.taskRows.length)], [[1, 2], [3, 0], [3, 0]])
   })
-  add('loader: a task row carries its type, class, refit target, name, build points, what is left, its pause flag and the class\'s size', async () => {
+  add('loader: a task row carries its type, class, refit target, name, build points, what is left, its pause flag, the count of ships it makes, the class\'s size and flag and its refit target\'s size and flag', async () => {
     const { yards } = await read()
 
-    return same(yards[0].taskRows.map((row) => [row.id, row.taskType, row.classId, row.className, row.refitId, row.name, row.totalBP, row.completedBP, row.remaining, row.paused, row.size]), [[101, 0, 10, 'Ten', null, 'First', 6000, 750, 5250, false, 2000], [102, 2, 10, 'Ten', 11, null, 10500, 500, 10000, true, 2000], [104, 0, 11, 'Eleven', null, 'Third', 300, 0, 300, null, 3000]])
+    return same(yards[0].taskRows.map((row) => [row.id, row.taskType, row.classId, row.className, row.refitId, row.name, row.totalBP, row.completedBP, row.remaining, row.paused, row.hulls, row.size, row.commercial, row.targetSize, row.targetCommercial]), [[101, 0, 10, 'Ten', null, 'First', 6000, 750, 5250, false, 3, 2000, false, null, null], [102, 2, 10, 'Ten', 11, null, 10500, 500, 10000, true, 1, 2000, false, 3000, false], [104, 0, 11, 'Eleven', null, 'Third', 300, 0, 300, null, null, 3000, false, null, null]])
   })
+  add('loader: a save whose task table has no count of ships gives null for it on every task, never 1', async () => same((await read('norepeat')).yards[0].taskRows.map((row) => row.hulls), [null, null, null]))
   add('loader: the activity is read with the yard: its type, the build points and what is done, the pause flag (0 and 1 as false and true) and the capacity target', async () => {
     const { yards } = await read()
 
@@ -762,6 +883,32 @@ const page = (ctx) => {
     return same([none.inventoryRows.length, none.inventoryHint, colony.inventoryRows.length, colony.inventoryHint], [0, 'The race has no shipyard.', 0, 'The colony named by the link has no shipyard of the race.'])
   })
   add('page-rows: no figure of any row is NaN or infinite', () => (finiteAll(make().inventoryRows.map((row) => [row.slipwayBP, row.freeSlipways, row.activitySort, row.taskLines.map((line) => line.days)])) ? true : 'a figure is NaN or infinite'))
+  add('page-rows: a light yard is one row typed Light, tooled for no class, with its free slipways, its slipway priced and a task of three ships shown as "1 of 3 left" and dated to all of them', () => {
+    const [row] = make({ yards: [yardE] }).inventoryRows
+    const [line] = row.taskLines
+
+    return same([row.type, row.untooled, row.slipwaysText, near(row.slipwayBP, 192), line.hullsText, line.hulls, line.remaining, near(line.days, gameDays({ total: 1000, completed: 250, ships: 3, buildRate: 1000, size: 18 }))], ['Light', true, '4 of 5', true, '1 of 3 left', 3, 750, true])
+  })
+  add('page-rows: the class\'s flag sets the task\'s rate, not the yard\'s type: a commercial class of 18 hull spaces in the naval yard\'s task takes 3,000 BP at 522.5 a year and a military class in the commercial yard\'s at 590, the figures the yard type alone would swap', () => {
+    const row = (commercial) => task(90, { remaining: 3000, totalBP: 3000, completedBP: 0, size: 18, commercial, hulls: 1 })
+    const days = (yard, commercial) => make({ yards: [{ ...yard, taskRows: [row(commercial)] }] }).inventoryRows[0].taskLines[0].days
+
+    return sameNumbers([days(yardA, true), days(yardB, false)], [gameDays({ total: 3000, completed: 0, ships: 1, buildRate: 1000, size: 18, commercial: true }), gameDays({ total: 3000, completed: 0, ships: 1, buildRate: 1000, size: 18 })]) === true && days(yardA, true) !== days(yardA, false) ? true : short([days(yardA, true), days(yardB, false)])
+  })
+  add('page-rows: a task of one ship, or one whose count is not stored, shows no "n of m"', () => same(make({ yards: [yardA, { ...yardE, taskRows: [{ ...yardE.taskRows[0], hulls: null }] }] }).inventoryRows.flatMap((row) => row.taskLines).map((line) => line.hullsText), ['', '', '']))
+  add('page-rows: a light yard\'s retool cell for a class it lists says no retool is needed, with no cost', () => {
+    const nine = classRecord('Nine', 18)
+    const result = m.refits.yardEligibility({ ...yardE, tooledId: null }, nine, 'build', eligibilityContext(nine))
+    const cell = make({ yards: [yardE] }).retoolOf(yardE, result, nine, MODIFIERS, '3.2.x')
+
+    return same([result.tooling.kind, cell.state, cell.label, cell.cost], ['listed', 'listed', 'No retool needed', null])
+  })
+  add('growth: a light yard\'s Growth view prices the slipway alone, with no continual row for a target and the continual target disabled for it, where a naval yard keeps all seven rows', () => {
+    const vm = make({ yards: [yardE, yardA], yardId: 5 })
+    const rows = vm.growthOf(yardE, 6000).rows
+
+    return same([rows.map((row) => row.key), near(value(rows[0].price), 192), vm.growthLight, vm.growthOf(yardA, 15000).rows.length, make({ yardId: 1 }).growthLight], [['slipway'], true, true, 7, false])
+  })
 
   add('growth: the rows are the slipway, the five steps and the continual upgrade, with the prices and times worked by hand at yard A', () => {
     const growth = make().growthOf(yardA, 15000)
@@ -805,10 +952,15 @@ const page = (ctx) => {
     return same(growth.rows.map((row) => [row.price.status, row.days]), growth.rows.map(() => ['unavailable', null]))
   })
 
-  add('tiles: the Yards and Growth views\' tiles are the counts of the yards: 4 yards (2 naval, 1 commercial, 1 repair), 4 of 10 slipways free, 6 tasks and 2 activities, operations 0.8', () => {
+  add('tiles: the Yards and Growth views\' tiles are the counts of the yards: 4 yards (2 naval, 0 light, 1 commercial, 1 repair), 4 of 10 slipways free, 6 tasks and 2 activities, operations 0.8', () => {
     const tiles = make().yardTiles
 
-    return same([tiles.map((tile) => tile.label), tiles.map((tile) => tile.value), tiles[0].note, tiles[2].note], [['Shipyards', 'Free slipways', 'Work running', 'Shipyard operations'], ['4', '4 of 10', '6 tasks', '0.8'], '2 naval, 1 commercial, 1 repair', '2 yard activities (upgrades and retools)'])
+    return same([tiles.map((tile) => tile.label), tiles.map((tile) => tile.value), tiles[0].note, tiles[2].note], [['Shipyards', 'Free slipways', 'Work running', 'Shipyard operations'], ['4', '4 of 10', '6 tasks', '0.8'], '2 naval, 0 light, 1 commercial, 1 repair', '2 yard activities (upgrades and retools)'])
+  })
+  add('tiles: a light yard is counted among the yards by its own type, its slipways among the free ones', () => {
+    const tiles = make({ yards: [yardA, yardE] }).yardTiles
+
+    return same([tiles[0].value, tiles[0].note, tiles[1].value], ['2', '1 naval, 1 light, 0 commercial, 0 repair', '6 of 9'])
   })
   add('tiles: the operations tile is a dash with its result unavailable when the race holds no level, and the tiles are the same on the Growth view', () => {
     const tiles = make({ shipyardOperationsHeld: [] }).yardTiles
@@ -1073,6 +1225,31 @@ const links = (ctx) => [
 
     return same([seen.lines.map((link) => link.query.view).sort(), seen.path], [['growth', 'yards'], [{ path: '/shipyards', query: { view: 'yards' } }]])
   }],
+  ['rendered-light: the rendered Classes view shows each light yard of the fixture as type Light, with its five free slipways, 1,000 t and no tooling, the 900 t class it lists with no retool and the 1,100 t class it cannot take, neither retooled nor given more capacity', async () => {
+    for (const [kind, taken] of [['nine', true], ['eleven', false]]) {
+      const seen = await screenOf(ctx, kind)
+      const lights = seen.rows.filter((cells) => cells[1] === 'Light')
+
+      assert.equal(lights.length, 4, `${kind}: the four light yards of the fixture draw a row`)
+
+      lights.forEach((cells) => {
+        assert.deepEqual([cells[2], cells[3].replace(/\D/g, ''), cells[4]], ['5 of 5', '1000', 'Not needed'], `${kind} ${cells[0]}`)
+
+        if (taken) {
+          assert.ok(cells[5].includes('Can take it') && cells[6].includes('No retool needed'), `${kind} ${cells[0]}: ${cells[5]} / ${cells[6]}`)
+        } else {
+          assert.ok(cells[5].includes('Cannot') && cells[5].includes('neither retooled nor given more capacity'), `${kind} ${cells[0]}: ${cells[5]}`)
+        }
+      })
+    }
+
+    return true
+  }],
+  ['rendered-repeat: the rendered Production ship job of a task of three ships reads "1 of 3 ships left"', async () => {
+    const seen = await screenOf(ctx, 'recap')
+
+    return same(seen.job.text.includes('1 of 3 ships left'), true)
+  }],
 ]
 
 // ---------- the saves ----------
@@ -1087,6 +1264,27 @@ const openSave = (file) => new Promise((resolve, reject) => {
 
   const raw = new sqlite3.Database(resolved, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve({ file: path.basename(resolved), query: rawQuery(raw), close: () => raw.close() })))
 })
+
+// A disposable copy of the fixture with `plantSql` applied, handed to `use` as a read handle: the copy lives in the OS temp directory and its folder is removed after, the same way as the browser copy (the owner's saves are never changed).
+const withPlanted = async (file, plantSql, use) => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'growth-repeat-'))
+  const copy = path.join(folder, 'save.db')
+
+  fs.copyFileSync(path.resolve(root, file), copy)
+
+  const raw = await new Promise((resolve, reject) => {
+    const database = new sqlite3.Database(copy, (error) => (error ? reject(error) : resolve(database)))
+  })
+
+  try {
+    await execOf(raw, plantSql)
+
+    return await use({ query: rawQuery(raw) })
+  } finally {
+    await new Promise((resolve) => raw.close(() => resolve()))
+    fs.rmSync(folder, { recursive: true, force: true })
+  }
+}
 
 const rowsOf = async (database, sql, replacements = {}) => (await database.query(sql, { replacements }))[0]
 
@@ -1215,14 +1413,22 @@ const saveStatements = async (ctx, file) => {
 
     for (const { GameID, RaceID } of races) {
       const yards = await m.refits.loadYards(database, { GameID, RaceID })
-      const recap = await rowsOf(database, 'select FCT_ShipyardTask.TaskID as ID, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = :GameID and FCT_ShipyardTask.RaceID = :RaceID', { GameID, RaceID })
+      // The class the game dates a task by: a refit's target, the class it builds otherwise (Population.cs RefreshShipyardTasksListView turns to gclass22_1 for a refit and gclass22_0 for a build). Its size and `Commercial` flag are read from the save here, not through the utility's loader, and the rate is worked from the game's arithmetic.
+      const recap = await rowsOf(database, 'select t.TaskID as ID, t.TaskTypeID, t.TotalBP, t.NumShips as Hulls, t.TotalBP - t.CompletedBP as RemainingProduction, t.Paused, bc.Size as BuildSize, bc.Commercial as BuildCommercial, rc.Size as TargetSize, rc.Commercial as TargetCommercial from FCT_ShipyardTask t left join FCT_ShipClass bc on bc.ShipClassID = t.ClassID left join FCT_ShipClass rc on rc.ShipClassID = t.RefitID where t.GameID = :GameID and t.RaceID = :RaceID', { GameID, RaceID })
       const byId = Object.fromEntries(recap.map((row) => [row.ID, row]))
+      const rateOf = (row) => {
+        const refit = [2, 4].includes(row.TaskTypeID)
+        const size = refit ? row.TargetSize : row.BuildSize
+        const commercial = refit ? row.TargetCommercial : row.BuildCommercial
+
+        return MODIFIERS.ShipyardBuildRate * (1 + ((commercial === 1 ? size * 0.25 : size) / 100 - 1) / 2)
+      }
 
       yards.forEach((yard) => yard.taskRows.filter((row) => wanted(byId[row.id])).forEach((row) => {
         const expected = byId[row.id]
-        const rate = pr.shipRate(MODIFIERS, expected)
-        const finish = pr.finishDays({ rule: 'production.shipFinish', rate, remaining: expected.RemainingProduction, remainingName: 'the task\'s remaining build points', paused: pr.flagOf(expected.Paused) })
-        const actual = g.taskFinish(MODIFIERS, yard, row)
+        const rate = p.ofRule({ rule: 'production.shipRate', value: rateOf(expected), inputs: { present: ['the class\'s size and commercial flag'] }, units: 'BP/yr' })
+        const finish = pr.finishDays({ rule: 'production.shipFinish', rate, remaining: expected.RemainingProduction + (expected.Hulls > 1 ? (expected.Hulls - 1) * Math.abs(expected.TotalBP) : 0), remainingName: 'the task\'s remaining build points', paused: pr.flagOf(expected.Paused) })
+        const actual = g.taskFinish(MODIFIERS, row)
 
         compared++
 
@@ -1235,13 +1441,84 @@ const saveStatements = async (ctx, file) => {
     return same([bad, compared >= least], [[], true])
   }
 
-  add(`save-tasks: ${label}: the time left of every stored task is the Production Recap's, the build points left over the colony's rate for the class (the shared rate and finish)`, () => compareTasks(() => true, 0))
+  add(`save-tasks: ${label}: the time left of every stored task is the Production Recap's, the build points left over the colony's rate for the class (a refit's target, with the quarter weight of a commercial class)`, () => compareTasks(() => true, 0))
 
-  if ((await rowsOf(database, 'select count(*) as n from FCT_ShipyardTask inner join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID where FCT_Shipyard.SYType <> 1'))[0].n === 0) {
-    NO_CASE.set('save-commercial', NO_COMMERCIAL)
+  add(`save-flag: ${label}: a refit task whose target class is commercial sits at a naval yard and is dated at a quarter of the target's size, as the class's flag gives it, not at the full size the yard's type would give`, async () => {
+    const plant = `update FCT_ShipyardTask set TaskTypeID = 2, RefitID = (select min(ShipClassID) from FCT_ShipClass where GameID = ${FIXTURE.gameId} and RaceID = ${FIXTURE.raceId}) where TaskID = 1; update FCT_ShipClass set Commercial = 1 where ShipClassID = (select RefitID from FCT_ShipyardTask where TaskID = 1)`
+
+    return withPlanted(file, plant, async (copy) => {
+      const [stored] = await rowsOf(copy, 'select t.TotalBP, t.CompletedBP, t.NumShips, c.Size, c.Commercial, y.SYType from FCT_ShipyardTask t join FCT_ShipClass c on c.ShipClassID = t.RefitID join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.TaskID = 1')
+      const [row] = (await m.refits.loadRefitTasks(copy, { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId })).filter((task) => task.ID === 1)
+      const work = { total: stored.TotalBP, completed: stored.CompletedBP, buildRate: MODIFIERS.ShipyardBuildRate, size: stored.Size }
+      const rate = m.production.shipRate(MODIFIERS, row)
+      const finish = m.production.shipTaskFinish({ rate, task: { remaining: row.RemainingProduction, totalBP: row.TotalBP, hulls: row.Hulls }, paused: m.production.flagOf(row.Paused) })
+      const days = m.provenance.valueOrNull(finish.result)
+
+      return same([stored.SYType, stored.Commercial, row.Size, row.CommercialModifier, near(days, gameDays({ ...work, ships: stored.NumShips, commercial: true })), !near(days, gameDays({ ...work, ships: stored.NumShips, commercial: false }))], [1, 1, stored.Size, 0.25, true, true])
+    })
+  })
+
+  if ((await rowsOf(database, 'select count(*) as n from FCT_Shipyard where SYType = 4'))[0].n === 0) {
+    NO_CASE.set('save-light', NO_LIGHT)
   } else {
-    add(`save-commercial: ${label}: the time left of every stored task at a commercial yard is the Production Recap's, at a quarter of the class rate`, () => compareTasks((row) => row.CommercialModifier === 0.25, 1))
+    add(`save-light: ${label}: every light yard is read as type 4, offered the slipway alone at the full weight of a naval yard (capacity over 500 t times 120 times the race's operations) with no capacity step and no continual upgrade, and rated at the modification rate of a naval yard of its capacity`, async () => {
+      const bad = []
+      let seen = 0
+
+      for (const { GameID, RaceID } of races) {
+        const operations = m.g.shipyardOperations(await m.g.loadShipyardOperations(database, { GameID, RaceID }), '2.7.x')
+
+        for (const yard of (await m.refits.loadYards(database, { GameID, RaceID })).filter((candidate) => candidate.type === 4)) {
+          const rows = m.g.upgradePrices({ yard, operations, version: '2.7.x' })
+          const steps = m.g.CAPACITY_STEPS.map((step) => m.g.capacityStepPrice({ yard, step, operations, version: '2.7.x' }))
+          const continual = m.g.continualPrice({ yard, target: yard.capacity + 5000, operations, version: '2.7.x' })
+          const rate = (1 + (yard.capacity / 5000 - 1) / 2) * MODIFIERS.ShipyardBuildRate
+
+          seen++
+
+          if (rows.length !== 1 || !near(m.provenance.valueOrNull(rows[0].price), (yard.capacity / 500) * 120 * m.provenance.valueOrNull(operations)) || !steps.every((step) => step.status === 'unavailable') || continual.status !== 'unavailable' || !near(m.provenance.valueOrNull(m.g.modificationRate(MODIFIERS, yard)), rate)) {
+            bad.push(yard.id)
+          }
+        }
+      }
+
+      return same([bad, seen > 0], [[], true])
+    })
   }
+
+  add(`save-repeat: ${label}: a task of three ships planted on a copy of the save is dated at the game's own seconds (its balance plus the whole cost of each later ship over the build rate its class gives), at a naval yard and at a light yard, and the loader reads the count`, async () => {
+    const plant = 'update FCT_ShipyardTask set NumShips = 3 where TaskID = 1; update FCT_ShipyardTask set NumShips = 2, ShipyardID = (select min(ShipyardID) from FCT_Shipyard where SYType = 4 and GameID = 141 and RaceID = 784) where TaskID = 2'
+
+    return withPlanted(file, plant, async (copy) => {
+      const yards = await m.refits.loadYards(copy, { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId })
+      const bad = []
+
+      for (const [taskId, ships] of [[1, 3], [2, 2]]) {
+        const [stored] = await rowsOf(copy, 'select t.TotalBP, t.CompletedBP, t.NumShips, c.Size, c.Commercial, y.SYType from FCT_ShipyardTask t join FCT_ShipClass c on c.ShipClassID = t.ClassID join FCT_Shipyard y on y.ShipyardID = t.ShipyardID where t.TaskID = :id and t.TaskTypeID not in (2, 4)', { id: taskId })
+        const yard = yards.find((candidate) => candidate.taskRows.some((row) => row.id === taskId))
+        const row = yard.taskRows.find((candidate) => candidate.id === taskId)
+        const finish = m.g.taskFinish(MODIFIERS, row)
+        const work = { total: stored.TotalBP, completed: stored.CompletedBP, buildRate: MODIFIERS.ShipyardBuildRate, size: stored.Size, commercial: stored.Commercial === 1 }
+
+        if (stored.NumShips !== ships || row.hulls !== ships || yard.type !== stored.SYType || !near(m.provenance.valueOrNull(finish.result), gameDays({ ...work, ships })) || near(m.provenance.valueOrNull(finish.result), gameDays({ ...work, ships: 1 }))) {
+          bad.push([taskId, row.hulls, yard.type, m.provenance.valueOrNull(finish.result), gameDays({ ...work, ships })])
+        }
+      }
+
+      return same([bad, yards.filter((yard) => yard.type === 4).some((yard) => yard.taskRows.length === 1)], [[], true])
+    })
+  })
+  add(`save-repeat: ${label}: the mineral projection of a task of three ships is its ship in hand's alone, as in the game (the ship's minerals times the share of its build points left): planting the count changes no colony's need`, async () => {
+    const scope = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+    const before = await m.minerals.loadQueueNeeds(database, scope)
+
+    return withPlanted(file, 'update FCT_ShipyardTask set NumShips = 3 where TaskID = 1', async (copy) => {
+      const after = await m.minerals.loadQueueNeeds(copy, scope)
+      const [{ populationId, ship }] = (await copy.query('select PopulationID as populationId, Duranium * (TotalBP - CompletedBP) / TotalBP as ship from FCT_ShipyardTask where TaskID = 1'))[0]
+
+      return same([after, ship > 0 && !near(after[populationId].Duranium, before[populationId].Duranium + 2 * ship)], [before, true])
+    })
+  })
 
   return { skipped: false, statements, activities, close: () => database.close() }
 }
@@ -1287,7 +1564,7 @@ const MUTATIONS = [
   { name: 'the operations factor taken as the highest multiplier', file: G, find: 'value: Math.min(...held.map((level) => level.multiplier))', replace: 'value: Math.max(...held.map((level) => level.multiplier))', fails: ['operations', 'price', 'page-rows', 'save-stored'] },
   { name: 'a race holding no level given a factor of 1', file: G, find: '} else if (!held.length) {', replace: '} else if (!held.length) {\n    return figure({ rule, value: 1, present: [], units: \'\', version })\n  } else if (false) {', fails: ['operations', 'price', 'growth'] },
   { name: 'a level with no multiplier counted as 0', file: G, find: 'const unknown = held.filter((level) => !isNumber(level.multiplier))', replace: 'const unknown = []', fails: ['operations'] },
-  { name: 'the type rejection of a price removed', file: G, find: '  if (!isNumber(yard.type)) {\n    missing.push(\'the yard\\\'s type\')\n  } else if (factorOf(yard.type) === null) {\n    missing.push(`the rules for yard type $' + '{yard.type}`)\n  }\n', replace: '', fails: ['price'] },
+  { name: 'the type rejection of a price removed', file: G, find: '  if (!isNumber(yard.type)) {\n    missing.push(\'the yard\\\'s type\')\n  } else if (factorOf(yard.type) === null) {\n    missing.push(`the rules for yard type $' + '{yard.type}`)\n  } else if (capacityGrowth', replace: '  if (false) {\n  } else if (capacityGrowth', fails: ['price'] },
   { name: 'a linked yard hidden by the free-slipway filter', file: P, find: 'idleOnly && yard.id !== linkedYardId && full(yard)', replace: 'idleOnly && full(yard)', fails: ['links'] },
   { name: 'a linked yard hidden by the saved search', file: P, find: '(yard.id === linkedYardId || !search || ', replace: '(!search || ', fails: ['links'] },
   { name: 'a link that names no yard keeping the last linked yard', file: P, find: '      this.linkedYardId = yardId\n', replace: '', fails: ['links'] },
@@ -1295,15 +1572,17 @@ const MUTATIONS = [
   { name: 'a target at or below the capacity priced', file: G, find: 'isAvailable(price) && !(target > yard.capacity)', replace: 'false', fails: ['continual'] },
   { name: 'the most construction periods cut to 100', file: G, find: 'export const MAX_CONTINUAL_PERIODS = 100000', replace: 'export const MAX_CONTINUAL_PERIODS = 100', fails: ['continual', 'growth'] },
   { name: 'a fixed upgrade timed on no build points', file: G, find: 'remaining: price.value, target: null', replace: 'remaining: 0, target: null', fails: ['time', 'growth'] },
-  { name: 'a task at a commercial yard weighted as a naval one', file: G, find: 'yard.type === SHIPYARD_TYPE.NAVAL ? 1 : isNumber(yard.type) ? 0.25 : null', replace: 'isNumber(yard.type) ? 1 : null', fails: ['time', 'save-commercial'] },
+  { name: 'the rate weighted by the yard\'s type rather than the class\'s flag', file: R, find: '(case when TargetClass.Commercial = 0 then 1.0 when TargetClass.Commercial is null then null else 0.25 end)', replace: '(case when FCT_Shipyard.SYType in (1, 4) then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end)', fails: ['save-flag'] },
+  { name: 'a refit task dated by its source class', file: G, find: 'Size: refit ? task.targetSize : task.size,', replace: 'Size: refit ? task.size : task.size,', fails: ['time'] },
+  { name: 'a task row\'s refit target taken from the class it refits', file: R, find: 'TargetClass.Size as TargetSize', replace: 'TaskClass.Size as TargetSize', fails: ['loader'] },
+  { name: 'a task\'s own class flag read from its refit target', file: R, find: 'commercial: flagOf(row.Commercial),', replace: 'commercial: flagOf(row.TargetCommercial),', fails: ['loader'] },
   { name: 'an activity timed on all its build points, not what is left', file: G, find: 'isNumber(yard.requiredBP) && isNumber(yard.completedBP) ? yard.requiredBP - yard.completedBP : null', replace: 'isNumber(yard.requiredBP) ? yard.requiredBP : null', fails: ['time', 'page-rows'] },
   { name: 'the levels read for every race', file: G, find: 'where FCT_RaceTech.GameID = :GameID and FCT_RaceTech.RaceID = :RaceID and', replace: 'where FCT_RaceTech.GameID = :GameID and', fails: ['loader'] },
   { name: 'the Shipyard Operations tech type read as another', file: G, find: 'export const OPERATIONS_TECH_TYPE = 158', replace: 'export const OPERATIONS_TECH_TYPE = 30', fails: ['loader', 'techtree', 'save-operations', 'save-stored'] },
   { name: 'the tech lines swapped between the views', file: G, find: '{ 30: \'yards\', [OPERATIONS_TECH_TYPE]: \'growth\' }', replace: '{ 30: \'growth\', [OPERATIONS_TECH_TYPE]: \'yards\' }', fails: ['techtree'] },
   { name: 'the refit labelled as a repair', file: G, find: '2: \'Refit\',', replace: '2: \'Repair\',', fails: ['labels'] },
-  { name: 'a task\'s balance taken the wrong way round', file: R, find: 'remaining: isNumber(row.TotalBP) && isNumber(row.CompletedBP) ? row.TotalBP - row.CompletedBP : null', replace: 'remaining: isNumber(row.TotalBP) && isNumber(row.CompletedBP) ? row.CompletedBP - row.TotalBP : null', fails: ['loader', 'save-tasks'] },
+  { name: 'a task\'s balance taken the wrong way round', file: R, find: 'remaining: isNumber(row.TotalBP) && isNumber(row.CompletedBP) ? row.TotalBP - row.CompletedBP : null', replace: 'remaining: isNumber(row.TotalBP) && isNumber(row.CompletedBP) ? row.CompletedBP - row.TotalBP : null', fails: ['loader'] },
   { name: 'a task\'s pause flag not stored taken as running', file: R, find: 'paused: flagOf(row.Paused),\n  size: numberOf(row.Size),', replace: 'paused: Boolean(row.Paused),\n  size: numberOf(row.Size),', fails: ['loader'] },
-  { name: 'a task\'s size read from its refit target', file: R, find: 'FCT_ShipClass.Size from FCT_ShipyardTask left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID', replace: 'FCT_ShipClass.Size from FCT_ShipyardTask left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.RefitID', fails: ['loader'] },
   { name: 'a save with no task table given an empty list of tasks', file: R, find: 'taskRows: hasTasks ? Object.freeze(taskRows[row.ShipyardID] || []) : null', replace: 'taskRows: Object.freeze(taskRows[row.ShipyardID] || [])', fails: ['loader'] },
   { name: 'a stored pause flag of an activity taken as 0 when it is not there', file: R, find: 'paused: flagOf(row.PauseActivity),', replace: 'paused: Boolean(row.PauseActivity),', fails: ['loader'] },
   { name: 'a class link that opens Refits', file: D, find: 'classId ? { view: \'classes\', operation, from, to: classId }', replace: 'classId ? { view: \'refits\', operation, from, to: classId }', fails: ['links'] },
@@ -1352,6 +1631,32 @@ const MUTATIONS = [
   { name: 'a pick the race no longer has kept', file: P, find: 'if (id && !this.classById[id] && !this.linkedClassIds.includes(id)) {', replace: 'if (false) {', fails: ['page-persist'] },
   { name: 'a class the link names dropped with the stale picks', file: P, find: ' && !this.linkedClassIds.includes(id)', replace: '', fails: ['page-persist'] },
   { name: 'the picks cleared when the race changes', file: P, find: '      this.linkedClassIds = []\n      this.expanded = []', replace: '      this.linkedClassIds = []\n      this.fromId = null\n      this.toId = null\n      this.expanded = []', fails: ['page-persist'] },
+  { name: 'a light yard listing a class asking a retool', file: R, find: 'tooling = { kind: \'listed\', tooled: null', replace: 'tooling = { kind: \'unassigned\', tooled: null', fails: ['light', 'page-rows'] },
+  { name: 'a light yard not told from the others', file: R, find: 'const light = yard.type === SHIPYARD_TYPE.LIGHT', replace: 'const light = false', fails: ['light'] },
+  { name: 'another race\'s class listed by a light yard', file: R, find: 'flagged(hard, gaps, target.otherRace,', replace: 'void (hard, gaps, target.otherRace,', fails: ['light'] },
+  { name: 'a class over a light yard\'s capacity taken', file: R, find: 'blockers.push(\'A light yard can be neither retooled nor given more capacity\')', replace: 'void 0', fails: ['light'] },
+  { name: 'the yard rules left out of the 3.2 line', file: R, find: 'const YARD_VERSIONS = [\'2.7.x\', \'3.2.x\']', replace: 'const YARD_VERSIONS = [\'2.7.x\']', fails: ['light', 'rules'] },
+  { name: 'a task\'s count of ships read as 1', file: R, find: 'hulls: numberOf(row.NumShips),', replace: 'hulls: 1,', fails: ['loader', 'save-repeat'] },
+  { name: 'a light yard offered the capacity steps', file: G, find: '...(yard.type === SHIPYARD_TYPE.LIGHT ? [] : CAPACITY_STEPS.map(', replace: '...(false ? [] : CAPACITY_STEPS.map(', fails: ['light', 'save-light'] },
+  { name: 'a light yard priced for growing its capacity', file: G, find: 'else if (capacityGrowth && !growsInCapacity(yard.type)) {', replace: 'else if (false) {', fails: ['light', 'save-light'] },
+  { name: 'a light yard left out of the price rules', file: G, find: '(isFullCapacityYard(type) ? 1 :', replace: '(type === SHIPYARD_TYPE.NAVAL ? 1 :', fails: ['light', 'save-light'] },
+  { name: 'a task dated to its current ship alone', file: G, find: 'hulls: task.hulls }, paused: task.paused })', replace: 'hulls: 1 }, paused: task.paused })', fails: ['time', 'page-rows', 'save-repeat'] },
+  { name: 'a task of several ships dated to the first alone', file: PD, find: 'later > 0 ? later * Math.abs(task.totalBP) : 0', replace: '0', fails: ['time', 'page-rows', 'save-repeat'] },
+  { name: 'a later ship counted at the balance, not the whole cost', file: PD, find: 'later * Math.abs(task.totalBP)', replace: 'later * Math.abs(task.remaining)', fails: ['time', 'page-rows', 'save-repeat'] },
+  { name: 'a light yard\'s modification rate at a tenth of a naval yard\'s', file: PD, find: 'isFullCapacityYard(shipyard.SYType) ? 1 : 0.1', replace: 'shipyard.SYType === 1 ? 1 : 0.1', fails: ['light', 'save-light'] },
+  { name: 'a task with no count of ships dated as a single ship', file: PD, find: '  } else if (!isNumber(task.hulls)) {\n    return { value: null, missing: \'the number of ships the task builds\' }\n', replace: '', fails: ['time'] },
+  { name: 'a light yard not counted a full-capacity yard', file: T, find: 'export const isFullCapacityYard = (type) => type === SHIPYARD_TYPE.NAVAL || type === SHIPYARD_TYPE.LIGHT', replace: 'export const isFullCapacityYard = (type) => type === SHIPYARD_TYPE.NAVAL', fails: ['light', 'save-light'] },
+  { name: 'a light yard offered capacity growth', file: T, find: 'export const growsInCapacity = (type) => type !== SHIPYARD_TYPE.LIGHT', replace: 'export const growsInCapacity = () => true', fails: ['light', 'growth'] },
+  { name: 'the light yard type numbered as another', file: T, find: 'LIGHT: 4', replace: 'LIGHT: 5', fails: ['light', 'save-light'] },
+  { name: 'a light yard typed by no name', file: P, find: ', [SHIPYARD_TYPE.LIGHT]: \'Light\' }', replace: ' }', fails: ['page-rows'] },
+  { name: 'a continual row for a yard whose capacity cannot grow', file: P, find: 'if (target !== null && growsInCapacity(yard.type)) {', replace: 'if (target !== null) {', fails: ['growth'] },
+  { name: 'the continual target left open for a light yard', file: P, find: 'return this.growthYard !== null && !growsInCapacity(this.growthYard.type)', replace: 'return false', fails: ['growth'] },
+  { name: 'a repeating task\'s count of ships left off its line', file: P, find: 'hullsText: repeats ? `1 of $' + '{this.count(task.hulls)} left` : \'\'', replace: 'hullsText: \'\'', fails: ['page-rows'] },
+  { name: 'the light yards left out of the type tile', file: P, find: '$' + '{this.count(typed(SHIPYARD_TYPE.LIGHT))} light, ', replace: '', fails: ['tiles'] },
+  { name: 'the tooled-for cell of a light yard naming none', file: P, find: '                <span v-if="item.untooled" class="text--secondary" title="A light yard lists the classes that fit it, with no tooling">Not needed</span>', replace: '                <span v-if="item.untooled" class="text--secondary" title="A light yard lists the classes that fit it, with no tooling">None</span>', fails: ['rendered-light'] },
+  { name: 'the retool of a class a light yard lists left unread', file: P, find: '      } else if (tooling.kind === \'listed\') {\n        return none(\'listed\', \'No retool needed\', \'A light yard lists the class, so it needs no tooling\')\n', replace: '', fails: ['page-rows'] },
+  { name: 'the count of ships left off a repeating job', file: PR, find: 'ship.Hulls > 1 ? `1 of $' + '{this.count(ship.Hulls)} ships left` : \'\'', replace: '\'\'', fails: ['rendered-repeat'] },
+  { name: 'the mineral projection of a task of several ships taken for each ship', file: CM, find: '/ FCT_ShipyardTask.TotalBP end as $' + '{name}', replace: '/ FCT_ShipyardTask.TotalBP * FCT_ShipyardTask.NumShips end as $' + '{name}', fails: ['save-repeat'] },
 ]
 
 const MUTANTS = MUTATIONS.map((mutation, index) => ({ id: `mutant:${index}`, ...mutation }))
@@ -1371,7 +1676,7 @@ const sourcesOf = (mutant) => {
 const contextOf = async (sources) => {
   const real = sourcesOf(null)
   const changed = (key) => sources[key] !== real[key]
-  const utilityNames = { G: 'shipyard-growth', R: 'refits', D: 'deep-links' }
+  const utilityNames = { G: 'shipyard-growth', R: 'refits', D: 'deep-links', PD: 'production', T: 'shipyard-types', CM: 'colony-minerals' }
   const planted = Object.fromEntries(Object.entries(utilityNames).filter(([key]) => changed(key)).map(([key, name]) => [name, sources[key]]))
   const pagePlanted = Object.fromEntries(Object.entries(planted).map(([name, text]) => [`utilities/${name}`, text]))
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: planted })
@@ -1379,7 +1684,7 @@ const contextOf = async (sources) => {
   const pageOptions = await loadPage('pages/shipyards', { stubs: STUBS, modules: { 'mixins/production-modifiers': MIXIN_STUB }, sources: pageSources })
   const persistedOptions = await loadPage('pages/shipyards', { stubs: STUBS, modules: { 'mixins/production-modifiers': MIXIN_STUB, 'mixins/persisted-view': PERSISTED_VIEW_SOURCE }, sources: pageSources })
 
-  return { m: { g: loaded['shipyard-growth'], refits: loaded.refits, production: loaded.production, provenance: loaded.provenance, deepLinks: loaded['deep-links'] }, pageOptions, persistedOptions, pageText: sources.P, sourceText: sources }
+  return { m: { g: loaded['shipyard-growth'], refits: loaded.refits, production: loaded.production, provenance: loaded.provenance, deepLinks: loaded['deep-links'], minerals: loaded['colony-minerals'] }, pageOptions, persistedOptions, pageText: sources.P, sourceText: sources }
 }
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))

@@ -333,6 +333,32 @@ const pure = (ctx) => {
     return true
   })
 
+  add('held: a construction or refit task that repeats (it still makes more than one ship) holds back the stock of the components it may take again for each later ship, with no amount proven, and one of a single ship, with no stored count or with Use Components off holds none', () => {
+    const build = { id: 1, populationId: 3, typeId: 0, classId: 1, refitId: 0, useComponents: 1, totalBP: 90, classCost: 100, hulls: 3 }
+    const refit = { id: 2, populationId: 3, typeId: 2, classId: 1, refitId: 2, useComponents: 1, hulls: 2 }
+    const claimsOf = (result) => result.claims.map((claim) => [claim.populationId, claim.componentId, claim.proof, claim.units])
+    const repeating = run({ tasks: [build] })
+    const refitting = run({ tasks: [refit] })
+    const unknownClass = run({ tasks: [{ ...build, classId: 99 }] })
+
+    assert.deepEqual(repeating.tasks.map((task) => [task.state, task.hulls]), [['successors', 3]])
+    assert.ok(repeating.tasks[0].reason.includes('2 more ships'), repeating.tasks[0].reason)
+    assert.deepEqual(claimsOf(repeating), [[3, 101, 'unknown', null], [3, 102, 'unknown', null], [3, 103, 'unknown', null]])
+    assert.deepEqual([rowOf(repeating, 101).reserved, rowOf(repeating, 102).reserved], [{ proven: 0, unknown: 4 }, { proven: 0, unknown: 2 }])
+    assert.deepEqual(refitting.tasks.map((task) => task.state), ['successors'])
+    assert.deepEqual(claimsOf(refitting), [[3, 102, 'unknown', null]])
+    assert.deepEqual(claimsOf(unknownClass), [[3, null, 'unknown', null]])
+    assert.deepEqual(unknownClass.tasks.map((task) => task.state), ['successors'])
+
+    for (const task of [{ ...build, hulls: 1 }, { ...build, hulls: null }, { ...build, hulls: undefined }, { ...build, useComponents: 0 }, { ...refit, hulls: 1 }, { ...refit, useComponents: 0 }]) {
+      const result = run({ tasks: [task] })
+
+      assert.deepEqual([result.claims, result.tasks.map((row) => row.state)], [[], ['taken']])
+    }
+
+    return true
+  })
+
   add('held: a task of a type that is not known, or an unread task list, holds back all the stock it could claim and the shortage is an upper bound', () => {
     const unknownType = run({ tasks: [{ id: 1, populationId: 2, typeId: 9, classId: 1 }] })
 
@@ -826,7 +852,7 @@ const TABLES = {
   FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'Name'],
   FCT_Shipyard: ['ShipyardID', 'GameID', 'PopulationID'],
   FCT_ShipClass: ['ShipClassID', 'Cost'],
-  FCT_ShipyardTask: ['TaskID', 'GameID', 'RaceID', 'PopulationID', 'TaskTypeID', 'ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP'],
+  FCT_ShipyardTask: ['TaskID', 'GameID', 'RaceID', 'PopulationID', 'TaskTypeID', 'ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP', 'NumShips'],
   FCT_IndustrialProjects: ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'SpeciesID', 'ProductionType', 'ProductionID', 'WealthUse', 'Amount', 'PartialCompletion', 'Percentage', 'Queue', 'Description', 'Pause'],
   FCT_ShipDesignComponents: ['SDComponentID', 'GameID', 'Name', 'ComponentTypeID', 'Size', 'Cost'],
   FCT_RaceTech: ['GameID', 'TechID', 'RaceID'],
@@ -856,9 +882,9 @@ const FIXTURE_ROWS = {
   ],
   FCT_ShipClass: [{ ShipClassID: 5, Cost: 100 }],
   FCT_ShipyardTask: [
-    { TaskID: 1, GameID: 1, RaceID: 1, PopulationID: 1, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 1, UseComponents: 1, TotalBP: 90, CompletedBP: 0 },
-    { TaskID: 2, GameID: 1, RaceID: 2, PopulationID: 3, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 0, UseComponents: 1, TotalBP: 100, CompletedBP: 0 },
-    { TaskID: 3, GameID: 1, RaceID: 1, PopulationID: 2, TaskTypeID: 4, ClassID: 5, RefitID: 6, Paused: null, UseComponents: null, TotalBP: null, CompletedBP: null },
+    { TaskID: 1, GameID: 1, RaceID: 1, PopulationID: 1, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 1, UseComponents: 1, TotalBP: 90, CompletedBP: 0, NumShips: 3 },
+    { TaskID: 2, GameID: 1, RaceID: 2, PopulationID: 3, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 0, UseComponents: 1, TotalBP: 100, CompletedBP: 0, NumShips: 1 },
+    { TaskID: 3, GameID: 1, RaceID: 1, PopulationID: 2, TaskTypeID: 4, ClassID: 5, RefitID: 6, Paused: null, UseComponents: null, TotalBP: null, CompletedBP: null, NumShips: null },
   ],
   FCT_IndustrialProjects: [
     { ProjectID: 1, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 3, ProductionID: 102, WealthUse: 40, Amount: 4.0268, PartialCompletion: 0.9732, Percentage: 2, Queue: 0, Description: 'Sensor', Pause: 0 },
@@ -955,6 +981,7 @@ const loaders = (ctx) => {
     assert.deepEqual([tasks[0].typeId, tasks[0].classId, tasks[0].totalBP, tasks[0].classCost, tasks[0].paused, tasks[0].useComponents], [0, 5, 90, 100, 1, 1])
     assert.deepEqual([tasks[1].typeId, tasks[1].refitId, tasks[1].useComponents, tasks[1].totalBP, tasks[1].paused], [4, 6, null, null, null])
     assert.equal(tasks[1].classCost, 100)
+    assert.deepEqual([tasks[0].hulls, tasks[1].hulls], [3, null])
     assert.equal(reads.tasks, true)
 
     return true
@@ -1001,6 +1028,7 @@ const loaders = (ctx) => {
     const noSurvey = await read(['FCT_RaceSysSurvey'])
     const noAmounts = await read(['FCT_IndustrialProjects.Amount', 'FCT_IndustrialProjects.PartialCompletion'])
     const noUse = await read(['FCT_ShipyardTask.UseComponents'])
+    const noShips = await read(['FCT_ShipyardTask.NumShips'])
 
     assert.deepEqual(noPause.projects.map((entry) => entry.paused), [null, null])
     assert.deepEqual(noClassCost.tasks.map((task) => task.classCost), [null, null])
@@ -1008,6 +1036,7 @@ const loaders = (ctx) => {
     assert.equal(noSurvey.colonies[1].systemName, null)
     assert.deepEqual(noAmounts.projects.map((entry) => [entry.amount, entry.partial]), [[null, null], [null, null]])
     assert.deepEqual(noUse.tasks.map((task) => task.useComponents), [null, null])
+    assert.deepEqual(noShips.tasks.map((task) => task.hulls), [null, null])
 
     return true
   })
@@ -1646,6 +1675,11 @@ const MUTATIONS = [
   { name: 'the available figure ignores what is held back', file: U, find: 'availableLocal += free', replace: 'availableLocal += held', fails: ['held'] },
   { name: 'an automatic refit claims nothing', file: U, find: 'ids.forEach((componentId) => claims.push(', replace: 'ids.slice(0, 0).forEach((componentId) => claims.push(', fails: ['held', 'save-planted'] },
   { name: 'an automatic refit with Use Components off claims stock', file: U, find: 'if (task.useComponents === 0) {', replace: 'if (false) {', fails: ['held'] },
+  { name: 'a repeating task holding nothing', file: U, find: ' && later > 0 && task.useComponents !== 0) {', replace: ' && false) {', fails: ['held'] },
+  { name: 'a repeating task counted from a single ship', file: U, find: 'const later = isNumber(task.hulls) && task.hulls > 1 ? task.hulls - 1 : 0', replace: 'const later = 0', fails: ['held'] },
+  { name: 'a repeating refit holding every component of its class', file: U, find: 'holdBack(task.typeId === TASK_TYPE.CONSTRUCTION ? (mounted ? mounted.map((part) => part.componentId) : null) : additions(task), reason,', replace: 'holdBack(mounted ? mounted.map((part) => part.componentId) : null, reason,', fails: ['held'] },
+  { name: 'a repeating task with Use Components off holding stock', file: U, find: ' && later > 0 && task.useComponents !== 0) {', replace: ' && later > 0) {', fails: ['held'] },
+  { name: 'a task\'s count of ships read as 1', file: D, find: 'hulls: numberOrNull(row.NumShips)', replace: 'hulls: 1', fails: ['loaders'] },
   { name: 'a construction task holds the stock it used', file: U, find: 'rows.push({ ...base, state: \'taken\', reason: \'The stock this task uses was taken when it was made.\' })', replace: 'rows.push({ ...base, state: \'taken\', reason: \'The stock this task uses was taken when it was made.\' })\n      claims.push({ populationId: task.populationId, componentId: null, units: null, proof: \'unknown\', source: \'task\', taskId: task.id, reason: \'held\' })', fails: ['held', 'save-tasks'] },
   { name: 'an unread task list holds nothing', file: U, find: 'if (!read) {\n    claims.push(', replace: 'if (false) {\n    claims.push(', fails: ['held', 'save-manifest'] },
   { name: 'a task of an unknown type holds nothing', file: U, find: 'claims.push({ populationId: task.populationId === undefined ? null : task.populationId, componentId: null, units: null, proof: \'unknown\', source: \'task\', taskId: task.id, reason })', replace: 'void reason', fails: ['held'] },

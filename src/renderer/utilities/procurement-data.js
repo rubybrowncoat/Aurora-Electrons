@@ -40,7 +40,7 @@ const loadColonies = async (database, { GameID, RaceID }) => {
   return { colonies: Object.fromEntries(rows.map((row) => [row.PopulationID, { id: row.PopulationID, name: row.PopName, systemId: numberOrNull(row.SystemID), systemName: row.SystemName === undefined ? null : row.SystemName, yards: numberOrNull(row.Yards) }])), read: true }
 }
 
-// The race's shipyard tasks, one row each as stored with the class cost: [{ id, populationId, typeId, classId, refitId, paused, useComponents, totalBP, completedBP, classCost }]. The cost is what the ship costs without any component credit; a task of a lower total was made with stock credited against it.
+// The race's shipyard tasks, one row each as stored with the class cost: [{ id, populationId, typeId, classId, refitId, paused, useComponents, totalBP, completedBP, hulls (NumShips, the ships the task still makes, null where the save stores none), classCost }]. The cost is what the ship costs without any component credit; a task of a lower total was made with stock credited against it.
 const loadTasks = async (database, { GameID, RaceID }) => {
   const [task, shipClass] = await Promise.all([columnsOf(database, 'FCT_ShipyardTask'), columnsOf(database, 'FCT_ShipClass')])
 
@@ -50,9 +50,9 @@ const loadTasks = async (database, { GameID, RaceID }) => {
 
   const cost = shipClass.has('Cost') && shipClass.has('ShipClassID') && task.has('ClassID') ? 'FCT_ShipClass.Cost' : 'null'
   const join = cost === 'null' ? '' : 'left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID'
-  const [rows] = await database.query(`select FCT_ShipyardTask.TaskID, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.TaskTypeID, ${selectedColumns('FCT_ShipyardTask', task, ['ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP'])}, ${cost} as ClassCost from FCT_ShipyardTask ${join} where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} order by FCT_ShipyardTask.TaskID`)
+  const [rows] = await database.query(`select FCT_ShipyardTask.TaskID, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.TaskTypeID, ${selectedColumns('FCT_ShipyardTask', task, ['ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP', 'NumShips'])}, ${cost} as ClassCost from FCT_ShipyardTask ${join} where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} order by FCT_ShipyardTask.TaskID`)
 
-  return { tasks: rows.map((row) => ({ id: row.TaskID, populationId: row.PopulationID, typeId: numberOrNull(row.TaskTypeID), classId: numberOrNull(row.ClassID), refitId: numberOrNull(row.RefitID), paused: numberOrNull(row.Paused), useComponents: numberOrNull(row.UseComponents), totalBP: numberOrNull(row.TotalBP), completedBP: numberOrNull(row.CompletedBP), classCost: numberOrNull(row.ClassCost) })), read: true }
+  return { tasks: rows.map((row) => ({ id: row.TaskID, populationId: row.PopulationID, typeId: numberOrNull(row.TaskTypeID), classId: numberOrNull(row.ClassID), refitId: numberOrNull(row.RefitID), paused: numberOrNull(row.Paused), useComponents: numberOrNull(row.UseComponents), totalBP: numberOrNull(row.TotalBP), completedBP: numberOrNull(row.CompletedBP), hulls: numberOrNull(row.NumShips), classCost: numberOrNull(row.ClassCost) })), read: true }
 }
 
 // The race's queued component projects and development projects the game loads (utilities/production-types.js `loadedProject`): [{ id, productionType, populationId, componentId, amount, partial, percentage, queue, paused, name }]. `componentId` is the project's `ProductionID`: the component of a component or Engineering Project, the missile of an Ordnance Project, the ground unit class of a Ground Unit Project. `amount` and `partial` are the stored remaining amount and part-built unit (null when the save lacks them); `paused` is the pause flag as stored (null when the save lacks it).

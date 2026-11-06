@@ -333,9 +333,15 @@ const pure = (ctx) => {
   })
   add('yardstates: a repair yard cannot build, an unsupported yard type is not covered, and neither has a time or minerals', () => {
     const repair = yardRow({}, {}, 2, { type: 3 })
-    const odd = yardRow({}, {}, 2, { type: 4 })
+    const odd = yardRow({}, {}, 2, { type: 5 })
 
     return repair.state === 'ineligible' && odd.state === 'unsupported' && [repair, odd].every((row) => row.days === null && row.minerals === null && row.bp === null && row.timeResult.status === 'unavailable') ? true : short([repair, odd])
+  })
+  add('yardstates: a light yard lists the class with no tooling, so it builds it where a naval yard tooled for another class retools, and its workers are the whole capacity over 4000', () => {
+    const light = yardRow({}, {}, 2, { type: 4, tooledId: 101 })
+    const naval = yardRow({}, {}, 2, { tooledId: 101 })
+
+    return naval.state === 'retool' && light.state === 'capable' && light.retoolDays === 0 && light.days !== null && near(light.labour.millions, 2 * 1000 / 4000) && near(light.labour.millions, naval.labour.millions) ? true : short([light, naval.state])
   })
   add('yardstates: a yard of a type the save does not give is unknown, naming it', () => {
     const row = yardRow({}, {}, 2, { type: null })
@@ -881,7 +887,7 @@ const panel = (ctx) => {
     return vm.paths.station.state === 'unknown' && vm.verdict.some((line) => line.text.includes('Not known')) && vm.tiles[0].value === 'Not known' ? true : short(vm.paths.station)
   })
   add('panel: each row has a status look, its reasons, what is not known, and a sort rank with the unknown ones last', () => {
-    const vm = mount(props({ yards: [yard({ id: 1 }), yard({ id: 2, tasks: 2 }), yard({ id: 3, type: 4 }), yard({ id: 4, type: null })], colonies: { 7: colony({ spaceports: 0 }) } }))
+    const vm = mount(props({ yards: [yard({ id: 1 }), yard({ id: 2, tasks: 2 }), yard({ id: 3, type: 5 }), yard({ id: 4, type: null })], colonies: { 7: colony({ spaceports: 0 }) } }))
     const byKey = Object.fromEntries(vm.rows.map((row) => [row.key, row]))
 
     return same([byKey['yard-1'].rank, byKey['yard-2'].rank, byKey['yard-3'].rank, byKey['yard-4'].rank, byKey['industry-7'].rank], [0, 1, 5, null, 4]) === true && byKey['yard-4'].gaps.length > 0 && byKey['industry-7'].reasons.some((text) => text.includes('spaceport')) && byKey['yard-1'].pathLabel !== byKey['industry-7'].pathLabel ? true : short(vm.rows.map((row) => [row.key, row.rank]))
@@ -1055,6 +1061,7 @@ const MUTATIONS = [
   { name: 'projects not read taken as none held', file: U, find: '{ held: 0, missing: [\'the colony\\\'s industrial projects\'] }', replace: '{ held: 0, missing: [] }', fails: ['unread'] },
   { name: 'a stock amount not read taken as held', file: U, find: 'total.invalid || total.unknown ||', replace: 'total.invalid ||', fails: ['unread'] },
   { name: 'a yard\'s workers counted for one slipway', file: U, find: 'yardWorkers(yard.type, yard.capacity, yard.slipways)', replace: 'yardWorkers(yard.type, yard.capacity, 1)', fails: ['labour'] },
+  { name: 'a light yard\'s workers counted as a repair yard\'s', file: U, find: 'yardWorkers(yard.type, yard.capacity, yard.slipways)', replace: 'yardWorkers(yard.type === 4 ? 3 : yard.type, yard.capacity, yard.slipways)', fails: ['yardstates'] },
   { name: 'factories not read taken as none', file: U, find: 'isNumber(colony.factories.workers) ? colony.factories.workers : null', replace: 'isNumber(colony.factories.workers) ? colony.factories.workers : 0', fails: ['labour'] },
   { name: 'a quantity with a fraction accepted', file: U, find: 'if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_PLATFORMS) {', replace: 'if (quantity < 1 || quantity > MAX_PLATFORMS) {', fails: ['invalid'] },
   { name: 'a colony with factories and no spaceport left out', file: U, find: 'colonies[id].spaceports > 0 || (colonies[id].factories && colonies[id].factories.workers > 0)', replace: 'colonies[id].spaceports > 0', fails: ['rows'] },

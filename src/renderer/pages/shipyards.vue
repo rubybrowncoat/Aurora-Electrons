@@ -42,7 +42,8 @@
             </template>
             <template #[`item.capacity`]="{ item }">{{ count(item.capacity) }}</template>
             <template #[`item.tooledName`]="{ item }">
-              <span v-if="item.tooled === undefined" class="text-no-wrap">—<provenance-mark :result="item.tooledGap" /></span>
+              <span v-if="item.untooled" class="text--secondary" title="A light yard lists the classes that fit it, with no tooling">Not needed</span>
+              <span v-else-if="item.tooled === undefined" class="text-no-wrap">—<provenance-mark :result="item.tooledGap" /></span>
               <span v-else-if="item.tooled === null" class="text--secondary">None</span>
               <span v-else class="d-flex align-center flex-wrap">
                 {{ item.tooledName }}
@@ -55,7 +56,7 @@
               <span v-else-if="!item.taskCount" class="text--secondary">None</span>
               <div v-else class="py-1">
                 <div class="font-weight-medium">{{ count(item.taskCount) }}</div>
-                <div v-for="line in item.taskLines.slice(0, 3)" :key="line.id" class="caption text--secondary">{{ line.label }} · {{ line.subject }} · <span class="text-no-wrap">{{ taskTime(line) }}<provenance-mark :result="line.result" /></span></div>
+                <div v-for="line in item.taskLines.slice(0, 3)" :key="line.id" class="caption text--secondary">{{ line.label }}<span v-if="line.hullsText" :title="line.hullsNote"> ({{ line.hullsText }})</span> · {{ line.subject }} · <span class="text-no-wrap">{{ taskTime(line) }}<provenance-mark :result="line.result" /></span></div>
                 <div v-if="item.taskLines.length > 3" class="caption text--secondary">and {{ count(item.taskLines.length - 3) }} more</div>
               </div>
             </template>
@@ -90,7 +91,7 @@
                       </thead>
                       <tbody>
                         <tr v-for="line in item.taskLines" :key="line.id">
-                          <td>{{ line.label }}</td>
+                          <td>{{ line.label }}<div v-if="line.hullsText" class="caption text--secondary" :title="line.hullsNote">{{ line.hullsText }}</div></td>
                           <td>{{ line.subject }}</td>
                           <td class="text-right">{{ count(line.remaining, 1) }}</td>
                           <td class="text-right text-no-wrap">{{ line.rate === null ? '—' : count(line.rate, 1) }}<provenance-mark :result="line.rateResult" /></td>
@@ -128,7 +129,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to find idle yards and to see what keeps each one busy. A yard appears once, with every task it works. A task's time left is the Production Recap's: the build points not yet done over the colony's shipyard rate for the task's class. The activity is the yard's own upgrade or retool; a continual upgrade's time is approximate. A retool holds no slipway, so the free slipways are the slipways less the tasks. The add-slipway price is the yard's capacity over 500 tons times 120 times the race's shipyard operations, a tenth of it at a commercial or repair yard. Obsolete marks a yard tooled for a class that is marked obsolete.<provenance-mark rule="shipyardGrowth.slipwayPrice" />
+            Use it to find idle yards and to see what keeps each one busy. A yard appears once, with every task it works. A task's time left is the Production Recap's: the build points not yet done, with the whole cost of each later ship of a repeating task, over the colony's shipyard rate for the task's class. A repeating task shows how many ships it still has to build, the current one included, because the save stores that count and not the total the task was given; Left (BP) is the current ship's. The activity is the yard's own upgrade or retool; a continual upgrade's time is approximate. A retool holds no slipway, so the free slipways are the slipways less the tasks. The add-slipway price is the yard's capacity over 500 tons times 120 times the race's shipyard operations, a tenth of it at a commercial or repair yard. A light yard lists the classes that fit it, so it is tooled for none and has no retool or capacity step. Obsolete marks a yard tooled for a class that is marked obsolete.<provenance-mark rule="shipyardGrowth.slipwayPrice" />
           </div>
         </v-card>
 
@@ -137,7 +138,7 @@
             <span>Yard growth<provenance-mark rule="shipyardGrowth.capacityStep" label /></span>
             <span class="d-flex align-center flex-wrap controls">
               <v-autocomplete :value="growthYard ? growthYard.id : null" :items="yardOptions" item-text="name" item-value="id" label="Shipyard" dense outlined hide-details clearable class="yard-picker" @change="yardId = $event || null" />
-              <v-text-field :value="growthTarget === null ? '' : String(growthTarget)" label="Continual target (t)" :placeholder="targetPlaceholder" persistent-placeholder type="number" min="0" dense outlined hide-details clearable class="target-field" @input="setTarget" />
+              <v-text-field :value="growthTarget === null ? '' : String(growthTarget)" label="Continual target (t)" :placeholder="targetPlaceholder" persistent-placeholder type="number" min="0" dense outlined hide-details clearable :disabled="growthLight" class="target-field" @input="setTarget" />
             </span>
           </div>
           <div v-if="!growth" class="panel-body caption text--secondary">{{ growthHint }}</div>
@@ -151,6 +152,7 @@
               Modification rate {{ count(figureOf(growth.rate), 1) }} BP a year<provenance-mark :result="growth.rate" /> · Shipyard operations {{ count(figureOf(operations), 2) }}<provenance-mark :result="operations" />
             </div>
             <div v-if="growthYard.shipBased === true" class="caption text--secondary mb-2">The yard belongs to a ship, which the game does not let be modified: no upgrade is priced.</div>
+            <div v-if="growthLight" class="caption text--secondary mb-2">A light yard is offered the slipway alone: its capacity cannot grow, so no capacity step or continual target is priced.</div>
             <v-simple-table dense class="growth-table">
               <thead>
                 <tr>
@@ -173,7 +175,7 @@
             </v-simple-table>
           </div>
           <div class="panel-foot caption text--secondary">
-            Use it to compare the upgrades and to size a continual target. A slipway costs the yard's capacity over 500 tons times 120 times the race's shipyard operations; a capacity step costs the yard's slipways times 120 times the operations times its multiple of 500 tons (1, 2, 4, 10 or 20). A commercial or repair yard pays a tenth. The operations factor is the lowest multiplier among the Shipyard Operations levels the race holds. The time is the price over the yard's modification rate, which rises with its capacity. The 500 and 2,000 ton steps are marked estimated: no save checked stores one, so their price follows the pattern of the others. A continual upgrade is priced per ton at the steps' rate and stepped each construction period, so its time is approximate and the last period may overshoot the target; the game stores no price for it to compare with.<provenance-mark rule="shipyardGrowth.operations" />
+            Use it to compare the upgrades and to size a continual target. A slipway costs the yard's capacity over 500 tons times 120 times the race's shipyard operations; a capacity step costs the yard's slipways times 120 times the operations times its multiple of 500 tons (1, 2, 4, 10 or 20). A commercial or repair yard pays a tenth. A light yard pays in full but is offered the slipway alone: its capacity cannot grow, so it has no step and no continual target. The operations factor is the lowest multiplier among the Shipyard Operations levels the race holds. The time is the price over the yard's modification rate, which rises with its capacity. The 500 and 2,000 ton steps are marked estimated: no save checked stores one, so their price follows the pattern of the others. A continual upgrade is priced per ton at the steps' rate and stepped each construction period, so its time is approximate and the last period may overshoot the target; the game stores no price for it to compare with.<provenance-mark rule="shipyardGrowth.operations" />
           </div>
         </v-card>
 
@@ -219,7 +221,6 @@
                         </span>
                         <span class="cell-share">S {{ percent(cell.shareSource) }} · T {{ percent(cell.shareTarget) }}</span>
                         <span class="cell-yards">
-                          <v-icon v-if="cell.noRetool.ok === true" x-small color="success">mdi-check</v-icon>
                           <v-icon x-small>mdi-wrench-outline</v-icon>{{ yardsText(cell.info.refitYards, cell.info.unknownYards) }}
                           <v-icon x-small>mdi-tools</v-icon>{{ yardsText(cell.info.retoolYards, cell.info.unknownYards) }}
                         </span>
@@ -370,7 +371,8 @@
               </template>
               <template #[`item.capacity`]="{ item }">{{ count(item.capacity) }}</template>
               <template #[`item.tooledName`]="{ item }">
-                <span v-if="item.tooled === undefined" class="text-no-wrap">—<provenance-mark :result="item.tooledGap" /></span>
+                <span v-if="item.untooled" class="text--secondary" title="A light yard lists the classes that fit it, with no tooling">Not needed</span>
+                <span v-else-if="item.tooled === undefined" class="text-no-wrap">—<provenance-mark :result="item.tooledGap" /></span>
                 <span v-else-if="item.tooled === null" class="text--secondary">None</span>
                 <span v-else>{{ item.tooledName }}</span>
               </template>
@@ -396,7 +398,7 @@
             </v-data-table>
           </template>
           <div class="panel-foot caption text--secondary">
-            Use it to pick a yard for a class and to see why a yard cannot take it or needs a retool. A yard is judged on its type, its capacity, its slipways less the tasks working at it and the class's flags. A yard takes the class it is tooled for, and another class without a retool when that class is within 20% of the tooled class's size and the refit between them costs at most a fifth of its cost; any other class that is not obsolete, not a shipping line's, without prototype components and within the capacity needs a retool, which a yard with no tooled class takes at once and free. A retool costs the lesser of the refit from the tooled class to the target and the target's cost, scaled by the slipways and the race's shipyard operations, and a refit that costs nothing retools at once. A refit also needs its source class within the capacity and within 20% of the size of the tooled class, and a commercial yard takes commercial classes only, while a repair yard repairs only. A yard type the rules do not cover shows as not covered and a figure the save lacks as not known. Not checked: whether ships of the source class are at the yard's colony, and whether a damaged ship is there to repair.<provenance-mark rule="refit.yardEligibility" />
+            Use it to pick a yard for a class and to see why a yard cannot take it or needs a retool. A yard is judged on its type, its capacity, its slipways less the tasks working at it and the class's flags. A yard takes the class it is tooled for without a retool; another class needs one, and a class that is obsolete, a shipping line's, has prototype components or is larger than the capacity cannot be taken at all (a commercial yard takes a commercial class only). A yard with no tooled class takes the class it is tooled for at once and free. A retool costs the lesser of the refit from the tooled class to the target and the target's cost, scaled by the slipways and the race's shipyard operations, and a refit that costs nothing retools at once. A refit also needs its source class within the capacity, and at a yard tooled for a class its source is listed only when the class tooled at the time of the refit has a size between 80% and 120% of the source's, the class it is tooled for now or the target it would be retooled for first, so a source the target's band leaves out is refused after the retool too; a commercial yard takes commercial classes only, while a repair yard repairs only. A light yard is tooled for no class: it takes any class of the race that is not obsolete, not a shipping line's, without prototype components and within its capacity, with no retool, asks no size band of a refit's source, and it can be neither retooled nor given more capacity, so a class over its capacity is ruled out. A yard type the rules do not cover shows as not covered and a figure the save lacks as not known. Not checked: whether ships of the source class are at the yard's colony, and whether a damaged ship is there to repair.<provenance-mark rule="refit.yardEligibility" />
           </div>
         </v-card>
 
@@ -470,10 +472,11 @@ import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadPlatformSources } from '../utilities/platform-paths'
-import { finishDays, flagOf, shipRate, shipyardFinish, shipyardUpgradeRate, sortNullLast } from '../utilities/production'
+import { flagOf, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, sortNullLast } from '../utilities/production'
 import { describeResult, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
-import { REFIT_TASK_TYPES, SHIPYARD_TYPE, YARD_OPERATIONS, checkRefitTask, checkRetoolTask, costShare, inBand, loadRefitClasses, loadRefitTasks, loadRetoolTasks, loadShipCounts, loadYards, noRetoolCheck, refitCost, refitRate, refitTime, refitTotal, retoolCost, retoolTime, tooledClassOf, yardEligibility } from '../utilities/refits'
+import { REFIT_TASK_TYPES, YARD_OPERATIONS, checkRefitTask, checkRetoolTask, costShare, inBand, loadRefitClasses, loadRefitTasks, loadRetoolTasks, loadShipCounts, loadYards, refitCost, refitRate, refitTime, refitTotal, retoolCost, retoolTime, tooledClassOf, yardEligibility } from '../utilities/refits'
 import { CONTINUAL_ACTIVITY, RETOOL_ACTIVITY, SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES, activityFinish, continualPrice, continualTime, loadShipyardOperations, modificationRate, shipyardOperations, slipwayPrice, taskFinish, upgradePrices, upgradeTime } from '../utilities/shipyard-growth'
+import { SHIPYARD_TYPE, growsInCapacity } from '../utilities/shipyard-types'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
@@ -526,7 +529,7 @@ const yardsTableSort = {
   },
 }
 
-const YARD_TYPES = { [SHIPYARD_TYPE.NAVAL]: 'Naval', [SHIPYARD_TYPE.COMMERCIAL]: 'Commercial', [SHIPYARD_TYPE.REPAIR]: 'Repair' }
+const YARD_TYPES = { [SHIPYARD_TYPE.NAVAL]: 'Naval', [SHIPYARD_TYPE.COMMERCIAL]: 'Commercial', [SHIPYARD_TYPE.REPAIR]: 'Repair', [SHIPYARD_TYPE.LIGHT]: 'Light' }
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
@@ -679,7 +682,7 @@ export default {
       }
     },
 
-    // The yards against one refit from `source` into `target`, as { refitYards, unknownYards, retoolYards, best, gap, none, retoolFirst, untimed }: the yards that take it now or when a slipway frees (`refitYards`), the yards that would take it after a retool (`retoolYards`), the yards not known either way (`unknownYards`) and the quickest yard's rate. The source matters (a source over a yard's capacity, or outside the window of its tooled class, leaves the yard out), so this is per pair, kept for the pair. `none` is that no yard can take it at all, which is a fact, and `retoolFirst` that only a retool would make one able. `gap` says what leaves the quickest yard unknown: a yard that might take it with an input missing, or a rate that is missing. While a gap stands there is no `best`, as the quickest of the yards known would not be the quickest of them all. `untimed` is that there is no yard whose time a cell could show.
+    // The yards against one refit from `source` into `target`, as { refitYards, unknownYards, retoolYards, best, gap, none, retoolFirst, untimed }: the yards that take it now or when a slipway frees (`refitYards`), the yards that would take it after a retool (`retoolYards`), the yards not known either way (`unknownYards`) and the quickest yard's rate. The source matters (a source over a yard's capacity, or outside the size band of the class tooled when the refit is made, leaves the yard out), so this is per pair, kept for the pair. `none` is that no yard can take it at all, which is a fact, and `retoolFirst` that only a retool would make one able. `gap` says what leaves the quickest yard unknown: a yard that might take it with an input missing, or a rate that is missing. While a gap stands there is no `best`, as the quickest of the yards known would not be the quickest of them all. `untimed` is that there is no yard whose time a cell could show.
     yardSummaryOf() {
       const { yards, rateOf, eligibilityContext } = this
       const kept = new Map()
@@ -740,7 +743,7 @@ export default {
       return off.length ? `Narrow them: ${off.join(', ')} or search for a class.` : 'Narrow them: search for a class.'
     },
 
-    // The matrix: the rows are the classes ships can be refitted from, the columns the classes they can become, each cell priced once. `rows[].cells[]` are { target, state ('same'; 'outside' the size window, both sizes known; 'priced'; or 'unpriced' when a figure is missing), refit, days, time, shareSource, shareTarget, noRetool, info }. With the size window on, a row or column with no pair in the window is left out, which keeps a save with many classes to the pairs worth reading. `tooLarge` is set, with `pairs` the cells to price, when the matrix would be too big to draw.
+    // The matrix: the rows are the classes ships can be refitted from, the columns the classes they can become, each cell priced once. `rows[].cells[]` are { target, state ('same'; 'outside' the size window, both sizes known; 'priced'; or 'unpriced' when a figure is missing), refit, days, time, shareSource, shareTarget, info }. With the size window on, a row or column with no pair in the window is left out, which keeps a save with many classes to the pairs worth reading. `tooLarge` is set, with `pairs` the cells to price, when the matrix would be too big to draw.
     matrix() {
       const { classes, components, formulaVersion, shipCounts, yardSummaryOf, sizeWindow, shipsOnly, hideObsolete, searchText, fromId, toId } = this
       const matches = (shipClass) => !searchText || shipClass.name.toLowerCase().includes(searchText)
@@ -780,7 +783,7 @@ export default {
           const info = yardSummaryOf(source, target)
           const time = info.untimed ? null : refitTime(refit.total, info.gap || info.best.rate)
 
-          return { target, state: 'priced', refit, time, days: valueOrNull(time), shareSource: costShare(refit.total, { name: source.name, cost: source.cost }), shareTarget: costShare(refit.total, { name: target.name, cost: target.cost }), noRetool: noRetoolCheck(source, target, refit.total, formulaVersion), info }
+          return { target, state: 'priced', refit, time, days: valueOrNull(time), shareSource: costShare(refit.total, { name: source.name, cost: source.cost }), shareTarget: costShare(refit.total, { name: target.name, cost: target.cost }), info }
         })
 
         rows.push({ source, cells })
@@ -862,6 +865,7 @@ export default {
           type: YARD_TYPES[yard.type] || (isNumber(yard.type) ? `Type ${yard.type}` : UNKNOWN_TEXT),
           capacity: yard.capacity,
           tooled,
+          untooled: yard.type === SHIPYARD_TYPE.LIGHT,
           tooledName: tooled ? tooled.name : null,
           tooledGap: unavailable({ rule: 'refit.yardEligibility', missing: ['the class the yard is tooled for'], units: '' }),
           state: result.state,
@@ -888,7 +892,7 @@ export default {
         const check = checkRefitTask(task, classById, components, formulaVersion)
         const modifiers = modifiersOf[task.PopulationID]
         const paused = flagOf(task.Paused)
-        const finish = finishDays({ rule: 'production.shipFinish', rate: shipRate(modifiers, task), remaining: task.RemainingProduction, remainingName: 'the task\'s remaining build points', paused })
+        const finish = shipTaskFinish({ rate: shipRate(modifiers, task), task: { remaining: task.RemainingProduction, totalBP: task.TotalBP, hulls: task.Hulls }, paused })
 
         return this.runningRow({ key: `refit-${task.ID}`, kind: task.ShipyardTaskType === REFIT_TASK_TYPES[1] ? 'Automatic refit' : 'Refit', name: task.Name || `Refit #${task.ID}`, yardName: task.ShipyardName, sourceId: task.SourceClassID, targetId: task.TargetClassID, sourceName: name(task.SourceClassID), targetName: name(task.TargetClassID), stored: task.TotalBP, completed: task.CompletedBP, check, paused, finish: finish.result, idle: finish.idle })
       })
@@ -951,7 +955,7 @@ export default {
             return { ...step, time: time.result, days: valueOrNull(time.result), idle: time.idle, approx: false }
           })
 
-          if (target !== null) {
+          if (target !== null && growsInCapacity(yard.type)) {
             const price = continualPrice({ yard, target, operations, version: formulaVersion })
             const time = continualTime(modifiers, yard, target, price)
 
@@ -987,6 +991,11 @@ export default {
       return yard ? `${this.typeLabel(yard)} yard · ${this.count(yard.capacity)} t · ${this.count(yard.slipways)} slipways` : ''
     },
 
+    // Whether the yard the Growth view prices is a light yard, which is offered no continual upgrade and so has no target to set.
+    growthLight() {
+      return this.growthYard !== null && !growsInCapacity(this.growthYard.type)
+    },
+
     targetPlaceholder() {
       const yard = this.growthYard
       const target = yard ? this.growthTargetFor(yard) : null
@@ -1005,7 +1014,7 @@ export default {
         const modifiers = modifiersOf[yard.populationId]
         const slipwayResult = slipwayPrice({ yard, operations, version: formulaVersion })
         const tooled = tooledClassOf(yard, classById)
-        const taskLines = yard.taskRows === null ? null : yard.taskRows.map((task) => this.taskLineOf(yard, task, modifiers))
+        const taskLines = yard.taskRows === null ? null : yard.taskRows.map((task) => this.taskLineOf(task, modifiers))
         const free = isNumber(yard.slipways) && isNumber(yard.tasks) ? yard.slipways - yard.tasks : null
         const activity = isNumber(yard.taskType) && yard.taskType > 0 ? this.activityOf(yard, modifiers) : null
 
@@ -1023,6 +1032,7 @@ export default {
           slipwaysGap: unavailable({ rule: 'refit.yardEligibility', missing: [...(isNumber(yard.slipways) ? [] : ['the yard\'s slipways']), ...(isNumber(yard.tasks) ? [] : ['the tasks at the yard'])], units: '' }),
           retooling: yard.taskType === RETOOL_ACTIVITY,
           tooled,
+          untooled: yard.type === SHIPYARD_TYPE.LIGHT,
           tooledName: tooled ? tooled.name : null,
           tooledGap: unavailable({ rule: 'refit.yardEligibility', missing: ['the class the yard is tooled for'], units: '' }),
           taskCount: isNumber(yard.tasks) ? yard.tasks : null,
@@ -1052,7 +1062,7 @@ export default {
     yardTiles() {
       const { yards, operations } = this
       const typed = (type) => yards.filter((yard) => yard.type === type).length
-      const others = yards.filter((yard) => !isNumber(yard.type) || ![SHIPYARD_TYPE.NAVAL, SHIPYARD_TYPE.COMMERCIAL, SHIPYARD_TYPE.REPAIR].includes(yard.type)).length
+      const others = yards.filter((yard) => !isNumber(yard.type) || ![SHIPYARD_TYPE.NAVAL, SHIPYARD_TYPE.COMMERCIAL, SHIPYARD_TYPE.REPAIR, SHIPYARD_TYPE.LIGHT].includes(yard.type)).length
       const known = yards.filter((yard) => isNumber(yard.slipways) && isNumber(yard.tasks))
       const slipways = known.reduce((total, yard) => total + yard.slipways, 0)
       const free = known.reduce((total, yard) => total + yard.slipways - yard.tasks, 0)
@@ -1061,7 +1071,7 @@ export default {
       const operationsValue = valueOrNull(operations)
 
       return [
-        { label: 'Shipyards', value: this.count(yards.length), rule: 'refit.yardEligibility', note: `${this.count(typed(SHIPYARD_TYPE.NAVAL))} naval, ${this.count(typed(SHIPYARD_TYPE.COMMERCIAL))} commercial, ${this.count(typed(SHIPYARD_TYPE.REPAIR))} repair${others ? `, ${this.count(others)} of no type the rules cover` : ''}` },
+        { label: 'Shipyards', value: this.count(yards.length), rule: 'refit.yardEligibility', note: `${this.count(typed(SHIPYARD_TYPE.NAVAL))} naval, ${this.count(typed(SHIPYARD_TYPE.LIGHT))} light, ${this.count(typed(SHIPYARD_TYPE.COMMERCIAL))} commercial, ${this.count(typed(SHIPYARD_TYPE.REPAIR))} repair${others ? `, ${this.count(others)} of no type the rules cover` : ''}` },
         { label: 'Free slipways', value: `${this.count(free)} of ${this.count(slipways)}`, rule: 'refit.yardEligibility', note: known.length < yards.length ? `${this.count(yards.length - known.length)} ${yards.length - known.length === 1 ? 'yard' : 'yards'} with a slipway or task count not known, not counted` : 'Slipways with no task working' },
         { label: 'Work running', value: `${this.count(tasks)} ${tasks === 1 ? 'task' : 'tasks'}`, rule: 'production.shipFinish', note: `${this.count(activities)} yard ${activities === 1 ? 'activity' : 'activities'} (upgrades and retools)` },
         { label: 'Shipyard operations', value: operationsValue === null ? UNKNOWN_TEXT : this.count(operationsValue, 2), rule: 'shipyardGrowth.operations', result: operations, note: 'Multiplier on the price of every upgrade and retool' },
@@ -1077,9 +1087,10 @@ export default {
 
       const { matrix, yards, runningRows } = this
       const covered = yards.filter((yard) => yard.type === SHIPYARD_TYPE.NAVAL || yard.type === SHIPYARD_TYPE.COMMERCIAL)
+      const light = yards.filter((yard) => yard.type === SHIPYARD_TYPE.LIGHT)
       const repair = yards.filter((yard) => yard.type === SHIPYARD_TYPE.REPAIR)
       const typeless = yards.filter((yard) => !isNumber(yard.type))
-      const others = yards.length - covered.length - repair.length - typeless.length
+      const others = yards.length - covered.length - light.length - repair.length - typeless.length
       const refits = runningRows.filter((row) => row.kind !== 'Retool')
       const retools = runningRows.filter((row) => row.kind === 'Retool')
       const balance = (rows, rule, none) => {
@@ -1098,10 +1109,11 @@ export default {
       const refitBalance = balance(refits, 'refit.cost', 'No yard is refitting a ship')
       const retoolBalance = balance(retools, 'refit.retool', 'No yard is being retooled')
       const notCovered = [repair.length ? `${this.count(repair.length)} repair yards, which neither build nor refit` : '', others ? `${this.count(others)} of a type the rules do not cover` : '', typeless.length ? `${this.count(typeless.length)} with no type known` : ''].filter(Boolean).join('; ')
+      const lead = light.length ? `Naval and commercial yards, and ${this.count(light.length)} light ${light.length === 1 ? 'yard' : 'yards'} that need no retool` : 'Naval and commercial yards'
 
       return [
         { label: 'Refits priced', value: matrix.tooLarge ? UNKNOWN_TEXT : this.count(matrix.priced), rule: 'refit.cost', note: matrix.tooLarge ? this.narrowHint : `${this.count(matrix.rows.length)} source classes into ${this.count(matrix.columns.length)} target classes${matrix.unpriced ? `; ${this.count(matrix.unpriced)} with no price, a figure missing` : ''}` },
-        { label: 'Yards that refit and retool', value: this.count(covered.length), rule: 'refit.yardEligibility', note: notCovered ? `Naval and commercial yards; ${notCovered}` : 'Naval and commercial yards' },
+        { label: 'Yards that refit and retool', value: this.count(covered.length + light.length), rule: 'refit.yardEligibility', note: notCovered ? `${lead}; ${notCovered}` : lead },
         { label: 'Refits running', value: this.count(refits.length), rule: 'refit.cost', result: refitBalance.result, note: refitBalance.note },
         { label: 'Retools running', value: this.count(retools.length), rule: 'refit.retool', result: retoolBalance.result, note: retoolBalance.note },
       ]
@@ -1276,13 +1288,14 @@ export default {
       return item.id === this.yardId ? 'is-picked' : ''
     },
 
-    // A shipyard task as a line: what it is, what it is for, and its time left as the Production Recap times it.
-    taskLineOf(yard, task, modifiers) {
+    // A shipyard task as a line: what it is, what it is for, and its time left as the Production Recap times it, which for a task that repeats (a count of ships above 1) covers every ship it still builds. `hullsText` is "1 of n" for such a task: the ship in hand of the n the task still builds, the stored count being the ships left with the current one counted.
+    taskLineOf(task, modifiers) {
       const { classById } = this
-      const finish = taskFinish(modifiers, yard, task)
+      const finish = taskFinish(modifiers, task)
       const target = task.refitId && classById[task.refitId] ? ` to ${classById[task.refitId].name}` : ''
+      const repeats = isNumber(task.hulls) && task.hulls > 1
 
-      return { id: task.id, label: SHIPYARD_TASK_TYPES[task.taskType] || `Task ${task.taskType}`, subject: `${task.className || task.name || '—'}${target}`, remaining: task.remaining, paused: task.paused === true, rate: valueOrNull(finish.rate), rateResult: finish.rate, days: valueOrNull(finish.result), result: finish.result, idle: finish.idle }
+      return { id: task.id, label: SHIPYARD_TASK_TYPES[task.taskType] || `Task ${task.taskType}`, subject: `${task.className || task.name || '—'}${target}`, remaining: task.remaining, hulls: task.hulls, hullsText: repeats ? `1 of ${this.count(task.hulls)} left` : '', hullsNote: repeats ? `The count is the ${this.count(task.hulls)} ships the task still builds, this one included: the save does not store the total the task was given. The time left covers them all; Left (BP) is this ship's.` : '', paused: task.paused === true, rate: valueOrNull(finish.rate), rateResult: finish.rate, days: valueOrNull(finish.result), result: finish.result, idle: finish.idle }
     },
 
     // A yard's own activity as { label, detail, paused, approx, days, result, idle }: an upgrade or a retool, timed as the Production Recap times it.
@@ -1376,7 +1389,7 @@ export default {
       const takes = info.unknownYards ? `at least ${info.refitYards} yards take the target class now or when a slipway frees` : `${info.refitYards} yards take the target class now or when a slipway frees`
       const retools = info.unknownYards ? `at least ${info.retoolYards} would take it after a retool, and ${info.unknownYards} more are not known either way` : `${info.retoolYards} would take it after a retool`
 
-      return `${source.name} to ${cell.target.name}: ${this.count(total, 1)} BP, ${this.percent(cell.shareSource)} of ${source.name}'s cost, ${this.percent(cell.shareTarget)} of ${cell.target.name}'s cost; ${takes}, ${retools}${cell.noRetool.ok === true ? '; a yard tooled for the source needs no retool' : ''}`
+      return `${source.name} to ${cell.target.name}: ${this.count(total, 1)} BP, ${this.percent(cell.shareSource)} of ${source.name}'s cost, ${this.percent(cell.shareTarget)} of ${cell.target.name}'s cost; ${takes}, ${retools}`
     },
 
     // What an eligibility result reads as: its state's label, icon, colour and rank, the reasons and the notes.
@@ -1399,8 +1412,8 @@ export default {
         return none('none', '')
       } else if (tooling.kind === 'tooled') {
         return none('tooled', 'Tooled for the class')
-      } else if (tooling.kind === 'compatible') {
-        return none('noRetool', 'No retool needed', `Within 20% of ${tooling.tooled.name}'s size, refit at most a fifth of its cost`)
+      } else if (tooling.kind === 'listed') {
+        return none('listed', 'No retool needed', 'A light yard lists the class, so it needs no tooling')
       } else if (tooling.kind === 'unassigned') {
         return none('immediate', 'At once', 'The yard has no tooled class')
       }

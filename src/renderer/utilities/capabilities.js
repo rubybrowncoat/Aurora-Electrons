@@ -352,7 +352,6 @@ export const DECLARED = Object.freeze([
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-01', table: 'FCT_Race', columns: Object.freeze(['chkShowBodyColours', 'chkCCIncludeLowG', 'chkGasGiantColour']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-04', table: 'FCT_Race', columns: Object.freeze(['chkJumpPointBuoys']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-01', table: 'FCT_Population', columns: Object.freeze(['AlienArtifacts', 'ConstructPriority', 'AccruedArtifactPoints', 'AccruedConstructPoints', 'NoRuinRecovery']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-07', table: 'FCT_ShipyardTask', columns: Object.freeze(['NumShips']) }),
 
 ])
 

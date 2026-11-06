@@ -20,8 +20,8 @@ registerRule({
   versions: ['2.7.x'],
   units: 'component units',
   verification: 'estimated',
-  structure: ['FCT_ShipyardTask.TaskTypeID, UseComponents, ClassID, RefitID, PopulationID', 'FCT_ClassComponent.NumComponent'],
-  note: 'Which stock is claimed by work already queued. A shipyard task takes the stored components it uses when it is made (the stock is debited then and a deleted task does not give them back), so a construction or refit task in the save holds nothing of the stock it was made from: the stock is net of it. The claims that remain are the ones a task has not yet taken: an automatic refit makes its next task from the ship\'s class when the last one ends and takes the stock again for it, and how many of those follow is not stored. A colony with such a task holds back its stock of the components the refit adds, and one whose task cannot be read, or whose type or class is not known, holds back all its stock of the components of the plans, until the claim is known. A repair or a scrap takes no component stock. Read from the game\'s rules; no saved game shows a task taking stock after it was made.',
+  structure: ['FCT_ShipyardTask.TaskTypeID, UseComponents, ClassID, RefitID, PopulationID, NumShips', 'FCT_ClassComponent.NumComponent'],
+  note: 'Which stock is claimed by work already queued. A shipyard task takes the stored components it uses when it is made (the stock is debited then and a deleted task does not give them back), so a construction or refit task in the save holds nothing of the stock it was made from: the stock is net of it. The claims that remain are the ones a task has not yet taken: an automatic refit makes its next task from the ship\'s class when the last one ends and takes the stock again for it, and how many of those follow is not stored; a construction or refit task that repeats (a count of ships above 1) makes a task for the next ship when it ends and takes the stock again for that one, which the stock then in hand decides. A colony with such a task holds back its stock of the components the refit adds, or of the components the class mounts for a construction, and one whose task cannot be read, or whose type or class is not known, holds back all its stock of the components of the plans, until the claim is known. A repair or a scrap takes no component stock. Read from the game\'s rules; no saved game shows a task taking stock after it was made.',
   assumptions: ['A task takes the stock only when it is made', 'An automatic refit whose Use Components flag is off takes none'],
 })
 
@@ -87,7 +87,7 @@ export const queuedOf = (projects) => {
   return byComponent
 }
 
-// The claims on a colony's component stock that queued work still holds, as { claims, tasks }. `tasks`: the race's shipyard tasks [{ id, populationId, typeId, classId, refitId, useComponents, totalBP, classCost }]; `parts`: the components of each class, { [classId]: [{ componentId, count }] }; `read`: whether the tasks were read at all; `entered`: stock the player holds back by hand, [{ populationId, componentId, units }]. A claim is { populationId (null: every colony), componentId (null: every component), units (a number when proven, null when it is not known), proof ('proven' or 'unknown'), source ('task', 'entered' or 'unread'), reason }. `tasks` of the result is one row per task with what it holds: 'taken' (made with the stock it uses; nothing is held), 'none' (takes no stock), 'successors' (an automatic refit that may take stock again) or 'unknown'.
+// The claims on a colony's component stock that queued work still holds, as { claims, tasks }. `tasks`: the race's shipyard tasks [{ id, populationId, typeId, classId, refitId, useComponents, totalBP, hulls (the ships the task still makes, this one included; null where the save stores none), classCost }]; `parts`: the components of each class, { [classId]: [{ componentId, count }] }; `read`: whether the tasks were read at all; `entered`: stock the player holds back by hand, [{ populationId, componentId, units }]. A claim is { populationId (null: every colony), componentId (null: every component), units (a number when proven, null when it is not known), proof ('proven' or 'unknown'), source ('task', 'entered' or 'unread'), reason }. `tasks` of the result is one row per task with what it holds: 'taken' (made with the stock it uses; nothing is held), 'none' (takes no stock), 'successors' (an automatic refit, or a construction or refit that repeats, which may take stock again for the next ship) or 'unknown'.
 export const reservationsOf = ({ tasks = [], parts = {}, read = true, entered = [] }) => {
   const claims = []
   const rows = []
@@ -110,9 +110,28 @@ export const reservationsOf = ({ tasks = [], parts = {}, read = true, entered = 
   }
 
   tasks.forEach((task) => {
-    const base = { taskId: task.id, populationId: task.populationId, typeId: task.typeId, classId: task.classId, refitId: task.refitId === undefined ? null : task.refitId, useComponents: task.useComponents === undefined ? null : task.useComponents, credited: isNumber(task.classCost) && isNumber(task.totalBP) && task.typeId === TASK_TYPE.CONSTRUCTION ? Math.max(0, task.classCost - task.totalBP) : null }
+    const base = { taskId: task.id, populationId: task.populationId, typeId: task.typeId, classId: task.classId, refitId: task.refitId === undefined ? null : task.refitId, useComponents: task.useComponents === undefined ? null : task.useComponents, hulls: task.hulls === undefined ? null : task.hulls, credited: isNumber(task.classCost) && isNumber(task.totalBP) && task.typeId === TASK_TYPE.CONSTRUCTION ? Math.max(0, task.classCost - task.totalBP) : null }
 
-    if (task.typeId === TASK_TYPE.CONSTRUCTION || task.typeId === TASK_TYPE.REFIT) {
+    // A task that makes more tasks takes the stock again for each (Population.cs `method_19` credits the stored components to the next task as it is made), the amount being whatever stock is then in hand: every component it may take is held back, with no amount proven. `ids` the components, null when the classes are not known.
+    const holdBack = (ids, reason, unknownClasses) => {
+      if (ids === null) {
+        claims.push({ populationId: task.populationId, componentId: null, units: null, proof: 'unknown', source: 'task', taskId: task.id, reason: `${reason} ${unknownClasses}` })
+      } else {
+        ids.forEach((componentId) => claims.push({ populationId: task.populationId, componentId, units: null, proof: 'unknown', source: 'task', taskId: task.id, reason }))
+      }
+
+      rows.push({ ...base, state: 'successors', reason })
+    }
+
+    const flagNote = task.useComponents === 1 ? '' : '; its Use Components flag is not known either'
+    const later = isNumber(task.hulls) && task.hulls > 1 ? task.hulls - 1 : 0
+
+    if ((task.typeId === TASK_TYPE.CONSTRUCTION || task.typeId === TASK_TYPE.REFIT) && later > 0 && task.useComponents !== 0) {
+      const reason = `The task repeats for ${later} more ${later === 1 ? 'ship' : 'ships'} and takes the stock again for each when it is made${flagNote}.`
+      const mounted = parts[task.classId]
+
+      holdBack(task.typeId === TASK_TYPE.CONSTRUCTION ? (mounted ? mounted.map((part) => part.componentId) : null) : additions(task), reason, task.typeId === TASK_TYPE.CONSTRUCTION ? 'The class it builds is not known, so every component stays held back.' : 'The classes it refits between are not known, so every component stays held back.')
+    } else if (task.typeId === TASK_TYPE.CONSTRUCTION || task.typeId === TASK_TYPE.REFIT) {
       rows.push({ ...base, state: 'taken', reason: 'The stock this task uses was taken when it was made.' })
     } else if (task.typeId === TASK_TYPE.REPAIR || task.typeId === TASK_TYPE.SCRAP) {
       rows.push({ ...base, state: 'none', reason: 'A repair or a scrap takes no component stock.' })
@@ -120,16 +139,7 @@ export const reservationsOf = ({ tasks = [], parts = {}, read = true, entered = 
       if (task.useComponents === 0) {
         rows.push({ ...base, state: 'none', reason: 'An automatic refit with Use Components off takes no stock.' })
       } else {
-        const ids = additions(task)
-        const reason = `An automatic refit makes a new task for each ship still to refit and takes the stock again, and how many follow is not stored${task.useComponents === 1 ? '' : '; its Use Components flag is not known either'}.`
-
-        if (ids === null) {
-          claims.push({ populationId: task.populationId, componentId: null, units: null, proof: 'unknown', source: 'task', taskId: task.id, reason: `${reason} The classes it refits between are not known, so every component stays held back.` })
-        } else {
-          ids.forEach((componentId) => claims.push({ populationId: task.populationId, componentId, units: null, proof: 'unknown', source: 'task', taskId: task.id, reason }))
-        }
-
-        rows.push({ ...base, state: 'successors', reason })
+        holdBack(additions(task), `An automatic refit makes a new task for each ship still to refit and takes the stock again, and how many follow is not stored${flagNote}.`, 'The classes it refits between are not known, so every component stays held back.')
       }
     } else {
       const reason = 'The task type is not known, so what stock it holds is not known.'

@@ -68,7 +68,7 @@ registerRule({
   units: 'M workers',
   verification: 'confirmed',
   structure: ['FCT_Shipyard.Slipways, Capacity, SYType', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.Workers, ConstructionValue'],
-  note: 'The workers the capacity a path draws on already holds, in millions: a yard\'s slipways times its capacity, a quarter-thousandth of a worker per ton at a naval yard and a tenth of that at a commercial or repair yard, and a colony\'s construction factories times the workers each needs. They are held whether or not the capacity is building, so a platform adds none; a colony short of workers lowers the output of both paths through its efficiency.',
+  note: 'The workers the capacity a path draws on already holds, in millions: a yard\'s slipways times its capacity, a quarter-thousandth of a worker per ton at a naval or light yard and a tenth of that at a commercial or repair yard, and a colony\'s construction factories times the workers each needs. They are held whether or not the capacity is building, so a platform adds none; a colony short of workers lowers the output of both paths through its efficiency.',
 })
 
 // What a class is as a station: { state ('capable' or 'ineligible' or 'unknown'), blockers, missing }. `shipClass`: a class record of utilities/refits.js (obsolete, prototype); `noArmour`: true, false or null when the save has no such setting. The class list is already the race's own, so where a class came from (`otherRace`) decides nothing here.
