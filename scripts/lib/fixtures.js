@@ -28,8 +28,11 @@ const PLAYED_NEXT = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-2.db'
 // The third save of the campaign, 31,613,400 s after `PLAYED_NEXT` and 62,417,705 s after `PLAYED` (GameTime 154,143,115 s; 20,122 bodies of game 161 against 18,921), which the pair witness reads beside the two earlier ones. It is a witness on the same terms as `PLAYED`: never the default, and read as exercising a rule only where a check names it.
 const PLAYED_THIRD = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-3.db', gameId: 161, raceId: 909, gameName: 'UEF' })
 
-// The saves of saves/ of the 3.2 line, by file name and in the order a sorted listing gives: the fresh and the migrated 3.1 saves, the three played 3.2 saves and the shipped 3.0.0, 3.1.0 and 3.2.0 databases. A check that reads every save of the line reads these and no other file of the folder (a save from before the line is read only to be refused).
-const LINE_SAVE_FILES = Object.freeze(['AuroraDB-310-fresh.db', path.basename(FIXTURE.file), path.basename(PLAYED.file), path.basename(PLAYED_NEXT.file), path.basename(PLAYED_THIRD.file), 'AuroraDB_300_shipped.db', 'AuroraDB_310_shipped.db', 'AuroraDB_320_shipped.db'])
+// The second continuation of `PLAYED_NEXT`, saved from it as the other branch of the campaign: 35,000,010 s after it (GameTime 157,529,725 s, 1.110 of the 31,536,000 s year; 21,065 bodies of game 161 against 18,921) in 478 increments against the 124 of `PLAYED_THIRD`. Both branches' ledgers diverge from the fork at 122,529,715 s at their first row (86,400 s here against 432,000 s there) and coincide on 21 whole 86,400 s days that both recorded at the same clock times. It was saved with `SubPulseLength` 60 s, where the three earlier saves store 1800, so a pair that reads it as the later save takes its own call schedule, and its source call upper bound, from the earlier save and its ledger. It is a witness on the same terms as `PLAYED`: never the default, and read as exercising a rule only where a check names it.
+const PLAYED_BRANCHED = Object.freeze({ file: 'saves/AuroraDB-320-fetterkrolle-3-branched.db', gameId: 161, raceId: 909, gameName: 'UEF' })
+
+// The saves of saves/ of the 3.2 line, by file name and in the order a sorted listing gives: the fresh and the migrated 3.1 saves, the four played 3.2 saves and the shipped 3.0.0, 3.1.0 and 3.2.0 databases. A check that reads every save of the line reads these and no other file of the folder (a save from before the line is read only to be refused).
+const LINE_SAVE_FILES = Object.freeze(['AuroraDB-310-fresh.db', path.basename(FIXTURE.file), path.basename(PLAYED.file), path.basename(PLAYED_NEXT.file), path.basename(PLAYED_BRANCHED.file), path.basename(PLAYED_THIRD.file), 'AuroraDB_300_shipped.db', 'AuroraDB_310_shipped.db', 'AuroraDB_320_shipped.db'])
 
 // The played save as the `[file, GameID, RaceID]` triple of a `--save`, `--stock` or `--modded` option.
 const playedTriple = () => [PLAYED.file, PLAYED.gameId, PLAYED.raceId]
@@ -46,4 +49,4 @@ const fixtureRows = (sql, ...params) => {
   }
 }
 
-module.exports = { FIXTURE, INTERIM, PLAYED, PLAYED_NEXT, PLAYED_THIRD, LINE_SAVE_FILES, fixtureSave, fixtureTriple, fixturePath, fixtureRows, playedTriple }
+module.exports = { FIXTURE, INTERIM, PLAYED, PLAYED_NEXT, PLAYED_THIRD, PLAYED_BRANCHED, LINE_SAVE_FILES, fixtureSave, fixtureTriple, fixturePath, fixtureRows, playedTriple }
