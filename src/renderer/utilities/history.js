@@ -14,6 +14,10 @@ import { combine, failureWords, ofRule, registerRule, sumResults, unavailable } 
 import { ReadOnly, recordingOwner, requireRecording, withRegistry } from './recording-owner'
 
 const HISTORY_VERSIONS = ['2.7.x']
+// The tonnage rule holds for the earlier line and for this one: it is exercised on the interim fixture and on a save the game wrote under the present line by scripts/check-fleet-profile.js.
+const TONNAGE_VERSIONS = ['2.7.x', '3.2.x']
+// Tons of ship in one hull space.
+const TONS_PER_HULL_SPACE = 50
 
 registerRule({
   id: 'history.population',
@@ -69,13 +73,14 @@ registerRule({
   note: 'The race\'s ships of non-shipping-line fleets, military or commercial by their class, when the snapshot was taken. No ship of a kind is a known 0.',
 })
 
+// The game's own fleet and sub-fleet military tonnage is the hull spaces of the ships of a kind, summed as stored (they are fractional), converted once at 50 t each: Fleet.cs:5784-5799 (method_141, `Sum(Ship.Size) * Helpers.TonsPerHS`) and SubFleet.cs:82-84 (method_3, the same over a sub-fleet's ships). The earlier line cut the summed hull spaces to a whole number before converting (2.7.1 Fleet.cs:5634-5637).
 registerRule({
   id: 'history.fleetTonnage',
-  versions: HISTORY_VERSIONS,
+  versions: TONNAGE_VERSIONS,
   units: 't',
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size', 'FCT_Ship'],
-  note: 'The class size of each ship times 50 t per hull space, added up. The 50 t per hull space is the app\'s own constant and is not checked against a stored tonnage. A class with no stored size leaves the sum unknown.',
+  note: 'The hull spaces of the race\'s ships of one kind, added up as the class sizes are stored and converted once at 50 t per hull space: the sizes are fractional and the race-level sum keeps them until that one conversion, as the game\'s fleet tonnage does on the present line. The earlier line cut the summed hull spaces to a whole number before converting, so the app\'s sum keeps a fraction the earlier game\'s fleet figure drops. The 50 t per hull space is the app\'s own constant and is not checked against a stored tonnage. A class with no stored size leaves the sum unknown.',
 })
 
 registerRule({
@@ -692,7 +697,7 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
   const [[race], colonies, ships, installations, [counts]] = await Promise.all([
     query(`select FCT_Game.GameTime, FCT_Game.GameName, FCT_Race.RaceTitle, FCT_Race.WealthPoints, FCT_Race.AnnualWealth from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`),
     query(`select FCT_Population.Population, FCT_Population.FuelStockpile, FCT_Population.MaintenanceStockpile, FCT_Population.Duranium, FCT_Population.Neutronium, FCT_Population.Corbomite, FCT_Population.Tritanium, FCT_Population.Boronide, FCT_Population.Mercassium, FCT_Population.Vendarite, FCT_Population.Sorium, FCT_Population.Uridium, FCT_Population.Corundium, FCT_Population.Gallicite from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
-    query(`select FCT_ShipClass.Commercial, count(*) as Ships, case when count(FCT_ShipClass.Size) = count(*) then sum(FCT_ShipClass.Size * 50) end as Tons from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_ShipClass.Commercial`),
+    query(`select FCT_ShipClass.Commercial, count(*) as Ships, case when count(FCT_ShipClass.Size) = count(*) then sum(FCT_ShipClass.Size) end as Size from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_ShipClass.Commercial`),
     query(`select FCT_PopulationInstallations.PlanetaryInstallationID as ID, case when count(FCT_PopulationInstallations.Amount) = count(*) then sum(FCT_PopulationInstallations.Amount) end as Amount from FCT_PopulationInstallations inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_PopulationInstallations.Amount > 0 or FCT_PopulationInstallations.Amount is null) group by FCT_PopulationInstallations.PlanetaryInstallationID`),
     query(`select (select case when count(FCT_TechSystem.DevelopCost) = count(*) then coalesce(sum(FCT_TechSystem.DevelopCost), 0) end from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = ${GameID} and FCT_RaceTech.RaceID = ${RaceID}) as Research, (select count(*) from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}) as Systems, (select count(*) from FCT_Commander where FCT_Commander.GameID = ${GameID} and FCT_Commander.RaceID = ${RaceID} and ${SERVING_COMMANDER}) as Commanders`),
   ])
@@ -701,8 +706,13 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
     return null
   }
 
-  // No ship of a kind is a known 0 ships and 0 t; a class with no stored size makes the tonnage null.
-  const shipsOf = (commercial) => ships.find((row) => !!row.Commercial === commercial) || { Ships: 0, Tons: 0 }
+  // No ship of a kind is a known 0 ships and 0 t; a class with no stored size makes the tonnage null. The hull spaces are converted once, after the sum: the sizes are fractional and the game converts the summed size, never each ship's tons.
+  const shipsOf = (commercial) => ships.find((row) => !!row.Commercial === commercial) || { Ships: 0, Size: 0 }
+  const tonsOf = (hullSpaces) => {
+    const size = nullable(hullSpaces)
+
+    return size === null ? null : size * TONS_PER_HULL_SPACE
+  }
   const military = shipsOf(false)
   const commercial = shipsOf(true)
   const populated = colonies.every((colony) => isKnownNumber(colony.Population))
@@ -721,9 +731,9 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
       // Colony stockpiles, Duranium to Gallicite (mineral IDs 1–11); null where a colony has no stored amount.
       minerals: ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite'].map((name) => rounded(sum(colonies, name))),
       militaryShips: military.Ships,
-      militaryTons: rounded(nullable(military.Tons)),
+      militaryTons: rounded(tonsOf(military.Size)),
       commercialShips: commercial.Ships,
-      commercialTons: rounded(nullable(commercial.Tons)),
+      commercialTons: rounded(tonsOf(commercial.Size)),
       // { PlanetaryInstallationID: amount }, null for a type with a row that has no stored amount.
       installations: Object.fromEntries(installations.map((row) => [row.ID, rounded(nullable(row.Amount), 100)])),
       research: nullable(counts.Research),

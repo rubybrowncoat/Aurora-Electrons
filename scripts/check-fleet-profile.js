@@ -1,7 +1,7 @@
 /*
-  Checks the fleet that sails together (src/renderer/utilities/fleet-profile.js, the fleet profile component and the Transport and Hauling pages that use it) without a save.
+  Checks the fleet that sails together (src/renderer/utilities/fleet-profile.js, the fleet profile component and the Transport and Hauling pages that use it) and the race's fleet tonnage (src/renderer/utilities/history.js).
 
-  Every statement runs on ships, fleets and a small SQLite database made here and on the real utilities, component and pages. Nothing is read from a save. The statements cover the acceptance of AE-085-01:
+  Every statement runs on ships, fleets and a small SQLite database made here and on the real utilities, component and pages. The three statements of the fleet transfer and the tonnage read the interim fixture and the save the game wrote under the present line, both read-only and skipped when the file is not there. The statements cover the acceptance of AE-085-01 and the fleet reads of AE-309-12:
   - a fleet of fast and slow ships shares one travel cycle at the speed of its slowest ship, and each ship burns at its own share of its own speed;
   - the saved fleet speed and the recomputed effective maximum stay apart, and the saved speed is held to what the fleet can reach;
   - a ship in a hangar or under tow burns no fuel of its own and does not limit the fleet, and its holds are not counted but marked as left out;
@@ -10,11 +10,15 @@
   - nested hangars, tow chains, a shipyard in tow, a carrier that is elsewhere and holds that are all in tow are unsupported and say why, and a link the save does not state is unknown, never free;
   - the slowest ship sets each loading stop and the ship with the shortest range sets the fuel;
   - the loader reads the engines, links and towed mass from the tables as they are, reads a column the save lacks as null and keeps to the fleets asked for;
-  - the pages take speed, burn and counted cargo from the profile, say why a fleet is left out, and track the optional read under the key the page labels it with.
+  - the pages take speed, burn and counted cargo from the profile, say why a fleet is left out, and track the optional read under the key the page labels it with;
+  - the race's military and commercial tonnage (the History snapshot) is the hull spaces of its ships summed as the class sizes are stored, fractional, and converted once at 50 t: on the fixture and on the played save it equals a sum written apart from the module, while the earlier line's cut of the summed hull spaces and a rounding of each ship's tons each give another figure;
+  - a parasite counts under the fleet its own row names, which is the fleet the game's transfer writes to it: the profile holds exactly the fleet's rows, every hangared ship rides a carrier of that same fleet, its role is the hangar's and its holds are left out of the cargo;
+  - the fleet's speed follows the game's refresh after a transfer: a hand-set speed below the maximum is kept, one above it is held to the maximum, and a fleet set to its maximum takes it. Neither save states a hand-set speed, so these cases are planted on the real fleet rows, which only changes the two fleet values;
+  - no source reads a rearming figure: no file of the tree names one of the rule's tables or columns (the ordnance series, the class's and the ship's ordnance templates, the assignment, the stored missiles and the weapons, with the columns that name a stored load), apart from the catalogue's declaration of the two ordnance series tables, and the ordnance figures the app has are the stored production and capacity rows.
 
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names, both on the real sources and on the sources with every benign edit (wording, attribute order) applied. Each benign edit, and all of them together, must leave every check green. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits. `--only=text|text` selects edits by name and always runs the head and complete benign composition; `--detail` prints the named check's failure for each caught fault.
 
-  The component and the pages are checked by what they do: the pages' computed rows and reads evaluated on a pseudo instance, and the compiled templates' elements and bound expressions. No statement matches source text or prose; only a planted fault names a source anchor, and each is found by an identifier, a key or a code expression.
+  The component and the pages are checked by what they do: the pages' computed rows and reads evaluated on a pseudo instance, and the compiled templates' elements and bound expressions. No statement matches source text or prose, except the rearming statement, which reads every source under the renderer to show that no table or column of that rule is named but the catalogue's declaration of the tables it knows before a page reads them: only a planted fault names a source anchor, and each is found by an identifier, a key or a code expression. A fault plants a read of one rearming table in a renderer module, so each name is shown to be one the statement finds.
 */
 const fs = require('fs')
 const path = require('path')
@@ -26,17 +30,33 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { fixtureSave, PLAYED } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
 
 const FILES = {
   profile: inRenderer('utilities', 'fleet-profile.js'),
+  history: inRenderer('utilities', 'history.js'),
   haulingRules: inRenderer('utilities', 'hauling.js'),
   component: inRenderer('components', 'page', 'FleetProfile.vue'),
   haulingPage: inRenderer('pages', 'hauling.vue'),
   transportPage: inRenderer('pages', 'information.vue'),
 }
+
+// The packages the History utility imports, as the least a load of it needs: the store, the dates and the numerals are never used by the snapshot read here.
+const HISTORY_STUBS = {
+  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
+  dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
+  'dayjs/plugin/utc.js': 'export default {}',
+  romanum: 'export default { toNumeral: String }',
+}
+
+// The saves the fleet transfer and the tonnage are read from: the interim fixture, and the save the game wrote under the present line as an additional witness. A save that is not there is skipped and said so.
+const SAVES = [
+  { label: 'the interim fixture', ...fixtureSave() },
+  { label: 'the played save', file: PLAYED.file, game: PLAYED.gameId, race: PLAYED.raceId },
+]
 
 const ORIGINALS = Object.fromEntries(Object.entries(FILES).map(([name, file]) => [name, fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')]))
 
@@ -164,6 +184,28 @@ const databaseOf = async (schema, rows) => {
   }
 }
 
+// A save opened read-only, answering as the utilities' database does: a query gives the rows as `[rows]`.
+const openSave = (file) => new Promise((resolve, reject) => {
+  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => {
+    if (error) {
+      reject(error)
+      return
+    }
+
+    resolve({
+      query: (sql) => new Promise((resolve, reject) => raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))),
+      close: () => new Promise((resolve) => raw.close(resolve)),
+    })
+  })
+})
+
+// Every file of the source tree under a folder, the rearming statement's search.
+const filesUnder = (folder) => fs.readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
+  const location = path.join(folder, entry.name)
+
+  return entry.isDirectory() ? filesUnder(location) : [location]
+})
+
 // ---- The world: the module, the component and the pages as shipped, or with edits planted -------------------------------
 const resolved = (edit, text) => {
   if (!edit.at) {
@@ -198,12 +240,13 @@ const worldOf = (edits = []) => {
   }
   const labelsOf = 'export default (labels) => ({ computed: { inputLabels: () => labels } })'
   const modules = memo(() => loadUtilities(['fleet-profile', 'transport', 'hauling', 'provenance'], { sources: utilitySources }))
+  const history = memo(() => loadUtilities(['history', 'provenance'], { stubs: HISTORY_STUBS, sources: { history: text.history } }))
   const capabilities = memo(() => loadUtilities(['capabilities']))
   const component = memo(() => loadPage('components/page/FleetProfile', { sources: pageSources }))
   const hauling = memo(() => loadPage('pages/hauling', { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
   const transport = memo(() => loadPage('pages/information', { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
 
-  return { text, modules, capabilities, component, hauling, transport }
+  return { text, modules, history, capabilities, component, hauling, transport }
 }
 
 // What a trip of the fleet takes from the origin colony to the destination colony, for the ships `ships` read as `basis` says.
@@ -1401,6 +1444,189 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
   assert.ok(marksIn(fleetCell, cellOf({})).length >= 3, 'the ships, the speed and the saved speed each carry a mark')
 })
 
+// ---- The fleet transfer and the tonnage, on the saves -----------------------------------------------------------------
+// The ships of a list grouped by the fleet each row names.
+const fleetsOf = (ships) => {
+  const fleets = new Map()
+
+  ships.forEach((ship) => {
+    if (!fleets.has(ship.FleetID)) {
+      fleets.set(ship.FleetID, [])
+    }
+
+    fleets.get(ship.FleetID).push(ship)
+  })
+
+  return fleets
+}
+
+// The role the game's refresh leaves a ship in: the hangar first, the tow second, as the transfer writes both of a parasite's links.
+const roleOf = (ship) => (ship.MothershipID > 0 ? 'hangared' : ship.TractorParentShipID > 0 ? 'towed' : 'independent')
+
+// The profile of a fleet of a save at its maximum, named by the fleet's own row.
+const profileOf = (fp, fleetId, ships) => fp.fleetProfile(ships, { FleetID: fleetId, FleetName: ships[0].FleetName })
+
+// The saves a statement reads, printing the one that is not there and returning the ones it read.
+const eachSave = async (name, body) => {
+  let read = 0
+
+  for (const save of SAVES) {
+    const location = path.join(root, save.file)
+
+    if (!fs.existsSync(location)) {
+      console.log(`SKIP ${name}: ${save.label} is not in ${save.file}`)
+      continue
+    }
+
+    const database = await openSave(location)
+
+    try {
+      await body(database, save)
+      read += 1
+    } finally {
+      await database.close()
+    }
+  }
+
+  assert.ok(read >= 1, `${name}: a save to read`)
+}
+
+check('tonnage', 'the race\'s military and commercial tonnage is the hull spaces of its ships summed as the class sizes are stored and converted once at 50 t each: on every save it equals a sum written apart from the module, while a cut of the summed hull spaces or a rounding of each class size gives another figure', async (w) => {
+  const { history, provenance } = await w.history()
+
+  assert.deepEqual(provenance.getRule('history.fleetTonnage').versions, ['2.7.x', '3.2.x'], 'the tonnage rule holds for the earlier line and for this one')
+
+  await eachSave('tonnage', async (database, save) => {
+    const { snapshot } = await history.takeSnapshot(database, { GameID: save.game, RaceID: save.race })
+    const [groups] = await database.query(`select FCT_ShipClass.Commercial as Commercial, count(*) as Ships, sum(FCT_ShipClass.Size) as Size, sum(round(FCT_ShipClass.Size)) as RoundedSize from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${save.game} and FCT_Ship.RaceID = ${save.race} and FCT_Ship.ShippingLineID = 0 group by FCT_ShipClass.Commercial`)
+    const kindOf = (commercial) => groups.find((row) => Boolean(row.Commercial) === commercial)
+    const military = kindOf(false)
+    const commercial = kindOf(true)
+
+    assert.ok(military && commercial, `${save.label}: ships of both kinds`)
+    assert.ok(military.Size !== Math.trunc(military.Size), `${save.label}: the military hull spaces are fractional, the case the rule is about`)
+    assert.equal(snapshot.militaryShips, military.Ships, `${save.label}: the military ship count`)
+    assert.equal(snapshot.commercialShips, commercial.Ships, `${save.label}: the commercial ship count`)
+    assert.equal(snapshot.militaryTons, Math.round(military.Size * 50), `${save.label}: the military tonnage is the hull spaces summed as stored and converted once`)
+    assert.equal(snapshot.commercialTons, Math.round(commercial.Size * 50), `${save.label}: the commercial tonnage is the hull spaces summed as stored and converted once`)
+    assert.notEqual(Math.trunc(military.Size) * 50, snapshot.militaryTons, `${save.label}: the earlier line's cut of the summed hull spaces gives another figure`)
+    assert.notEqual(Math.round(military.RoundedSize * 50), snapshot.militaryTons, `${save.label}: a rounding of each class size gives another figure`)
+  })
+})
+
+check('parasites', 'a parasite counts under the fleet its own row names, the fleet the game\'s transfer writes, with the role its links give it and its holds left out of that fleet\'s cargo: every carried ship rides a carrier of the same fleet on the saves, the profile holds exactly the fleet\'s rows, and the fixture witnesses a hangar while the played save witnesses a tow', async (w) => {
+  const { 'fleet-profile': fp, provenance } = await w.modules()
+
+  assert.ok(provenance.getRule('transport.fleetCargo').versions.includes('3.2.x'), 'the holds rule holds for this line')
+  let hangars = 0
+
+  await eachSave('parasites', async (database, save) => {
+    const [[carried]] = await database.query(`select count(*) as N from FCT_Ship as P inner join FCT_Ship as C on C.ShipID = P.MothershipID and C.GameID = P.GameID where P.GameID = ${save.game} and P.RaceID = ${save.race} and P.MothershipID > 0 and P.FleetID <> C.FleetID`)
+
+    assert.equal(carried.N, 0, `${save.label}: every parasite is in the fleet its carrier is in, as the transfer writes both rows`)
+
+    const ships = await fp.loadFleetShips(database, { GameID: save.game, RaceID: save.race })
+    const fleets = fleetsOf(ships)
+    const withParasites = [...fleets.entries()].map(([id, list]) => ({ id, list, carried: list.filter((ship) => ship.MothershipID > 0).length })).filter((fleet) => fleet.carried > 0).sort((a, b) => b.carried - a.carried)
+    const withTowed = [...fleets.entries()].map(([id, list]) => ({ id, list, towed: list.filter((ship) => ship.TractorParentShipID > 0).length })).filter((fleet) => fleet.towed > 0).sort((a, b) => b.towed - a.towed)
+    const chosen = withParasites[0] || withTowed[0]
+
+    assert.ok(chosen, `${save.label}: a fleet with a carried or towed ship to read`)
+
+    const fleetRows = await fp.loadFleetShips(database, { GameID: save.game, RaceID: save.race, fleetWhere: `FCT_Fleet.FleetID = ${Number(chosen.id)}` })
+    const [inFleet] = await database.query(`select FCT_Ship.ShipID as ShipID, FCT_Ship.MothershipID as MothershipID, FCT_Ship.TractorParentShipID as TractorParentShipID from FCT_Ship where FCT_Ship.GameID = ${save.game} and FCT_Ship.RaceID = ${save.race} and FCT_Ship.FleetID = ${Number(chosen.id)} order by FCT_Ship.ShipID`)
+    const profile = profileOf(fp, chosen.id, fleetRows)
+
+    assert.deepEqual(fleetRows.map((ship) => ship.ShipID).sort((a, b) => a - b), inFleet.map((row) => row.ShipID), `${save.label}: the loader holds the fleet's own rows and no other fleet's`)
+    assert.deepEqual(profile.participants.map((one) => one.role).sort(), inFleet.map(roleOf).sort(), `${save.label}: the role of every ship is what its links say`)
+    assert.ok(!profile.reasons.some((reason) => reason.code === 'carrier-elsewhere'), `${save.label}: no ship is in the hangar of a ship of another fleet`)
+
+    if (profile.status === 'ok') {
+      const counted = fleetRows.filter((ship) => roleOf(ship) === 'independent' && (ship.CargoCapacity > 0 || ship.ColonistCapacity > 0))
+
+      assert.ok(profile.cargo.ships.every((ship) => roleOf(ship) === 'independent'), `${save.label}: no carried or towed ship's holds are counted`)
+      assert.equal(profile.cargo.counted.cargo, counted.reduce((total, ship) => total + ship.CargoCapacity, 0), `${save.label}: the counted holds are the free ships'`)
+      assert.equal(profile.cargo.counted.colonists, counted.reduce((total, ship) => total + ship.ColonistCapacity, 0), `${save.label}: the counted berths are the free ships'`)
+    }
+
+    if (chosen.carried > 0) {
+      hangars += 1
+    }
+  })
+
+  assert.ok(hangars >= 1, 'the fixture witnesses a parasite in a hangar')
+})
+
+check('manual-speed', 'the fleet sails at its hand-set speed held to its maximum, never raised to it, and at its maximum when the fleet is set to it: no saved fleet is hand-set, so the case is planted on the real fleet rows of the saves', async (w) => {
+  const { 'fleet-profile': fp, provenance } = await w.modules()
+
+  assert.ok(provenance.getRule('transport.fleetSpeed').versions.includes('3.2.x'), 'the fleet speed rule holds for this line')
+
+  await eachSave('manual-speed', async (database, save) => {
+    const ships = await fp.loadFleetShips(database, { GameID: save.game, RaceID: save.race })
+    const sailing = [...fleetsOf(ships).entries()].map(([id, list]) => ({ id, list, profile: profileOf(fp, id, list) })).find((fleet) => fleet.profile.status === 'ok')
+
+    assert.ok(sailing, `${save.label}: a fleet that sails`)
+    assert.ok(sailing.profile.effectiveMax > 10, `${save.label}: the fleet's maximum leaves room below it`)
+
+    const [[handSet]] = await database.query(`select count(*) as N from FCT_Fleet where GameID = ${save.game} and UseMaximumSpeed = 0`)
+    const fleet = { FleetID: sailing.id, FleetName: sailing.list[0].FleetName }
+    const maximum = sailing.profile.effectiveMax
+    const automatic = fp.fleetProfile(sailing.list, { ...fleet, Speed: maximum - 10, UseMaximumSpeed: 1 }, { basis: 'saved' })
+    const kept = fp.fleetProfile(sailing.list, { ...fleet, Speed: maximum - 10, UseMaximumSpeed: 0 }, { basis: 'saved' })
+    const capped = fp.fleetProfile(sailing.list, { ...fleet, Speed: maximum + 500, UseMaximumSpeed: 0 }, { basis: 'saved' })
+
+    assert.equal(handSet.N, 0, `${save.label}: no saved fleet is hand-set, so the case is planted`)
+    assert.equal(automatic.cruise, maximum, `${save.label}: a fleet set to its maximum takes it, not the stale speed it stores`)
+    assert.equal(automatic.cruiseSource, 'maximum-mode', `${save.label}: the maximum is the source of a fleet set to it`)
+    assert.equal(kept.cruise, maximum - 10, `${save.label}: a hand-set speed below the maximum is kept`)
+    assert.equal(kept.cruiseSource, 'saved', `${save.label}: a hand-set speed is the source`)
+    assert.equal(capped.cruise, maximum, `${save.label}: a hand-set speed above the maximum is held to it`)
+    assert.equal(capped.cruiseSource, 'saved-capped', `${save.label}: a hand-set speed held down says so`)
+  })
+})
+
+// The tables a fleet's rearming reads, and the columns that name the same rule: the ordnance series and the missile types it holds (Game.cs:8694-8703), the class's and the ship's ordnance template and the ships' and the populations' weapons (Game.cs:10417-10582, 10682, 11018-11304), the stored missile rows (Game.cs:11561-11649), and the missile design's required and available stock with a ship's hangar load, which the substitution list (Race.method_329) and the carrier path order.
+const REARMING_TABLES = ['FCT_OrdnanceSeries', 'FCT_OrdnanceSeriesMissileType', 'FCT_ClassOrdnanceTemplate', 'FCT_ShipOrdnanceTemplate', 'FCT_MissileAssignment', 'FCT_Missile', 'FCT_ShipWeapon', 'FCT_PopulationWeapon']
+const REARMING_COLUMNS = ['OrdnanceSeriesID', 'MissileTypeID', 'MissileNumber', 'RemainingDecoys', 'MissilesRequired', 'MissilesAvailable', 'PrecursorMissile', 'HangarLoadType']
+
+// The rearming names a text states. Each name counts as a whole word: `_` is a word character, so a bare `OrdnanceSeries` never stands for `FCT_OrdnanceSeries`, and only the full table and column names find a read.
+const rearmingNamesIn = (text) => [...REARMING_TABLES, ...REARMING_COLUMNS].filter((name) => new RegExp(`\\b${name}\\b`).test(text))
+
+// The catalogue's declaration of the tables it knows before a page reads them: a `DECLARED` entry is one frozen record naming its table in a `table` field beside the columns it declares, and it is no read. Only those entries are lifted, and only from the catalogue's own text, so a read written anywhere else in that file, or in any other file, is still named.
+const DECLARATION = /^\s*Object\.freeze\(\{ item: '[^']*', readBy: '[^']*', table: '[^']*', columns: Object\.freeze\(\[[^\]]*\]\)(?:, (?:retained: (?:true|false), )?note: '[^']*')? \}\),$/
+const withoutDeclarations = (text) => text.split('\n').filter((line) => !DECLARATION.test(line)).join('\n')
+
+check('rearming', 'the app reads no rearming figure: no source names a stored missile stock, a ship\'s or class\'s ordnance template, an assignment or a substitution list beyond the catalogue\'s declaration of the two ordnance series tables, and the ordnance figures the app has are the stored production and capacity rows', async (w) => {
+  const catalogue = inRenderer('utilities', 'capabilities.js')
+  const edited = new Map(Object.entries(FILES).map(([name, file]) => [file, name]))
+  const sources = filesUnder(inRenderer()).map((file) => {
+    const name = edited.get(file)
+    const text = name ? w.text[name] : fs.readFileSync(file, 'utf8')
+
+    return { where: path.relative(root, file), text: file === catalogue ? withoutDeclarations(text) : text }
+  })
+  const readers = sources.flatMap(({ where, text }) => rearmingNamesIn(text).map((name) => `${where}: ${name}`))
+
+  assert.deepEqual(readers, [], 'no source names a rearming table or column, a stored loadout or a substitution list')
+
+  // The catalogue declares the two ordnance series tables and their columns before a page reads them. Those entries are the only rearming names in the tree, and the exemption is the entry and not the file: an entry is lifted as one, while a query of the same table written beside it is named.
+  const declarations = fs.readFileSync(catalogue, 'utf8').split('\n').filter((line) => REARMING_TABLES.some((table) => line.includes(`table: '${table}'`)))
+  const declaredTables = declarations.map((line) => REARMING_TABLES.find((table) => line.includes(`table: '${table}'`)))
+
+  assert.deepEqual(declaredTables, ['FCT_OrdnanceSeries', 'FCT_OrdnanceSeriesMissileType'], 'the catalogue declares the two ordnance series tables and no other table of this rule')
+  assert.deepEqual(rearmingNamesIn(withoutDeclarations(declarations.join('\n'))), [], 'a declaration entry is no read')
+  assert.deepEqual(rearmingNamesIn(withoutDeclarations(`${declarations.join('\n')}\nconst sql = 'select FCT_OrdnanceSeries.OrdnanceSeriesID from FCT_OrdnanceSeries'`)), ['FCT_OrdnanceSeries', 'OrdnanceSeriesID'], 'a read of the same table written beside the declarations is named')
+
+  // The ordnance figures the app has are the stored production and capacity rows, so the absence above is a fact about the app and not a missing page.
+  const production = fs.readFileSync(inRenderer('mixins', 'production-modifiers.js'), 'utf8')
+  const designed = fs.readFileSync(inRenderer('pages', 'designed-tech.vue'), 'utf8')
+
+  assert.ok(/OrdnanceProductionValue/.test(production), 'the colony\'s ordnance capacity is the stored installation value')
+  assert.ok(/OrdnanceProduction/.test(production), 'the race\'s ordnance production is the stored rate')
+  assert.ok(/FCT_ShipClass\.OrdnanceModules/.test(designed), 'a class\'s ordnance is its stored module count')
+})
+
 // ---- The planted faults ----------------------------------------------------------------------------------------------
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const DISTANCE_RESULT = /(pathResult: )(?:this\.pathOf\(reach\)|\(this\.pathOf\(reach\)\))(?=, savedPositions:)/
@@ -1409,6 +1635,12 @@ const DISTANCE_RESULT = /(pathResult: )(?:this\.pathOf\(reach\)|\(this\.pathOf\(
 // [100] Old: "a save without the carrier's hangar column drops its ships"; new: "a missing hangar column drops the carried ship rows".
 // Original forcing of the absent optional column into SELECT fails at fleet-profile.js:106-108 before any ship rows return.
 // Replacement class: missing hangar schema incorrectly drops carried rows. Original unsafe optional-column SQL-read class currently has no credited fault.
+
+// A read of each rearming table planted in a renderer module, as the query a page would issue: the rearming search must name it. One fault per table and one for a column alone, so a name, or the boundary before it, that stops matching fails a fault rather than passing unnoticed.
+const REARMING_READS = [
+  ...REARMING_TABLES.map((table, index) => [`a source reads ${table}`, 'profile', 'const MIN_SPEED = 1', `const MIN_SPEED = 1\nconst REARMING_READ_${index} = 'select * from ${table} where GameID = 1'`, ['rearming']]),
+  ['a source names the missiles a fleet needs to stock', 'profile', 'const MIN_SPEED = 1', 'const MIN_SPEED = 1\nconst REARMING_STOCK = \'MissilesAvailable\'', ['rearming']],
+]
 
 const FAULTS = [
   ['a ship in a hangar or under tow is taken as under its own power', 'profile', 'const role = hangared ? \'hangared\' : towed ? \'towed\' : \'independent\'', 'const role = \'independent\'', ['carried']],
@@ -1508,6 +1740,12 @@ const FAULTS = [
   ['a missing hangar column drops the carried ship rows', 'profile', 'return Object.freeze(rows)', 'return Object.freeze(hasClassColumn(CARRIER_CLASS_COLUMN) ? rows : rows.filter((row) => !row.MothershipID))', ['loader-runtime']],
   // eslint-disable-next-line no-template-curly-in-string
   ['a class column the save lacks reads as 0', 'profile', '(hasClassColumn(name) ? `FCT_ShipClass.${name}` : `null as ${name}`)', '(hasClassColumn(name) ? `FCT_ShipClass.${name}` : `0 as ${name}`)', ['loader']],
+  ['the loader reads a ship under the fleet its carrier is in', 'profile', 'inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID', 'inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.MothershipID', ['parasites']],
+  ['a hangared ship is left without its hangar role', 'profile', 'const role = hangared ? \'hangared\' : towed ? \'towed\' : \'independent\'', 'const role = towed ? \'towed\' : \'independent\'', ['parasites']],
+  ['a hand-set speed above the maximum is kept', 'profile', 'saved > effectiveMax ? [effectiveMax, \'saved-capped\'] : [saved, \'saved\']', '[saved, \'saved\']', ['manual-speed']],
+  ['the snapshot cuts each class size to whole hull spaces before the sum', 'history', 'sum(FCT_ShipClass.Size) end as Size', 'sum(cast(FCT_ShipClass.Size as integer)) end as Size', ['tonnage']],
+  ['the snapshot rounds each class size before the sum', 'history', 'sum(FCT_ShipClass.Size) end as Size', 'sum(round(FCT_ShipClass.Size)) end as Size', ['tonnage']],
+  ...REARMING_READS,
 ]
 
 // ---- Benign edits ----------------------------------------------------------------------------------------------------

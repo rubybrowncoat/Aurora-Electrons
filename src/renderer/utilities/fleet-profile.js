@@ -19,11 +19,13 @@ const ENGINEERING = 31
 // The slowest speed the game gives a ship, in km/s.
 const MIN_SPEED = 1
 
+// The line's parasite transfer decides both rules below: the parasite is moved into the target fleet's list and takes that fleet (Ship.cs:8007-8060, TransferToFleet, which adds each ship whose mother ship is the transferred one to the target fleet and writes the new fleet to it), so a hangared ship counts under the fleet its own row names, and the fleet's speed is recomputed by the member that holds a hand-set speed to the maximum and never raises it (Fleet.cs:10467-10488, method_252, called for both fleets after a transfer). Both are exercised on the interim fixture and on a save the game wrote under the present line by scripts/check-fleet-profile.js.
+const FLEET_MEMBERSHIP_VERSIONS = ['2.7.x', '3.2.x']
 const FLEET_VERSIONS = ['2.7.x']
 
 registerRule({
   id: 'transport.fleetSpeed',
-  versions: FLEET_VERSIONS,
+  versions: FLEET_MEMBERSHIP_VERSIONS,
   units: 'km/s',
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size, EnginePower', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID, ComponentValue', 'FCT_DamagedComponent', 'FCT_Ship.OverhaulFactor, MothershipID, TractorTargetShipID, TractorParentShipID', 'FCT_Fleet.Speed, UseMaximumSpeed'],
@@ -43,7 +45,7 @@ registerRule({
 
 registerRule({
   id: 'transport.fleetCargo',
-  versions: FLEET_VERSIONS,
+  versions: FLEET_MEMBERSHIP_VERSIONS,
   units: 't',
   verification: 'estimated',
   structure: ['FCT_ShipClass.CargoCapacity, ColonistCapacity', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID, ComponentValue', 'FCT_DamagedComponent', 'FCT_Ship.MothershipID, TractorParentShipID'],
