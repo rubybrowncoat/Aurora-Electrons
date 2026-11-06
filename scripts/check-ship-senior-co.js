@@ -161,7 +161,7 @@ const shipRows = (text, c, database, groups = null) => database.query(queryOf(te
 const rosterRows = (text, c, database, groups = null) => database.query(queryOf(text, ROSTER_HEADER, partsValues(c, groups))).all()
 
 // ---- Rows the pure cases are built from --------------------------------------------------------------------------------
-const baseShip = (overrides = {}) => ({ ShipID: 1, ShipName: 'Scout One', ClassName: 'Scout', RankRequired: 3, ShipSeniorCO: 0, NavalRanks: NAVAL_RANKS, ClassSize: 10, Terraformers: 0, MiningModules: 0, Harvesters: 20, SciencePosts: 0, GeoSurvey: 0, GravSurvey: 0, CaptainID: 0, ScienceOfficerID: 0, ...overrides })
+const baseShip = (overrides = {}) => ({ ShipID: 1, ShipName: 'Scout One', ClassName: 'Scout', MainFunction: 2, RankRequired: 3, ShipSeniorCO: 0, NavalRanks: NAVAL_RANKS, ClassSize: 10, Terraformers: 0, MiningModules: 0, Harvesters: 20, SciencePosts: 0, GeoSurvey: 0, GravSurvey: 0, CaptainID: 0, ScienceOfficerID: 0, ...overrides })
 
 const value = (result) => (result && result.status !== 'unavailable' ? result.value : null)
 const missing = (result) => (result && result.status === 'unavailable' ? result.inputs.missing : [])
@@ -555,7 +555,7 @@ const flat = (node) => (Array.isArray(node) ? node.map(flat).join('') : typeof n
 // The slots of a table of the page's template, rendered for a row: { [slot name]: (item) => text }.
 const slotsOf = (block) => {
   const componentText = `<template><div>${block}</div></template>`
-  const vm = { shipRows: [1], shipHeaders: [], shipTable: { itemsPerPage: 10 }, shipPageSizes: [], rows: [], systemLink: () => '/systems/1', colonyLink: () => '/colonies/1', rankName: (level) => `Rank ${level}`, bonusText: () => '', count: String }
+  const vm = { shipRows: [1], visibleShipRows: [1], declaredText: () => '', shipHeaders: [], shipTable: { itemsPerPage: 10 }, shipPageSizes: [], rows: [], systemLink: () => '/systems/1', colonyLink: () => '/colonies/1', rankName: (level) => `Rank ${level}`, bonusText: () => '', count: String }
   const { tree, errors } = renderTree(componentText, vm)
 
   assert.deepEqual(errors, [], 'the extracted template compiles')
@@ -569,7 +569,7 @@ const slotsOf = (block) => {
 
 check('text', 'the Commanders page draws the Senior CO mark of a ship, the one-rank-above note of the post and the mark of the roster\'s assignment from its own template, and the footer of the ships panel states the rule, including that a save without the setting gives no captain rank', async (w) => {
   const text = w.texts.commandersPage
-  const ships = slotsOf(blockOf(text, '<v-data-table v-if="shipRows.length"', '</v-data-table>'))
+  const ships = slotsOf(blockOf(text, '<v-data-table v-if="visibleShipRows.length"', '</v-data-table>'))
   const ship = (flag) => ships('item.ship', { ship: { ShipName: 'Hauler', ClassName: 'H50M', FleetName: 'First', SystemID: 0, SystemName: '', ShipSeniorCO: flag } })
   const post = (seniorCO) => ships('item.post', { post: { post: 'captain', label: 'Mining', level: 4, seniorCO }, postResult: null })
 
@@ -579,7 +579,7 @@ check('text', 'the Commanders page draws the Senior CO mark of a ship, the one-r
     assert.ok(!/Senior CO/.test(ship(flag)), `a ship with the flag ${flag} carries no mark: ${ship(flag)}`)
   }
 
-  assert.ok(/Mining · Rank 4 · one above the class$/.test(post(true)), `a captain's post raised by the flag says so: ${post(true)}`)
+  assert.ok(/Mining · Rank 4 · one above the class\s*$/.test(post(true)), `a captain's post raised by the flag says so: ${post(true)}`)
   assert.ok(!/one above/.test(post(false)), `a post the flag did not raise says nothing: ${post(false)}`)
 
   const roster = slotsOf(`<v-data-table :items="rows">${blockOf(text, '<template #[`item.assignment`]', '</template>')}</v-data-table>`)

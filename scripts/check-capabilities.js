@@ -1276,7 +1276,7 @@ const consumerResults = async (mods, source, refusedFile) => {
   holds('a roster bonus of a blocked ID is unknown, never its stored value', bonuses[5] === null && bonuses[25] === null && bonuses[6] === 1.1)
   holds('a roster chip of a blocked bonus reads as unknown', commanders.formatBonus(25, 6, blocked) !== '6' && commanders.formatBonus(25, 6, new Set()) === '6')
 
-  const ship = { ShipID: 1, ClassName: 'Terraformer', Terraformers: 2, RankRequired: 3, ShipSeniorCO: 0 }
+  const ship = { ShipID: 1, ClassName: 'Terraformer', Terraformers: 2, RankRequired: 3, ShipSeniorCO: 0, MainFunction: 2 }
 
   holds('a specialist post that rests on a blocked bonus is unavailable', !isAvailableResult(commanders.specialistPost(ship, new Set([9]))) && isAvailableResult(commanders.specialistPost(ship, new Set())))
 
@@ -1580,7 +1580,7 @@ const rosterChecks = async (capabilities, commanders, source) => {
   try {
     const baseline = await rosterRun(commanders, source, null)
 
-    check('roster: the page\'s four queries run on an unaltered save', baseline.ok && baseline.rows.length === 4, baseline.failed.join('; '))
+    check('roster: the page\'s five queries run on an unaltered save (the fifth reads the classes of the light naval candidates, AE-304-02)', baseline.ok && baseline.rows.length === 5, [baseline.rows.length, ...baseline.failed].join('; '))
     check('roster: an unaltered save returns rank names and ages', named(baseline.rows, 'RankName').some((name) => name !== null) && named(baseline.rows, 'GraduationAge').some((age) => age !== null))
 
     const cases = [

@@ -49,6 +49,14 @@ export const TERRAFORMING = 9
 // A ship class this small (FCT_ShipClass.Size, in hull spaces, 1,000 t) or smaller is a light naval unit, and its captain's bonus counts in full where a larger ship's counts halved. The limit is inclusive.
 const LIGHT_NAVAL_SIZE = 20
 
+// FCT_ShipClass.MainFunction, the function the game ranks a ship's officers by (`Race.AssignCommanderAssignmentScore`) and names as the class's role. The game works it out from the class's armament, sensors and size each time it loads a class unless the player picked it (`UserDefinedFunction` set, `ClassDesign` where the player chooses it), so a function that is stored and not declared is the game's own reading. Names as the game words them.
+export const MAIN_FUNCTIONS = Object.freeze({ 0: 'None', 1: 'Carrier', 2: 'Warship', 3: 'Light Naval', 5: 'Scout', 6: 'Survey Ship', 7: 'Survey Ship', 8: 'Freighter', 9: 'Colony Ship', 10: 'Troop Transport', 11: 'Stabilisation Ship', 12: 'Fuel Harvester', 13: 'Terraformer', 14: 'Orbital Miner', 15: 'Salvager', 16: 'Liner', 17: 'Supply Ship', 18: 'Maintenance Ship', 19: 'Tanker', 20: 'Orbital Habitat', 21: 'Worker', 22: 'Recreational Ship', 23: 'Space Station', 24: 'Intelligence Ship', 26: 'Diplomatic Ship', 27: 'Tug', 28: 'Ordnance Production' })
+const LIGHT_NAVAL_FUNCTION = 3
+// Light Tactical, the bonus the game ranks the captain of a Light Naval ship by.
+export const LIGHT_TACTICAL = 39
+// Tactical, the bonus a captain's combat effect takes on a ship over `LIGHT_NAVAL_SIZE` hull spaces (half of it).
+export const TACTICAL = 21
+
 // FCT_Ranks.RankType of the naval ranks (the game's commander type Naval, the first of its enumeration).
 const NAVAL_RANK_TYPE = 0
 
@@ -74,7 +82,7 @@ export const RETIRE_STATUSES = {
 export const SERVING_COMMANDER = 'FCT_Commander.RetireStatus = 0 and FCT_Commander.Prisoner = 0'
 
 // The SQL the roster's queries take for the columns the save has: `groups` is { rank, age, seniorCO } from the capability check of /commanders (utilities/capabilities.js `SOFT`), null while it has not answered, which reads as a save that has everything. A group the save lacks is selected as nulls (never 0, so the figures built on it are unavailable) and its joins are left out: `rankColumns`, `rankLevel`, `classRank` and `shipFlag` for the ranks, `ageColumn` for the species' graduation age; the ship's Senior CO flag and the count of naval ranks that a flagged ship's captain rank needs are nulls without the `seniorCO` group.
-// `classRank` is the rank the class requires beside the ship's Senior CO flag and the number of naval ranks the race holds, which `captainRank` needs to tell whether a rank above the class's exists; `shipFlag` is the same flag of the ship an assigned officer serves on, null for a post that is not on a ship. A save without the flag selects it as null, and `captainRank` holds a null flag to be unknown, never no flag: its captain's rank is then unavailable rather than the class's.
+// `classRank` is the rank the class requires beside the ship's Senior CO flag and the number of naval ranks the race holds, which `captainRank` needs to tell whether a rank above the class's exists; `shipFlag` is the same flag of the ship an assigned officer serves on, null for a post that is not on a ship. A save without the flag selects it as null, and `captainRank` holds a null flag to be unknown, never no flag: its captain's rank is then unavailable rather than the class's. `namedFunctions` lists the codes of the main functions the game names (`MAIN_FUNCTIONS`), for the read of the classes whose function is not stored or is not one of them, which may be light naval ones.
 export const rosterParts = (groups, { GameID, RaceID }) => {
   const ranked = !groups || groups.rank !== false
   const aged = !groups || groups.age !== false
@@ -89,6 +97,7 @@ export const rosterParts = (groups, { GameID, RaceID }) => {
     ageJoin: aged ? 'left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID' : '',
     rankJoin: ranked ? 'left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID' : '',
     levelJoin: ranked ? `left join (select FCT_Ranks.RankType, max(FCT_Ranks.Priority) as Lowest from FCT_Ranks where FCT_Ranks.GameID = ${GameID} and FCT_Ranks.RaceID = ${RaceID} group by FCT_Ranks.RankType) as VIR_Levels on VIR_Levels.RankType = FCT_Ranks.RankType` : '',
+    namedFunctions: Object.keys(MAIN_FUNCTIONS).join(', '),
   }
 }
 
@@ -162,13 +171,14 @@ registerRule({
   note: 'Whether an unassigned administrator would govern a colony better than its governor: the colony\'s required bonuses (Governor tab) compared in order, the first, then the second, then the third. The order follows the game\'s documented automated assignment and is not compared with an assignment the game made. A colony or commander whose bonus is not stored cannot be rated: the result is unavailable and names the missing value.',
 })
 
+// Source members of the post rule, 3.1.0: `Race.AssignCommanderAssignmentScore` (Race.cs 13255-13380; 13280-13344) ranks the captain of a ship by the bonus of its stored main function, Light Naval by Light Tactical, whatever the size; `ShipClass.AssignMainFunction` (ShipClass.cs 4566-4733) chooses Light Naval only for a class of at most 20 hull spaces (4731) unless the player declared the function (`ClassDesign`, `UserDefinedFunction`), and the game loads a class with it only when it was not declared (ShipClass.cs 3928); `Ship.CalculateTacticalEffectivenessMultiplier` (Ship.cs 1723-1741) takes the captain's Light Tactical (`Commander.method_5`) for a ship of at most 20 hull spaces and the captain's Tactical halved (`Commander.method_7`, Commander.cs 325-337) for a larger one, as `Ship.method_125` does (Ship.cs 5621-5627, which skips Light Tactical above 20 hull spaces). So the ranking of a declared Light Naval class over 20 hull spaces by Light Tactical is the game's assignment order and not its effect in combat.
 registerRule({
   id: POST,
   versions: ['3.2.x'],
   units: 'post',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired, Size', 'FCT_Ship.ShipSeniorCO', 'FCT_Ranks.RankType (the count of the naval ranks)', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)'],
-  note: 'The post and bonus that matter on a specialist ship, from its class: terraformers and miners use the captain\'s bonus, survey ships the science officer\'s Survey bonus when the class has a Science Department and otherwise the captain\'s, in full for a class of 20 hull spaces or less (the limit included) and halved for a larger one. The captain\'s rank is the rank the class requires, which already carries the class\'s own Senior CO option, and one rank higher for a ship that is flagged Senior CO itself, as the game asks the ship for its rank; a secondary officer ranks one below the class rank whatever the flag. The post-to-bonus match was observed on a sample of saved assignments; the captain\'s share is the game source\'s rule and is not checked against a save. A class whose module counts, size or required rank are not stored has no post, nor has a captain\'s post of a ship whose Senior CO setting is not stored or whose flagged rank the race\'s ranks do not hold; a save that does not store the setting at all keeps the class\'s rank for the post and says so.',
+  structure: ['FCT_ShipClass.Terraformers, MiningModules, Harvesters, GeoSurvey, GravSurvey, RankRequired, Size', 'FCT_ShipClass.MainFunction, UserDefinedFunction, NoOfficers', 'FCT_Ship.ShipSeniorCO', 'FCT_Ranks.RankType (the count of the naval ranks)', 'FCT_ClassComponent, FCT_ShipDesignComponents.Name (Science Department)', 'FCT_CommanderBonuses.BonusID, BonusValue (Light Tactical, Tactical)'],
+  note: 'The post and bonus that matter on a ship, from its class: terraformers and miners use the captain\'s bonus, survey ships the science officer\'s Survey bonus when the class has a Science Department and otherwise the captain\'s, in full for a class of 20 hull spaces or less (the limit included) and halved for a larger one. A ship of a class whose stored main function is Light Naval and that has officers is a light naval ship: its captain is ranked by Light Tactical, the bonus the game\'s assignment order uses for that function. That ranking is not the effect on the ship: in combat the ship\'s own tactical multiplier takes the captain\'s Light Tactical in full for a class of 20 hull spaces or less and half of the captain\'s Tactical for a larger one, so for a class declared Light Naval over 20 hull spaces Light Tactical counts for nothing in combat, and the post carries the Tactical bonus beside it. The game works the main function out from the class\'s size, armament and sensors unless the player declared it, so a stored Light Naval function counts for a class over 20 hull spaces only when it was declared. A class whose main function is not stored, or is one the game does not name, may be a light naval class and has no post, unless it has no officers or is not declared and over 20 hull spaces, which no function makes light naval. A declared function is shown beside the post; only Light Naval is ranked by its own bonus, the other posts follow the class\'s modules. The captain\'s rank is the rank the class requires, which already carries the class\'s own Senior CO option, and one rank higher for a ship that is flagged Senior CO itself, as the game asks the ship for its rank; a secondary officer ranks one below the class rank whatever the flag. The post-to-bonus match was observed on a sample of saved assignments; the captain\'s share is the game source\'s rule and is not checked against a save. A class whose module counts, size or required rank are not stored has no post, nor has a captain\'s post of a ship whose Senior CO setting is not stored or whose flagged rank the race\'s ranks do not hold; a save that does not store the setting at all keeps the class\'s rank for the post and says so. A Light Naval class whose officers, size or declaration are not stored has no post.',
 })
 
 registerRule({
@@ -207,7 +217,7 @@ registerRule({
   units: 'assignments',
   verification: 'estimated',
   structure: ['the governor, specialist ship and research suggestion rules'],
-  note: 'The assignments an unassigned officer would improve: governor improvements, specialist ships and research projects added. Each rests on an estimated rule; assignments that cannot be rated for a missing value are left out and counted apart.',
+  note: 'The assignments an unassigned officer would improve: governor improvements, specialist ships, light naval ships and research projects added. Each counts a post, and one officer can be the best candidate of many posts, so the count is of posts that an officer would improve and is neither a number of officers nor an allocation. Each rests on an estimated rule; assignments that cannot be rated for a missing value are left out and counted apart.',
 })
 
 registerRule({
@@ -515,6 +525,59 @@ export const captainlessShips = (ships) => {
 
 const SHIP_INPUTS = { RankRequired: 'the rank the class requires', ClassSize: 'the size of the class', Terraformers: 'the number of terraformers', MiningModules: 'the number of mining modules', Harvesters: 'the number of harvesters', SciencePosts: 'the number of science posts', GeoSurvey: 'the geological survey strength', GravSurvey: 'the gravitational survey strength' }
 
+// The name of a main function code: the game's, else its number, else unknown.
+export const mainFunctionLabel = (code) => MAIN_FUNCTIONS[code] || (isKnownNumber(code) ? `Function ${code}` : UNKNOWN_TEXT)
+
+// A stored flag as true or false (a boolean, or a number that is not 0); null when it is not stored.
+const flagOf = (value) => (typeof value === 'boolean' ? value : isKnownNumber(value) ? value !== 0 : null)
+
+// The function the player declared for a ship's class (`FCT_ShipClass.UserDefinedFunction` set), as { code, label }; null for a class whose function the game works out and for one whose function or declaration is not stored.
+export const declaredFunction = (ship) => (flagOf(ship.UserDefinedFunction) === true && isKnownNumber(ship.MainFunction) ? { code: ship.MainFunction, label: mainFunctionLabel(ship.MainFunction) } : null)
+
+// Whether a main function code is one the game names (`MAIN_FUNCTIONS`): a stored code of another kind, or none, is not a function the page can tell from Light Naval.
+const namedFunction = (ship) => isKnownNumber(ship.MainFunction) && MAIN_FUNCTIONS[ship.MainFunction] !== undefined
+
+// What the class's officers, declaration and size say for a Light Naval function: true when the class has officers and is declared or of `LIGHT_NAVAL_SIZE` hull spaces or fewer, false with no officers or for a class that is not declared and is larger, null where a flag or the size that decides is not stored.
+const lightNavalFit = (ship) => {
+  const officers = flagOf(ship.NoOfficers)
+  const declared = flagOf(ship.UserDefinedFunction)
+
+  if (officers === true) {
+    return false
+  } else if (officers === null) {
+    return null
+  } else if (declared === true) {
+    return true
+  }
+
+  if (!isKnownNumber(ship.ClassSize)) {
+    return null
+  }
+
+  return ship.ClassSize <= LIGHT_NAVAL_SIZE ? true : declared === false ? false : null
+}
+
+// Whether a ship is a light naval one, whose captain the game ranks by Light Tactical (`Race.AssignCommanderAssignmentScore`): its class's stored main function is Light Naval, the class has officers, and either the player declared the function or the class is of `LIGHT_NAVAL_SIZE` hull spaces or fewer (the limit the game's own choice stops at). True, false, or null where what decides it is not stored (a class with no stored officers flag, size, or declaration). A stored function the game names other than Light Naval is not one. A class whose function is not stored, or is not one the game names, may be one: it is not one only where its officers, declaration and size rule out any function being Light Naval, else null.
+export const isLightNavalPost = (ship) => {
+  const named = namedFunction(ship)
+
+  if (named && ship.MainFunction !== LIGHT_NAVAL_FUNCTION) {
+    return false
+  }
+
+  const fit = lightNavalFit(ship)
+
+  return named || fit === false ? fit : null
+}
+
+// What keeps `isLightNavalPost` from answering for a ship, as phrases for a missing list.
+const lightNavalGaps = (ship, where) => [
+  ...(namedFunction(ship) ? [] : [isKnownNumber(ship.MainFunction) ? `the main function of the class of ${where}, stored as ${ship.MainFunction}, which the game does not name` : `the main function of the class of ${where}`]),
+  ...(flagOf(ship.NoOfficers) === null ? [`whether the class of ${where} has officers`] : []),
+  ...(flagOf(ship.UserDefinedFunction) !== true && !isKnownNumber(ship.ClassSize) ? [`the size of the class of ${where}`] : []),
+  ...(flagOf(ship.UserDefinedFunction) === null && isKnownNumber(ship.ClassSize) && ship.ClassSize > LIGHT_NAVAL_SIZE ? [`whether the function of the class of ${where} was declared`] : []),
+]
+
 // The rank a ship's captain must hold, as { level, flagged, missing } (`Ship.method_47` of the game, which asks the ship for it): the rank the class requires as a level (1 is the lowest naval rank; the stored requirement already carries the class's own Senior CO option, so it is not added again) and one level higher for a ship that is flagged Senior CO itself (`FCT_Ship.ShipSeniorCO` is 1). The game finds no rank for a flagged ship whose class already holds the highest naval rank: `ship.NavalRanks` is the number of the race's naval ranks. `missing` names what is not stored or not there, and `level` is then null. A flag the save does not hold — a save without the column, whose read selects it as null, or a null under it — is not read as an unflagged ship: the game adds one rank to the class's when the flag is 1, so either could have been 1, and the rank is unknown with `flagged` null and the setting named in `missing`. The ranks of the other posts stay relative to the class.
 export const captainRank = (ship) => {
   const where = ship.ClassName || `class of ship ${ship.ShipID}`
@@ -539,19 +602,37 @@ export const captainRank = (ship) => {
   return { level: ship.RankRequired + 1, flagged, missing }
 }
 
-// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share, seniorCO }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else their captain's: in full for a class of `LIGHT_NAVAL_SIZE` hull spaces or less (`ship.ClassSize`), half for a larger one. The captain's `level` is `captainRank`'s, `seniorCO` whether the ship's own flag raised it; a secondary officer ranks one below the rank the class requires, the flag leaving it alone. A class whose module counts, size or required rank are not stored has no post, nor has a captain's post of a ship whose Senior CO setting the save does not hold, or that has no rank above its class's. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
+// The officer post and bonus that matter on a ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share, seniorCO } (and `combat` for a ship over the limit). A light naval ship (`isLightNavalPost`) has its captain ranked by Light Tactical, the bonus of the game's assignment order for that function (Race.cs 13280-13344): `share` is the part of it that counts in the ship's own tactical multiplier (Ship.cs 1731-1741, 5621-5627), 1 for a class of `LIGHT_NAVAL_SIZE` hull spaces or fewer, 0 for a larger one, which only a declared class is, and null where the size is not stored, with `combat` { bonusId, label, share } naming the bonus that counts there instead (Tactical, half; `Commander.method_7`). Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else their captain's: in full for a class of `LIGHT_NAVAL_SIZE` hull spaces or less (`ship.ClassSize`), half for a larger one. The captain's `level` is `captainRank`'s, `seniorCO` whether the ship's own flag raised it; a secondary officer ranks one below the rank the class requires, the flag leaving it alone. A class whose module counts, size or required rank are not stored has no post, nor has a captain's post of a ship whose Senior CO setting the save does not hold, or that has no rank above its class's, nor a class that may be Light Naval and whose main function, officers, size or declaration are not stored. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
 export const specialistPost = (ship, blocked = NONE) => {
   const where = ship.ClassName || `class of ship ${ship.ShipID}`
   const lacking = (columns) => columns.filter((column) => !isKnownNumber(ship[column])).map((column) => `${SHIP_INPUTS[column] || column} of ${where}`)
-  const post = (value) => {
+  const post = (value, notes = []) => {
     const science = value.post === 'science'
     const rank = science ? null : captainRank(ship)
     const missing = [...(science ? lacking(['RankRequired']) : rank.missing), ...(blocked.has(value.bonusId) ? [`the save's row for bonus ${value.bonusId}, ${value.label}`] : [])]
 
-    return missing.length ? unavailable({ rule: POST, missing }) : ofRule({ rule: POST, value: { ...value, level: science ? Math.max(1, ship.RankRequired - 1) : rank.level, seniorCO: science ? false : rank.flagged }, inputs: { present: science ? ['class modules', 'RankRequired'] : ['class modules', 'RankRequired', 'Senior CO setting'] } })
+    return missing.length ? unavailable({ rule: POST, missing }) : ofRule({ rule: POST, value: { ...value, level: science ? Math.max(1, ship.RankRequired - 1) : rank.level, seniorCO: science ? false : rank.flagged }, inputs: { present: science ? ['class modules', 'RankRequired'] : ['class modules', 'RankRequired', 'Senior CO setting'], missing: notes } })
+  }
+  // The captain of a light naval ship: ranked by Light Tactical whatever the size, which counts in the ship's tactical multiplier only up to `LIGHT_NAVAL_SIZE` hull spaces and gives way to half of Tactical above.
+  const lightNavalPost = () => {
+    const base = { post: 'captain', bonusId: LIGHT_TACTICAL, label: 'Light Tactical' }
+
+    if (!isKnownNumber(ship.ClassSize)) {
+      return post({ ...base, share: null }, [`the size of the class of ${where}, which says whether Light Tactical counts in combat`])
+    }
+
+    const over = ship.ClassSize > LIGHT_NAVAL_SIZE
+
+    return over ? post({ ...base, share: 0, combat: { bonusId: TACTICAL, label: 'Tactical', share: 0.5 } }) : post({ ...base, share: 1 })
   }
 
-  if (!isKnownNumber(ship.Terraformers)) {
+  const lightNaval = isLightNavalPost(ship)
+
+  if (lightNaval === null) {
+    return unavailable({ rule: POST, missing: lightNavalGaps(ship, where) })
+  } else if (lightNaval) {
+    return lightNavalPost()
+  } else if (!isKnownNumber(ship.Terraformers)) {
     return unavailable({ rule: POST, missing: lacking(['Terraformers', 'RankRequired']) })
   } else if (ship.Terraformers > 0) {
     return post({ post: 'captain', bonusId: TERRAFORMING, label: 'Terraforming', share: 1 })
@@ -574,7 +655,7 @@ export const specialistPost = (ship, blocked = NONE) => {
   return ship.ClassSize <= LIGHT_NAVAL_SIZE ? post({ post: 'captain', bonusId: SURVEY, label: 'Survey', share: 1 }) : post({ post: 'captain', bonusId: SURVEY, label: 'Survey (half for a captain)', share: 0.5 })
 }
 
-// Specialist ships where an unassigned naval officer of the post's rank has a better bonus than the officer in it (or the post is empty). `officers`: naval officers with `bonuses` and `RankLevel`. Returns { rows, unrated }: `rows` are the posts to improve or vacant, each with a result of 'commanders.shipBonus' that names a candidate left out for a missing bonus or rank (`unknownCandidates` counts them), and `unrated` the ships that cannot be rated, each { ship, result } with the result unavailable. A vacant post stays a row whether or not an officer is better. A post holder not among the officers, or whose bonus has no value, cannot be rated. `blocked` as for `specialistPost`.
+// Ships where an unassigned naval officer of the post's rank has a better bonus than the officer in it (or the post is empty): the specialist ships, or the light naval ones. `officers`: naval officers with `bonuses` and `RankLevel`. Returns { rows, unrated }: `rows` are the posts to improve or vacant, each with a result of 'commanders.shipBonus' that names a candidate left out for a missing bonus or rank (`unknownCandidates` counts them), and `unrated` the ships that cannot be rated, each { ship, result } with the result unavailable. A row is the best unassigned officer for its post taken alone: one officer can be the candidate of many rows, `alsoBestFor` counts the other rows that name the same officer, and those rows are alternatives, not a simultaneous allocation. A row of a post that carries `combat` (a light naval ship over the limit) holds the holder's and the candidate's bonus of that kind beside the ranking's, as `combat` { bonusId, label, share, current, candidate }. A vacant post stays a row whether or not an officer is better. A post holder not among the officers, or whose bonus has no value, cannot be rated. `blocked` as for `specialistPost`.
 export const shipSuggestions = (ships, officers, names = {}, blocked = NONE) => {
   const idle = idleOf(officers)
   const byId = Object.fromEntries(officers.map((officer) => [officer.CommanderID, officer]))
@@ -642,6 +723,9 @@ export const shipSuggestions = (ships, officers, names = {}, blocked = NONE) => 
       return
     }
 
+    // What counts in combat where it is not the ranking's bonus (a light naval ship over the limit): the holder's and the candidate's bonus of that kind, none where the save's row for it is not confirmed.
+    const combat = post.combat ? { ...post.combat, current: holder && !blocked.has(post.combat.bonusId) ? heldBonus(holder, post.combat.bonusId) : null, candidate: best && !blocked.has(post.combat.bonusId) ? heldBonus(best.officer, post.combat.bonusId) : null } : null
+
     rows.push({
       ship,
       post,
@@ -649,10 +733,20 @@ export const shipSuggestions = (ships, officers, names = {}, blocked = NONE) => 
       holder,
       current,
       candidate: best ? best.officer : null,
+      combat,
+      alsoBestFor: 0,
       otherRanks: better.length - atRank.length - unranked.length,
       unknownCandidates: gaps.length,
       result: combine({ rule: SHIP, parts: { post: postResult }, compute: () => ({ current, candidate: best ? best.value : null }), inputs: { present: ['officer bonuses'], missing: named(gaps) } }),
     })
+  })
+
+  // The rows that name the same officer are alternatives for that one officer, not a simultaneous allocation.
+  const rowsOf = new Map()
+
+  rows.forEach((row) => row.candidate && rowsOf.set(row.candidate, (rowsOf.get(row.candidate) || 0) + 1))
+  rows.forEach((row) => {
+    row.alsoBestFor = row.candidate ? rowsOf.get(row.candidate) - 1 : 0
   })
 
   return { rows, unrated }
@@ -736,10 +830,10 @@ export const researchSuggestions = (projects, scientists, blocked = NONE, { noRe
   return { rows, unrated, skipped: null }
 }
 
-// The assignments an unassigned officer would improve, as a result of 'commanders.bonusSuggestion': the governor, ship and research rows added. `unrated` is the number of assignments left out because they cannot be rated.
-export const bonusSuggestionCount = (governors, ships, research) => {
-  const unknown = governors.unrated.length + ships.unrated.length + research.unrated.length
-  const value = governors.rows.length + ships.rows.length + research.rows.length
+// The assignments an unassigned officer would improve, as a result of 'commanders.bonusSuggestion': the governor, ship, research and light naval rows added (`light` as `ships`, for the light naval ships). `unrated` is the number of assignments left out because they cannot be rated.
+export const bonusSuggestionCount = (governors, ships, research, light = { rows: [], unrated: [] }) => {
+  const unknown = governors.unrated.length + ships.unrated.length + research.unrated.length + light.unrated.length
+  const value = governors.rows.length + ships.rows.length + research.rows.length + light.rows.length
 
   return { value, unknown, result: countOf({ rule: SUGGESTIONS, value, unknown, missing: `${unknown} assignments cannot be rated`, units: 'assignments' }) }
 }

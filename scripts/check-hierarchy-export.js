@@ -1052,9 +1052,9 @@ const nodesOf = (tree, test, found = []) => {
 
 const textOf = (tree) => (tree === null || tree === undefined ? '' : Array.isArray(tree) ? tree.map(textOf).join('') : tree.tag ? textOf(tree.children) : tree.text || '')
 
-const CORE_KEYS = ['commanders', 'bonusTypes', 'traits', 'colonies', 'ships', 'projects', 'former', 'formerHistory', 'held', 'unsettled', 'noResearch']
+const CORE_KEYS = ['commanders', 'bonusTypes', 'traits', 'colonies', 'ships', 'lightShips', 'projects', 'former', 'formerHistory', 'held', 'unsettled', 'noResearch']
 const OPTIONAL_KEYS = ['navalTree', 'groundTree']
-const EMPTY_READS = { commanders: [], bonusTypes: [], traits: [], colonies: [], ships: [], projects: [], former: [], formerHistory: {}, held: [], unsettled: 0, navalTree: null, groundTree: null, noResearch: { read: false, value: null } }
+const EMPTY_READS = { commanders: [], bonusTypes: [], traits: [], colonies: [], ships: [], lightShips: [], projects: [], former: [], formerHistory: {}, held: [], unsettled: 0, navalTree: null, groundTree: null, noResearch: { read: false, value: null } }
 
 const STORE = {
   getters: { config: { get: (_name, fallback) => fallback }, database: null, GameID: GAME, RaceID: RACE, StartYear: 2000, 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() },

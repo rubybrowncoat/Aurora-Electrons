@@ -146,7 +146,7 @@ const officer = (overrides = {}) => ({ HasCaptain: true, CaptainBonus: 1.4, HasS
 
 const sensorShip = (id, size, overrides = {}) => ({ ShipID: id, MothershipID: 0, CurrentCrew: 100, ClassCrew: 100, CrewMorale: 1, GeoValue: 2, GeoDesigned: 2, GravValue: 0, GravDesigned: 0, DamagedLines: 0, ...officer({ CaptainBonus: 1.5, ClassSize: size }), ...overrides })
 
-const postRow = (overrides = {}) => ({ ShipID: 1, ShipName: 'Scout', ClassName: 'Scout', RankRequired: 2, ShipSeniorCO: 0, ClassSize: 10, Terraformers: 0, MiningModules: 0, Harvesters: 0, SciencePosts: 0, GeoSurvey: 2, GravSurvey: 0, ...overrides })
+const postRow = (overrides = {}) => ({ ShipID: 1, ShipName: 'Scout', ClassName: 'Scout', MainFunction: 6, RankRequired: 2, ShipSeniorCO: 0, ClassSize: 10, Terraformers: 0, MiningModules: 0, Harvesters: 0, SciencePosts: 0, GeoSurvey: 2, GravSurvey: 0, ...overrides })
 
 // The Commanders page's ships read, as its source writes it: the template literal after `ships: {` with the game, the race and the class rank columns (`classRank`, of `rosterParts` for a complete save) filled in.
 const pageShipsSql = (text, classRank) => {

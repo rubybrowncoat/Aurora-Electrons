@@ -38,7 +38,7 @@ registerRule({
   versions: [STATED_FORMULA_VERSION],
   verification: 'confirmed',
   structure: ['DIM_CommanderBonusType.BonusID', 'DIM_CommanderBonusType.Description', 'DIM_CommanderBonusType.Percentage'],
-  note: 'The commander bonus IDs the planners read were compared with the commander bonus types of the three shipped databases of the line and of a played save migrated to it: each stands for the same bonus, a multiplier or a rating, in all four. The line removed Fighter Combat (26) and added Light Tactical (39), and the planners read neither, so neither is gated. A save whose row differs is not mapped.',
+  note: 'The commander bonus IDs the planners read were compared with the commander bonus types of the three shipped databases of the line and of a played save migrated to it: each stands for the same bonus, a multiplier or a rating, in all four. The line removed Fighter Combat (26) and added Light Tactical (39); the planners read Light Tactical, which ranks the captains of light naval ships, so it is gated, and not Fighter Combat, which none reads. Communications (22) is gated for the contact rating the captains of diplomacy ships give. A save whose row differs is not mapped.',
 })
 
 registerRule({
@@ -257,9 +257,12 @@ export const BONUS_NAMES = Object.freeze({
   8: Object.freeze({ name: 'Population Growth', percentage: true, routes: Object.freeze(['/colony-outlook', '/commanders']), effect: Object.freeze({ default: 'the growth rates of the colonies', '/commanders': OFFICERS }) }),
   9: Object.freeze({ name: 'Terraforming', percentage: true, routes: Object.freeze(['/production', '/habitability', '/commanders']), effect: Object.freeze({ default: 'the terraforming capacity and rates of the colonies, with the commanders and naval admin chain behind them', '/commanders': OFFICERS }) }),
   11: Object.freeze({ name: 'Ground Construction', percentage: true, routes: Object.freeze(MIXIN_REPORTS), effect: 'the ground unit construction rates of the colonies' }),
+  21: Object.freeze({ name: 'Tactical', percentage: true, routes: Object.freeze(['/commanders']), effect: 'the Tactical bonus shown beside the Light Tactical ranking of a light naval ship over 20 hull spaces' }),
+  22: Object.freeze({ name: 'Communications', percentage: true, routes: Object.freeze(['/intelligence']), effect: 'the contact rating that the captains of the ships with a Diplomacy Module give an attempt at communication' }),
   24: Object.freeze({ name: 'Logistics', percentage: true, routes: Object.freeze(['/hauling', '/information']), effect: 'the commander, naval admin, governor and sector terms of the cargo handling times' }),
   25: Object.freeze({ name: 'Colony Administration', percentage: false, routes: Object.freeze(['/commanders']), effect: OFFICERS }),
   27: Object.freeze({ name: 'Research Admin', percentage: false, routes: Object.freeze(['/technologies', '/commanders']), effect: Object.freeze({ '/technologies': 'the labs the scientists may run', '/commanders': OFFICERS }) }),
+  39: Object.freeze({ name: 'Light Tactical', percentage: true, routes: Object.freeze(['/commanders']), effect: OFFICERS }),
 })
 
 export const COMPONENT_TYPES = Object.freeze({
@@ -352,7 +355,7 @@ export const DECLARED = Object.freeze([
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-01', table: 'FCT_Population', columns: Object.freeze(['AlienArtifacts', 'ConstructPriority', 'AccruedArtifactPoints', 'AccruedConstructPoints', 'NoRuinRecovery']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-07', table: 'FCT_ShipyardTask', columns: Object.freeze(['NumShips']) }),
   Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-13', table: 'FCT_MissileType', columns: Object.freeze(['Lurker']) }),
-  Object.freeze({ item: 'AE-308-07', readBy: 'AE-304-01', table: 'FCT_AlienClass', columns: Object.freeze(['AlienClassType']) }),
+
 ])
 
 // The Aurora line the app is for, as its major and minor ('3.2'): the stated formula version without its patch.
