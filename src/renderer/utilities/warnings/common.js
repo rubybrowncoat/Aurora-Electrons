@@ -18,7 +18,7 @@ import { loadFormulaVersion } from '../capabilities'
 //
 // `ctx` is { database, GameID, RaceID, RaceNPR, separator, count(value, decimals), options, GameTime?, unknown(missing) }; `unknown` is put there by `checksOf`.
 
-const WARNING_VERSIONS = ['2.7.x']
+const WARNING_VERSIONS = ['3.2.x']
 
 const ruleName = (key) => key.replace(/-(\w)/g, (_match, letter) => letter.toUpperCase())
 
@@ -38,7 +38,7 @@ export const checksOf = (checks) => checks.map(({ evidence, read, ...check }) =>
 
 registerRule({
   id: 'warnings.summary',
-  versions: WARNING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'rows, checks',
   verification: 'confirmed',
   structure: ['the rows each check returns', 'the muted rows and checks of the race', 'the snoozes of the race on the open branch'],

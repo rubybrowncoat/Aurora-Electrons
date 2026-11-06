@@ -108,6 +108,7 @@ export const checks = checksOf([
     rule: 'A colony has construction factories while the industrial projects it is building (not queued) take under 100% of its construction capacity.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('construction'),
       assumptions: ['A free share of more than 0.00006% of the capacity counts as free; smaller remainders are rounding.'],
@@ -129,6 +130,7 @@ export const checks = checksOf([
     rule: 'A colony has ordnance factories while the ordnance projects it is building (not queued) take under 100% of its ordnance capacity.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('ordnance'),
     },
@@ -149,6 +151,7 @@ export const checks = checksOf([
     rule: 'A colony has light naval factories while the light naval projects it is building (not queued) take under 100% of its light naval capacity.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('light naval'),
     },
@@ -169,6 +172,7 @@ export const checks = checksOf([
     rule: 'A colony with people on it has ground force construction complexes staffed at its efficiency while the ground unit training tasks under way (not queued) take under 100% of that capacity, so the rest trains nothing; a colony with no training task at all counts as fully idle.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.GroundTrainingValue', 'FCT_Population.Efficiency, Population', 'FCT_GroundUnitTraining.TaskPercentage'],
       note: 'The complexes are staffed at the colony\'s efficiency and the tasks\' stored shares are summed (to at most 100%); that this is how the game allocates the capacity is not checked against the game. A colony with a complex\'s amount or type, the efficiency, the population or a task\'s share not stored is listed apart, as not evaluated.',
       assumptions: ['The complexes work at the colony\'s efficiency (at most 1), and a remainder of more than 0.005 complexes is idle.'],

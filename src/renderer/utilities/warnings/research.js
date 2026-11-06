@@ -47,6 +47,7 @@ export const checks = checksOf([
     rule: 'A colony has more research facilities than its projects use, so some labs sit idle. A race that starts no research projects is not checked.',
     evidence: {
       verification: 'confirmed',
+      versions: ['2.7.x'],
       structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.ResearchValue', 'FCT_ResearchProject.Facilities'],
       note: 'A count comparison on stored rows: the colony\'s research facilities against the labs its projects are assigned. A colony with an installation\'s type or amount, or a project\'s assigned labs, not stored is listed apart, as not evaluated. A race whose No Research Projects setting is on is not checked (the game leaves its idle labs out of its events), and a colony of a race whose setting is not stored is listed apart, as not evaluated.',
     },
@@ -95,6 +96,7 @@ export const checks = checksOf([
     rule: 'A research project that is not paused sits at a colony with no research facilities installed (none at all, or only other installations, or labs of zero amount), so it never advances. Paused projects and projects with no labs assigned are listed apart. A race that starts no research projects is not checked.',
     evidence: {
       verification: 'confirmed',
+      versions: ['2.7.x'],
       structure: ['FCT_ResearchProject.Pause, Facilities', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.ResearchValue'],
       note: 'A count comparison on stored rows: a project not paused at a colony with no research facilities. A project whose paused flag is not stored, or whose colony has an installation\'s type or amount not stored and no lab known, is listed apart, as not evaluated; labs assigned that are not stored show a dash. A race whose No Research Projects setting is on is not checked, and a project of a race whose setting is not stored is listed apart, as not evaluated.',
     },
@@ -130,6 +132,7 @@ export const checks = checksOf([
     rule: 'A research project is paused, or sits at a colony with labs while none of them are assigned to it, so it makes no progress until the player acts. A project at a colony with no labs at all is a dead project instead.',
     evidence: {
       verification: 'confirmed',
+      versions: ['2.7.x'],
       structure: ['FCT_ResearchProject.Pause, Facilities', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.ResearchValue'],
       note: 'A flag and count comparison on stored rows: a paused project, or one with no labs assigned at a colony that has labs. A project whose paused flag or assigned labs are not stored, or whose colony has an installation\'s type or amount not stored and no lab known, is listed apart, as not evaluated.',
     },

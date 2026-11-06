@@ -108,6 +108,7 @@ export const checks = checksOf([
     rule: 'A ship has fewer crew aboard than its class needs, so its holds and its survey, harvester, orbital mining, maintenance, salvage, terraforming and stabilisation modules work at the share aboard (estimates read from the game\'s rules; over-crewing adds nothing). Morale and crew grade are separate, and a class with no morale check still loses this throughput; replacement crew joins at a colony of over a million people.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
       note: 'The crew aboard and the class crew are stored values; what a shortfall slows is read from the game\'s rules, with no saved game showing a short-crewed ship doing it, so the effects are not checked against stored data. A ship whose crew aboard or class crew is not stored is listed apart, as not evaluated.',
       assumptions: ['A shortfall slows a ship\'s holds and modules at the share of the class crew aboard.'],
@@ -166,6 +167,7 @@ export const checks = checksOf([
     rule: 'A ship has one or more damaged components; the cost is the maintenance supplies a repair takes.',
     evidence: {
       verification: 'confirmed',
+      versions: ['2.7.x'],
       structure: ['FCT_DamagedComponent', 'FCT_ShipDesignComponents.Cost', 'FCT_Ship.ShippingLineID'],
       note: 'A presence check on stored rows: a ship with a damaged component row. The repair cost is twice the stored component cost; a cost not stored shows a dash. A ship whose shipping line is not stored is listed apart, as not evaluated.',
     },
@@ -543,6 +545,7 @@ export const checks = checksOf([
     rule: 'A current class of more than 10 size that carries cargo or colonists has no cargo shuttle, so it can\'t load or unload without a colony\'s help.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: ['FCT_ShipClass.Size, CargoCapacity, ColonistCapacity, TroopCapacity, CargoShuttleStrength, Obsolete'],
       note: 'The capacities and the shuttle strength are stored class values; that a class of more than 10 size needs shuttles is a threshold of this page, not one the game states. A class with one of the values not stored is listed apart, as not evaluated.',
       assumptions: ['A class of more than 10 size that carries cargo or colonists needs a cargo shuttle.'],

@@ -376,6 +376,7 @@ export const checks = checksOf([
     rule: 'An ancient construct on a surveyed body is dormant, or has no colony of the race with 10 million people on it, so its research bonus goes unused.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: ['FCT_AncientConstruct.Active, ResearchBonus, ResearchField', 'FCT_Population.Population', 'FCT_Fleet.AssignedPopulationID', 'FCT_ShipCargo.Amount', 'FCT_ClassComponent berths'],
       note: 'The construct\'s state and the colonies\' populations are stored values; the 10 million population a construct needs is a threshold this page uses, not one read from stored data, and colonists aboard orbiting ships are counted up to the berths they fill. A construct whose state or colony populations are missing, with no known colony of 10 million, is listed apart, as not evaluated.',
       assumptions: ['A construct needs a colony of the race with 10 million people on its body, counting colonists aboard orbiting ships up to the berths they fill.'],
