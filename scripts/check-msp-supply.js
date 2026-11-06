@@ -351,11 +351,13 @@ const pure = (ctx) => {
   add('shared: civilian mining draws on the deposit whether its output is taxed or bought, and the colony keeps only its own share of a finite deposit', () => {
     const target = { PopulationID: 2, PopName: 'C2', SystemID: SYSTEM }
     const held = { Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6 }
+    const packeted = { ...held, Duranium: 0 }
     const taxed = rowOf(rowsOf({ pairs: [pair(1, dry())], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 0 })] }), 1)
-    const bought = rowOf(rowsOf({ pairs: [pair(1, dry(), {}, held, ships(target))], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 1, MassDriverExport: 1 })] }), 1)
+    const bought = rowOf(rowsOf({ pairs: [pair(1, dry(), {}, packeted, ships(target))], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 1, MassDriverExport: 1 })] }), 1)
+    const filled = rowOf(rowsOf({ pairs: [pair(1, dry(), {}, held, ships(target))], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 1, MassDriverExport: 1 })] }), 1)
     const plenty = rowOf(rowsOf({ pairs: [pair(1, dry())], surface: [surface(1, 1, { CivilianMineCount: 10, PurchaseCivilianMinerals: 0 })] }), 1)
 
-    return near(taxed.ledger.high.credited.Duranium, 30) && near(bought.ledger.high.credited.Duranium, 30) && near(plenty.ledger.high.credited.Duranium, 100) ? true : short([taxed.ledger.high.credited.Duranium, bought.ledger.high.credited.Duranium, plenty.ledger.high.credited.Duranium])
+    return near(taxed.ledger.high.credited.Duranium, 30) && near(bought.ledger.high.credited.Duranium, 30) && near(filled.ledger.high.credited.Duranium, 60) && near(plenty.ledger.high.credited.Duranium, 100) ? true : short([taxed.ledger.high.credited.Duranium, bought.ledger.high.credited.Duranium, filled.ledger.high.credited.Duranium, plenty.ledger.high.credited.Duranium])
   })
   add('shared: a colony on the body whose mining rate is not known leaves the draw on the deposit unknown, so nothing from it is counted for any colony', () => {
     const a = pair(1, dry())

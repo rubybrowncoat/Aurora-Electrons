@@ -1704,11 +1704,11 @@ const dependencyChecks = async (capabilities, source, scan) => {
   const copies = []
   // The resource reserves panel and the Transport page's refuelling sites read through mixins and helpers the scan does not follow, so their reads are in `EXTRA_READS`: the registry says which of its inputs read a column.
   const panelReaders = (table, column) => [['/logistics', 'ResourceReserves'], ['/hauling', 'ResourceReserves'], ['/information', 'fuelSites']].filter(([route, key]) => capabilities.INPUTS[route].some((input) => input.key === key && (input.reads[table] || []).includes(column)))
-  const unaffected = ['/mineral-outlook', '/logistics', '/habitability', '/production', '/colony-outlook', '/survey-progress']
+  const unaffected = ['/logistics', '/habitability', '/production', '/colony-outlook', '/survey-progress']
   const shared = (share) => shareReaders(scan, share)
   const sharing = (share) => Object.keys(SHARE_SOURCES).filter((route) => sharesOf(route).includes(share))
   const cases = [
-    { label: 'FCT_Population.ReserveDuranium dropped', table: 'FCT_Population', column: 'ReserveDuranium', readers: readersOf(scan, 'FCT_Population', 'ReserveDuranium'), supported: unaffected, unsupported: ['/minerals', '/hauling'] },
+    { label: 'FCT_Population.ReserveDuranium dropped', table: 'FCT_Population', column: 'ReserveDuranium', readers: readersOf(scan, 'FCT_Population', 'ReserveDuranium'), supported: unaffected, unsupported: ['/minerals', '/hauling', '/mineral-outlook'] },
     { label: 'FCT_Population.FuelStockpile dropped', table: 'FCT_Population', column: 'FuelStockpile', readers: [...readersOf(scan, 'FCT_Population', 'FuelStockpile'), ...riftReaders('FuelStockpile'), ...panelReaders('FCT_Population', 'FuelStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress'], unsupported: ['/logistics', '/production'] },
     { label: 'FCT_Population.MaintenanceStockpile dropped', table: 'FCT_Population', column: 'MaintenanceStockpile', readers: [...readersOf(scan, 'FCT_Population', 'MaintenanceStockpile'), ...riftReaders('MaintenanceStockpile'), ...panelReaders('FCT_Population', 'MaintenanceStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress', '/production'], unsupported: ['/logistics'] },
     { label: 'DIM_NavalAdminCommandType.Industrial dropped', table: 'DIM_NavalAdminCommandType', column: 'Industrial', readers: shared('Industrial'), supported: ['/survey-progress', '/minerals', '/hauling'], unsupported: sharing('Industrial') },

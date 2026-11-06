@@ -3,13 +3,13 @@
 
   bun scripts/check-mineral-supply.js [--no-mutations]
 
-  The utility is run on synthetic colonies, mines, packets and ledger moves worked by hand. Route: a colony with no destination, a destination that is gone or the colony itself sends nothing by packet, whatever its civilian complexes do; a destination that exists keeps the route whoever owns it, wherever it is and whether or not it has a driver (only the destination picker restricts those), and the site's drivers alone decide whether stock ships; the civilian output a race buys for such a destination goes into a packet (the whole of it by the 2.7.1 rule these hand-worked cases state; the 3.1.0 game tops the stockpile up to its reserve first, a known mismatch recorded by the group save-reserve and owned by AE-309-13, which is why the route and the packet rules list the earlier line only); what is not stored leaves the route unavailable, and a purchase choice that is not stored leaves the packet output, the stock added and the supply of a site with a destination unknown. Unconnected: a productive mine with no route adds all it extracts to its own stock, supplies no destination and credits no colony, the capital included. Throughput: stock shipped by drivers is the ledger's observed tonnes, never the drivers' capacity, and without a ledger it is unknown, not 0. Packets: a packet is in the sender's stock before it leaves, in flight to its destination (in no stock) in transit, and in the destination's own stock after, counted once; the race's total is the same in every phase; a packet bound for a colony the race lacks is in flight and in no destination. Destinations: each is credited by the sites that name it, never by a packet's origin, which the save does not hold. Conservation: extraction is the civilian output that goes into a packet plus what stays in the site's stock. Neutral: the ledger's transfers (freighter loads and unloads, packet sends and receipts) add no income. Observed: the ledger's tonnes are annualised, and unknown without a ledger or with an amount missing. Scenario: a blank delivery is nothing entered, a negative or non-numeric one is invalid, one with no colony is incomplete, an applied one is assumed and changes no confirmed figure.
+  The utility is run on synthetic colonies, mines, packets and ledger moves worked by hand. Route: a colony with no destination, a destination that is gone or the colony itself sends nothing by packet, whatever its civilian complexes do; a destination that exists keeps the route whoever owns it, wherever it is and whether or not it has a driver (only the destination picker restricts those), and the site's drivers alone decide whether stock ships; the civilian output a race buys for such a destination fills the colony's stock up to its reserve first and only what is left goes into a packet (Population.ProcessMiningProduction: the groups reserve and reserve-note work it from the source, and every other hand-worked colony keeps a reserve of 0, so its packet carries the whole output); what is not stored leaves the route unavailable, and a purchase choice that is not stored leaves the packet output, the stock added and the supply of a site with a destination unknown. Unconnected: a productive mine with no route adds all it extracts to its own stock, supplies no destination and credits no colony, the capital included. Throughput: stock shipped by drivers is the ledger's observed tonnes, never the drivers' capacity, and without a ledger it is unknown, not 0. Packets: a packet is in the sender's stock before it leaves, in flight to its destination (in no stock) in transit, and in the destination's own stock after, counted once; the race's total is the same in every phase; a packet bound for a colony the race lacks is in flight and in no destination. Destinations: each is credited by the sites that name it, never by a packet's origin, which the save does not hold. Conservation: extraction is the civilian output that goes into a packet plus what stays in the site's stock. Reserve: the stockpile takes what the other mines add, then the complexes' output up to the shortfall to the reserve, and the packet the rest, never below 0 and never more than the output; a colony at or above its reserve ships all of it, one short of it by more than the output ships none and still names its destination; a stock or a reserve that is not stored leaves the packet output, the stock added and the supply of a site that ships by packet unknown, naming it. Neutral: the ledger's transfers (freighter loads and unloads, packet sends and receipts) add no income. Observed: the ledger's tonnes are annualised, and unknown without a ledger or with an amount missing. Scenario: a blank delivery is nothing entered, a negative or non-numeric one is invalid, one with no colony is incomplete, an applied one is assumed and changes no confirmed figure.
 
   The panel's script runs as a pseudo instance over scripts/lib/page-loader.js, its template and the page are read as text and the page's script runs the supply computed.
 
   The save (the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141, race 784, read-only) gives the real colonies, mines, cargo and ledger: the stock is compared with a raw sum of the table, the cargo aboard with a raw sum of the holds, extraction with the rates of the mining rows, each site's route with the stored destination, and the ledger's loads and unloads with a raw grouped read. On a temporary copy of the save every destination is cleared (no site has a route: each adds its extraction to its own stock and supplies none), and a delivery entered on the page for a site and a colony of the save is taken from what the site keeps and added to what the colony receives. With a ledger that covers no days every observed figure is unknown and the totals are unchanged.
 
-  The fixture holds no mass driver, no civilian mining complex, no packet in flight and no mass driver send or receipt in the ledger, so the rules of packets, of what a site ships and of the sends and receipts run on a second, planted copy of it: the cases the game's own source gives (see the block above `plantCases`) are inserted into a temporary copy, never into the file. The planted run compares the packets with the raw sums and with the amounts planted, a destination's stock after arrival with its raw stock and the packets bound for it, a packet bound for no colony with the lost tonnes, a site that buys the complexes' output for a destination with the game's own arithmetic written out beside the rule, a site whose mass drivers ship stock with the ledger rows planted for it, and the ledger's sends and receipts with the raw grouped read. A save that is not there is skipped.
+  The fixture holds no mass driver, no civilian mining complex, no packet in flight and no mass driver send or receipt in the ledger, so the rules of packets, of what a site ships and of the sends and receipts run on a second, planted copy of it: the cases the game's own source gives (see the block above `plantCases`) are inserted into a temporary copy, never into the file. The planted run compares the packets with the raw sums and with the amounts planted, a destination's stock after arrival with its raw stock and the packets bound for it, a packet bound for no colony with the lost tonnes, a site that buys the complexes' output for a destination with the game's own arithmetic written out beside the rule (colonies with every reserve 0, with half the stock as the reserve, with the reserve above any stock and with the reserve short of the stock by a part of the complexes' output, which the group save-reserve works from the source), a site whose mass drivers ship stock with the ledger rows planted for it, and the ledger's sends and receipts with the raw grouped read. The played save of scripts/lib/fixtures.js is an extra witness of the group save-reserve: its civilian mining colony keeps every reserve at 0, and a temporary copy has reserves planted on it. A save that is not there is skipped.
 
   Each mutation of the utility, the panel, the page or the outlook must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -22,7 +22,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
-const { fixtureSave } = require('./lib/fixtures')
+const { fixtureSave, PLAYED } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -36,7 +36,7 @@ const M = 'minerals'
 const V = 'component'
 const P = 'page'
 const NAMES = ['mineral-supply', 'mineral-outlook', 'minerals', 'colony-minerals', 'cmc-policy', 'mining-data', 'provenance']
-const SAVES = [{ ...fixtureSave(), copy: true }, { ...fixtureSave(), copy: true, planted: true }]
+const SAVES = [{ ...fixtureSave(), copy: true }, { ...fixtureSave(), copy: true, planted: true }, { file: PLAYED.file, game: PLAYED.gameId, race: PLAYED.raceId, witness: true }]
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
@@ -106,7 +106,7 @@ const fixtures = (m) => {
   const { ms, provenance, minerals, colony: colonyModule } = m
   const MINS = minerals.MINERALS
   const value = provenance.valueOrNull
-  const colony = (id, name, over = {}) => ({ PopulationID: id, PopName: name, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, ...Object.fromEntries(MINS.map(({ name: mineral }) => [mineral, 0])), ...over })
+  const colony = (id, name, over = {}) => ({ PopulationID: id, PopName: name, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, ...Object.fromEntries(MINS.map(({ name: mineral }) => [mineral, 0])), ...Object.fromEntries(MINS.map(({ name: mineral }) => [`Reserve${mineral}`, 0])), ...over })
   // The colony `from` with its mass driver pointed at the colony `to`, in the same system and the same race unless the override says otherwise.
   const toward = (to, over = {}) => ({ MassDriverDest: to.PopulationID, DestinationID: to.PopulationID, DestinationName: to.PopName, DestinationRaceID: RACE, DestinationSystemID: to.SystemID, ...over })
   // One deposit row of the colony's mines: 10 manned mines at 10 t each, accessibility 1, every modifier neutral, so 100 t/yr; civilian complexes add 10 t each.
@@ -201,10 +201,98 @@ const pure = (ctx) => {
 
     return same([result.status, result.rule.id], ['estimated', 'mineralSupply.route'])
   })
-  add('versions: the route, the packet output, the stock added and the supply list the earlier line only while the reserve top-up of the 3.1.0 game is not modelled (owner AE-309-13; the planted case is the group save-reserve)', () => {
+  add('versions: the route, the packet output, the stock added and the supply list the 3.2 line only, which the source\'s reserve top-up and the groups reserve and save-reserve back', () => {
     const ids = ['mineralSupply.route', 'mineralSupply.packetOutput', 'mineralSupply.localStock', 'mineralSupply.supply']
 
-    return same(ids.map((id) => [id, provenance.getRule(id).versions.includes('3.2.x')]), ids.map((id) => [id, false]))
+    return same(ids.map((id) => [id, provenance.getRule(id).versions]), ids.map((id) => [id, ['3.2.x']]))
+  })
+
+  // ----- the reserve top-up -----
+  // A colony `Mine` of 10 manned mines (100 t/yr of Duranium, the other mines' output) and the 20 bought complexes (200 t/yr, the civilian output), 300 t/yr in all, bound for the empty colony `Home`. Population.ProcessMiningProduction adds the 100 to the stockpile first, then adds the smaller of the 200 and the reserve's shortfall (the reserve less the stockpile as it then stands, never below 0) and puts the rest of the 200 into the packet. Every figure below is worked by hand from that, never from the rule. `reserved` is the site with a stock and a reserve of Duranium, and `worked` its packet output, stock added and supply.
+  const reserved = (stock, reserve, { rows = {}, over = {}, orbitals = [], materialId = 1 } = {}) => {
+    const to = colony(1, 'Home')
+    const result = supply({ surface: [surface(2, 'Mine', { ...BOUGHT, ...rows })], orbital: orbitals, routes: [to, colony(2, 'Mine', { Duranium: stock, ReserveDuranium: reserve, ...toward(to), ...over })], flows: ledger([]), materialId })
+
+    return { result, site: siteOf(result, 2) }
+  }
+  const worked = (site) => [value(site.packetOutput), value(site.local), value(site.supply)]
+  const nearAll = (actual, expected) => (actual.length === expected.length && actual.every((figure, index) => near(figure, expected[index])) ? true : `${short(actual)} != ${short(expected)}`)
+
+  add('reserve: a colony whose stock is below its reserve keeps the complexes\' output up to the shortfall, sends the remainder, and its stock rises to the reserve', () => {
+    const { site } = reserved(100, 350)
+
+    return same([site.connection, ...worked(site), 100 + value(site.local)], ['packets', 50, 250, 50, 350])
+  })
+  add('reserve: a colony whose stock is at or above its reserve sends the whole output', () => {
+    const cases = [[0, 0], [100, 100], [500, 100], [100, 200]]
+
+    return same(cases.map(([stock, reserve]) => worked(reserved(stock, reserve).site)), cases.map(() => [200, 100, 200]))
+  })
+  add('reserve: the other mines\' output counts before the shortfall, and the boundaries are exact', () => {
+    const cases = [[100, 201], [0, 150], [0, 300], [0, 301]]
+
+    return same(cases.map(([stock, reserve]) => worked(reserved(stock, reserve).site)), [[199, 101, 199], [150, 150, 150], [0, 300, 0], [0, 300, 0]])
+  })
+  add('reserve: a colony far below its reserve keeps the whole output and sends nothing, and the packet stays its route', () => {
+    const { result, site } = reserved(0, 1000000000)
+    const destination = destinationOf(result, 1)
+
+    return same([site.connection, ...worked(site), site.destination.populationId, value(destination.fromSites)], ['packets', 0, 300, 0, 1, 0])
+  })
+  add('reserve: only the stock and the reserve of the site\'s own mineral count', () => {
+    const { site } = reserved(10000, 1000000000, { rows: { MaterialID: 2 }, over: { Neutronium: 10, ReserveNeutronium: 250 }, materialId: 2 })
+
+    return same(worked(site), [60, 240, 60])
+  })
+  add('reserve: a reserve or a stock of another mineral that is not stored leaves the figures known', () => same(worked(reserved(100, 350, { over: { ReserveNeutronium: null, Neutronium: null } }).site), [50, 250, 50]))
+  add('reserve: what an orbital miner of the colony adds counts with the other mines\' output', () => {
+    const { site } = reserved(0, 250, { rows: { ManualMineCount: 0 }, orbitals: [orbital(2, 'Mine', { MassDriverExport: 1 })] })
+
+    return nearAll([value(site.extraction), ...worked(site)], [296.25, 46.25, 250, 46.25])
+  })
+  add('reserve: the packet output and the stock added add up to the extraction at every stock and reserve, and the destination and the race\'s totals take the remainder', () => {
+    const cases = [[0, 0], [100, 350], [0, 300], [0, 1000000000], [500, 100]]
+    const bad = cases.filter(([stock, reserve]) => {
+      const { result, site } = reserved(stock, reserve)
+      const destination = destinationOf(result, 1)
+
+      return !near(value(site.packetOutput) + value(site.local), value(site.extraction)) || !near(value(destination.fromSites), value(site.packetOutput)) || !near(value(result.empire.packetOutput), value(site.packetOutput)) || !near(value(result.empire.local), value(site.local))
+    })
+
+    return bad.length ? short(bad) : true
+  })
+  add('reserve: a stock or a reserve that is not stored leaves the packet output, the stock added and the supply of a site that ships by packet unknown, naming it', () => {
+    const cases = [['reserve not stored', { over: { ReserveDuranium: null } }, 'reserve'], ['reserve not read', { over: { ReserveDuranium: undefined } }, 'reserve'], ['stock not stored', { over: { Duranium: null } }, 'stockpiled']]
+    const bad = cases.filter(([, options, word]) => {
+      const { site } = reserved(100, 350, options)
+      const results = [site.packetOutput, site.local, site.supply]
+
+      return !(results.every((result) => isUnavailable(result) && result.inputs.missing.some((text) => text.includes(word)) && result.inputs.missing.every((text) => !RAW_POINTER.test(text))) && value(site.extraction) === 300)
+    })
+
+    return bad.length ? short(bad.map(([name]) => name)) : true
+  })
+  add('reserve: a reserve that is not stored costs nothing to a site that sends no civilian output by packet', () => {
+    const taxed = reserved(100, null, { rows: { PurchaseCivilianMinerals: 0, MassDriverExport: 0 } }).site
+    const unconnected = siteOf(supply({ surface: [surface(2, 'Mine', BOUGHT)], routes: [colony(2, 'Mine', { Duranium: 100, ReserveDuranium: null })] }), 2)
+
+    return same([worked(taxed), worked(unconnected)], [[0, 100, 0], [0, 300, 0]])
+  })
+  add('reserve-note: the route note states the potential route and the reserve condition, and no longer says the output goes straight into a packet', () => {
+    const note = provenance.getRule('mineralSupply.route').note
+    const missing = ['potential route', 'fills the colony\'s own stock up to its reserve', 'only what is left goes into the packet', 'at or above its reserve sends all of it'].filter((phrase) => !note.includes(phrase))
+
+    return missing.length || /straight into a packet/.test(note) ? short([missing, /straight into a packet/.test(note)]) : true
+  })
+  add('reserve-note: the notes of the packet output, the stock added and the supply state the reserve first, and no note of the four names a release', () => {
+    const phrases = { route: [], packetOutput: ['up to its reserve first', 'never below 0', 'never more than the complexes\' output'], localStock: ['up to its reserve'], supply: ['the colony\'s reserve leaves'] }
+    const bad = Object.entries(phrases).filter(([name, list]) => {
+      const note = provenance.getRule(`mineralSupply.${name}`).note
+
+      return list.some((phrase) => !note.includes(phrase)) || /\b(?:2\.[5-9]|3\.[0-2])\b/.test(note)
+    })
+
+    return bad.length ? short(bad.map(([name]) => name)) : true
   })
 
   // ----- a productive mine with no route -----
@@ -648,12 +736,14 @@ const pure = (ctx) => {
 
     return rows.length === 1 && sql.includes('FCT_Population.GameID = 3') && sql.includes(`FCT_Population.RaceID = ${RACE}`) && sql.includes('MassDriverDest') && sql.includes('DriverGaps') && sql.includes('FCT_Population.Duranium') && sql.includes('FCT_Population.Gallicite') ? true : sql
   })
-  add('loaders: the colonies read names no reserve column, so a save without the reserves still reads', async () => {
+  add('loaders: the colonies read names the stock and the reserve of every mineral', async () => {
     const database = standIn([[/FCT_Population/, [colony(1, 'A')]]])
 
     await ms.loadSiteRoutes(database, { GameID: 3, RaceID: RACE })
 
-    return /Reserve/.test(database.log[0]) ? database.log[0] : true
+    const missing = minerals.MINERALS.flatMap(({ name }) => [`FCT_Population.${name}`, `FCT_Population.Reserve${name}`]).filter((column) => !new RegExp(`${column.replace('.', '\\.')}\\b`).test(database.log[0]))
+
+    return missing.length ? short(missing) : true
   })
   add('loaders: the destination\'s drivers are not read: the destination\'s own drivers decide nothing', async () => {
     const database = standIn([[/FCT_Population/, []]])
@@ -713,6 +803,13 @@ const panel = (ctx) => {
 
     return same(vm.tiles.map((tile) => [tile.label, tile.value]), [['Extracted a year', '400 t'], ['Straight into packets a year', '200 t'], ['Added to own stock a year', '200 t'], ['In stock', '100 t'], ['In flight', '20 t'], ['Aboard ships', '0 t'], ['Held in all', '120 t']]) === true && vm.tiles.every((tile) => tile.result && tile.result.rule) ? true : short(vm.tiles.map((tile) => [tile.label, tile.value]))
   })
+  add('panel: the packet and stock tiles say that the civilian output fills a reserve first, and a site whose output is bought is shown as a possible packet route', () => {
+    const vm = mount({ supply: result() })
+    const notes = Object.fromEntries(vm.tiles.map((tile) => [tile.label, tile.note]))
+    const row = vm.siteRows.find((item) => item.populationId === 2)
+
+    return /up to its reserve first/.test(notes['Straight into packets a year']) && /reserve included/.test(notes['Added to own stock a year']) && row.view.label === 'Civilian output can ship by packet' ? true : short([notes, row.view])
+  })
   add('panel: a total that is not known shows a dash, not 0 t', () => {
     const vm = mount({ supply: result({ packets: null }) })
     const tile = vm.tiles.find((item) => item.label === 'In flight')
@@ -762,6 +859,11 @@ const panel = (ctx) => {
 
   add('panel-template: the panel is a top-level .panel with a data-summary that has no digit and no first or second person', () => (/class="panel mineral-supply"/.test(startTag) && summary.trim().length > 0 && !/\d/.test(summary) && !PRONOUNS.test(summary) ? true : summary))
   add('panel-template: the foot says what the figures are: stock, packets with no origin, transfers not income, freighters, hypothetical deliveries, unknown not 0', () => ['own stock', 'records no packet origin', 'as income', 'Freighter orders are not read', 'hypothetical delivery', 'not 0'].filter((phrase) => !foot.includes(phrase)).map((phrase) => `the foot lacks "${phrase}"`).join('; ') || true)
+  add('panel-template: the foot says that the output the race buys fills the colony\'s stock up to its reserve first and only the rest goes into a packet', () => {
+    const missing = ['up to its reserve', 'only the rest goes into a packet'].filter((phrase) => !foot.includes(phrase))
+
+    return missing.length || /straight into a packet/.test(foot) ? short([missing, /straight into a packet/.test(foot)]) : true
+  })
   add('panel-template: the foot is in the UI voice: no first or second person', () => (PRONOUNS.test(foot.replace(/<[^>]*>/g, '')) ? 'the foot speaks to a person' : true))
   add('panel-template: the template compiles', () => { const errors = templateErrors(text); return errors.length ? short(errors) : true })
   add('panel-template: every figure carries its mark: the sites\' and destinations\' figures, known and not, the route, the delivery, the lost tonnes and the rules of the heads', () => {
@@ -920,15 +1022,19 @@ const CIVILIAN_COMPLEX = 39
 const MASS_DRIVER = 24
 const LOST_DESTINATION = 999999999
 const SHORTFALL_RESERVE = 1000000000
+// Fractions of the complexes' output by which `plantReserves` leaves the stockpile, with what the other mines add, short of the reserve it plants, taken in turn for the minerals a colony mines: with the first three the game keeps that part of the output in the stockpile and ships the rest, with the last it keeps all of it.
+const RESERVE_FRACTIONS = [0.25, 0.5, 0.75, 1.5]
 const DAY_SECONDS = 86400
 
 // What the game puts into the packet of a colony that purchases civilian minerals for a destination, a mineral at a time (Population.ProcessMiningProduction): the complexes' output `civilian` goes into the stockpile while the stockpile, with what the other mines add (`kept`), is below the `reserve`, and only the rest into the packet.
 const sourcePacket = ({ civilian, kept, stock, reserve }) => civilian - Math.min(civilian, Math.max(0, reserve - (stock + kept)))
 
-// The cases planted on the copy `file` of the save: three colonies of the race that mine with automated mines only (no manned mine, no complex, no mass driver, on a body with deposits and a radiation level the complexes work at) and one destination, the colony holding the most Duranium.
+// The cases planted on the copy `file` of the save: five colonies of the race that mine with automated mines only (no manned mine, no complex, no mass driver, on a body with deposits and a radiation level the complexes work at) and one destination, the colony holding the most Duranium.
 // - `bought`: 20 civilian complexes, the output bought for the destination, every reserve 0 (the stockpile is never below it, so the game ships the complexes' whole share).
-// - `shortfall`: the same with the Duranium reserve above any stockpile (the game keeps the complexes' Duranium in the stockpile).
+// - `shortfall`: the same with the Duranium reserve above any stockpile (the game keeps the complexes' Duranium in the stockpile and ships none of it).
 // - `drivers`: 2 mass drivers and the destination named; the ledger holds 800 t of Duranium and 200 t of Neutronium sent from it ten days before the save, and the same received at the destination, with another 100 t of Duranium received 100 days before.
+// - `partial`: the same as `bought`, its reserves set afterwards by `plantReserves` from a first read of the copy, so that the stockpile with what the other mines add is short of each reserve by a part of the complexes' output (the game keeps that part in the stockpile and ships the rest).
+// - `above`: the same as `bought` with every reserve half the stock (the stockpile is above the reserve, so the game ships the complexes' whole share).
 // - four packets in flight: 1,200 t of Duranium with 300 t of Neutronium and 600 t of Duranium bound for the destination, 400 t of Duranium bound for the `drivers` colony and 50 t of Corbomite bound for a colony that does not exist.
 const plantCases = async (file, save) => {
   const edited = await openSave(file, sqlite3.OPEN_READWRITE)
@@ -938,14 +1044,14 @@ const plantCases = async (file, save) => {
     const one = async (sql) => (await rowsOf(edited, sql))
     const [{ GameTime: gameTime }] = await one(`select GameTime from FCT_Game where GameID = ${game}`)
     const mining = 'VIR_Type.MiningProductionValue >= 1'
-    const sites = await one(`select FCT_Population.PopulationID, FCT_Population.SystemID from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${game} and FCT_Population.RaceID = ${race} and FCT_SystemBody.RadiationLevel < 10000 and exists (select 1 from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${game} and FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.Amount > 0) and exists (select 1 from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${game} and VIR_Installation.PopID = FCT_Population.PopulationID and VIR_Installation.Amount >= 1 and ${mining} and VIR_Type.Workers = 0) and not exists (select 1 from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${game} and VIR_Installation.PopID = FCT_Population.PopulationID and VIR_Installation.Amount > 0 and ((${mining} and VIR_Type.Workers > 0) or VIR_Type.CivilianInstallation = 1 or VIR_Type.PlanetaryInstallationID in (${CIVILIAN_COMPLEX}, ${MASS_DRIVER}, 52))) order by FCT_Population.PopulationID limit 3`)
+    const sites = await one(`select FCT_Population.PopulationID, FCT_Population.SystemID from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${game} and FCT_Population.RaceID = ${race} and FCT_SystemBody.RadiationLevel < 10000 and exists (select 1 from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${game} and FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.Amount > 0) and exists (select 1 from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${game} and VIR_Installation.PopID = FCT_Population.PopulationID and VIR_Installation.Amount >= 1 and ${mining} and VIR_Type.Workers = 0) and not exists (select 1 from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${game} and VIR_Installation.PopID = FCT_Population.PopulationID and VIR_Installation.Amount > 0 and ((${mining} and VIR_Type.Workers > 0) or VIR_Type.CivilianInstallation = 1 or VIR_Type.PlanetaryInstallationID in (${CIVILIAN_COMPLEX}, ${MASS_DRIVER}, 52))) order by FCT_Population.PopulationID limit 5`)
     const [destination] = await one(`select PopulationID, SystemID from FCT_Population where GameID = ${game} and RaceID = ${race} and PopulationID not in (${sites.map((site) => site.PopulationID).join(', ') || 0}) order by Duranium desc, PopulationID limit 1`)
 
-    if (sites.length < 3 || !destination) {
-      throw new Error(`the save holds ${sites.length} colonies of the race that mine with automated mines only (3 are planted on) and ${destination ? 'a' : 'no'} destination`)
+    if (sites.length < 5 || !destination) {
+      throw new Error(`the save holds ${sites.length} colonies of the race that mine with automated mines only (5 are planted on) and ${destination ? 'a' : 'no'} destination`)
     }
 
-    const [bought, shortfall, drivers] = sites
+    const [bought, shortfall, drivers, partial, above] = sites
     const columns = (amounts) => MINERAL_COLUMNS.map((name) => amounts[name] || 0)
     const packet = (at, to, amounts) => ({ at, to, amounts })
     const packets = [packet(bought.SystemID, destination.PopulationID, { Duranium: 1200, Neutronium: 300 }), packet(bought.SystemID, destination.PopulationID, { Duranium: 600 }), packet(destination.SystemID, drivers.PopulationID, { Duranium: 400 }), packet(bought.SystemID, LOST_DESTINATION, { Corbomite: 50 })]
@@ -956,7 +1062,9 @@ const plantCases = async (file, save) => {
       `update FCT_Population set PurchaseCivilianMinerals = 1, MassDriverDest = ${destination.PopulationID}, ${MINERAL_COLUMNS.map((name) => `Reserve${name} = 0`).join(', ')} where GameID = ${game} and PopulationID = ${bought.PopulationID}`,
       `update FCT_Population set PurchaseCivilianMinerals = 1, MassDriverDest = ${destination.PopulationID}, ReserveDuranium = ${SHORTFALL_RESERVE} where GameID = ${game} and PopulationID = ${shortfall.PopulationID}`,
       `update FCT_Population set MassDriverDest = ${destination.PopulationID} where GameID = ${game} and PopulationID = ${drivers.PopulationID}`,
-      `insert into FCT_PopulationInstallations (GameID, PopID, PlanetaryInstallationID, Amount) values (${game}, ${bought.PopulationID}, ${CIVILIAN_COMPLEX}, 20), (${game}, ${shortfall.PopulationID}, ${CIVILIAN_COMPLEX}, 20), (${game}, ${drivers.PopulationID}, ${MASS_DRIVER}, 2)`,
+      `update FCT_Population set PurchaseCivilianMinerals = 1, MassDriverDest = ${destination.PopulationID} where GameID = ${game} and PopulationID = ${partial.PopulationID}`,
+      `update FCT_Population set PurchaseCivilianMinerals = 1, MassDriverDest = ${destination.PopulationID}, ${MINERAL_COLUMNS.map((name) => `Reserve${name} = ${name} / 2`).join(', ')} where GameID = ${game} and PopulationID = ${above.PopulationID}`,
+      `insert into FCT_PopulationInstallations (GameID, PopID, PlanetaryInstallationID, Amount) values (${game}, ${bought.PopulationID}, ${CIVILIAN_COMPLEX}, 20), (${game}, ${shortfall.PopulationID}, ${CIVILIAN_COMPLEX}, 20), (${game}, ${drivers.PopulationID}, ${MASS_DRIVER}, 2), (${game}, ${partial.PopulationID}, ${CIVILIAN_COMPLEX}, 20), (${game}, ${above.PopulationID}, ${CIVILIAN_COMPLEX}, 20)`,
       `insert into FCT_MassDriverPackets (GameID, RaceID, SysID, DestID, TotalSize, Speed, Xcor, Ycor, LastXcor, LastYcor, IncrementStartX, IncrementStartY, ${MINERAL_COLUMNS.join(', ')}) values ${packets.map(({ at, to, amounts }) => `(${game}, ${race}, ${at}, ${to}, ${Object.values(amounts).reduce((total, amount) => total + amount, 0)}, 5000, 0, 0, 0, 0, 0, 0, ${columns(amounts).join(', ')})`).join(', ')}`,
       `insert into FCT_RaceMineralData (RaceID, GameID, PopulationID, MineralID, MineralDataType, Time, Amount) values ${[ledger(drivers.PopulationID, 12, 1, 10, 800), ledger(drivers.PopulationID, 12, 2, 10, 200), ledger(destination.PopulationID, 13, 1, 10, 800), ledger(destination.PopulationID, 13, 2, 10, 200), ledger(destination.PopulationID, 13, 1, 100, 100)].join(', ')}`,
     ]
@@ -965,15 +1073,98 @@ const plantCases = async (file, save) => {
       await edited.run(statement)
     }
 
-    return { destination: destination.PopulationID, bought: bought.PopulationID, shortfall: shortfall.PopulationID, drivers: drivers.PopulationID, packets: packets.map(({ to, amounts }) => ({ to, amounts })), sent, received }
+    return { destination: destination.PopulationID, bought: bought.PopulationID, shortfall: shortfall.PopulationID, drivers: drivers.PopulationID, partial: partial.PopulationID, above: above.PopulationID, packets: packets.map(({ to, amounts }) => ({ to, amounts })), sent, received }
   } finally {
     await edited.close()
   }
 }
 
+// What the pages read of a save for the supply, through the loaders of the utility: the mining rows, the colonies, the packets in flight, the minerals aboard ships and the ledger's moves of the race.
+const readSave = async (m, db, save) => {
+  const ids = { GameID: save.game, RaceID: save.race }
+  const [surface, orbital, routes, packets] = await Promise.all([rowsOf(db, m.mining.surfaceMiningQuery(ids)), rowsOf(db, m.mining.orbitalMiningQuery(ids)), m.ms.loadSiteRoutes(db, ids), m.colony.loadPacketsInFlight(db, ids)])
+  const cargoRows = await rowsOf(db, `select FCT_ShipCargo.CargoID as MaterialID, case when count(FCT_ShipCargo.Amount) = count(*) then sum(FCT_ShipCargo.Amount) end as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${save.game} and FCT_Ship.RaceID = ${save.race} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`)
+  const cargo = Object.fromEntries(cargoRows.map((row) => [row.MaterialID, row.Amount]))
+  const [{ Present: ledgerTable }] = await rowsOf(db, "select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
+  const transfers = await m.ms.loadTransfers(db, { ...ids, windowDays: 365 })
+
+  return { surface, orbital, routes, packets, cargo, transfers, ledgerTable }
+}
+
+// A colony's row of the save, and the mining production of its installations as the save stores them: `Civilian` (the complexes), `Manned` (the mines that need workers) and `Total` (every installation that mines).
+const stockRowOf = async (db, save, populationId) => (await rowsOf(db, `select * from FCT_Population where GameID = ${save.game} and PopulationID = ${populationId}`))[0]
+const installationsOf = async (db, save, populationId) => (await rowsOf(db, `select sum(case when VIR_Type.CivilianInstallation = 1 then VIR_Installation.Amount * VIR_Type.MiningProductionValue else 0 end) as Civilian, sum(case when VIR_Type.CivilianInstallation = 0 and VIR_Type.Workers > 0 then VIR_Installation.Amount * VIR_Type.MiningProductionValue else 0 end) as Manned, sum(VIR_Installation.Amount * VIR_Type.MiningProductionValue) as Total from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${save.game} and VIR_Installation.PopID = ${populationId} and VIR_Type.MiningProductionValue >= 1`))[0]
+
+// What the game works out for the colony `populationId`, which buys its complexes' output for a destination, a mineral at a time, beside the figures of its site in the rules (`site`): `dug` is the extraction of the site, `civilian` the complexes' part of it (their share of the colony's mining installations as stored, never the rules' own), `stock` and `reserve` the stored columns and `shipped` the packet that the arithmetic of the source gives (`sourcePacket`). One entry for each mineral the colony mines whose extraction is known.
+const workedColony = async (m, db, save, populationId) => {
+  const data = await readSave(m, db, save)
+  const counts = await installationsOf(db, save, populationId)
+  const stored = await stockRowOf(db, save, populationId)
+  const share = counts.Civilian / counts.Total
+
+  return m.minerals.MINERALS.flatMap(({ id, name }) => {
+    const { sites } = m.ms.mineralSupply({ surface: data.surface, orbital: data.orbital, navalAdmins: {}, routes: data.routes, packets: data.packets, cargo: data.cargo, RaceID: save.race, materialId: id, flows: null, entries: [] })
+    const site = sites.find((item) => item.populationId === populationId)
+    const dug = site ? m.provenance.valueOrNull(site.extraction) : null
+
+    if (dug === null) {
+      return []
+    }
+
+    const civilian = dug * share
+
+    return [{ name, site, dug, civilian, stock: stored[name], reserve: stored[`Reserve${name}`], shipped: sourcePacket({ civilian, kept: dug - civilian, stock: stored[name], reserve: stored[`Reserve${name}`] }) }]
+  })
+}
+
+// Plants reserves on the copy `file` of a save for the colony `populationId`, which buys its complexes' output for a destination: for each mineral it mines, the reserve that leaves the stockpile, with what the other mines add, short of it by the next of `RESERVE_FRACTIONS` times the complexes' output. A first read of the copy gives what the colony digs up and the complexes' part of it (`workedColony`). Returns `{ [mineral]: { fraction, reserve } }`.
+const plantReserves = async (m, file, save, populationId) => {
+  const edited = await openSave(file, sqlite3.OPEN_READWRITE)
+
+  try {
+    const planted = {}
+    const entries = (await workedColony(m, edited, save, populationId)).filter((entry) => entry.civilian > 0)
+
+    for (const [index, entry] of entries.entries()) {
+      const fraction = RESERVE_FRACTIONS[index % RESERVE_FRACTIONS.length]
+      const reserve = entry.stock + (entry.dug - entry.civilian) + fraction * entry.civilian
+
+      await edited.run(`update FCT_Population set Reserve${entry.name} = ${reserve} where GameID = ${save.game} and PopulationID = ${populationId}`)
+      planted[entry.name] = { fraction, reserve }
+    }
+
+    return planted
+  } finally {
+    await edited.close()
+  }
+}
+
+// The figures of a colony with reserves planted (`plantReserves`), from its `workedColony` entries: the packet the arithmetic of the source gives is what the planted fraction leaves of the complexes' output (the part kept is the fraction, at most the whole output), the rules' packet output is that packet and the stock added is what is dug less it, and the stock with what is added reaches the reserve for a fraction of 1 or less and stays below it for a larger one. Returns what differs and how many minerals ship a remainder (some of the output, not all and not none).
+const reserveFigures = (value, entries, planted) => {
+  const bad = []
+  let remainders = 0
+
+  entries.filter((entry) => planted[entry.name]).forEach((entry) => {
+    const { fraction } = planted[entry.name]
+    const sent = value(entry.site.packetOutput)
+    const added = value(entry.site.local)
+    const risen = entry.stock + added
+
+    if (!near(entry.shipped, entry.civilian - entry.civilian * Math.min(fraction, 1)) || !near(sent, entry.shipped) || !near(added, entry.dug - entry.shipped) || (fraction <= 1 ? !near(risen, entry.reserve) : !(risen < entry.reserve))) {
+      bad.push([entry.name, fraction, sent, entry.shipped, added])
+    }
+
+    if (fraction < 1 && entry.shipped > 0) {
+      remainders++
+    }
+  })
+
+  return { bad, remainders }
+}
+
 const saveStatements = async (ctx, save) => {
   const { m } = ctx
-  const { ms, mining, colony: colonyModule, provenance, minerals } = m
+  const { ms, provenance, minerals } = m
   const value = provenance.valueOrNull
   const planted = Boolean(save.planted)
   const original = path.resolve(root, save.file)
@@ -993,6 +1184,7 @@ const saveStatements = async (ctx, save) => {
 
     try {
       plan = await plantCases(target, save)
+      plan.reserves = await plantReserves(m, target, save, plan.partial)
     } catch (error) {
       removePlanted()
       throw error
@@ -1013,15 +1205,7 @@ const saveStatements = async (ctx, save) => {
     return { skipped: true, statements: [] }
   }
 
-  const read = async (db) => {
-    const [surface, orbital, routes, packets] = await Promise.all([rowsOf(db, mining.surfaceMiningQuery(ids)), rowsOf(db, mining.orbitalMiningQuery(ids)), ms.loadSiteRoutes(db, ids), colonyModule.loadPacketsInFlight(db, ids)])
-    const cargoRows = await rowsOf(db, `select FCT_ShipCargo.CargoID as MaterialID, case when count(FCT_ShipCargo.Amount) = count(*) then sum(FCT_ShipCargo.Amount) end as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${save.game} and FCT_Ship.RaceID = ${save.race} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`)
-    const cargo = Object.fromEntries(cargoRows.map((row) => [row.MaterialID, row.Amount]))
-    const [{ Present: ledgerTable }] = await rowsOf(db, "select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
-    const transfers = await ms.loadTransfers(db, { ...ids, windowDays: 365 })
-
-    return { surface, orbital, routes, packets, cargo, transfers, ledgerTable }
-  }
+  const read = (db) => readSave(m, db, save)
 
   const data = await read(database)
   const names = minerals.MINERALS
@@ -1187,11 +1371,11 @@ const saveStatements = async (ctx, save) => {
   }
 
   if (planted) {
-    const stockRow = async (populationId) => (await rowsOf(database, `select * from FCT_Population where GameID = ${save.game} and PopulationID = ${populationId}`))[0]
-    const installations = async (populationId) => (await rowsOf(database, `select sum(case when VIR_Type.CivilianInstallation = 1 then VIR_Installation.Amount * VIR_Type.MiningProductionValue else 0 end) as Civilian, sum(case when VIR_Type.CivilianInstallation = 0 and VIR_Type.Workers > 0 then VIR_Installation.Amount * VIR_Type.MiningProductionValue else 0 end) as Manned, sum(VIR_Installation.Amount * VIR_Type.MiningProductionValue) as Total from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${save.game} and VIR_Installation.PopID = ${populationId} and VIR_Type.MiningProductionValue >= 1`))[0]
+    const stockRow = (populationId) => stockRowOf(database, save, populationId)
+    const installations = (populationId) => installationsOf(database, save, populationId)
     const planting = {}
 
-    for (const populationId of [plan.bought, plan.shortfall]) {
+    for (const populationId of [plan.bought, plan.shortfall, plan.partial, plan.above]) {
       const counts = await installations(populationId)
 
       planting[populationId] = { share: counts.Civilian / counts.Total, manned: counts.Manned, stock: await stockRow(populationId) }
@@ -1208,8 +1392,9 @@ const saveStatements = async (ctx, save) => {
       }
 
       const civilian = dug * share
+      const reserve = stock[`Reserve${name}`]
 
-      return { site, dug, shipped: sourcePacket({ civilian, kept: dug - civilian, stock: stock[name], reserve: stock[`Reserve${name}`] }) }
+      return { site, dug, civilian, stock: stock[name], reserve, shipped: sourcePacket({ civilian, kept: dug - civilian, stock: stock[name], reserve }) }
     }
 
     addSave('save-output: a site that buys the complexes\' output for a destination that exists ships by packet what the game ships (the complexes\' share of the mining installations stored, here with no manned mine), keeps the rest in its stockpile and supplies the packet', () => {
@@ -1234,18 +1419,66 @@ const saveStatements = async (ctx, save) => {
 
       return manned === 0 && share > 0 && share < 1 && shipped > 0 && !bad.length ? true : short([manned, share, shipped, bad.slice(0, 3)])
     })
-    addSave('save-reserve: a known mismatch, recorded and not fixed (owner AE-309-13): with the stockpile below its reserve the game keeps the complexes\' output in the stockpile and ships the rest (Population.ProcessMiningProduction of 3.0.0 and 3.1.0, not of 2.7.1), and the rules ship all of it', () => {
-      const apart = []
+    addSave('save-reserve: with the stockpile at or above its reserve (every reserve 0 at one colony, half the stock at another) the game ships the whole of the complexes\' output and the rules do', () => {
+      const bad = []
+      let above = 0
+
+      for (const populationId of [plan.bought, plan.above]) {
+        names.forEach((mineral) => {
+          const { site, dug, civilian, stock, reserve, shipped } = gameFigures(populationId, mineral)
+
+          if (!site || shipped === null) {
+            return
+          }
+
+          above += stock > reserve ? 1 : 0
+
+          if (!near(shipped, civilian) || !near(value(site.packetOutput), civilian) || !near(value(site.local), dug - civilian)) {
+            bad.push([populationId, mineral.name, value(site.packetOutput), civilian])
+          }
+        })
+      }
+
+      return above > 0 && !bad.length ? true : short([above, bad.slice(0, 3)])
+    })
+    addSave('save-reserve: with the stockpile far below its reserve (the Duranium reserve above any stockpile) the game keeps the complexes\' Duranium in the stockpile and ships none of it, and the rules do, whatever the other minerals ship', () => {
+      const bad = []
 
       names.forEach((mineral) => {
-        const { site, shipped: expected } = gameFigures(plan.shortfall, mineral)
+        const { site, dug, shipped } = gameFigures(plan.shortfall, mineral)
 
-        if (site && expected !== null && !near(value(site.packetOutput), expected)) {
-          apart.push([mineral.name, value(site.packetOutput), expected])
+        if (site && shipped !== null && (!near(value(site.packetOutput), shipped) || !near(value(site.local), dug - shipped))) {
+          bad.push([mineral.name, value(site.packetOutput), shipped])
         }
       })
 
-      return apart.length === 1 && apart[0][0] === 'Duranium' && apart[0][2] === 0 && apart[0][1] > 0 ? true : short(apart.length ? apart : 'the rules and the game agree: the mismatch is gone, so the route, packetOutput, localStock and supply list the 3.2 line (the group versions)')
+      const duranium = gameFigures(plan.shortfall, { id: 1, name: 'Duranium' })
+
+      return duranium.site && duranium.shipped === 0 && near(value(duranium.site.packetOutput), 0) && near(value(duranium.site.local), duranium.dug) && !bad.length ? true : short([duranium.shipped, bad.slice(0, 3)])
+    })
+    addSave('save-reserve: with the stockpile short of the reserve by a part of the complexes\' output (reserves planted from a first read of the copy) the game keeps that part in the stockpile and ships the remainder, and the stock rises to the reserve', () => {
+      const entries = names.flatMap((mineral) => {
+        const figures = gameFigures(plan.partial, mineral)
+
+        return figures.site && figures.shipped !== null ? [{ ...figures, name: mineral.name }] : []
+      })
+      const { bad, remainders } = reserveFigures(value, entries, plan.reserves)
+
+      return remainders > 0 && !bad.length ? true : short([remainders, Object.keys(plan.reserves).length, bad.slice(0, 3)])
+    })
+    addSave('save-reserve: a destination is credited with what the sites ship, never the whole output: the remainders of the colonies that buy for it and what the drivers send', () => {
+      const bad = []
+
+      names.forEach((mineral) => {
+        const destination = supplies[mineral.id].destinations.find((entry) => entry.populationId === plan.destination)
+        const expected = [plan.bought, plan.shortfall, plan.partial, plan.above].reduce((total, populationId) => total + (gameFigures(populationId, mineral).shipped || 0), 0) + (plan.sent[mineral.id] || 0) * 2
+
+        if (!destination || !near(value(destination.fromSites), expected)) {
+          bad.push([mineral.name, destination ? value(destination.fromSites) : null, expected])
+        }
+      })
+
+      return bad.length ? short(bad.slice(0, 3)) : true
     })
     addSave('save-drivers: a site whose mass drivers ship stock names its destination and sends, a year at a time, what the ledger records it sending, and the destination receives what the ledger records over the window', () => {
       const bad = []
@@ -1391,6 +1624,90 @@ const saveStatements = async (ctx, save) => {
   return { skipped: false, statements, close }
 }
 
+// The played save as an extra witness of the group save-reserve: the civilian mining colonies a 3.2 game wrote, those of the race that buy the complexes' output for a destination that exists, read as saved (the reserves are stored as the game kept them, 0 here, so the game ships the whole output) and on a temporary copy with reserves planted on them (`plantReserves`). Nothing else of the save is read, and the file is never written.
+const witnessStatements = async (ctx, save) => {
+  const { m } = ctx
+  const value = m.provenance.valueOrNull
+  const original = path.resolve(root, save.file)
+
+  if (!fs.existsSync(original)) {
+    return { skipped: true, statements: [] }
+  }
+
+  const label = `played save ${path.basename(original)}`
+  const database = await openSave(original)
+  const [race] = await rowsOf(database, `select RaceID from FCT_Race where GameID = ${save.game} and RaceID = ${save.race}`)
+
+  if (!race) {
+    console.log(`SKIP  ${label}: game ${save.game} race ${save.race} is not in the file`)
+    await database.close()
+
+    return { skipped: true, statements: [] }
+  }
+
+  const colonies = (await rowsOf(database, `select FCT_Population.PopulationID from FCT_Population where FCT_Population.GameID = ${save.game} and FCT_Population.RaceID = ${save.race} and FCT_Population.PurchaseCivilianMinerals = 1 and FCT_Population.MassDriverDest > 0 and exists (select 1 from FCT_Population as VIR_Destination where VIR_Destination.GameID = ${save.game} and VIR_Destination.PopulationID = FCT_Population.MassDriverDest) and exists (select 1 from FCT_PopulationInstallations as VIR_Installation inner join DIM_PlanetaryInstallation as VIR_Type on VIR_Type.PlanetaryInstallationID = VIR_Installation.PlanetaryInstallationID where VIR_Installation.GameID = ${save.game} and VIR_Installation.PopID = FCT_Population.PopulationID and VIR_Installation.Amount >= 1 and VIR_Type.CivilianInstallation = 1 and VIR_Type.MiningProductionValue >= 1) order by FCT_Population.PopulationID`)).map((row) => row.PopulationID)
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-supply-played-'))
+  const copy = path.join(folder, 'planted.db')
+  const removeCopy = () => fs.rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  const planted = {}
+
+  try {
+    fs.copyFileSync(original, copy)
+
+    for (const populationId of colonies) {
+      planted[populationId] = await plantReserves(m, copy, save, populationId)
+    }
+  } catch (error) {
+    await database.close()
+    removeCopy()
+    throw error
+  }
+
+  const edited = await openSave(copy)
+  const statements = []
+  const addSave = (name, test) => statements.push([`${name.slice(0, name.indexOf(':'))}: ${label}:${name.slice(name.indexOf(':') + 1)}`, test])
+
+  addSave('save-reserve: a civilian mining colony of the save, read as saved, ships by packet what the game ships and keeps the rest in its stockpile', async () => {
+    const bad = []
+    let tonnes = 0
+
+    for (const populationId of colonies) {
+      for (const entry of await workedColony(m, database, save, populationId)) {
+        tonnes += entry.civilian
+
+        if (!near(value(entry.site.packetOutput), entry.shipped) || !near(value(entry.site.local), entry.dug - entry.shipped)) {
+          bad.push([populationId, entry.name, value(entry.site.packetOutput), entry.shipped])
+        }
+      }
+    }
+
+    return colonies.length > 0 && tonnes > 0 && !bad.length ? true : short([colonies.length, tonnes, bad.slice(0, 3)])
+  })
+  addSave('save-reserve: a civilian mining colony of the save with reserves planted on a copy (short of the stock by a part of the complexes\' output) keeps that part in its stockpile and ships the remainder, and the stock rises to the reserve', async () => {
+    const bad = []
+    let remainders = 0
+
+    for (const populationId of colonies) {
+      const figures = reserveFigures(value, await workedColony(m, edited, save, populationId), planted[populationId])
+
+      bad.push(...figures.bad)
+      remainders += figures.remainders
+    }
+
+    return remainders > 0 && !bad.length ? true : short([remainders, bad.slice(0, 3)])
+  })
+
+  return {
+    skipped: false,
+    statements,
+    close: async () => {
+      await database.close()
+      await edited.close()
+      removeCopy()
+    },
+  }
+}
+
 // ---------- the planted faults ----------
 
 // A planted fault and the checks that must fail for it: each name is the key of a check (the text before its colon), and the fault is caught only when every one of them fails.
@@ -1423,7 +1740,27 @@ const MUTATIONS = [
   { name: 'the extraction taken as what stays in the site\'s stock', file: U, find: 'compute: ({ extraction: dug, packetOutput: shipped }) => dug - shipped', replace: 'compute: ({ extraction: dug, packetOutput: shipped }) => dug', fails: ['conservation', 'save-conservation'] },
   { name: 'the packet output taken from every kind of mine', file: U, find: 'surfaceRateResult({ ...row, ...CIVILIAN_ONLY }, true)', replace: 'surfaceRateResult(row, true)', fails: ['conservation', 'destinations', 'save-output'] },
   { name: 'the packet output dropped for a site whose complexes are bought', file: U, find: 'if (routed !== null && routed.state === \'packets\') {', replace: 'if (false) {', fails: ['conservation', 'throughput', 'save-output'] },
-  ...['route', 'packetOutput', 'localStock', 'supply'].map((name) => ({ name: `the ${name} rule listed on the 3.2 line while the reserve top-up is not modelled`, file: U, find: `id: 'mineralSupply.${name}',\n  versions: PACKET_VERSIONS,`, replace: `id: 'mineralSupply.${name}',\n  versions: SUPPLY_VERSIONS,`, fails: ['versions'] })),
+  { name: 'the whole civilian output shipped whatever the reserve', file: U, find: 'const packetShare = ({ civilian, extraction, stock, reserve }) => civilian - Math.min(civilian, Math.max(0, reserve - (stock + extraction - civilian)))', replace: 'const packetShare = ({ civilian }) => civilian', fails: ['reserve', 'save-reserve'] },
+  { name: 'the shortfall taken from the stockpile alone, without what the other mines add', file: U, find: '(stock + extraction - civilian)', replace: 'stock', fails: ['reserve', 'save-reserve'] },
+  { name: 'the top-up taken beyond the civilian output', file: U, find: 'civilian - Math.min(civilian, Math.max(0, reserve - (stock + extraction - civilian)))', replace: 'civilian - Math.max(0, reserve - (stock + extraction - civilian))', fails: ['reserve', 'save-reserve'] },
+  { name: 'a stockpile above the reserve topped up by a negative shortfall', file: U, find: 'Math.max(0, reserve - (stock + extraction - civilian))', replace: 'reserve - (stock + extraction - civilian)', fails: ['reserve', 'save-reserve'] },
+  { name: 'the shortfall rounded up to a tonne', file: U, find: 'Math.max(0, reserve - (stock + extraction - civilian))', replace: 'Math.max(1, reserve - (stock + extraction - civilian))', fails: ['reserve', 'save-reserve'] },
+  { name: 'the reserve of another mineral', file: U, find: 'const reserve = colony[`Reserve${mineral.name}`]', replace: 'const reserve = colony.ReserveDuranium', fails: ['reserve'] },
+  { name: 'a reserve that is not stored taken as 0', file: U, find: 'return known(reserve) ? ofRule({ rule: \'minerals.colonyStock\', value: reserve,', replace: 'return true ? ofRule({ rule: \'minerals.colonyStock\', value: reserve || 0,', fails: ['reserve'] },
+  { name: 'a stock that is not stored taken as 0 by the top-up', file: U, find: 'stock: results.stock, reserve: reserveResult(colony, mineral) }', replace: 'stock: ofRule({ rule: \'minerals.colonyStock\', value: valueOrNull(results.stock) || 0, inputs: { present: [] } }), reserve: reserveResult(colony, mineral) }', fails: ['reserve'] },
+  { name: 'the reserve asked of a site that ships no civilian output by packet', file: U, find: '} else if (routed !== null && routed.state === \'packets\') {', replace: '} else if (routed !== null) {', fails: ['reserve'] },
+  { name: 'the route note sending the output straight into a packet', file: U, find: "makes a packet bound for the colony\\'s mass driver destination the potential route of that output", replace: "sends it straight into a packet bound for the colony\\'s mass driver destination", fails: ['reserve-note'] },
+  { name: 'the route note without its reserve condition', file: U, find: ', and only what is left goes into the packet, so a colony whose stock is below its reserve keeps the output up to the shortfall and sends the remainder, and a colony at or above its reserve sends all of it.', replace: ', and the rest goes into the packet.', fails: ['reserve-note'] },
+  { name: 'the route note with the condition reversed', file: U, find: ', and a colony at or above its reserve sends all of it.', replace: ', and a colony below its reserve sends all of it.', fails: ['reserve-note'] },
+  { name: 'the packet output note without its reserve top-up', file: U, find: ", less what fills the colony\\'s own stock up to its reserve first.", replace: '.', fails: ['reserve-note'] },
+  { name: 'the stock added note without the civilian output that fills the reserve', file: U, find: "to the site\\'s own stockpile, with the civilian output that fills the stockpile up to its reserve before a packet is made: the extraction", replace: "to the site\\'s own stockpile: the extraction", fails: ['reserve-note'] },
+  { name: 'the supply note without what the reserve leaves', file: U, find: "what the colony\\'s reserve leaves of the civilian output where it ships by packet", replace: 'the civilian output where it ships by packet', fails: ['reserve-note'] },
+  { name: 'the route state of bought output labelled as a shipment', file: U, find: "packets: 'Civilian output can ship by packet',", replace: "packets: 'Civilian output ships by packet',", fails: ['panel'] },
+  { name: 'the route rule listed on both lines', file: U, find: "id: 'mineralSupply.route',\n  versions: SUPPLY_VERSIONS,", replace: "id: 'mineralSupply.route',\n  versions: ['2.7.x', '3.2.x'],", fails: ['versions'] },
+  { name: 'the foot sending the output the race buys straight into a packet', file: V, find: "first fills the colony's own stock up to its reserve, after what the site's other mines add, and only the rest goes into a packet;", replace: 'goes straight into a packet,', fails: ['panel-template'] },
+  { name: 'the packet tile without the reserve that comes first', file: V, find: ", less what fills a colony\\'s stock up to its reserve first'", replace: "'", fails: ['panel'] },
+  { name: 'the stock tile without the civilian output that fills the reserve', file: V, find: ", the civilian output that fills its reserve included'", replace: "'", fails: ['panel'] },
+  ...['route', 'packetOutput', 'localStock', 'supply'].map((name) => ({ name: `the ${name} rule listed on the earlier line only`, file: U, find: `id: 'mineralSupply.${name}',\n  versions: SUPPLY_VERSIONS,`, replace: `id: 'mineralSupply.${name}',\n  versions: ['2.7.x'],`, fails: ['versions'] })),
   { name: 'a packet counted in the destination\'s stock and in flight', file: U, find: 'compute: ({ stock, inbound }) => stock + inbound }),\n      fromSites', replace: 'compute: ({ stock, inbound }) => stock + inbound + inbound }),\n      fromSites', fails: ['packets', 'save-packets'] },
   { name: 'a packet bound for a colony the race lacks dropped', file: U, find: 'results: lostKeys.map((key) => inFlightOf(key)) })', replace: 'results: [] })', fails: ['packets', 'save-packets'] },
   { name: 'the packets in flight left out of what the race holds', file: U, find: 'parts: { stock, inFlight, aboard }, compute: (values) => values.stock + values.inFlight + values.aboard })', replace: 'parts: { stock, inFlight, aboard }, compute: (values) => values.stock + values.aboard })', fails: ['packets', 'save-packets'] },
@@ -1442,7 +1779,7 @@ const MUTATIONS = [
   { name: 'the ledger read over the whole history', file: U, find: 'and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * 86400}', replace: '', fails: ['loaders', 'save-ledger'] },
   { name: 'the destination\'s drivers read again as a gate', file: U, find: 'VIR_Destination.SystemID as DestinationSystemID from', replace: 'VIR_Destination.SystemID as DestinationSystemID, 0 as DestinationDrivers from', fails: ['loaders'] },
   { name: 'the colonies read without their stock', file: U, find: 'FCT_Population.MassDriverDest, ${stocks},', replace: 'FCT_Population.MassDriverDest,', fails: ['loaders', 'save-stock'] },
-  { name: 'the colonies read with the reserves, which a save may lack', file: U, find: 'FCT_Population.MassDriverDest, ${stocks},', replace: 'FCT_Population.MassDriverDest, ${stocks}, FCT_Population.ReserveDuranium,', fails: ['loaders'] },
+  { name: 'the colonies read without the reserves', file: U, find: '`FCT_Population.${mineral.name}, FCT_Population.Reserve${mineral.name}`', replace: '`FCT_Population.${mineral.name}`', fails: ['loaders', 'save-output', 'save-reserve'] },
   { name: 'a blank delivery taken as 0', file: U, find: 'if (!text) {\n    return []\n  }', replace: 'if (false) {\n    return []\n  }', fails: ['scenario'] },
   { name: 'a negative delivery accepted', file: U, find: 'if (!Number.isFinite(tonnes) || tonnes < 0) {', replace: 'if (!Number.isFinite(tonnes)) {', fails: ['scenario'] },
   { name: 'a delivery with no colony assumed to go somewhere', file: U, find: '} else if (destinationId === null) {', replace: '} else if (false) {', fails: ['scenario'] },
@@ -1554,7 +1891,7 @@ const statementsOf = async (ctx, withSaves) => {
 
   if (withSaves && useSaves) {
     for (const save of SAVES) {
-      const read = await saveStatements(ctx, save)
+      const read = save.witness ? await witnessStatements(ctx, save) : await saveStatements(ctx, save)
 
       if (read.skipped) {
         skipped.push(save.file)

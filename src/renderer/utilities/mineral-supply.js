@@ -1,4 +1,4 @@
-// The Mineral Outlook's supply accounting: what the mines of each site extract, what can leave the site by mass driver, what the ledger shows shipped and received, and what packets are on their way to each destination, kept as separate figures. A mineral dug up at a site goes into that colony's own stockpile; it supplies industry elsewhere only through a mass-driver packet (or a freighter's load, which the save shows only as ledger shipments), and the race's totals take none of those moves as income. Hypothetical deliveries are scenario inputs, never assumed. Evidence: docs/plans/backlog/evidence/AE-054-01.md.
+// The Mineral Outlook's supply accounting: what the mines of each site extract, what can leave the site by mass driver, what the ledger shows shipped and received, and what packets are on their way to each destination, kept as separate figures. A site's retained output goes into that colony's own stockpile; a mineral supplies industry elsewhere only through a mass-driver packet (or a freighter's load, which the save shows only as ledger shipments), and the race's totals take none of those moves as income. Hypothetical deliveries are scenario inputs, never assumed. Evidence: docs/plans/backlog/evidence/AE-054-01.md.
 
 import { TARGET_STATES, driversByColony, targetOf } from './cmc-policy'
 import { stockAndInbound } from './colony-minerals'
@@ -7,43 +7,45 @@ import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlo
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
 const SUPPLY_VERSIONS = ['3.2.x']
-// The rules that read the packet the complexes' output goes into, and the route that says it goes (a known mismatch, owner AE-309-13): the 3.1.0 and 3.0.0 game fills a colony's stockpile up to its reserve from the purchased civilian output first and ships only the rest (Population.ProcessMiningProduction; the 2.7.1 GClass146.method_10 does not), which these rules and the route's note do not model (scripts/check-mineral-supply.js, group save-reserve), so they stay on the earlier line.
-const PACKET_VERSIONS = ['2.7.x']
 
+// The route of a site's civilian output. Population.ProcessMiningProduction of 3.1.0 (Population.cs lines 1257 to 1291): a colony of a player race that buys its civilian complexes' output (PurchaseCivilianMinerals) and has a mass driver destination (MassDriverDest, not null) takes the disposition PurchaseCivilianMiningForMassDriverExport and builds a packet bound for that destination; with no destination it purchases locally (the output stays in its stockpile), and a colony that does not buy taxes the complexes and builds none. The disposition makes the packet the potential route of the output, not what is sent: what goes into it is what the reserve top-up of mineralSupply.packetOutput leaves, so a colony whose stock is below its reserve keeps the output up to the shortfall and one at or above its reserve sends all of it.
 registerRule({
   id: 'mineralSupply.route',
-  versions: PACKET_VERSIONS,
+  versions: SUPPLY_VERSIONS,
   units: 'route',
   verification: 'estimated',
   structure: ['FCT_Population.MassDriverDest, PurchaseCivilianMinerals', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
-  note: 'Whether anything a site digs up can leave it by packet. A race that buys the output of a colony\'s civilian complexes sends it straight into a packet bound for the colony\'s mass driver destination; stock above the reserve goes by the colony\'s own drivers. A destination that is stored and still exists keeps the route whoever owns it, wherever it is and whether or not it has a driver: the destination picker offers fewer colonies than a stored destination may be, and only the site\'s drivers set what its stock can send. A packet adds its minerals to the destination\'s stock on arrival, driver or none; a packet bound for a destination that no longer exists is lost. A site with no destination sends nothing by packet; a site with a destination but no driver sends only the civilian output the race buys. A freighter\'s hold is not a packet route: what freighters load shows only as ledger shipments. A packet carries no origin in the save, so an arrival is never assigned to a site.',
+  note: 'Whether anything a site digs up can leave it by packet. A race that buys the output of a colony\'s civilian complexes for a destination makes a packet bound for the colony\'s mass driver destination the potential route of that output: the output first fills the colony\'s own stock up to its reserve, after what the colony\'s other mines add, and only what is left goes into the packet, so a colony whose stock is below its reserve keeps the output up to the shortfall and sends the remainder, and a colony at or above its reserve sends all of it. Stock above the reserve goes by the colony\'s own drivers. A destination that is stored and still exists keeps the route whoever owns it, wherever it is and whether or not it has a driver: the destination picker offers fewer colonies than a stored destination may be, and only the site\'s drivers set what its stock can send. A packet adds its minerals to the destination\'s stock on arrival, driver or none; a packet bound for a destination that no longer exists is lost. A site with no destination sends nothing by packet; a site with a destination but no driver sends only what the reserve leaves of the civilian output the race buys. A freighter\'s hold is not a packet route: what freighters load shows only as ledger shipments. A packet carries no origin in the save, so an arrival is never assigned to a site.',
 })
 
+// The civilian output that goes into the packet. Population.ProcessMiningProduction of 3.1.0, the case PurchaseCivilianMiningForMassDriverExport (Population.cs lines 1326 to 1350 and 1393 to 1399), for each mineral, with `num` the mineral mined in the step and `num2` the civilian share of it (the civilian over the total mining production, times `num`): `num - num2` is added to the colony's stockpile (gclass123_0, the mineral columns of FCT_Population) first, when it is above 0; `num5` is the colony's reserve of the mineral (gclass123_2, the Reserve<mineral> columns of FCT_Population, saved by Game.cs at line 10552 and read back at line 17755) less that stockpile as it then stands; when `num5` is above 0 the smaller of `num2` and `num5` (`num6`) is added to the stockpile as well, and `num2 - num6` (`num4`) goes into the packet when it is above 0; the packet enters the game only when its total is above 0. The figure is that one step taken for a year of today's output against today's stockpile and reserve: the civilian output less the smaller of it and the reserve's shortfall after the stockpile and what the other mines add, the shortfall never below 0.
 registerRule({
   id: 'mineralSupply.packetOutput',
-  versions: PACKET_VERSIONS,
+  versions: SUPPLY_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
-  structure: ['FCT_Population.PurchaseCivilianMinerals, MassDriverDest', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_MineralDeposit.Accessibility'],
-  note: 'What the civilian complexes of a colony whose output the race buys dig up a year, which goes into a packet of its own and not into the colony\'s stockpile: the complexes\' share of the colony\'s mining rate. A colony that taxes its complexes, or has no destination, sends no output this way. The rate is today\'s; accessibility falls as a deposit is worked past half.',
+  structure: ['FCT_Population.PurchaseCivilianMinerals, MassDriverDest', 'FCT_Population.<mineral>, Reserve<mineral>', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_MineralDeposit.Accessibility'],
+  note: 'What the civilian complexes of a colony whose output the race buys send by packet a year: their share of the colony\'s mining rate, less what fills the colony\'s own stock up to its reserve first. That top-up is the reserve less the stock and less what the colony\'s other mines and orbital miners add, never below 0 and never more than the complexes\' output: a colony at or above its reserve sends all of it, and one far below it sends none. A colony that taxes its complexes, or has no destination, sends no output this way. The rate, the stock and the reserve are today\'s, and a year\'s output meets them in a single step where the game works each production step in turn; accessibility falls as a deposit is worked past half.',
 })
 
+// What the site adds to its own stockpile. The same member and branch as above (Population.cs lines 1326 to 1350): the stockpile takes `num - num2`, the output of the manned and automated mines and the orbital miners, and `num6`, the smaller of the civilian output `num2` and the reserve's shortfall `num5`, so the site adds its extraction less what goes into the packet (`num4`).
 registerRule({
   id: 'mineralSupply.localStock',
-  versions: PACKET_VERSIONS,
+  versions: SUPPLY_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
-  structure: ['the site\'s mining rates', 'FCT_Population.PurchaseCivilianMinerals, MassDriverDest'],
-  note: 'What the site\'s own mines and orbital miners add a year to the site\'s own stockpile: the extraction less the civilian output that goes straight into a packet. Industry elsewhere does not see it until a driver or a freighter moves it, so extraction at a site is never supply at another colony.',
+  structure: ['the site\'s mining rates', 'FCT_Population.PurchaseCivilianMinerals, MassDriverDest', 'FCT_Population.<mineral>, Reserve<mineral>'],
+  note: 'What the site\'s own mines and orbital miners add a year to the site\'s own stockpile, with the civilian output that fills the stockpile up to its reserve before a packet is made: the extraction less the civilian output that goes into a packet. Industry elsewhere does not see it until a driver or a freighter moves it, so extraction at a site is never supply at another colony.',
 })
 
+// What leaves the site for a destination. The civilian packet of Population.ProcessMiningProduction of 3.1.0 (Population.cs lines 1277 to 1291 and 1393 to 1399), whose content is the packet output above and which no ledger entry records, and the packet that LaunchMassDriverMineralPacket builds from the stock above the reserve (Population.cs lines 1145 to 1221, recorded as entry type 12): the supply is the two together.
 registerRule({
   id: 'mineralSupply.supply',
-  versions: PACKET_VERSIONS,
+  versions: SUPPLY_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['the site\'s route', 'FCT_RaceMineralData.Amount, MineralDataType 12'],
-  note: 'What leaves the site for a destination colony by a route the save names: 0 where there is no packet route, the civilian output where it ships by packet, and, where the site\'s drivers ship stock, the tonnes the ledger shows them sending over its window. Drivers ship stock above the reserve up to their capacity, so without the ledger that throughput is not known. Freighter loads are not counted: where they go is not recorded.',
+  note: 'What leaves the site for a destination colony by a route the save names: 0 where there is no packet route, what the colony\'s reserve leaves of the civilian output where it ships by packet, and, where the site\'s drivers ship stock, the tonnes the ledger shows them sending over its window. Drivers ship stock above the reserve up to their capacity, so without the ledger that throughput is not known. Freighter loads are not counted: where they go is not recorded.',
 })
 
 registerRule({
@@ -52,7 +54,7 @@ registerRule({
   units: 't/yr',
   verification: 'confirmed',
   structure: ['FCT_RaceMineralData.Amount, MineralDataType 8, 12, PopulationID, MineralID'],
-  note: 'The tonnes the game\'s ledger records a colony sending by mass driver or loading into freighters over its window, annualised: stored values, summed. The ledger records a packet when drivers send stock, not when civilian output goes straight into a packet, and a tonne loaded into a freighter is not a tonne delivered. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, and against a copy of it with mass driver sends planted in the ledger from the game\'s source.',
+  note: 'The tonnes the game\'s ledger records a colony sending by mass driver or loading into freighters over its window, annualised: stored values, summed. The ledger records a packet when drivers send stock, not when civilian output goes into a packet, and a tonne loaded into a freighter is not a tonne delivered. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, and against a copy of it with mass driver sends planted in the ledger from the game\'s source.',
 })
 
 registerRule({
@@ -117,6 +119,16 @@ const cargoResult = (cargo, materialId) => {
 // The results of one mineral at one colony row: its stock and what is in flight to it.
 const resultsAt = (colony, packets, materialId) => stockAndInbound(colony, packets, MINERALS.find((item) => item.id === materialId))
 
+// The colony's reserve of one mineral as a result of 'minerals.colonyStock': unavailable, naming it, when the save does not record it.
+const reserveResult = (colony, mineral) => {
+  const reserve = colony[`Reserve${mineral.name}`]
+
+  return known(reserve) ? ofRule({ rule: 'minerals.colonyStock', value: reserve, inputs: { present: [`FCT_Population.Reserve${mineral.name}`] } }) : unavailable({ rule: 'minerals.colonyStock', missing: [`the ${mineral.name} reserve of the colony`] })
+}
+
+// What of the civilian output `civilian` of one mineral goes into the colony's packet, from the mineral's `extraction`, the colony's `stock` and its `reserve` (Population.ProcessMiningProduction, see the comment above mineralSupply.packetOutput): the stockpile takes the output of the other mines (`extraction` less `civilian`) first, the reserve's shortfall after that is never below 0, and the civilian output tops the stockpile up by the smaller of itself and that shortfall before the rest goes into the packet.
+const packetShare = ({ civilian, extraction, stock, reserve }) => civilian - Math.min(civilian, Math.max(0, reserve - (stock + extraction - civilian)))
+
 const driverText = (where) => `the number of mass drivers or their driver value at ${where}`
 const POLICY_COLUMN = 'the colony\'s civilian mineral purchase setting'
 
@@ -131,9 +143,9 @@ const reachOf = (colony) => {
   return destination > 0 && colony.DestinationID !== null && colony.DestinationID !== undefined && destination !== colony.PopulationID
 }
 
-// One row per colony of the race: its name, system, destination (and the destination's name, race and system), its drivers and its stock of every mineral.
+// One row per colony of the race: its name, system, destination (and the destination's name, race and system), its drivers, and its stock and reserve of every mineral.
 export const loadSiteRoutes = async (database, { GameID, RaceID }) => {
-  const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name}`).join(', ')
+  const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name}, FCT_Population.Reserve${mineral.name}`).join(', ')
   const [rows] = await database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${stocks}, coalesce(VIR_Drivers.Drivers, 0) as Drivers, coalesce(VIR_Drivers.Gaps, 0) as DriverGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID from FCT_Population left join (${driversByColony(GameID)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`)
 
   return Object.freeze(rows)
@@ -181,7 +193,7 @@ const loadedOf = (flows, populationId, materialId) => observed('mineralSupply.sh
 const receivedOf = (flows, populationId, materialId) => observed('mineralSupply.received', flows, populationId, materialId, [LEDGER_TYPES.received])
 const unloadedOf = (flows, populationId, materialId) => observed('mineralSupply.received', flows, populationId, materialId, [LEDGER_TYPES.unloaded])
 
-// How a site's packet route reads, as a result of 'mineralSupply.route' whose value is `{ state, civilian, stock, target, destinationId }`. A stored destination keeps the route while its colony exists, whoever owns it, wherever it is and whether or not it has a driver: only the picker offers fewer, so only the source's drivers decide whether stock ships. `civilian`: the race buys the complexes' output for a destination (the mining rows' `MassDriverExport`); `stock`: 'ships' when the site's drivers send stock above the reserve, 'none' when they cannot, 'unknown' when what decides it is not recorded; `target`: `targetOf`'s verdict on the destination, for display. `state` is 'packets' (civilian output goes by packet: the potential route, as the 2.7.1 game ships it all; the 3.1.0 game keeps it in the stockpile while that is below its reserve, Population.ProcessMiningProduction, owner AE-309-13), 'driver' (stock goes by the drivers), or 'none' (nothing leaves by packet, whatever the destination field says). A site whose route cannot be told is unavailable. `colony` is the site's row of `loadSiteRoutes`, undefined when it has none.
+// How a site's packet route reads, as a result of 'mineralSupply.route' whose value is `{ state, civilian, stock, target, destinationId }`. A stored destination keeps the route while its colony exists, whoever owns it, wherever it is and whether or not it has a driver: only the picker offers fewer, so only the source's drivers decide whether stock ships. `civilian`: the race buys the complexes' output for a destination (the mining rows' `MassDriverExport`); `stock`: 'ships' when the site's drivers send stock above the reserve, 'none' when they cannot, 'unknown' when what decides it is not recorded; `target`: `targetOf`'s verdict on the destination, for display. `state` is 'packets' (the packet is the potential route of the civilian output: the output fills the colony's stockpile up to its reserve first and only what is left goes into the packet, which `siteSupply` works out, Population.ProcessMiningProduction), 'driver' (stock goes by the drivers), or 'none' (nothing leaves by packet, whatever the destination field says). A site whose route cannot be told is unavailable. `colony` is the site's row of `loadSiteRoutes`, undefined when it has none.
 export const routeResult = ({ colony, civilian, RaceID }) => {
   const target = colony ? targetOf(colony, RaceID) : null
   const reach = colony ? reachOf(colony) : null
@@ -221,7 +233,7 @@ export const routeResult = ({ colony, civilian, RaceID }) => {
 // The mining row with no manned or automated mines: what is left of its rate is the civilian complexes'.
 const CIVILIAN_ONLY = { ManualMineCount: 0, AutomatedMineCount: 0 }
 
-// The sites of one mineral: one entry per colony with a mining row (a colony's mines, or the orbital miners assigned to it) on a deposit of `materialId`, most extracted first. `surface` and `orbital` are the rows of mining-data.js; `routes` the rows of `loadSiteRoutes`; `packets` the rows of colony-minerals.js `loadPacketsInFlight` (null when not read); `flows` the `transferFlows` of the ledger's moves. Each site has `extraction` (its mining rate), `packetOutput` (the civilian output that goes straight into a packet), `local` (what it adds to its own stockpile), `supply` (what leaves it for a destination by a route the save names), `capacity` (what its drivers can send, a limit on stock and not a throughput), `sent` and `loaded` (observed, from the ledger), `stock` (its own stockpile of the mineral now) and its `route`. `connection` is 'unconnected' with no packet route, else 'packets', 'driver', or 'unknown'.
+// The sites of one mineral: one entry per colony with a mining row (a colony's mines, or the orbital miners assigned to it) on a deposit of `materialId`, most extracted first. `surface` and `orbital` are the rows of mining-data.js; `routes` the rows of `loadSiteRoutes`; `packets` the rows of colony-minerals.js `loadPacketsInFlight` (null when not read); `flows` the `transferFlows` of the ledger's moves. Each site has `extraction` (its mining rate), `packetOutput` (the civilian output that goes into a packet once the colony's stockpile is filled up to its reserve), `local` (what it adds to its own stockpile), `supply` (what leaves it for a destination by a route the save names), `capacity` (what its drivers can send, a limit on stock and not a throughput), `sent` and `loaded` (observed, from the ledger), `stock` (its own stockpile of the mineral now) and its `route`. `connection` is 'unconnected' with no packet route, else 'packets', 'driver', or 'unknown'.
 export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = null, RaceID, materialId, flows }) => {
   const routeBy = Object.fromEntries(routes.map((colony) => [colony.PopulationID, colony]))
   const mineral = MINERALS.find((item) => item.id === materialId)
@@ -239,6 +251,7 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
 
   const sites = [...groups.values()].map((entry) => {
     const colony = routeBy[entry.populationId]
+    const results = colony ? resultsAt(colony, packets, materialId) : null
     const civilian = [...entry.surface, ...entry.orbital].some((row) => Boolean(row.MassDriverExport))
     const route = routeResult({ colony, civilian, RaceID })
     const routed = isAvailable(route) ? route.value : null
@@ -255,7 +268,7 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
     } else if (policyMissing && reach !== false) {
       packetOutput = unavailable({ rule: 'mineralSupply.packetOutput', missing: [POLICY_COLUMN] })
     } else if (routed !== null && routed.state === 'packets') {
-      packetOutput = combine({ rule: 'mineralSupply.packetOutput', parts: { civilian: miningSum(entry.surface.map((row) => surfaceRateResult({ ...row, ...CIVILIAN_ONLY }, true))) }, compute: ({ civilian: output }) => output })
+      packetOutput = combine({ rule: 'mineralSupply.packetOutput', parts: { civilian: miningSum(entry.surface.map((row) => surfaceRateResult({ ...row, ...CIVILIAN_ONLY }, true))), extraction, stock: results.stock, reserve: reserveResult(colony, mineral) }, compute: packetShare })
     }
 
     const local = policyMissing ? unavailable({ rule: 'mineralSupply.localStock', missing: [POLICY_COLUMN] }) : combine({ rule: 'mineralSupply.localStock', parts: { extraction, packetOutput }, compute: ({ extraction: dug, packetOutput: shipped }) => dug - shipped })
@@ -283,7 +296,6 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
       supply = unavailable({ rule: 'mineralSupply.supply', missing: [POLICY_COLUMN] })
     }
 
-    const results = colony ? resultsAt(colony, packets, materialId) : null
     const destination = routed && routed.destinationId ? { populationId: routed.destinationId, name: colony.DestinationName || null } : null
 
     return {
@@ -427,7 +439,7 @@ export const mineralSupply = ({ surface, orbital, navalAdmins, routes, packets, 
 }
 
 export const ROUTE_STATES = Object.freeze({
-  packets: 'Civilian output ships by packet',
+  packets: 'Civilian output can ship by packet',
   driver: 'Drivers ship stock',
   none: 'No packet route',
   unknown: 'Route not known',
