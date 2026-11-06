@@ -198,6 +198,44 @@ const rowsOfTimeCase = ({ species, own, body }) => {
   return tables
 }
 
+// Three bodies the race's own colony sits on, for what the body detail says of a colony's terraforming whether or not there is a plan: one already liveable for the species (Done, no plan to make), one too light to keep an atmosphere (no plan found), and one cold body the plan warms. The colonies move pressure on all three, so the game's one-year lines belong on all three.
+const OWN_SPECIES = { SpeciesID: 4, SpeciesName: 'Humans', BreatheID: 10, Oxygen: 0.2, OxyDev: 0.1, PressMax: 10, Temperature: 280, TempDev: 30, Gravity: 1, GravDev: 0.5, PopulationDensityModifier: 1 }
+const OWN_BODIES = { done: 301, noPlan: 302, planned: 303 }
+const OWN_COLONIES = { [OWN_BODIES.done]: { id: 1, name: 'Alive' }, [OWN_BODIES.noPlan]: { id: 2, name: 'Light' }, [OWN_BODIES.planned]: { id: 3, name: 'Cold' } }
+
+const rowsOfOwnColony = () => {
+  const tables = []
+  const planet = (extra) => ({ ...earth, Albedo: 1, OrbitNumber: 0, ...extra })
+
+  tables.push(['FCT_Game', { GameID: GAME, TerraformingSpeed: 100 }])
+  tables.push(['FCT_Race', { GameID: GAME, RaceID: RACE, ColonizationSkill: 1, TerraformingRate: 1 }])
+  tables.push(['FCT_RaceSysSurvey', { SystemID: 1, RaceID: RACE, GameID: GAME, Name: 'Test', ControlRaceID: 0, MilitaryRestrictedSystem: 0 }])
+  tables.push(['FCT_Star', { StarID: 1, SystemID: 1, GameID: GAME, ComponentNumber: 1, Luminosity: 1, OrbitingComponent: 0, OrbitalDistance: 0, Eccentricity: 0 }])
+  TIME_GASES.forEach((gas) => tables.push(['DIM_Gases', gas]))
+  tables.push(['FCT_Species', OWN_SPECIES])
+  Object.entries(OWN_COLONIES).forEach(([body, colony]) => tables.push(['FCT_Population', { PopulationID: colony.id, GameID: GAME, RaceID: RACE, SystemBodyID: Number(body), SpeciesID: OWN_SPECIES.SpeciesID, Population: 100, PopName: colony.name }]))
+  ;[
+    planet({ SystemBodyID: OWN_BODIES.done, PlanetNumber: 1, SurfaceTemp: 275, BaseTemp: 250, HydroID: 1, HydroExt: 0, name: 'Alive' }),
+    planet({ SystemBodyID: OWN_BODIES.noPlan, PlanetNumber: 2, Gravity: 0.05, SurfaceTemp: 275, BaseTemp: 250, HydroID: 1, HydroExt: 0, name: 'Light' }),
+    planet({ SystemBodyID: OWN_BODIES.planned, PlanetNumber: 3, SurfaceTemp: 198, BaseTemp: 180, HydroID: 4, HydroExt: 100, name: 'Cold' }),
+  ].forEach(({ name, ...row }) => {
+    tables.push(['FCT_SystemBody', row])
+    tables.push(['FCT_SystemBodyName', { SystemBodyID: row.SystemBodyID, RaceID: RACE, Name: name }])
+    tables.push(['FCT_SystemBodySurveys', { SystemBodyID: row.SystemBodyID, RaceID: RACE }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: row.SystemBodyID, AtmosGasID: 10, AtmosGasPercentage: 20, GasAtm: 0.2, FrozenOut: 0 }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: row.SystemBodyID, AtmosGasID: 7, AtmosGasPercentage: 80, GasAtm: 0.8, FrozenOut: 0 }])
+  })
+
+  return tables
+}
+
+// The terraforming sources of those colonies, as `loadTerraformSources` gives them: the race moves 1 atm a year and each colony has this many terraforming installations.
+const ownSources = (installations = 1) => ({
+  raceRate: 1,
+  speed: 100,
+  colonies: Object.fromEntries(Object.entries(OWN_COLONIES).map(([body, colony]) => [colony.id, { PopulationID: colony.id, PopName: colony.name, SystemID: 1, SystemBodyID: Number(body), RaceID: RACE, radius: 6371, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, installations, ships: [], shipsKnown: true }])),
+})
+
 const exec = (db, sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, (error) => (error ? reject(error) : resolve())))
 
 const wrapped = (db) => ({ query: (sql) => new Promise((resolve, reject) => db.all(sql, (error, items) => (error ? reject(error) : resolve([items])))) })
@@ -436,18 +474,18 @@ const detailOf = (ctx, fixture, row, speciesId) => {
   return { shown, cost: node('cost') ? textOf(node('cost')).replace(/\s+/g, ' ').trim() : null, capacity: node('capacity') ? textOf(node('capacity')).replace(/\s+/g, ' ').trim() : null, gravityClass: node('gravity-class') ? textOf(node('gravity-class')).trim() : null }
 }
 
-// The body detail of a planted body as the page gives it for a species, rendered: its text with the white space of the template folded, and the notes under the plan's heading that say its time is a minimum. `capacity` is what the terraformers move in a year.
-const renderedDetail = (ctx, fixture, row, speciesId, capacity) => {
+// The body detail of a planted body as the page gives it for a species, rendered: its text with the white space of the template folded, the notes under the plan's heading that say its time is a minimum, and the one-year lines of the race's own colonies. `capacity` is what the terraformers move in a year; `sources` is the race's colonies as the page loads them (`terraformSources`).
+const renderedDetail = (ctx, fixture, row, speciesId, capacity, sources = null) => {
   const item = { id: row.body.SystemBodyID, row, body: row.body, best: row.best }
   const shown = ctx.pageOptions.methods.shownEvaluation.call({ detailSpecies: { [item.id]: speciesId } }, item)
   const Detail = extended(ctx.detailOptions, ctx.detail)
-  const vm = new Detail({ propsData: { item, shown, speciesOptions: row.evaluations, terraformCapacity: capacity, gases: fixture.gases, rules: { ...fixture.raceRules, ColonizationSkill: 1 }, separator: ',' } })
+  const vm = new Detail({ propsData: { item, shown, speciesOptions: row.evaluations, terraformCapacity: capacity, gases: fixture.gases, rules: { ...fixture.raceRules, ColonizationSkill: 1 }, separator: ',', ...(sources ? { terraformSources: sources } : {}) } })
 
   mounted.push(vm)
 
   const tree = vm._render()
 
-  return { shown, text: textOf(tree).replace(/\s+/g, ' '), minimumNotes: nodesOf(tree, withAttr('data-detail', 'minimum-time')).map((node) => textOf(node).trim()) }
+  return { shown, text: textOf(tree).replace(/\s+/g, ' '), minimumNotes: nodesOf(tree, withAttr('data-detail', 'minimum-time')).map((node) => textOf(node).trim()), oneYear: nodesOf(tree, withAttr('data-detail', 'one-year')).map((node) => textOf(node).replace(/\s+/g, ' ').trim()) }
 }
 
 // ---------- the statements ----------
@@ -1327,6 +1365,82 @@ const statements = (ctx) => {
     }
   })
 
+  // Terra's r1 finding: the game lists the year's Aestusium and Frigusium estimates for a colony that moves pressure, and its source gates them on the capacity, not on the Planner having a plan. The detail must draw them beside the body's temperature for a body already liveable (Done, no plan) and for one no plan was found for; the plan's own years and capacity lines stay with a plan, and a colony that moves no pressure gets no line.
+  add('one-year: the body detail draws a year of the colony\'s Aestusium and Frigusium beside the temperature whether or not there is a plan, and nothing from a colony that moves no pressure', async () => {
+    const { db, database } = await buildDatabase(ctx.m, rowsOfOwnColony())
+
+    try {
+      const fixture = { ...(await pipeline(ctx.m, database, SCOPE, 1)), database }
+      const detail = (body, sources) => {
+        const row = rowById(fixture.rows, body)
+
+        return { ...renderedDetail(ctx, fixture, row, OWN_SPECIES.SpeciesID, 1, sources), body: row.body }
+      }
+      const round = (value) => ctx.m.math.roundToDecimal(value, 1)
+      // The line the tab gives the body's temperature now, from the body's climate and its unfrozen gases rather than the saved SurfaceTemp.
+      const nowLine = (body) => {
+        const unfrozen = (body.Atmosphere || []).filter((gas) => !gas.FrozenOut)
+        const greenhouse = unfrozen.reduce((total, gas) => total + (gas.GHGas ? gas.GasAtm : 0), 0)
+        const anti = unfrozen.reduce((total, gas) => total + (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0), 0)
+        const temperature = ctx.m.habitability.surfaceTemperature(body, Math.min(3, 1 + body.AtmosPress / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti))
+
+        return `${round(temperature)} K (${round(temperature - 273)} °C)`
+      }
+      const section = 'The race\'s colonies on this body'
+      // The three lines the tab gives a colony that moves pressure: the temperature now, Aestusium above it and Frigusium below.
+      const estimates = (rendered, label) => {
+        const now = nowLine(rendered.body)
+
+        assert.equal(rendered.oneYear.length, 3, `${label}: the temperature now and both gas estimates`)
+        assert.ok(rendered.oneYear[0].includes('Surface temperature now') && rendered.oneYear[0].includes(now), `${label}: the temperature now, ${now}`)
+        assert.ok(rendered.oneYear[1].includes('Add Aestusium for one year') && / K \(\+\d/.test(rendered.oneYear[1]), `${label}: Aestusium raises the temperature`)
+        assert.ok(rendered.oneYear[2].includes('Add Frigusium for one year') && / K \(-\d/.test(rendered.oneYear[2]), `${label}: Frigusium lowers it`)
+      }
+
+      // Done: the body suits the species, so there is no plan to make; the colony's terraformers still move pressure.
+      const done = detail(OWN_BODIES.done, ownSources())
+
+      assert.equal(done.shown.assessment.outcome, 'done', 'the liveable body needs no plan')
+      assert.equal(done.shown.assessment.plan, null, 'and has none')
+      assert.ok(done.text.includes('Already liveable for this species: nothing to terraform.'), 'the detail says there is nothing to terraform')
+      assert.ok(done.text.includes(section), 'the colony is drawn')
+      estimates(done, 'done')
+
+      // No plan found: too light to keep an atmosphere, with the colony's terraformers still there.
+      const without = detail(OWN_BODIES.noPlan, ownSources())
+
+      assert.equal(without.shown.assessment.plan, null, 'no plan was found')
+      assert.equal(without.shown.assessment.outcome, 'no')
+      assert.ok(without.text.includes('Too light to keep an atmosphere'), 'the detail says why')
+      estimates(without, 'no plan')
+
+      // A plan: the estimates stay, and the plan's own years and capacity lines come with them.
+      const planned = detail(OWN_BODIES.planned, ownSources())
+
+      assert.ok(planned.shown.assessment.plan, 'the cold body has a plan')
+      assert.ok(planned.text.includes('for this plan'), 'the colony\'s years are for the plan')
+      assert.ok(planned.text.includes('Racial rate'), 'its capacity is broken down')
+      estimates(planned, 'plan')
+      assert.ok(!done.text.includes('for this plan') && !without.text.includes('for this plan'), 'the years of a plan are not worded without one')
+
+      // A colony that moves no pressure: no line at all, and no section of its own.
+      const idle = detail(OWN_BODIES.done, ownSources(0))
+
+      assert.deepEqual(idle.oneYear, [], 'a colony that moves no pressure gets no line')
+      assert.ok(!idle.text.includes(section), 'and no section is drawn')
+
+      // A capacity the save does not settle: the one-year line says so rather than a figure.
+      const unknown = detail(OWN_BODIES.done, ownSources(null)).oneYear
+
+      assert.equal(unknown.length, 1, 'an unknown capacity draws the one-year line only')
+      assert.ok(unknown[0].includes('Temperature after a year of terraforming') && unknown[0].includes('not known'), 'and says it is not known')
+
+      return true
+    } finally {
+      await new Promise((resolve, reject) => db.close((error) => (error ? reject(error) : resolve())))
+    }
+  })
+
   return list
 }
 
@@ -1431,6 +1545,7 @@ const MUTATIONS = [
   { name: 'the gravity class dropped from the row', file: U, find: 'gravityClass: assessment.gravityClass || null }', replace: 'gravityClass: null }', fails: ['gravity'] },
   { name: 'the gravity class not drawn beside the cost', file: V, find: '<span v-if="item.gravityClass" class="caption" :title="gravityText(item.gravityClass)" data-cell="gravity-class"> {{ item.gravityClass }}</span>', replace: '', fails: ['gravity'] },
   { name: 'the gravity class not drawn in the body detail', file: B, find: '<span v-if="assessment.gravityClass" class="caption" :title="gravityText(assessment.gravityClass)" data-detail="gravity-class">{{ assessment.gravityClass }}</span>', replace: '', fails: ['gravity'] },
+  { name: 'the year\'s estimates drawn only under a plan', file: B, find: '<template v-if="ownColonies.length">', replace: '<template v-if="plan && ownColonies.length">', fails: ['one-year'] },
   { name: 'the limit of the first species for every body', file: U, find: 'capacityValue: evaluation.capacityNow,', replace: 'capacityValue: row.evaluations[0].capacityNow,', fails: ['parity'] },
   { name: 'the species picked ignored', file: U, find: '(speciesId && row.evaluations.find((evaluation) => evaluation.species.SpeciesID === speciesId)) || row.best', replace: 'row.best', fails: ['species', 'parity'] },
   { name: 'a body selected twice listed twice', file: U, find: 'selection.filter((reference) => !seen.has(reference.SystemBodyID) && seen.add(reference.SystemBodyID))', replace: 'selection.filter(() => true)', fails: ['absent'] },

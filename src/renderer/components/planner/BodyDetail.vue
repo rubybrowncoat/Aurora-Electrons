@@ -90,16 +90,19 @@
                   maximum atm.
                 </v-list-item-title>
                 <v-list-item-subtitle :class="{ 'text-wrap': step.drained > 0 }">From {{ round(step.from, 3) }}<template v-if="step.drained > 0">, draining {{ round(step.drained, 1) }}% of the surface water with it</template>, {{ stepTime(step) }}.</v-list-item-subtitle>
+                <div v-if="step.lever" class="caption text--secondary text-wrap" data-detail="lever">{{ leverNote(step) }}</div>
               </v-list-item-content>
             </v-list-item>
             <v-list-item v-if="plan.settling.years > 0.1" two-line>
               <v-list-item-content>
                 <v-list-item-title class="text-wrap">Then wait for the surface to settle</v-list-item-title>
                 <v-list-item-subtitle>About {{ years(plan.settling.years) }} for natural {{ plan.settling.process === 'Evaporate' ? 'evaporation' : 'condensation' }} to bring the water to {{ round(plan.target.hydroExt, 1) }}%.</v-list-item-subtitle>
+                <div v-if="settleLever" class="caption text--secondary text-wrap" data-detail="lever">{{ settleLever }}</div>
               </v-list-item-content>
             </v-list-item>
           </v-list>
           <div v-if="plan.partial" class="caption text--secondary mt-1">No whole-orbit target was found in the bounded search; the displayed plan retains a temperature limitation.</div>
+          <div v-if="plan.dampening" class="caption text--secondary mt-1" data-detail="dampening">{{ dampeningNote }}</div>
 
           <div class="overline mt-3">What limits the colony cost at each stage</div>
           <v-simple-table dense class="limit-table" data-limits="table">
@@ -143,15 +146,24 @@
             <span v-for="option in installationOptions" :key="option.years" class="mr-6 text-no-wrap"><b>{{ option.count }}</b> in {{ option.years }} y</span>
             <span class="text--secondary">{{ rates }}</span>
           </div>
-          <div v-for="colony in ownColonies" :key="colony.id" class="mt-2">
-            <div class="font-weight-medium">{{ colony.name }}<provenance-mark :result="colony.result" /> <span class="text--secondary">{{ colony.yearsText }}</span></div>
-            <div v-for="line in colony.lines" :key="line.key" class="d-flex justify-space-between caption"><span class="mr-4">{{ line.label }}</span><span>{{ line.text }}</span></div>
-          </div>
         </template>
         <div v-else class="text--secondary">
           <h3 class="text--primary">Terraforming</h3>
           <div class="mt-1">{{ noPlanText }}</div>
         </div>
+
+        <template v-if="ownColonies.length">
+          <div class="overline mt-3">The race's colonies on this body</div>
+          <div v-for="colony in ownColonies" :key="colony.id" class="mt-2">
+            <div class="font-weight-medium">{{ colony.name }}<template v-if="plan"><provenance-mark :result="colony.result" /> <span class="text--secondary">{{ colony.yearsText }}</span></template></div>
+            <template v-if="plan">
+              <div v-for="line in colony.lines" :key="line.key" class="d-flex justify-space-between caption"><span class="mr-4">{{ line.label }}</span><span>{{ line.text }}</span></div>
+            </template>
+            <template v-if="colony.oneYear">
+              <div v-for="line in colony.oneYear.lines" :key="line.key" class="d-flex justify-space-between caption" data-detail="one-year"><span class="mr-4">{{ line.label }}<provenance-mark v-if="line.result" :result="line.result" /></span><span>{{ line.text }}</span></div>
+            </template>
+          </div>
+        </template>
 
         <div class="overline mt-4 d-flex align-center">
           Minerals
@@ -184,14 +196,18 @@ import { cmcNote, rowProvenance } from '../../utilities/colonization'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
 import { compact } from '../../utilities/minerals'
 import { isAvailable, unavailable, valueOrNull } from '../../utilities/provenance'
-import { NO_TERRAFORM_SOURCES, hasTerraformers, terraformBreakdown } from '../../utilities/terraform-capacity'
-import { MINIMUM_TIME_NOTE, OUTCOMES, TIME_BASIS, planYears, stepTimeBasis, timeWords } from '../../utilities/terraforming'
+import { NO_TERRAFORM_SOURCES, hasTerraformers, oneYearEstimate, terraformBreakdown } from '../../utilities/terraform-capacity'
+import { LEVER, MINIMUM_TIME_NOTE, OUTCOMES, TIME_BASIS, planYears, stepTimeBasis, timeWords } from '../../utilities/terraforming'
 import { terraformStages } from '../../utilities/terraform-limits'
 
 const GROUND_SURVEY = { 0: 'completed', 1: 'minimal', 2: 'low', 3: 'good', 4: 'high', 5: 'excellent' }
 const INSTALLATION_YEARS = [5, 10, 25, 50]
 // What the stages say of a drain: they show its end state, and no date for it.
 const DRAIN_STAGE_NOTE = 'The stages after a drain show it complete. It completes no earlier than its minimum time, and no stage is dated.'
+// What each dampening lever is called where a stage names it.
+const LEVER_WORDS = { [LEVER.WATER]: 'surface water', [LEVER.PRESSURE]: 'pressure' }
+// The temperature a stage shows, in the degrees Celsius the species' range is given in.
+const degrees = (kelvin) => roundToDecimal(kelvin - 273, 1)
 
 export default {
   name: 'BodyDetail',
@@ -271,7 +287,7 @@ export default {
 
       return this.limits.stages.map((stage) => {
         const swings = stage.points.periapsis !== stage.points.current
-        const changes = [stage.cleared.length ? `Clears ${names(stage.cleared)}.` : '', stage.overtaken.length ? `${names(stage.overtaken)} no longer set the cost, but stay.` : '', stage.revealed.length ? `Reveals ${names(stage.revealed)}.` : '', stage.blocked ? 'Only a fixed factor remains: no gas operation lowers the cost further.' : ''].filter(Boolean)
+        const changes = [this.leverText(stage), stage.cleared.length ? `Clears ${names(stage.cleared)}.` : '', stage.overtaken.length ? `${names(stage.overtaken)} no longer set the cost, but stay.` : '', stage.revealed.length ? `Reveals ${names(stage.revealed)}.` : '', stage.blocked ? 'Only a fixed factor remains: no gas operation lowers the cost further.' : ''].filter(Boolean)
 
         return {
           key: stage.index,
@@ -363,8 +379,30 @@ export default {
         const breakdown = terraformBreakdown({ raceRate, speed, source, admins: this.navalAdmins })
         const capacity = valueOrNull(breakdown.capacity)
 
-        return { id: population.PopulationID, name: source.PopName, lines: breakdown.lines, result: breakdown.capacity, yearsText: capacity === null ? 'time not known' : `${this.time(planYears(this.assessment.work, capacity), this.assessment.timeBasis)} for this plan` }
+        return { id: population.PopulationID, name: source.PopName, lines: breakdown.lines, oneYear: this.oneYearLines(breakdown.rate), result: breakdown.capacity, yearsText: capacity === null ? 'time not known' : `${this.time(planYears(this.assessment.work, capacity), this.assessment.timeBasis)} for this plan` }
       })
+    },
+
+    // What the whole plan does to the swing of an eccentric orbit, said once under the steps when a dampening lever is in it.
+    dampeningNote() {
+      const { limits, plan } = this
+
+      if (!limits || !plan || !plan.dampening) {
+        return ''
+      }
+
+      const first = limits.stages[0]
+      const last = limits.stages[limits.stages.length - 1]
+      const levers = plan.dampening.levers.map((lever) => LEVER_WORDS[lever]).join(' and ')
+
+      return `The greenhouse and anti-greenhouse gases alone leave an extreme of this orbit outside the species' range, so the plan also raises the dampening of the seasons with ${levers}: the dampening goes from ${roundToDecimal(first.dampening * 100, 1)}% to ${roundToDecimal(last.dampening * 100, 1)}%, the temperature at periapsis from ${degrees(first.extremes.periapsis)} to ${degrees(last.extremes.periapsis)} °C and at apoapsis from ${degrees(first.extremes.apoapsis)} to ${degrees(last.extremes.apoapsis)} °C.`
+    },
+
+    // What the end stage says of a water lever: the surface gains the water as the added vapour settles.
+    settleLever() {
+      const end = this.limits && this.limits.stages[this.limits.stages.length - 1]
+
+      return end && !end.step ? this.leverText(end) : ''
     },
 
     noPlanText() {
@@ -427,6 +465,44 @@ export default {
       return toneColor(activeAppearance(), name)
     },
     round: roundToDecimal,
+    // The two lines the game's Environment tab gives a terraforming colony: the temperature of the body now and what a year of Aestusium or of Frigusium would make it, null where the colony moves no pressure.
+    oneYearLines(rate) {
+      const result = oneYearEstimate(this.item.body, rate)
+
+      if (!result) {
+        return null
+      }
+
+      if (!isAvailable(result)) {
+        return { lines: [{ key: 'oneYear', label: 'Temperature after a year of terraforming', text: 'not known', result }] }
+      }
+
+      const { current, aestusium, frigusium } = result.value
+      const gas = (entry) => ({ key: entry.label, label: entry.label, text: `${roundToDecimal(entry.temperature, 1)} K (${entry.text})` })
+
+      return { lines: [{ key: 'oneYearNow', label: 'Surface temperature now', text: `${roundToDecimal(current, 1)} K (${degrees(current)} °C)`, result }, gas(aestusium), gas(frigusium)] }
+    },
+    // What a stage says of the dampening lever it pulls and its effect on both extremes, or nothing for a stage with none.
+    leverText(stage) {
+      if (!stage.lever) {
+        return ''
+      }
+
+      if (stage.step && stage.lever === LEVER.WATER) {
+        return 'Adds the vapour that condenses into the extra surface water.'
+      }
+
+      const { effect } = stage
+      const range = (swing) => `${degrees(swing.from)} to ${degrees(swing.to)} °C`
+
+      return `Raises the dampening by ${LEVER_WORDS[stage.lever]}: from ${roundToDecimal(effect.dampening.from * 100, 1)}% to ${roundToDecimal(effect.dampening.to * 100, 1)}%, periapsis from ${range(effect.periapsis)}, apoapsis from ${range(effect.apoapsis)}.`
+    },
+    // What a plan step says of its lever, found as the stage that carries the step.
+    leverNote(step) {
+      const stage = this.limits && this.limits.stages.find((entry) => entry.step === step)
+
+      return stage ? this.leverText(stage) : ''
+    },
     cost(value) {
       return value === null || value === undefined ? 'N/A' : roundToDecimal(value, 2).toString()
     },

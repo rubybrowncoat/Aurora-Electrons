@@ -436,6 +436,97 @@ const mutatedOf = (file, statements) => {
   return { query: async (sql) => [database.query(sql).all()], close: () => database.close() }
 }
 
+// ---- The Environment tab's one-year lines (AE-304-05) ------------------------------------------------------------------
+// What the game's Environment tab writes for a colony that terraforms (SystemBody.PopulateAtmosphereListView, SystemBody.cs:4316-4320): "Add Aestusium for one year" as a plus before the change that `method_37` (2079-2100) gives with the colony's yearly pressure on the body added to the greenhouse gas, "Add Frigusium for one year" as the change with a tenth of it added to the greenhouse gas and the whole of it to the anti-greenhouse gas, each against the temperature `method_2` (303-344, with the dampening of `method_1`, 262-301) has just written. Worked here from the saved rows and those methods, never by the app's helper. The base temperature is the game's: 255 / sqrt(distance / sqrt(luminosity)) at the distance now, never under 4 K, and a moon takes its planet's (SystemBody.cs:895, 909-912, 2594-2598).
+const TAB_LABELS = { aestusium: 'Add Aestusium for one year', frigusium: 'Add Frigusium for one year' }
+
+// A .NET double written with `#,0.#` (Helpers.smethod_60): the value read at 15 significant digits, rounded half away from zero at one decimal, the thousands set apart, and a negative that rounds to nothing without its sign. Worked on the digits, not on a number.
+const tabFigureOf = (value) => {
+  const text = Math.abs(value) < 1e-6 ? '0.00000000000000' : Math.abs(value).toPrecision(15)
+  const [whole, fraction = ''] = text.split('.')
+  const tenths = BigInt(whole + (fraction[0] || '0')) + (fraction[1] >= '5' ? 1n : 0n)
+  const digits = tenths.toString().padStart(2, '0')
+  const integer = digits.slice(0, -1).replace(/\B(?=(\d{3})+$)/g, ',')
+  const unsigned = digits.slice(-1) === '0' ? integer : `${integer}.${digits.slice(-1)}`
+
+  return value < 0 && tenths > 0n ? `-${unsigned}` : unsigned
+}
+
+// The rows the tab reads for every body of a game, by body: the climate figures, the planet's orbit for a moon, the star's luminosity, and the pressure of the greenhouse and of the anti-greenhouse gases that are not frozen out (the tab's own sums, taken in the order it lists the gases, the greatest first).
+const oneYearRows = async (database, game) => {
+  const query = async (sql) => (await database.query(sql))[0]
+  const bodies = await query(`select b.SystemBodyID, b.BodyClass, b.Albedo, b.AtmosPress, b.DustLevel, b.HydroExt, b.SurfaceTemp, b.OrbitalDistance, b.DistanceToParent, b.Eccentricity, b.Year, p.OrbitalDistance as ParentOrbitalDistance, p.DistanceToParent as ParentDistanceToParent, p.Eccentricity as ParentEccentricity, p.Year as ParentYear, s.Luminosity from FCT_SystemBody b inner join FCT_Star s on s.StarID = b.StarID left join FCT_SystemBody p on p.SystemBodyID = b.ParentBodyID and b.ParentBodyType = 1 where b.GameID = ${game} and b.BodyClass in (1, 2, 3, 5) and b.BodyTypeID not in (0, 4, 5)`)
+  const gases = await query(`select a.SystemBodyID, a.GasAtm, a.FrozenOut, g.GHGas, g.AntiGHGas from FCT_AtmosphericGas a left join DIM_Gases g on g.GasID = a.AtmosGasID where a.GameID = ${game}`)
+  const sums = new Map()
+
+  for (const gas of gases.sort((left, right) => right.GasAtm - left.GasAtm)) {
+    const sum = sums.get(gas.SystemBodyID) || { greenhouse: 0, anti: 0, frozen: 0 }
+
+    if (gas.FrozenOut) {
+      sum.frozen += 1
+    } else if (gas.GHGas) {
+      sum.greenhouse += gas.GasAtm
+    } else if (gas.AntiGHGas) {
+      sum.anti += gas.GasAtm
+    }
+
+    sums.set(gas.SystemBodyID, sum)
+  }
+
+  return new Map(bodies.map((row) => [row.SystemBodyID, { row, ...(sums.get(row.SystemBodyID) || { greenhouse: 0, anti: 0, frozen: 0 }) }]))
+}
+
+// The tab's figures for one body at a yearly pressure `yearly` on it (atm): the temperature now, the two estimates and the texts of the two lines, with whether a factor stood at the cap of 3. Null where a figure the tab reads is not in the rows.
+const tabOf = ({ row, greenhouse, anti }, yearly) => {
+  const moon = row.BodyClass === 2
+  const figures = [row.Albedo, row.AtmosPress, row.DustLevel, row.HydroExt, row.OrbitalDistance, row.DistanceToParent, row.Eccentricity, row.Year, row.Luminosity, ...(moon ? [row.ParentOrbitalDistance, row.ParentDistanceToParent, row.ParentEccentricity, row.ParentYear] : [])]
+
+  if (!figures.every(Number.isFinite)) {
+    return null
+  }
+
+  const distance = moon ? row.ParentOrbitalDistance : row.OrbitalDistance
+  const eccentricity = moon ? row.ParentEccentricity : row.Eccentricity
+  const year = moon ? row.ParentYear : row.Year
+  const dampening = eccentricity === 0 || distance === 0 ? 0 : (Math.min(0.5, row.AtmosPress / 10) + Math.min(0.3, row.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760))
+  const factors = (gh, agh) => [Math.min(3, 1 + row.AtmosPress / 10 + gh), Math.min(3, 1 + row.DustLevel / 20000 + agh)]
+  const base = Math.max(4, 255 / Math.pow((moon && row.ParentDistanceToParent > 0 ? row.ParentDistanceToParent : row.DistanceToParent) / Math.pow(row.Luminosity, 0.5), 0.5))
+  const [now, nowAnti] = factors(greenhouse, anti)
+  const circular = 255 / Math.pow(distance / Math.pow(row.Luminosity, 0.5), 0.5) * now * row.Albedo / nowAnti
+  const climate = base * now * row.Albedo / nowAnti
+  const surface = Math.max(4, dampening <= 0 ? climate : climate * (1 - dampening) + circular * dampening)
+  const estimate = (gh, agh) => {
+    const [factor, antiFactor] = factors(gh, agh)
+
+    return base * factor * row.Albedo / antiFactor
+  }
+  const aestusium = estimate(greenhouse + yearly, anti)
+  const frigusium = estimate(greenhouse + yearly / 10, anti + yearly)
+
+  return { base, surface, aestusium, frigusium, aestusiumText: `+${tabFigureOf(aestusium - surface)}`, frigusiumText: tabFigureOf(frigusium - surface), capped: now === 3 || nowAnti === 3 }
+}
+
+// The app's one-year lines against the tab's. The tab puts a plus before the Aestusium figure whatever its sign ("+-0.4" for a fall); the app writes a plus only before a figure that is not a fall, and nothing else of the line differs.
+const assertTab = (found, tab, label) => {
+  const close = (value, expected, what) => assert.ok(Math.abs(value - expected) <= 1e-9 * Math.max(1, Math.abs(expected)), `${label}: ${what} ${value}, tab ${expected}`)
+
+  close(found.current, tab.surface, 'the temperature now')
+  assert.equal(found.aestusium.label, TAB_LABELS.aestusium, `${label}: the Aestusium label`)
+  assert.equal(found.frigusium.label, TAB_LABELS.frigusium, `${label}: the Frigusium label`)
+  close(found.aestusium.temperature, tab.aestusium, 'the Aestusium estimate')
+  close(found.frigusium.temperature, tab.frigusium, 'the Frigusium estimate')
+  close(found.aestusium.change, tab.aestusium - tab.surface, 'the Aestusium change')
+  close(found.frigusium.change, tab.frigusium - tab.surface, 'the Frigusium change')
+  assert.equal(found.aestusium.text, tab.aestusiumText.replace('+-', '-'), `${label}: the Aestusium figure`)
+  assert.equal(found.frigusium.text, tab.frigusiumText, `${label}: the Frigusium figure`)
+}
+
+// A colony's rate on a body (a result of 'production.terraformRate') of a chosen size: one installation worth `yearly` atm on a body with the Earth's surface at the game's speed 100 and no modifier, so that the rate is `yearly` to the last digit but one; null `yearly` is a race with no terraforming rate, so the result is unavailable.
+const NEUTRAL_MODIFIER = Object.freeze({ governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 })
+const rateOf = (modules, yearly) => modules['terraform-capacity'].terraformBreakdown({ raceRate: yearly, speed: 100, source: { installations: 1, radius: Math.sqrt(EARTH_ATMOSPHERE_UNITS / (4 * PI)), modifier: NEUTRAL_MODIFIER, ships: [], shipsKnown: true }, admins: {} }).rate
+
+const insertGas = (game, body, gas, atm, frozen) => `insert into FCT_AtmosphericGas (GameID, SystemBodyID, AtmosGasID, AtmosGasPercentage, GasAtm, FrozenOut) values (${game}, ${body}, ${gas}, 0, ${atm}, ${frozen})`
+
 const BREAKDOWN_CHECKS = {
   arith: {
     needs: [],
@@ -839,6 +930,220 @@ const BREAKDOWN_CHECKS = {
       }
     },
   },
+  'one-year: the played colony against the game\'s Environment tab': {
+    needs: [PLAYED.file],
+    run: async (modules) => {
+      const { hasTerraformers, oneYearEstimate, terraformBreakdown } = modules['terraform-capacity']
+      const database = databaseOf(PLAYED.file)
+      const sources = await sourcesOf(modules, PLAYED.file, PLAYED_CASE.game, PLAYED_CASE.race)
+      const admins = await adminsOf(modules, PLAYED.file, PLAYED_CASE.game, PLAYED_CASE.race)
+      const bodies = await modules['colonization-data'].loadBodies(database, { GameID: PLAYED_CASE.game, RaceID: PLAYED_CASE.race })
+      const rows = await oneYearRows(database, PLAYED_CASE.game)
+      // The capacity is the working of the shared rule (the installations, the fleets at the colony, the modifiers and the game's speed from the save's rows); the naval admin chain's multiplier is the one factor taken from the app, as in that working.
+      const expected = await sharedCapacityOf(database, { game: PLAYED_CASE.game, race: PLAYED_CASE.race, chainOf: (system, command) => modules.minerals.navalAdminChain(admins, system, command).bonus })
+      let compared = 0
+
+      for (const source of Object.values(sources.colonies).filter(hasTerraformers)) {
+        const population = await firstOf(PLAYED.file, 'select * from FCT_Population where GameID = ? and PopulationID = ?', PLAYED_CASE.game, source.PopulationID)
+        const { Radius: radius } = await firstOf(PLAYED.file, 'select Radius from FCT_SystemBody where GameID = ? and SystemBodyID = ?', PLAYED_CASE.game, population.SystemBodyID)
+        const yearly = expected.colonies[population.PopulationID].capacity * EARTH_ATMOSPHERE_UNITS / (4 * PI * radius ** 2)
+        const { rate } = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source, admins })
+        const found = oneYearEstimate(bodies.find((row) => row.SystemBodyID === population.SystemBodyID), rate)
+        const entry = rows.get(population.SystemBodyID)
+        const tab = tabOf(entry, yearly)
+
+        assert.ok(yearly > 0 && found && found.status === 'estimated', `${source.PopName}: ${found ? missingOf(found) : 'no line for a colony that moves pressure'}`)
+        near(found.value.rate, yearly, 1e-9, `${source.PopName}: the yearly pressure on the body`)
+        assert.ok(Math.abs(tab.surface - entry.row.SurfaceTemp) < 1e-6, `${source.PopName}: the working's temperature now ${tab.surface}, saved ${entry.row.SurfaceTemp}`)
+        assertTab(found.value, tab, source.PopName)
+        compared += 1
+      }
+
+      assert.ok(compared > 0, 'no colony with terraformers')
+    },
+  },
+  'one-year: every body of the two saves': {
+    needs: [PLAYED.file, FIXTURE.file],
+    run: async (modules) => {
+      const { oneYearEstimate } = modules['terraform-capacity']
+      const rates = [0.0004, 0.05, 2].map((yearly) => rateOf(modules, yearly))
+      const seen = { compared: 0, unavailable: 0, frozen: 0, moons: 0, eccentric: 0, capped: 0, falls: 0 }
+
+      for (const [file, { game, race }] of [[PLAYED.file, PLAYED_CASE], [FIXTURE.file, FIXTURE_CASE]]) {
+        const database = databaseOf(file)
+        const bodies = await modules['colonization-data'].loadBodies(database, { GameID: game, RaceID: race })
+        const rows = await oneYearRows(database, game)
+
+        for (const body of bodies) {
+          const entry = rows.get(body.SystemBodyID)
+
+          for (const rate of rates) {
+            const found = oneYearEstimate(body, rate)
+            const tab = tabOf(entry, rate.value)
+
+            if (!tab) {
+              assert.equal(found.status, 'unavailable', `${file} ${body.SystemBodyID}: a figure the tab reads is not in the save`)
+              seen.unavailable += 1
+              continue
+            }
+
+            assert.equal(found.status, 'estimated', `${file} ${body.SystemBodyID}: ${missingOf(found)}`)
+            assertTab(found.value, tab, `${file} ${body.SystemBodyID}`)
+            seen.compared += 1
+            seen.frozen += entry.frozen > 0 ? 1 : 0
+            seen.moons += entry.row.BodyClass === 2 ? 1 : 0
+            seen.eccentric += (entry.row.BodyClass === 2 ? entry.row.ParentEccentricity : entry.row.Eccentricity) > 0 ? 1 : 0
+            seen.capped += tab.capped ? 1 : 0
+            seen.falls += found.value.aestusium.text.startsWith('-') ? 1 : 0
+          }
+        }
+      }
+
+      assert.ok(seen.compared > 10000, `${seen.compared} lines compared`)
+      assert.ok(seen.frozen > 0 && seen.moons > 0 && seen.eccentric > 0 && seen.capped > 0 && seen.falls > 0, `the saves cover frozen gases, moons, eccentric orbits, the cap of 3 and a fall under Aestusium: ${JSON.stringify(seen)}`)
+    },
+  },
+  'one-year: planted cases': {
+    needs: [PLAYED.file],
+    run: async (modules) => {
+      const { hasTerraformers, oneYearEstimate, terraformBreakdown } = modules['terraform-capacity']
+      const sources = await sourcesOf(modules, PLAYED.file, PLAYED_CASE.game, PLAYED_CASE.race)
+      const admins = await adminsOf(modules, PLAYED.file, PLAYED_CASE.game, PLAYED_CASE.race)
+      const held = Object.values(sources.colonies).find(hasTerraformers)
+      const { rate } = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: held, admins })
+      const { p: parent } = await firstOf(PLAYED.file, 'select ParentBodyID p from FCT_SystemBody where GameID = ? and SystemBodyID = ?', PLAYED_CASE.game, held.SystemBodyID)
+      const at = held.SystemBodyID
+      const game = PLAYED_CASE.game
+      const read = async (statements) => {
+        const copy = mutatedOf(PLAYED.file, statements)
+
+        try {
+          const body = (await modules['colonization-data'].loadBodies(copy, { GameID: game, RaceID: PLAYED_CASE.race })).find((row) => row.SystemBodyID === at)
+          const entry = (await oneYearRows(copy, game)).get(at)
+          const tab = tabOf(entry, rate.value)
+          const found = oneYearEstimate(body, rate)
+
+          assert.equal(found.status, 'estimated', missingOf(found))
+          assertTab(found.value, tab, 'planted')
+
+          return { body, entry, tab, found: found.value }
+        } finally {
+          copy.close()
+        }
+      }
+      const plain = await read([])
+
+      // The tab sums the gases that are not frozen out: a frozen greenhouse gas moves neither the temperature now nor an estimate.
+      const frozen = await read([insertGas(game, at, 20, 0.4, 1)])
+
+      assert.equal(frozen.tab.surface, plain.tab.surface, 'a frozen gas leaves the temperature now')
+      assert.equal(frozen.tab.aestusium, plain.tab.aestusium, 'and the Aestusium estimate')
+      assert.equal(frozen.found.aestusium.temperature, plain.found.aestusium.temperature)
+
+      // Greenhouse and anti-greenhouse gas past the cap of 3: more gas moves nothing, so the Aestusium estimate is the base temperature times the albedo, and the Frigusium estimate too.
+      const capped = await read([insertGas(game, at, 20, 2.5, 0), insertGas(game, at, 22, 2.5, 0)])
+
+      assert.ok(capped.tab.capped, 'both factors stand at the cap')
+      assert.ok(Math.abs(capped.found.aestusium.temperature - capped.tab.base * capped.entry.row.Albedo) < 1e-9, 'the capped greenhouse factor against the capped anti-greenhouse factor')
+      assert.ok(Math.abs(capped.found.frigusium.temperature - capped.tab.base * capped.entry.row.Albedo) < 1e-9)
+      assert.notEqual(capped.found.current, plain.found.current, 'the temperature now follows the gases the save lists, not the temperature it kept')
+
+      // Dust adds to the anti-greenhouse factor.
+      const dusty = await read([`update FCT_SystemBody set DustLevel = 6000 where SystemBodyID = ${at}`])
+
+      assert.notEqual(dusty.tab.surface, plain.tab.surface, 'dust cools the body')
+      assert.ok(dusty.found.frigusium.temperature < plain.found.frigusium.temperature)
+
+      // A moon takes its planet's orbit: the planet's distance now sets the base temperature, its orbital distance the circular temperature the dampening blends in, and only the temperature now has the blend (the tab's estimates have none).
+      const closer = `update FCT_SystemBody set DistanceToParent = 0.5 where SystemBodyID = ${parent}`
+      const blended = await read([closer])
+      const circular = await read([closer, `update FCT_SystemBody set Eccentricity = 0 where SystemBodyID = ${parent}`])
+
+      assert.notEqual(blended.tab.surface, plain.tab.surface, 'the planet\'s distance now sets the moon\'s base temperature')
+      assert.notEqual(blended.tab.surface, circular.tab.surface, 'the planet\'s eccentricity switches the dampening on')
+      assert.equal(blended.tab.aestusium, circular.tab.aestusium, 'the estimate has no dampening')
+      assert.equal(blended.tab.frigusium, circular.tab.frigusium)
+
+      // No pressure moved: no line. A figure the tab reads missing: unavailable and named, never a default. A rate that is unavailable: the same.
+      assert.equal(oneYearEstimate(plain.body, rateOf(modules, 0)), null, 'a colony that moves no pressure has no line')
+
+      for (const [label, body, named] of [['albedo', { ...plain.body, Albedo: null }, 'albedo'], ['base temperature', { ...plain.body, BaseTemp: undefined }, 'base temperature'], ['dust level', { ...plain.body, DustLevel: undefined }, 'dust level']]) {
+        const missing = oneYearEstimate(body, rate)
+
+        assert.equal(missing.status, 'unavailable', `a body without its ${label}`)
+        assert.ok(missing.inputs.missing.some((text) => text.includes(named)), `names the ${label}: ${missingOf(missing)}`)
+      }
+
+      const unknown = oneYearEstimate(plain.body, rateOf(modules, null))
+
+      assert.equal(unknown.status, 'unavailable', 'a colony whose rate is not known')
+      assert.ok(/terraforming rate/.test(missingOf(unknown)), missingOf(unknown))
+    },
+  },
+  'planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step': {
+    needs: [FIXTURE.file],
+    run: async (modules) => {
+      const data = modules['colonization-data']
+      const ask = { GameID: FIXTURE_CASE.game, RaceID: FIXTURE_CASE.race }
+      const base = databaseOf(FIXTURE.file)
+      const [species] = await data.loadSpecies(base, ask)
+      const chosen = (await data.loadBodies(base, ask)).find((row) => row.BodyClass === 1 && !row.OwnPopulations.length && !row.AlienPopulations.length)
+      // A planet of the fixture's with the air and the water taken off, on an orbit of eccentricity 0.3 whose present distance gives a base temperature of 250 K, and a species that lives between 258 and 318 K, breathes oxygen at 0.1 to 0.3 atm and bears 4 atm: its mean can be reached with gases, its extremes cannot.
+      const distance = Math.sqrt(chosen.StarLuminosity) * (255 / 250) ** 2
+      const copy = mutatedOf(FIXTURE.file, [
+        `update FCT_SystemBody set Radius = 6371, Gravity = 1, AtmosPress = 0, HydroExt = 0, HydroID = 1, Albedo = 1, DustLevel = 0, TidalLock = 0, Eccentricity = 0.3, OrbitalDistance = ${distance}, DistanceToParent = ${distance}, Year = 8760 where SystemBodyID = ${chosen.SystemBodyID}`,
+        `delete from FCT_AtmosphericGas where SystemBodyID = ${chosen.SystemBodyID}`,
+        `update FCT_Species set Temperature = 288, TempDev = 30, Oxygen = 0.2, OxyDev = 0.1, PressMax = 4, Gravity = 1, GravDev = 0.5, BreatheID = 10 where SpeciesID = ${species.SpeciesID}`,
+      ])
+
+      try {
+        const body = (await data.loadBodies(copy, ask)).find((row) => row.SystemBodyID === chosen.SystemBodyID)
+        const limits = modules.habitability.speciesLimits((await data.loadSpecies(copy, ask)).find((row) => row.SpeciesID === species.SpeciesID))
+        const { ColonizationSkill: skill } = await data.loadRaceRules(copy, ask)
+        const gases = Object.fromEntries((await data.loadGases(copy)).map((row) => [row.GasID, { AtmosGasID: row.GasID, AtmosGasName: row.Name, ...row }]))
+        const gasInfo = (id) => gases[id]
+        const assessment = modules.terraforming.assessTerraforming(body, limits, skill, gasInfo)
+        const { plan } = assessment
+        const { stages } = modules['terraform-limits'].terraformStages({ assessment, body, species: limits, skill, gasInfo })
+        const range = { low: limits.MinimumTemperature, high: limits.MaximumTemperature }
+
+        // The mean is tolerable, and so is the whole orbit once the plan has pulled its lever; the gases alone leave an extreme outside the range.
+        assert.equal(body.Eccentricity, 0.3)
+        assert.equal(assessment.outcome, 'yes', 'the plan fits the whole orbit')
+        assert.ok(plan && !plan.partial, 'no temperature limit is kept')
+        assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 })
+        assert.ok(plan.target.temperature >= range.low && plan.target.temperature <= range.high, 'the mean the plan reaches is in the range')
+        assert.ok(stages[0].extremes.apoapsis < range.low, 'the body starts with its cold end under the range')
+
+        const gasesOnly = stages[stages.length - 2]
+
+        assert.ok(gasesOnly.extremes.periapsis > range.high, 'after every gas operation the hot end is still over the range')
+
+        // The dampening step: proposed, named in its step and its stage, with its effect on both extremes, priced like the other steps and carrying the time basis.
+        assert.ok(plan.dampening && plan.dampening.levers.length > 0, 'the plan names its levers')
+
+        const lever = plan.steps.find((step) => step.lever)
+        const area = 4 * PI * body.Radius ** 2 / EARTH_ATMOSPHERE_UNITS
+        const end = stages[stages.length - 1]
+
+        assert.ok(lever && lever.work > 0, 'a step pulls a lever and is work')
+
+        for (const step of plan.steps) {
+          assert.ok(Math.abs(step.work / (step.atm * area) - 1) < 1e-5, `${step.label}: work ${step.work}, rule ${step.atm * area}`)
+        }
+
+        assert.ok(Math.abs(plan.work / plan.steps.reduce((total, step) => total + step.atm * area, 0) - 1) < 1e-5, 'the plan\'s work is its steps\'')
+        assert.equal(stages.find((stage) => stage.step && stage.step.key === lever.key).lever, lever.lever, 'the stage of the step names the lever')
+        assert.equal(end.lever, 'water', 'the stage that settles the added vapour names the surface water')
+        assert.ok(end.effect.dampening.to > end.effect.dampening.from && end.hydroExt === 100, 'and shows it raise the dampening with the whole surface under water')
+        assert.ok(end.extremes.periapsis <= range.high && end.extremes.apoapsis >= range.low, 'both ends of the orbit end in the range')
+        assert.ok(stages.every((stage) => stage.step ? stage.timeBasis === 'capacity' : stage.timeBasis === null), 'each operation carries the capacity basis, the end state none')
+        assert.equal(end.cost.raw, assessment.after.raw, 'the last stage is the plan\'s cost after terraforming')
+      } finally {
+        copy.close()
+      }
+    },
+  },
 }
 
 // Faults planted in the shared helper. `fails` names the BREAKDOWN_CHECKS each must break; a fault whose named checks all lack their saves is skipped.
@@ -870,6 +1175,20 @@ const BREAKDOWN_FAULTS = [
   { module: 'naval-admins', label: 'a naval admin bonus row without a value read as neutral', from: 'admin.BonusRow && !(Number.isFinite(admin.BonusValue) && Number.isFinite(admin.Share)) ? BONUS_UNKNOWN : null', to: 'null', fails: ['admin bonus missing: terraforming', 'admin bonus missing: another consumer'] },
   { module: 'naval-admins', label: 'a naval admin map of valueless bonuses returned empty', from: '(admin.BonusValue && admin.Share) || admin.BonusRow', to: 'admin.BonusValue && admin.Share', fails: ['admin bonus missing: terraforming', 'admin bonus missing: another consumer'] },
   { module: 'minerals', label: 'the chain ignores an unknown command bonus', from: 'if (current.BonusUnknown) {', to: 'if (false) {', fails: ['admin bonus missing: terraforming', 'admin bonus missing: another consumer'] },
+  { label: 'Frigusium takes the whole year\'s gas as greenhouse gas', from: 'estimate(greenhouse + yearly / 10, anti + yearly)', to: 'estimate(greenhouse + yearly, anti + yearly)', fails: ['one-year: the played colony against the game\'s Environment tab', 'one-year: every body of the two saves'] },
+  { label: 'Frigusium adds only a tenth of the year\'s gas as anti-greenhouse gas', from: 'estimate(greenhouse + yearly / 10, anti + yearly)', to: 'estimate(greenhouse + yearly / 10, anti + yearly / 10)', fails: ['one-year: the played colony against the game\'s Environment tab', 'one-year: every body of the two saves'] },
+  { label: 'the anti-greenhouse gas left out of the sums', from: 'const anti = sum(unfrozen.map((gas) => (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0)))', to: 'const anti = 0', fails: ['one-year: planted cases', 'one-year: every body of the two saves'] },
+  { label: 'gases frozen out counted', from: 'const unfrozen = (body.Atmosphere || []).filter((gas) => !gas.FrozenOut)', to: 'const unfrozen = body.Atmosphere || []', fails: ['one-year: planted cases', 'one-year: every body of the two saves'] },
+  { label: 'dust left out of the anti-greenhouse factor', from: 'const dust = body.DustLevel / 20000', to: 'const dust = 0', fails: ['one-year: planted cases'] },
+  { label: 'the cap of 3 dropped from the estimate', from: 'body.BaseTemp * Math.min(3, 1 + body.AtmosPress / 10 + greenhouseGas) * body.Albedo', to: 'body.BaseTemp * (1 + body.AtmosPress / 10 + greenhouseGas) * body.Albedo', fails: ['one-year: planted cases', 'one-year: every body of the two saves'] },
+  { label: 'the temperature now taken as saved, not as the tab recomputes it', from: 'const current = surfaceTemperature(body, Math.min(3, 1 + body.AtmosPress / 10 + greenhouse), Math.min(3, 1 + dust + anti))', to: 'const current = body.SurfaceTemp', fails: ['one-year: planted cases'] },
+  { label: 'a plus before every Aestusium figure', from: "label === AESTUSIUM && !figure.startsWith('-') ? '+' : ''", to: "label === AESTUSIUM ? '+' : ''", fails: ['one-year: every body of the two saves'] },
+  { label: 'the figure floored, not rounded', from: 'Math.round(Number((Math.abs(value) * 10).toPrecision(15))) / 10', to: 'Math.floor(Number((Math.abs(value) * 10).toPrecision(15))) / 10', fails: ['one-year: the played colony against the game\'s Environment tab', 'one-year: every body of the two saves'] },
+  { label: 'a colony that moves no pressure gets a line', from: 'if (!(rate.value > 0)) {', to: 'if (false) {', fails: ['one-year: planted cases'] },
+  { module: 'terraforming', label: 'no dampening lever is ever pulled', from: 'return plan && plan.partial && reached ? raisedDampening(body, species, gasInfo, plan) || plan : plan', to: 'return plan', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
+  { module: 'terraforming', label: 'a lever step is priced at half its atm', from: 'work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio })', to: 'work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio * (pulled ? 0.5 : 1) })', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
+  { module: 'terraforming', label: 'the water step never names its lever', from: 'raisedWater ? LEVER.WATER : null', to: 'null', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
+  { module: 'terraform-limits', label: 'the stage that settles the water does not name it', from: 'lever: waterLever ? LEVER.WATER : null', to: 'lever: null', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
 ]
 
 const climateOf = async (modules, file, game, race) => {
@@ -938,7 +1257,7 @@ const main = async () => {
     console.log(`SKIP ${group}: ${missing.length ? `missing ${missing.join(', ')}` : reason}`)
   }
 
-  const modules = await loadUtilities(['habitability', 'terraforming', 'colonization-data', 'colonization', 'terraform-capacity', 'naval-admins', 'minerals'], { stubs: { 'lodash/groupBy': GROUP_BY } })
+  const modules = await loadUtilities(['habitability', 'terraforming', 'terraform-limits', 'colonization-data', 'colonization', 'terraform-capacity', 'naval-admins', 'minerals'], { stubs: { 'lodash/groupBy': GROUP_BY } })
 
   const fixtures = []
 
@@ -1113,7 +1432,7 @@ const main = async () => {
     })
   }
 
-  const breakdownModules = ['habitability', 'terraforming', 'colonization-data', 'terraform-capacity', 'naval-admins', 'minerals']
+  const breakdownModules = ['habitability', 'terraforming', 'terraform-limits', 'colonization-data', 'terraform-capacity', 'naval-admins', 'minerals']
 
   for (const [name, { needs, run }] of Object.entries(BREAKDOWN_CHECKS)) {
     if (!present(...needs)) {

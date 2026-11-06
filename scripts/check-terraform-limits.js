@@ -5,7 +5,8 @@
   - the first stage is the body as the body detail prices it (the same cost factors at now, periapsis and apoapsis, and the factor bars flag the same factors), with the frozen-out flags the save carries;
   - each gas operation of a plan names the factors that limit the cost after it and the factors that would limit it next, every one of them where several are equal (exact ties, ties at the game's four decimals, ties between the orbit points), and says which it cleared and which it revealed;
   - the last stage is the plan's own end state, whatever the colonisation skill, and the water extent changes only in the stage that settles it;
-  - a fixed blocker (gravity below the species' minimum, a tidal lock, a body that cannot be colonised) is never promised away by a gas operation: no stage clears it, the cost never goes under the floor it sets, and a plan that reaches the floor says only a fixed factor remains.
+  - a fixed blocker (gravity below the species' minimum, a tidal lock, a body that cannot be colonised) is never promised away by a gas operation: no stage clears it, the cost never goes under the floor it sets, and a plan that reaches the floor says only a fixed factor remains;
+  - where the gases leave an extreme of an eccentric orbit outside the species' range although the mean is reached, the plan pulls the surface water, the pressure or both: the stage and the step name the lever and its effect on the dampening and on both extremes (against an independent working of the game's formula), the lever is priced like the other steps and carries the time basis, and a lever that costs more than the cold end it saves is not pulled (AE-304-05).
 
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults.
 
@@ -54,6 +55,9 @@ const METHANE_ID = 3
 // A species that lives between 258 and 318 K, breathes oxygen between 0.1 and 0.3 atm, bears up to 4 atm and gravity from 0.5 to 1.5. The climate of a fixture body is the game's: base temperature times 1 + pressure / 10 + greenhouse gas, with an albedo of 1, so each surface temperature below is worked by hand.
 const SPECIES_ROW = { IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: OXYGEN_ID, BreatheName: 'Oxygen', PopulationDensityModifier: 1 }
 const METHANE_SPECIES_ROW = { ...SPECIES_ROW, BreatheID: METHANE_ID, BreatheName: 'Methane' }
+// The same species bearing up to 10 atm, and a methane breather that lives between 224 and 294 K and bears 10 atm: the species of the bodies whose levers are worked below.
+const WIDE_ROW = { ...SPECIES_ROW, MaximumPressure: 10 }
+const WET_METHANE_ROW = { ...METHANE_SPECIES_ROW, MaximumPressure: 10, IdealTemperature: 259, TemperatureDeviation: 35 }
 
 const DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
 const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, extra = {}) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, FrozenOut: 0, ...extra })
@@ -65,6 +69,8 @@ const OXYGEN = { DangerousMethane: 3, DangerousPPMMethane: 50 }
 const GASES = { [METHANE_ID]: gasRow('Methane', METHANE), [OXYGEN_ID]: gasRow('Oxygen', OXYGEN), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
 const GAS_LIST = Object.entries(GASES).map(([id, row]) => ({ GasID: Number(id), Name: row.AtmosGasName, ...row }))
 const gasInfo = (id) => GASES[id]
+// The table with Aestusium freezing at 290 K: a greenhouse gas that is a solid at the cold end of a cold orbit.
+const freezingGasInfo = (id) => (id === 20 ? { ...gasInfo(id), FreezingPoint: 290 } : gasInfo(id))
 
 const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 275, BaseTemp: 250, Albedo: 1, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Year: 8760, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
 const airless = (extra = {}) => earthlike({ SurfaceTemp: 250, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
@@ -92,7 +98,13 @@ const BODIES = {
   thin: earthlike({ AtmosPress: 0.1, SurfaceTemp: 252.5, Atmosphere: [gas(7, 'Nitrogen', 0.1, 100)] }),
   trace: earthlike({ AtmosPress: 1.0005, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 19.99), gas(7, 'Nitrogen', 0.8, 79.99), gas(METHANE_ID, 'Methane', 0.0005, 0.05, { DangerousOxygen: 2, DangerousPPMOxygen: 500 })] }),
   traceOver: earthlike({ AtmosPress: 1.0006, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 19.99), gas(7, 'Nitrogen', 0.8, 79.95), gas(METHANE_ID, 'Methane', 0.0006, 0.06, { DangerousOxygen: 2, DangerousPPMOxygen: 500 })] }),
+  // An airless body on an eccentric orbit: its mean can be reached, and the pressure or the surface water the plan adds damps the seasons enough to bring both extremes into the range. `eccentricFar` is on an orbit no dampening reaches: the plan keeps a temperature limit.
   eccentric: airless({ Eccentricity: 0.3 }),
+  eccentricFar: airless({ Eccentricity: 0.8 }),
+  // A cold wet body on an eccentric orbit, for the species that bears 10 atm: the greenhouse gases bring the mean into the range and leave the cold end under it, so the plan raises both the surface water and the pressure.
+  leverBoth: earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.5, DistanceToParent: 1, HydroID: 4 }),
+  // Cold air over 50 % of liquid water for a methane breather, who pays for liquid water: more water would fit the orbit and cost more than the cold end it saves.
+  methaneWet: earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.3, DistanceToParent: 1, HydroExt: 50, HydroID: 3 }),
   moon: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, ParentYear: 8760, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [] }),
   moonLocked: earthlike({ BodyClass: 2, ParentOrbitalDistance: 1, ParentEccentricity: 0.2, ParentYear: 8760, HydroExt: 30, HydroID: 4, AtmosPress: 0, SurfaceTemp: 250, Atmosphere: [], TidalLock: 1 }),
   // Temperature and water both stand at exactly 2; with the temperature at 2.00004 they tie at the four decimals only.
@@ -147,24 +159,24 @@ const worldOf = (mutation = null) => {
   const cache = new Map()
 
   // The assessment and the stages of a fixture body at a colonisation skill; `stages` is null where the body has no plan.
-  const staged = async (name, skill = 1, row = SPECIES_ROW) => {
-    const key = `${name}/${skill}/${row.BreatheID}`
+  const staged = async (name, skill = 1, row = SPECIES_ROW, info = gasInfo) => {
+    const key = `${name}/${skill}/${row.BreatheID}/${row.MaximumPressure}/${info === gasInfo}`
 
     if (!cache.has(key)) {
       const { habitability, terraforming, limits } = await modules()
       const species = habitability.speciesLimits(row)
       const body = BODIES[name]
-      const assessment = terraforming.assessTerraforming(body, species, skill, gasInfo)
+      const assessment = terraforming.assessTerraforming(body, species, skill, info)
 
-      cache.set(key, { name, body, species, assessment, result: limits.terraformStages({ assessment, body, species, skill, gasInfo }) })
+      cache.set(key, { name, body, species, assessment, result: limits.terraformStages({ assessment, body, species, skill, gasInfo: info }) })
     }
 
     return cache.get(key)
   }
 
   // The component with the figures of one fixture body as the page gives them.
-  const detail = async (name, skill = 1) => {
-    const { body, species, assessment } = await staged(name, skill)
+  const detail = async (name, skill = 1, row = SPECIES_ROW) => {
+    const { body, species, assessment } = await staged(name, skill, row)
     const options = await component()
 
     return instantiate(options, { $store: { getters: {}, state: {} }, data: { item: { body }, shown: { species, assessment }, rules: { ColonizationSkill: skill }, gases: GAS_LIST, separator: ',', terraformCapacity: 1 } })
@@ -191,7 +203,7 @@ const stagesOf = async (w, name, skill = 1) => {
   return { ...found, stages: found.result.stages }
 }
 
-const PLANNED = ['liveable', 'airless', 'airlessLow', 'toxic', 'toxicLow', 'frozenToxic', 'thick', 'thickLocked', 'thin', 'trace', 'traceOver', 'eccentric', 'moon', 'moonLocked', 'exactTie', 'roundTie', 'hidden', 'floorSwing', 'condensing', 'removalOnly', 'shortSettle', 'noOperation']
+const PLANNED = ['liveable', 'airless', 'airlessLow', 'toxic', 'toxicLow', 'frozenToxic', 'thick', 'thickLocked', 'thin', 'trace', 'traceOver', 'eccentric', 'eccentricFar', 'moon', 'moonLocked', 'exactTie', 'roundTie', 'hidden', 'floorSwing', 'condensing', 'removalOnly', 'shortSettle', 'noOperation']
 
 const planned = async (w) => {
   const found = await Promise.all(PLANNED.map((name) => w.staged(name)))
@@ -373,6 +385,7 @@ check('targetSearchNonMonotone', 'the bounded search selects a full priced targe
   const plan = terraforming.planTerraforming(body, species, gasInfo)
 
   assert.ok(plan && !plan.partial, 'the public planner finds a full plan without changing the 258–318 K bounds')
+  assert.equal(plan.dampening, null, 'the search finds it by the gases alone: no dampening lever is pulled')
   const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
 
   assert.equal(assessment.outcome, 'yes', 'the public assessment selects the full plan rather than rejecting the worsening ideal fallback')
@@ -403,13 +416,15 @@ check('targetPressureBracket', 'an ideal blocked by the pressure limit still sea
 
   assert.equal(assessment.outcome, 'yes', 'null pressure-limited trials do not terminate the search for a reachable target')
   assert.ok(assessment.plan && !assessment.plan.partial)
+  assert.equal(assessment.plan.dampening, null, 'the search finds it by the gases alone: no dampening lever is pulled')
   assert.ok(assessment.plan.target.pressure <= species.MaximumPressure)
   assert.deepEqual(assessment.after.raws, { current: 0, periapsis: 0, apoapsis: 0 })
 })
 
 check('targetSearchImpossible', 'a bounded search with no full target retains a temperature-limited plan instead of accepting only its hot end', async (w) => {
   const { habitability, terraforming } = await w.modules()
-  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  // The species bears 4 atm: neither the surface water nor the air it can hold damps this orbit's cold end enough, so the plan keeps its temperature limit.
+  const species = habitability.speciesLimits(SPECIES_ROW)
   const body = earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.35, DistanceToParent: 1, HydroID: 4 })
   const plan = terraforming.planTerraforming(body, species, gasInfo)
   const target = terraforming.terraformedBody(body, species, plan, gasInfo)
@@ -422,7 +437,7 @@ check('targetSearchImpossible', 'a bounded search with no full target retains a 
 
 check('targetGasPhase', 'the target search prices a greenhouse gas freezing at apoapsis instead of accepting a phase-insensitive full plan', async (w) => {
   const { habitability, terraforming, limits } = await w.modules()
-  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 10 })
+  const species = habitability.speciesLimits(SPECIES_ROW)
   const body = earthlike({ BaseTemp: 180, SurfaceTemp: 198, StarLuminosity: (180 / 255) ** 4, Eccentricity: 0.25, DistanceToParent: 1, HydroID: 4 })
   const phasedGasInfo = (id) => id === 20 ? { ...gasInfo(id), FreezingPoint: 290 } : gasInfo(id)
   const assessment = terraforming.assessTerraforming(body, species, 1, phasedGasInfo)
@@ -547,7 +562,7 @@ check('operations', 'each gas operation names the limits after it, what it clear
   assert.deepEqual(heavy.cleared[4], ['temperature'])
 
   // The orbit: the limit can stand at a point other than now.
-  const swing = (await stagesOf(w, 'eccentric')).stages
+  const swing = (await stagesOf(w, 'eccentricFar')).stages
   const last = swing[swing.length - 1]
 
   assert.deepEqual(keysOf(last.limiting), ['temperature'])
@@ -1151,6 +1166,220 @@ check('thaw', 'a gas frozen out now is removed when the plan warms the body past
   assert.ok(left && left.GasAtm === 0.0004, 'the methane is in the end air at the pressure it had')
 })
 
+// ---- Dampening levers ------------------------------------------------------------------------------------------------
+// The dampening of a body's seasons and its temperatures at both ends of the orbit, worked from the game's formula (SystemBody.method_1: 0.1 an atm of pressure up to 0.5, 0.003 a percent of surface water up to 0.3, times the year's factor) and the habitability module's temperature at a distance, not by the stage code under check.
+const swingOf = (habitability, state) => {
+  const { distance, eccentricity, year } = habitability.orbitOf(state)
+  const dampening = !distance || !eccentricity || (state.AtmosPress <= 0 && state.HydroExt <= 0) ? 0 : (Math.min(0.5, state.AtmosPress / 10) + Math.min(0.3, state.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760))
+
+  return { dampening, periapsis: habitability.temperatureAtDistance(state, distance * (1 - eccentricity)), apoapsis: habitability.temperatureAtDistance(state, distance * (1 + eccentricity)) }
+}
+
+const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-9, `${message}: ${actual} against ${expected}`)
+
+const NO_RAWS = { current: 0, periapsis: 0, apoapsis: 0 }
+
+// Every stage of a plan against the independent working: the dampening and both extremes it stands at, the effect it has from the stage before, the lever it names, the time basis it carries, and the pricing of each step by the surface it works on (the atm it moves, and the percent of surface water it takes off at 40 % an atm, times the body's surface over the Earth's).
+const verifiedStages = (habitability, found, label) => {
+  const { body, assessment, result } = found
+  const { plan } = assessment
+  const { stages } = result
+  const area = 4 * Math.PI * body.Radius ** 2 / 511187128
+
+  assert.equal(stages[0].effect, null, `${label}: the start has nothing before it`)
+  assert.equal(stages[0].lever, null, `${label}: the start pulls no lever`)
+  assert.equal(stages[0].timeBasis, null, `${label}: the start takes no time`)
+
+  stages.forEach((stage, index) => {
+    const here = swingOf(habitability, stage.body)
+
+    near(stage.dampening, here.dampening, `${label} stage ${index}: the dampening`)
+    near(stage.extremes.periapsis, here.periapsis, `${label} stage ${index}: the temperature at periapsis`)
+    near(stage.extremes.apoapsis, here.apoapsis, `${label} stage ${index}: the temperature at apoapsis`)
+
+    if (index) {
+      const before = swingOf(habitability, stages[index - 1].body)
+      const { effect } = stage
+
+      near(effect.dampening.from, before.dampening, `${label} stage ${index}: the dampening before`)
+      near(effect.dampening.to, here.dampening, `${label} stage ${index}: the dampening after`)
+      near(effect.periapsis.from, before.periapsis, `${label} stage ${index}: periapsis before`)
+      near(effect.periapsis.to, here.periapsis, `${label} stage ${index}: periapsis after`)
+      near(effect.apoapsis.from, before.apoapsis, `${label} stage ${index}: apoapsis before`)
+      near(effect.apoapsis.to, here.apoapsis, `${label} stage ${index}: apoapsis after`)
+    }
+
+    if (stage.step) {
+      assert.equal(stage.lever, stage.step.lever, `${label} stage ${index}: a step stage names the lever its step pulls`)
+      assert.equal(stage.timeBasis, stage.step.drained > 0 ? 'minimum' : 'capacity', `${label} stage ${index}: the time basis of the step`)
+    } else if (index) {
+      assert.equal(stage.timeBasis, null, `${label} stage ${index}: the end state is no operation and takes no time`)
+    }
+  })
+
+  plan.steps.forEach((step) => near(step.work, (Math.abs(step.to - step.from) + step.drained / 40) * area, `${label}: the work of the ${step.key} step`))
+  near(plan.work, plan.steps.reduce((total, step) => total + step.work, 0), `${label}: the plan's work is its steps'`)
+}
+
+check('levers', 'where the gases leave an extreme of an eccentric orbit outside the range although the mean is reached, the plan pulls the surface water, the pressure or both: it names the lever in the step and the stage that carries it, shows what it does to the dampening and to both extremes against an independent working, prices it as the other steps and carries the time basis', async (w) => {
+  const { habitability } = await w.modules()
+
+  // The airless body on the 0.3 orbit, the species bearing 4 atm: the water the gases need condenses to the whole surface, and the extra surface shows in the stage that settles it, once the vapour is down.
+  const wet = await w.staged('eccentric')
+  const range = { low: wet.species.MinimumTemperature, high: wet.species.MaximumTemperature }
+  const wetStages = wet.result.stages
+  const wetEnd = wetStages[wetStages.length - 1]
+  const beforeSettling = wetStages[wetStages.length - 2]
+
+  assert.equal(wet.assessment.outcome, 'yes')
+  assert.equal(wet.assessment.plan.partial, false, 'the plan fits the whole orbit')
+  assert.deepEqual(wet.assessment.plan.dampening, { levers: ['water'] }, 'the plan names the surface water as its lever')
+  assert.deepEqual(wet.assessment.after.raws, NO_RAWS, 'nothing is left to pay at any point of the orbit')
+  verifiedStages(habitability, wet, 'eccentric')
+  assert.ok(wetStages[0].extremes.apoapsis < range.low, 'the body starts with its cold end under the range')
+  assert.ok(beforeSettling.extremes.periapsis > range.high, 'the gas operations alone leave the hot end over the range')
+  assert.ok(wetEnd.extremes.periapsis <= range.high && wetEnd.extremes.apoapsis >= range.low, 'the lever brings both ends into the range')
+  assert.equal(wetEnd.kind, 'settle', 'the water lever shows where the vapour settles')
+  assert.equal(wetEnd.lever, 'water')
+  assert.equal(wetEnd.hydroExt, 100, 'the surface holds the whole of the water')
+  assert.ok(wetStages.slice(0, -1).every((stage) => stage.hydroExt === wet.body.HydroExt), 'the surface keeps the water it has until the vapour condenses')
+  near(wetEnd.dampening, 0.3 + wetEnd.pressure / 10, 'the dampening of 100 % water is 0.3 and the pressure the plan ends at adds a tenth of an atm each')
+  assert.ok(wetEnd.effect.dampening.to > wetEnd.effect.dampening.from, 'the settling raises the dampening')
+  assert.deepEqual(wetStages.filter(({ lever }) => lever).map(({ kind, step }) => `${kind}:${step ? step.key : ''}`), ['step:water', 'settle:'], 'the stage of the water step and the stage that settles it name the lever, and no other does')
+  const vapour = wet.assessment.plan.steps.find(({ key }) => key === 'water')
+
+  assert.equal(vapour.lever, 'water')
+  assert.ok(vapour.work > 0, 'the lever is priced: the vapour is atm to raise')
+  assert.equal(wetStages.find(({ step }) => step === vapour || (step && step.key === 'water')).timeBasis, 'capacity', 'a lever takes the terraformers\' time, no more than it needs')
+
+  // The cold wet body on the 0.5 orbit for a species that bears 10 atm: the dampening rises by both, the pressure at its own step.
+  const both = await w.staged('leverBoth', 1, WIDE_ROW)
+  const bothStages = both.result.stages
+  const bothEnd = bothStages[bothStages.length - 1]
+  const air = bothStages.find(({ lever, step }) => lever === 'pressure' && step)
+
+  assert.equal(both.assessment.outcome, 'yes')
+  assert.deepEqual(both.assessment.plan.dampening, { levers: ['water', 'pressure'] })
+  assert.deepEqual(both.assessment.plan.steps.filter(({ lever }) => lever).map(({ key, lever }) => `${key}:${lever}`), ['water:water', 'neutral:pressure'], 'the water step and the neutral gas that fills the air up to the floor name their levers')
+  assert.ok(both.assessment.plan.steps.filter(({ lever }) => lever).every(({ work }) => work > 0))
+  assert.deepEqual(both.assessment.after.raws, NO_RAWS)
+  verifiedStages(habitability, both, 'leverBoth')
+  assert.ok(bothStages[0].extremes.apoapsis < both.species.MinimumTemperature, 'the body starts with its cold end under the range')
+  near(both.assessment.plan.target.pressure, 4, 'the species bears 4 atm of the 5 the dampening grows with')
+  near(both.assessment.plan.target.hydroExt, 87.5, 'the surface water goes up by rungs of an eighth of what is left')
+  near(bothEnd.dampening, 0.4 + 0.3 * 0.875, 'the dampening of 4 atm and 87.5 % water: 0.4 + 0.2625')
+  assert.equal(bothEnd.lever, 'water')
+  assert.equal(air.step.key, 'neutral', 'the pressure lever acts in its own gas operation')
+  assert.ok(air.effect.apoapsis.to > air.effect.apoapsis.from, 'more air warms the cold end')
+  assert.ok(bothEnd.extremes.apoapsis >= both.species.MinimumTemperature && bothEnd.extremes.periapsis <= both.species.MaximumTemperature, 'both ends end in the range')
+  assert.equal(bothEnd.cost.raw, both.assessment.after.raw, 'the last stage is the plan\'s cost after terraforming')
+
+  // The same body where the greenhouse gas freezes at the cold end: the water the gases need does not help the cold end enough, and the pressure does alone.
+  const air5 = await w.staged('leverBoth', 1, WIDE_ROW, freezingGasInfo)
+  const air5Stages = air5.result.stages
+
+  assert.deepEqual(air5.assessment.plan.dampening, { levers: ['pressure'] })
+  assert.deepEqual(air5.assessment.plan.steps.filter(({ lever }) => lever).map(({ key }) => key), ['neutral'])
+  assert.ok(air5Stages.every(({ lever }) => lever !== 'water'), 'no stage names the water')
+  verifiedStages(habitability, air5, 'frozen')
+  near(air5Stages[air5Stages.length - 1].dampening, 0.5 + 0.15, 'the dampening of 5 atm and 50 % water: 0.5 + 0.15')
+  assert.deepEqual(air5.assessment.after.raws, NO_RAWS)
+})
+
+check('leverSweep', 'across eccentric bodies, orbits and water, a plan pulls a lever only as a plan that fits the whole orbit and leaves nothing to pay, the steps that pull it are tagged, and a plan that keeps a temperature limit pulls none', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits(WIDE_ROW)
+  let pulled = 0
+  let kept = 0
+
+  for (const eccentricity of [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]) {
+    for (const base of [180, 210, 240]) {
+      for (const water of [0, 50]) {
+        const body = earthlike({ BaseTemp: base, SurfaceTemp: base + 18, StarLuminosity: (base / 255) ** 4, Eccentricity: eccentricity, DistanceToParent: 1, HydroExt: water, HydroID: water ? 4 : 1 })
+        const { plan, after } = terraforming.assessTerraforming(body, species, 1, gasInfo)
+        const label = `e ${eccentricity}, base ${base}, water ${water}`
+
+        if (plan && plan.dampening) {
+          const tagged = plan.steps.filter(({ lever }) => lever).map(({ lever }) => lever)
+
+          pulled += 1
+          assert.equal(plan.partial, false, `${label}: a plan with a lever fits the whole orbit`)
+          assert.equal(after.raw, 0, `${label}: and leaves nothing to pay`)
+          assert.deepEqual([...new Set(tagged)].sort(), [...plan.dampening.levers].sort(), `${label}: the steps tag the levers the plan names`)
+          assert.ok(plan.steps.filter(({ lever }) => lever).every(({ work }) => work > 0), `${label}: a lever step is work`)
+        } else if (plan && plan.partial) {
+          kept += 1
+          assert.equal(plan.dampening, null, `${label}: a plan that keeps a temperature limit pulls no lever`)
+        }
+      }
+    }
+  }
+
+  assert.ok(pulled >= 20, `${pulled} plans with a lever`)
+  assert.ok(kept >= 10, `${kept} plans that keep a temperature limit`)
+})
+
+check('leverGuard', 'a lever that costs the species more than the cold end it saves is not pulled: a methane breather pays for liquid water, so the plan keeps its temperature limit and drains the water the body has', async (w) => {
+  const found = await w.staged('methaneWet', 1, WET_METHANE_ROW)
+  const { plan, outcome } = found.assessment
+
+  assert.equal(outcome, 'limited', 'the body stays limited by its temperature')
+  assert.equal(plan.partial, true)
+  assert.equal(plan.dampening, null, 'no lever is pulled')
+  assert.ok(plan.steps.some(({ drained }) => drained > 0), 'the plan takes the liquid water off instead')
+  assert.ok(found.result.stages.every(({ lever }) => lever === null), 'no stage names a lever')
+})
+
+check('leverComponent', 'the body detail words the lever of a stage and of a step with its effect on the dampening and on both extremes, says once under the steps what the plan does to the orbit\'s swing, and shows nothing of it for a plan with no lever', async (w) => {
+  const found = await w.staged('leverBoth', 1, WIDE_ROW)
+  const vm = await w.detail('leverBoth', 1, WIDE_ROW)
+  const none = await w.detail('airless')
+  const { stages } = found.result
+  const percent = (value) => Number((value * 100).toFixed(1))
+  const degrees = (kelvin) => Number((kelvin - 273).toFixed(1))
+  const effectText = (stage, lever) => `Raises the dampening by ${lever}: from ${percent(stage.effect.dampening.from)}% to ${percent(stage.effect.dampening.to)}%, periapsis from ${degrees(stage.effect.periapsis.from)} to ${degrees(stage.effect.periapsis.to)} °C, apoapsis from ${degrees(stage.effect.apoapsis.from)} to ${degrees(stage.effect.apoapsis.to)} °C.`
+  const air = stages.find(({ lever, step }) => lever === 'pressure' && step)
+  const water = stages.find(({ lever, step }) => lever === 'water' && step)
+  const settle = stages[stages.length - 1]
+  const rowOf = (stage) => vm.stageRows.find((row) => row.key === stage.index)
+
+  assert.ok(air && water, 'the plan pulls the pressure and the water, each in a step stage')
+  assert.equal(vm.leverNote(air.step), effectText(air, 'pressure'), 'the pressure step words its effect on the dampening and on both extremes')
+  assert.equal(rowOf(air).change.startsWith(effectText(air, 'pressure')), true, 'and so does the stage row')
+  assert.equal(vm.leverNote(water.step), 'Adds the vapour that condenses into the extra surface water.', 'the water step names the vapour and leaves the effect to the stage that settles it')
+  assert.equal(vm.settleLever, effectText(settle, 'surface water'), 'the stage that settles the water words its effect')
+  assert.equal(rowOf(settle).change.startsWith(effectText(settle, 'surface water')), true)
+  assert.equal(vm.leverNote(found.assessment.plan.steps.find(({ lever }) => !lever)), '', 'a step that pulls no lever says nothing of one')
+
+  const first = stages[0]
+  const total = `the plan also raises the dampening of the seasons with surface water and pressure: the dampening goes from ${percent(first.dampening)}% to ${percent(settle.dampening)}%, the temperature at periapsis from ${degrees(first.extremes.periapsis)} to ${degrees(settle.extremes.periapsis)} °C and at apoapsis from ${degrees(first.extremes.apoapsis)} to ${degrees(settle.extremes.apoapsis)} °C.`
+
+  assert.ok(vm.dampeningNote.includes(total), 'the plan\'s note gives the whole effect on both extremes')
+  assert.ok(!/\b(?:I|we|you)\b/i.test(vm.dampeningNote), 'in the impersonal voice')
+  assert.equal(none.dampeningNote, '', 'a plan with no lever has no note')
+  assert.equal(none.settleLever, '')
+  assert.ok(none.stageRows.every((row) => !/dampening/.test(row.change)), 'and no stage row words a lever')
+
+  const nodes = elementsOf(templateOf(w.text.vue, 'BodyDetail.vue'))
+  const wordsOf = (node) => node.children.map((child) => child.text || '').join('')
+  const lines = nodes.filter((node) => attrOf(node, 'data-detail') === 'lever')
+  const [note] = nodes.filter((node) => attrOf(node, 'data-detail') === 'dampening')
+  const stepLine = lines.find((node) => wordsOf(node).includes('{{ leverNote(step) }}'))
+  const settleLine = lines.find((node) => wordsOf(node).includes('{{ settleLever }}'))
+  const withStep = (step) => Object.assign(Object.create(vm), { step })
+
+  assert.equal(lines.length, 2, 'a step and the settling carry the lever, each in a line of its own')
+  assert.ok(stepLine, 'a step words its lever by leverNote')
+  assert.ok(settleLine, 'the settling words its lever by settleLever')
+  assert.equal(!!evaluated(stepLine.if, withStep(air.step)), true, 'a step that pulls a lever shows it')
+  assert.equal(!!evaluated(stepLine.if, withStep(found.assessment.plan.steps.find(({ lever }) => !lever))), false, 'and a step that pulls none does not')
+  assert.equal(!!evaluated(settleLine.if, vm), true, 'the settling shows the lever it carries')
+  assert.equal(!!evaluated(settleLine.if, none), false, 'and says nothing for a plan with no lever')
+  assert.ok(note && wordsOf(note).includes('{{ dampeningNote }}'), 'the plan carries one note')
+  assert.equal(!!evaluated(note.if, vm), true, 'shown for a plan with a lever')
+  assert.equal(!!evaluated(note.if, none), false, 'and not for a plan with none')
+})
+
 // ---- The planted faults ----------------------------------------------------------------------------------------------
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const FAULTS = [
@@ -1192,8 +1421,8 @@ const FAULTS = [
   ['a factor whose penalty stands is called cleared when it only stops limiting', 'limits', 'Math.max(...distinct.map((name) => round4(standing(name, entry.key)))) < round4(entry.value)', 'true', ['operations', 'stages']],
   ['the last operation takes the planner\'s end state', 'limits', 'body: bodyAfter(body, plan, gasInfo, index + 1), species', 'body: index === steps.length - 1 ? ending : bodyAfter(body, plan, gasInfo, index + 1), species', ['conservation', 'settle', 'operations']],
   ['a short settling is left out', 'limits', 'const settles = plan.settling.process !== \'Stable\' && plan.settling.years > 0', 'const settles = plan.settling.process !== \'Stable\' && plan.settling.years > 0.1', ['settle']],
-  ['a plan with no gas operation stops at the saved start', 'limits', 'if (settles || !sameCosts || !sameLimits) {', 'if (settles) {', ['operations', 'end']],
-  ['a target that differs after the last operation is left out', 'limits', 'if (settles || !sameCosts || !sameLimits) {', 'if (settles || !steps.length) {', ['operations', 'end']],
+  ['a plan with no gas operation stops at the saved start', 'limits', 'if (settles || waterLever || !sameCosts || !sameLimits) {', 'if (settles) {', ['operations', 'end']],
+  ['a target that differs after the last operation is left out', 'limits', 'if (settles || waterLever || !sameCosts || !sameLimits) {', 'if (settles || !steps.length) {', ['operations', 'end']],
   ['the floor is stated before the skill', 'limits', 'floorWorst: stages[0].lowGravity ? skill : 0', 'floorWorst: stages[0].lowGravity ? 1 : 0', ['fixed']],
   ['a lock is flagged on a moon', 'limits', 'tidalLock: !!body.TidalLock && body.BodyClass !== BODY_CLASS.MOON', 'tidalLock: !!body.TidalLock', ['fixed']],
   ['the bars flag only the first of a tie', 'vue', 'new Set(limitingFactors(factors).map(', 'new Set(limitingFactors(factors).slice(0, 1).map(', ['bars']],
@@ -1207,10 +1436,10 @@ const FAULTS = [
   ['the target search ignores the hot extreme', 'terraforming', 'const high = Math.max(ends.current, ends.periapsis, ends.apoapsis)', 'const high = Math.max(ends.current, ends.apoapsis)', ['targetSearch', 'phase']],
   ['the target search ignores the cold extreme', 'terraforming', 'const low = Math.min(ends.current, ends.periapsis, ends.apoapsis)', 'const low = Math.min(ends.current, ends.periapsis)', ['targetSearchImpossible']],
   ['the target search ignores gas freezing at an extreme', 'habitability', 'if (threshold >= gas.FreezingPoint) {', 'if (true) {', ['targetGasPhase']],
-  ['a null trial terminates the target search', 'terraforming', 'fallback = fallback || trial', 'if (!trial) { return fallback }\n\n    fallback = fallback || trial', ['targetPressureBracket']],
-  ['the target search restores r3 side pruning', 'terraforming', ORIGINALS.terraforming.slice(ORIGINALS.terraforming.indexOf('  // Integer indices'), ORIGINALS.terraforming.indexOf('\n}\n', ORIGINALS.terraforming.indexOf('export const planTerraforming'))), `  const search = (minimum, maximum, cooling) => {
+  ['a null trial terminates the target search', 'terraforming', 'fallback = fallback || trial', 'if (!trial) { return { plan: fallback, reached } }\n\n    fallback = fallback || trial', ['targetPressureBracket']],
+  ['the target search restores r3 side pruning', 'terraforming', ORIGINALS.terraforming.slice(ORIGINALS.terraforming.indexOf('  // Integer indices'), ORIGINALS.terraforming.indexOf('\n}\n', ORIGINALS.terraforming.indexOf('const searchAims'))), `  const search = (minimum, maximum, cooling) => {
     const edgeAim = cooling ? minimum : maximum
-    const edge = planAtTemperature(body, species, gasInfo, edgeAim)
+    const edge = planAtTemperature(body, species, gasInfo, edgeAim, false, lever)
     let reachable = initial ? ideal : edge ? edgeAim : null
 
     if (edge && !edge.partial) {
@@ -1221,7 +1450,7 @@ const FAULTS = [
 
     for (let iteration = 0; iteration < 32 && maximum - minimum >= TOLERANCE; iteration += 1) {
       const aim = (minimum + maximum) / 2
-      const trial = planAtTemperature(body, species, gasInfo, aim)
+      const trial = planAtTemperature(body, species, gasInfo, aim, false, lever)
 
       if (trial && !trial.partial) {
         return trial
@@ -1244,7 +1473,7 @@ const FAULTS = [
   const cooler = () => search(species.MinimumTemperature, ideal, true)
   const warmer = () => search(ideal, species.MaximumTemperature, false)
 
-  return (cooling ? cooler() || warmer() : warmer() || cooler()) || fallback`, ['targetSearchNonMonotone']],
+  return { plan: (cooling ? cooler() || warmer() : warmer() || cooler()) || fallback, reached }`, ['targetSearchNonMonotone']],
   ['the liveability verdict scales the swing from the saved surface temperature', 'terraforming', 'const { current, periapsis, apoapsis } = temperaturePoints(body)', `const { current, periapsis, apoapsis } = (() => {
     const moon = body.BodyClass === 2
     const distance = moon ? body.ParentOrbitalDistance : body.OrbitalDistance
@@ -1268,6 +1497,22 @@ const FAULTS = [
 
     return { current: body.SurfaceTemp, periapsis: circular * blend(Math.max(1, Math.sqrt(distance / (distance * (1 - eccentricity))))), apoapsis: circular * blend(Math.min(1, Math.sqrt(distance / (distance * (1 + eccentricity))))) }
   })()`, ['phase']],
+  ['no dampening lever is ever pulled', 'terraforming', 'return plan && plan.partial && reached ? raisedDampening(body, species, gasInfo, plan) || plan : plan', 'return plan', ['levers', 'leverSweep', 'leverComponent']],
+  ['the water step never names its lever', 'terraforming', 'raisedWater ? LEVER.WATER : null', 'null', ['levers', 'leverSweep']],
+  ['the neutral gas never names the pressure lever', 'terraforming', 'raisedPressure ? LEVER.PRESSURE : null', 'null', ['levers', 'leverSweep']],
+  ['a lever step is priced at half its atm', 'terraforming', 'work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio })', 'work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio * (pulled ? 0.5 : 1) })', ['levers']],
+  ['a lever that costs more than it saves is pulled', 'terraforming', 'leftCost(body, species, plan, gasInfo) < baseline ? plan : null', 'true ? plan : null', ['leverGuard']],
+  ['the lever is always the strongest rung', 'terraforming', 'let high = ladder.length - 1', 'let high = 0', ['levers']],
+  ['a stage reads its effect from the start', 'limits', 'planned: true, previous: stages[stages.length - 1] }))', 'planned: true, previous: stages[0] }))', ['levers']],
+  ['the stage that settles the water does not name it', 'limits', 'lever: waterLever ? LEVER.WATER : null', 'lever: null', ['levers', 'leverComponent']],
+  ['a step stage does not name its lever', 'limits', 'kind: \'step\', step, lever: step.lever,', 'kind: \'step\', step, lever: null,', ['levers', 'leverComponent']],
+  ['a stage carries no time basis', 'limits', 'timeBasis: step ? stepTimeBasis(step) : null', 'timeBasis: null', ['levers']],
+  ['the extremes of a stage are read the wrong way round', 'limits', 'const extremes = { periapsis: temperatures.periapsis, apoapsis: temperatures.apoapsis }', 'const extremes = { periapsis: temperatures.apoapsis, apoapsis: temperatures.periapsis }', ['levers']],
+  ['the dampening of a stage ignores its surface water', 'limits', 'const dampening = orbitalTemperatureDampening(body)', 'const dampening = orbitalTemperatureDampening({ ...body, HydroExt: 0 })', ['levers']],
+  ['the stage rows leave the lever out', 'vue', 'const changes = [this.leverText(stage), ', 'const changes = [', ['leverComponent']],
+  ['a step line shows a lever for every step', 'vue', '<div v-if="step.lever" class="caption text--secondary text-wrap" data-detail="lever">', '<div v-if="true" class="caption text--secondary text-wrap" data-detail="lever">', ['leverComponent']],
+  ['the plan\'s dampening note is shown for every plan', 'vue', '<div v-if="plan.dampening" class="caption text--secondary mt-1" data-detail="dampening">', '<div v-if="plan" class="caption text--secondary mt-1" data-detail="dampening">', ['leverComponent']],
+  ['the plan\'s dampening note starts from the first operation', 'vue', 'const first = limits.stages[0]', 'const first = limits.stages[1]', ['leverComponent']],
 ]
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------

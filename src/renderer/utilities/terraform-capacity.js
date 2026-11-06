@@ -2,6 +2,7 @@
 
 import { fleetClaimable, fleetCountsForColony, fleetPlaced } from './colonization'
 import { crewFraction } from './crew'
+import { missingBodyInputs, surfaceTemperature } from './habitability'
 import { navalAdminChain } from './minerals'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 
@@ -11,6 +12,10 @@ const TERM_VERSIONS = ['2.7.x', '3.2.x']
 const TERRAFORMER_COMPONENT_TYPE = 33
 const TERRAFORMING_BONUS = 9
 const NONE = new Set()
+
+// The labels of the two lines of the game's Environment tab that estimate a year of the colony's terraforming.
+const AESTUSIUM = 'Add Aestusium for one year'
+const FRIGUSIUM = 'Add Frigusium for one year'
 
 // The surface of the Earth in the unit the game spreads pressure over, and the value of pi it divides by (3.1416, not Math.PI: the saved pressure changes of the campaigns match this figure to 1e-15, Math.PI is off by 2.3e-6).
 export const EARTH_SURFACE_AREA = 511187128
@@ -57,6 +62,17 @@ registerRule({
   structure: ['terraform.capacity', 'FCT_SystemBody.Radius', 'crew.terraforming'],
   note: `The colony's terraforming capacity spread over its own body: times the Earth's surface of ${EARTH_SURFACE_AREA} over the body's, 4 × ${SURFACE_PI} × radius². The pressure of one gas on a body changes by this rate times the years the game's growth clock advanced between two saves; it matched the saved change of a gas to four places on 13 colonies of the Falryx and Rin campaigns where the order and the capacity held between the saves. The rate is not compared with a saved figure of the job.`,
   assumptions: ['The capacity holds over the whole job'],
+})
+
+// `SystemBody.PopulateAtmosphereListView` (SystemBody.cs:4150-4326) lists "Add Aestusium for one year" and "Add Frigusium for one year" (SystemBody.cs:4319-4320) for a colony whose annual terraform capacity is above 0 (`Population.RecalculateEarthEquivalentAnnualTerraformCapacity`, Population.cs:4865-4878). Its sums are `num2`, the atm of unfrozen greenhouse gas, and `num3`, the atm of unfrozen anti-greenhouse gas (a gas flagged both counts as greenhouse); `num14` is the colony's capacity spread over the body (SystemBody.cs:4287-4314, the rate of the rule above); `method_2` (SystemBody.cs:303-344, called at SystemBody.cs:4208) is what the current surface temperature is recomputed with before the lines are taken, and `method_37` (SystemBody.cs:2079-2100) works each estimate. Aestusium is `method_37(num2 + num14, num3)` and Frigusium `method_37(num2 + num14 / 10, num3 + num14)`, each minus the current surface temperature.
+registerRule({
+  id: 'terraform.oneYearTemperature',
+  versions: ['3.2.x'],
+  units: 'K',
+  verification: 'estimated',
+  structure: ['FCT_SystemBody.BaseTemp, Albedo, AtmosPress, DustLevel, SurfaceTemp, Year, Eccentricity, OrbitalDistance, DistanceToParent', 'FCT_SystemBody.ParentOrbitalDistance, ParentEccentricity, ParentYear', 'FCT_AtmosphericGas.GasAtm, FrozenOut', 'DIM_Gases.GHGas, AntiGHGas', 'production.terraformRate'],
+  note: 'The temperature the Environment tab estimates for the body after one year of the colony\'s terraforming with each of two gases, beside the body\'s temperature now: the base temperature times the greenhouse multiplier, times the albedo, over the anti-greenhouse multiplier, each multiplier at most 3, with the year\'s gas added. Aestusium adds the whole of the colony\'s yearly pressure on the body to the greenhouse gas; Frigusium adds a tenth of it to the greenhouse gas and the whole of it to the anti-greenhouse gas. The estimate counts the pressure of the air as it stands and does not apply the dampening of the seasons, so on an eccentric body it stands against the dampened temperature of the body. The change shown is the estimate less the temperature now, which the game recomputes from the unfrozen gases. Worked from the source and matched to an independent working of it on a saved terraforming colony; the game does not save the lines, so no saved figure confirms it.',
+  assumptions: ['The body\'s base temperature is the one the game works with at the present orbital distance', 'A gas frozen out adds nothing to either sum'],
 })
 
 // A commander's bonus row against its value: no row at all is the game's neutral 1 (a missing commander or bonus), a row whose value is missing is unknown (null).
@@ -249,4 +265,43 @@ export const terraformBreakdown = ({ raceRate, speed, source, admins = {} }) => 
   )
 
   return { installations, orbital, capacity, rate, scale, lines }
+}
+
+// The figure the game's tab prints for a temperature change (`#,0.#`): the number read at 15 significant digits, rounded half away from zero to one decimal, thousands set apart by commas, and a negative that rounds to zero without its sign.
+const tabFigure = (value) => {
+  const rounded = Math.round(Number((Math.abs(value) * 10).toPrecision(15))) / 10
+  const text = rounded.toFixed(1).replace(/\.0$/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+  return value < 0 && rounded > 0 ? `-${text}` : text
+}
+
+// What one year of the colony's terraforming does to the temperature of its body by each of the two gases the Environment tab lists, as `{ rate, current, aestusium, frigusium }` of the rule 'terraform.oneYearTemperature': `rate` is the colony's yearly pressure on the body (the result of 'production.terraformRate', `breakdown.rate`), `current` the temperature the tab recomputes for the body now, and each gas `{ label, temperature, change, text }` with the line's label, the estimated temperature, its change from `current` and the change as the tab writes it (the tab puts a plus before the Aestusium figure whatever its sign, which reads "+-0.4" for a fall; here a fall reads "-0.4"). Null where the colony moves no pressure (the tab lists no line), unavailable where the rate or a figure of the body is not in the save, never a default.
+export const oneYearEstimate = (body, rate) => {
+  if (!rate || rate.status === 'unavailable') {
+    return unavailable({ rule: 'terraform.oneYearTemperature', missing: rate && rate.inputs.missing.length ? rate.inputs.missing : ['the colony\'s terraforming rate'] })
+  }
+
+  if (!(rate.value > 0)) {
+    return null
+  }
+
+  const missing = [...missingBodyInputs(body), ...(isNumber(body.DustLevel) ? [] : ['body dust level'])]
+
+  if (missing.length) {
+    return unavailable({ rule: 'terraform.oneYearTemperature', missing })
+  }
+
+  const unfrozen = (body.Atmosphere || []).filter((gas) => !gas.FrozenOut)
+  const greenhouse = sum(unfrozen.map((gas) => (gas.GHGas ? gas.GasAtm : 0)))
+  const anti = sum(unfrozen.map((gas) => (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0)))
+  const dust = body.DustLevel / 20000
+  const current = surfaceTemperature(body, Math.min(3, 1 + body.AtmosPress / 10 + greenhouse), Math.min(3, 1 + dust + anti))
+  const estimate = (greenhouseGas, antiGas) => body.BaseTemp * Math.min(3, 1 + body.AtmosPress / 10 + greenhouseGas) * body.Albedo / Math.min(3, 1 + dust + antiGas)
+  const line = (label, temperature) => {
+    const figure = tabFigure(temperature - current)
+
+    return { label, temperature, change: temperature - current, text: `${label === AESTUSIUM && !figure.startsWith('-') ? '+' : ''}${figure}` }
+  }
+
+  return combine({ rule: 'terraform.oneYearTemperature', parts: { rate }, compute: ({ rate: yearly }) => ({ rate: yearly, current, aestusium: line(AESTUSIUM, estimate(greenhouse + yearly, anti)), frigusium: line(FRIGUSIUM, estimate(greenhouse + yearly / 10, anti + yearly)) }), inputs: { present: ['the body\'s climate figures', 'the body\'s gases'] } })
 }

@@ -2,7 +2,7 @@
 //
 // The plan itself is the page's long-standing heuristic (a target atmosphere found by iterating the greenhouse balance). It first aims at the species' ideal temperature, then searches the species' range for a mean whose complete, phase-aware orbital swing fits. It is checked against the game's formulas, not against a played-out terraform.
 
-import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, costPoints, dangerColumnsOf, gasDanger, hydrosphereAtTemperature, hydrosphereTypeAt, infrastructurePerMillion, isDangerousGas, surfaceTemperature, temperaturePoints, withAtmosphereShares } from './habitability'
+import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, costPoints, dangerColumnsOf, gasDanger, hydrosphereAtTemperature, hydrosphereTypeAt, infrastructurePerMillion, isDangerousGas, orbitOf, surfaceTemperature, temperaturePoints, withAtmosphereShares } from './habitability'
 
 export const EARTH_SURFACE_AREA = 511187128
 // Water vapour condenses at this many atm a year and evaporates at this many; a hydro extent of 1 % is 1/40 atm of vapour.
@@ -18,6 +18,15 @@ const WATER_SHARE_MARGIN = 1e-6
 const GAS_AESTUSIUM = 20
 const GAS_FRIGUSIUM = 22
 const GAS_NITROGEN = 7
+
+// The two levers that raise an eccentric body's temperature dampening (`SystemBody.method_1`: 0.1 for each atm of pressure up to 0.5, 0.003 for each percent of surface water up to 0.3, both times a factor that falls with the length of the year), which a plan pulls only where the greenhouse and anti-greenhouse gases cannot bring both extremes into the species' range: more water on the surface, more pressure in the air. `NO_LEVER` is a plan that pulls none; a lever is `{ hydroExt, pressure }`, the least surface water in percent and the least pressure in atm the plan holds (0 for no floor).
+export const LEVER = Object.freeze({ WATER: 'water', PRESSURE: 'pressure' })
+const NO_LEVER = Object.freeze({ hydroExt: 0, pressure: 0 })
+// The pressure term of the dampening stops growing at 5 atm, so more air gains nothing; the lever searches in this many equal rungs from what the body has to what the lever can reach.
+const DAMPENING_PRESSURE = 5
+const LEVER_RUNGS = 8
+// How near the solver's temperature must come to the aim for the aim to be attained, in kelvin; the solver stops at a ratio within 1e-4, so an attained mean is within a few hundredths of a kelvin.
+const ATTAINED = 0.1
 
 // How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists. `color` is a tone (`toneColor` in appearance.js).
 export const OUTCOMES = {
@@ -101,7 +110,7 @@ export const hydrosphereState = (temperature, pressure) => {
 }
 
 // An oxygen breather aims for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and 75 % (above 75 % the body holds fewer people), ice anywhere. Any other breather pays for liquid water by its extent (sulphur dioxide for ice as well) and never for water it lacks, so a plan for one keeps the extent as saved unless `drain` is set, when it aims for none: the game's terraformer, set to remove water vapour, keeps removing it until the surface holds no water (`Population.ProcessTerraforming`) and the oceans evaporate to refill the air (`Game.ProcessWaterVapourEvaporation`).
-const targetHydroExtent = (current, hydrosphere, species, drain) => {
+const plainHydroExtent = (current, hydrosphere, species, drain) => {
   if (species.BreatheID !== GAS.OXYGEN) {
     return drain ? 0 : current
   }
@@ -123,6 +132,13 @@ const targetHydroExtent = (current, hydrosphere, species, drain) => {
   }
 
   return Math.max(current, 20)
+}
+
+// The surface water a plan aims for: what it would hold anyway, or the lever's floor where that is more and nothing is drained.
+const targetHydroExtent = (current, hydrosphere, species, drain, lever) => {
+  const plain = plainHydroExtent(current, hydrosphere, species, drain)
+
+  return !drain && lever.hydroExt > plain ? lever.hydroExt : plain
 }
 
 // Vapour in balance with the water on the surface; only liquid water keeps any in the air.
@@ -231,7 +247,7 @@ const multipliers = (total, greenhouse, anti, dust) => ({
 
 // Solves the atmosphere for one albedo. Returns null when the species can't hold it (too much pressure).
 const solveAtmosphere = (body, species, albedo, goal, keepNeutralGas) => {
-  const { summary, targetBreathable, targetMean, sideNeutral, sideGreenhouse, sideAnti, dust, waterShare, ownGreenhouse, ownAnti, hold, drain } = goal
+  const { summary, targetBreathable, targetMean, sideNeutral, sideGreenhouse, sideAnti, dust, waterShare, ownGreenhouse, ownAnti, hold, drain, lever } = goal
   const baseReference = Math.max(body.BaseTemp * albedo, 1)
 
   if (!Number.isFinite(baseReference) || baseReference <= 0) {
@@ -268,7 +284,7 @@ const solveAtmosphere = (body, species, albedo, goal, keepNeutralGas) => {
 
   // The neutral gas has to be enough to keep the breathing gas under 30 % and the whole under the species' pressure limit.
   const neutralRange = (fixed) => {
-    const minimum = Math.max(sideNeutral, targetBreathable > 0 ? targetBreathable / 0.3 - fixed : sideNeutral)
+    const minimum = Math.max(sideNeutral, targetBreathable > 0 ? targetBreathable / 0.3 - fixed : sideNeutral, lever.pressure - fixed)
     const maximum = Math.max(sideNeutral, species.MaximumPressure - fixed)
 
     return { minimum, maximum }
@@ -289,7 +305,7 @@ const solveAtmosphere = (body, species, albedo, goal, keepNeutralGas) => {
     ratio = ratioOf(total, greenhouse, anti)
     temperature = ratio * baseReference
     hydrosphere = hydrosphereState(temperature, total)
-    extent = targetHydroExtent(body.HydroExt, hydrosphere, species, drain)
+    extent = targetHydroExtent(body.HydroExt, hydrosphere, species, drain, lever)
     water = Math.min(Math.max(equilibriumVapour(hydrosphere, extent, total), 0), species.MaximumPressure, waterCeiling(total - previousWater))
 
     const error = ratio - targetRatio
@@ -361,7 +377,7 @@ const solveAtmosphere = (body, species, albedo, goal, keepNeutralGas) => {
   ratio = ratioOf(total, greenhouse, anti)
   temperature = ratio * baseReference
   hydrosphere = hydrosphereState(temperature, total)
-  extent = targetHydroExtent(body.HydroExt, hydrosphere, species, drain)
+  extent = targetHydroExtent(body.HydroExt, hydrosphere, species, drain, lever)
 
   // Reaching a wetter target means more vapour than the equilibrium: the excess condenses onto the surface.
   const equilibrium = equilibriumVapour(hydrosphere, extent, total)
@@ -372,7 +388,10 @@ const solveAtmosphere = (body, species, albedo, goal, keepNeutralGas) => {
     water = Math.min(wanted, waterCeiling(total - water))
   }
 
-  return { water, greenhouse, anti, neutral, total, temperature, hydrosphere, extent, albedo }
+  // Whether the vapour a wetter target needs is in the air: a surface that is to gain water only gains it from vapour that fits under the pressure limit and the vapour limit of the breather.
+  const supplied = !(increase > TOLERANCE) || water >= wanted - TOLERANCE
+
+  return { water, greenhouse, anti, neutral, total, temperature, hydrosphere, extent, albedo, supplied }
 }
 
 // The water step ends when the vapour is in the air; the surface then adjusts by itself, slowly. A drained surface adjusts inside the step instead: the terraformer removes the water the surface gives up, so nothing is left to settle.
@@ -399,7 +418,7 @@ const hydrosphereSettling = (body, solution, drained) => {
 }
 
 // The plan for one target mean, with the existing pressure, gas-multiplier and breathing limits. `hold` keeps the climate the air gives (the greenhouse and anti-greenhouse gases are left as they are) and `drain` takes the water off the surface, which the game's terraformer does by removing water vapour until the surface is dry. Each trial solves its own atmosphere and albedo before pricing its swing; no ratio extrapolates an extreme from another trial.
-const planFor = (body, species, gasInfo, targetMean, hold, drain) => {
+const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEVER) => {
   const area = 4 * Math.PI * body.Radius ** 2
   const areaRatio = area / EARTH_SURFACE_AREA
 
@@ -426,7 +445,7 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain) => {
   const own = summary.breathableGas || gasInfo(species.BreatheID)
   const ownGreenhouse = own && own.GHGas ? targetBreathable : 0
   const ownAnti = own && !own.GHGas && own.AntiGHGas ? targetBreathable : 0
-  const goal = { summary, targetBreathable, targetMean, sideNeutral, sideGreenhouse, sideAnti, waterShare, ownGreenhouse, ownAnti, hold, drain, dust: Math.max(Number.isFinite(body.DustLevel) ? body.DustLevel : 0, 0) / 20000 }
+  const goal = { summary, targetBreathable, targetMean, sideNeutral, sideGreenhouse, sideAnti, waterShare, ownGreenhouse, ownAnti, hold, drain, lever, dust: Math.max(Number.isFinite(body.DustLevel) ? body.DustLevel : 0, 0) / 20000 }
   let albedo = body.Albedo
   const solve = (value, keep) => solveAtmosphere(body, species, value, goal, keep)
   let keep = true
@@ -467,15 +486,24 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain) => {
   // The surface water a drain takes off, in percent of the surface: the terraformer removes it as vapour, 1 atm for every 40 %.
   const drained = drain ? Math.max(body.HydroExt - solution.extent, 0) : 0
   const settling = hydrosphereSettling(body, solution, drained > 0)
-  // `set` is the figure to type into the game for the named gas: the role's total less the side gases it keeps. `drained` is the surface water, in percent, the step also takes off.
-  const step = (key, label, gasId, from, to, set = to, off = 0) => ({ key, label, gasId, from, to, set, drained: off, atm: Math.abs(to - from) + off / HYDRO_PER_ATM, work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio })
+  // The levers this plan pulls: the surface water raised over what it would hold anyway, and the pressure held at the floor the lever sets (the neutral gas that fills the air up to it).
+  const raisedWater = !drain && lever.hydroExt > 0 && solution.extent > plainHydroExtent(body.HydroExt, solution.hydrosphere, species, drain) + TOLERANCE
+  const raisedPressure = lever.pressure > 0 && solution.total <= lever.pressure + TOLERANCE
+
+  // Water that is to gain extent condenses from vapour in the air: where that vapour does not fit, the plan cannot raise the surface and is no plan.
+  if (raisedWater && !solution.supplied) {
+    return null
+  }
+
+  // `set` is the figure to type into the game for the named gas: the role's total less the side gases it keeps. `drained` is the surface water, in percent, the step also takes off. `lever` names the dampening lever the step pulls, or null.
+  const step = (key, label, gasId, from, to, set = to, off = 0, pulled = null) => ({ key, label, gasId, from, to, set, drained: off, lever: pulled, atm: Math.abs(to - from) + off / HYDRO_PER_ATM, work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio })
   const operations = [
     ...summary.toxics.map((gas) => step('toxic', gas.AtmosGasName, gas.AtmosGasID, gas.GasAtm, 0)),
-    step('water', 'Water Vapour', GAS.WATER_VAPOUR, summary.waterVapour, solution.water, solution.water, drained),
+    step('water', 'Water Vapour', GAS.WATER_VAPOUR, summary.waterVapour, solution.water, solution.water, drained, raisedWater ? LEVER.WATER : null),
     step('breathable', species.BreatheName, species.BreatheID, summary.breathable, targetBreathable),
     step('greenhouse', greenhouseGas.name, greenhouseGas.id, summary.greenhouse, solution.greenhouse, solution.greenhouse - sideGreenhouse),
     step('antiGreenhouse', antiGas.name, antiGas.id, summary.antiGreenhouse, solution.anti, solution.anti - sideAnti),
-    step('neutral', neutralGas.name, neutralGas.id, summary.neutral, solution.neutral, solution.neutral - sideNeutral),
+    step('neutral', neutralGas.name, neutralGas.id, summary.neutral, solution.neutral, solution.neutral - sideNeutral, 0, raisedPressure ? LEVER.PRESSURE : null),
   ].filter((candidate) => candidate.work >= TOLERANCE * areaRatio)
   const steps = sequenceDrain(body, operations, gasInfo)
 
@@ -506,6 +534,10 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain) => {
     from: { pressure: summary.total, breathable: summary.breathable, albedo: body.OriginalAlbedo ?? body.Albedo },
     gases: { greenhouse: greenhouseGas, anti: antiGas, neutral: neutralGas, greenhouseSide: summary.greenhouseSide, antiSide: summary.antiSide, neutralSide: summary.neutralSide, breathable: summary.breathableGas, waterVapour: summary.waterVapourGas },
     partial: false,
+    // The levers that raise the dampening this plan pulls, null when it pulls none.
+    dampening: raisedWater || raisedPressure ? { levers: [...(raisedWater ? [LEVER.WATER] : []), ...(raisedPressure ? [LEVER.PRESSURE] : [])] } : null,
+    // Whether the solver reached the aimed mean; a body whose greenhouse or anti-greenhouse gas is at its limit does not.
+    attained: Math.abs(solution.temperature - targetMean) < ATTAINED,
   }
 
   if (drained > 0) {
@@ -541,32 +573,40 @@ const leavesDrainableWater = (body, species, plan, gasInfo) => {
   return Object.values(costPoints(end, species, true)).some(({ factors }) => factors.hydrosphere > 0)
 }
 
-// One trial of the target search: the plan for a target mean and, where it leaves a breather other than oxygen paying for water a drain can take off, the plan that drains it, unless that one leaves the species' range and the first does not.
-const planAtTemperature = (body, species, gasInfo, targetMean, hold = false) => {
-  const plan = planFor(body, species, gasInfo, targetMean, hold, false)
+// One trial of the target search: the plan for a target mean and, where it leaves a breather other than oxygen paying for water a drain can take off, the plan that drains it, unless that one leaves the species' range and the first does not. A plan that raises the surface water (`lever.hydroExt`) drains nothing.
+const planAtTemperature = (body, species, gasInfo, targetMean, hold = false, lever = NO_LEVER) => {
+  const plan = planFor(body, species, gasInfo, targetMean, hold, false, lever)
 
   if (!plan || !leavesDrainableWater(body, species, plan, gasInfo)) {
     return plan
   }
 
-  const draining = planFor(body, species, gasInfo, targetMean, hold, true)
+  // A plan that raises the surface water holds the water the lever sets: it drains none of it.
+  if (lever.hydroExt > 0) {
+    return plan
+  }
+
+  const draining = planFor(body, species, gasInfo, targetMean, hold, true, lever)
 
   return draining && (!draining.partial || plan.partial) ? draining : plan
 }
 
-// The plan for one body and species, or null only when no candidate solves an atmosphere. Try the clamped ideal, then the 0.25 K lattice from the minimum plus the exact maximum, nearest to the ideal first (lower on ties), without duplicates or response-based pruning. At most ceil((maximum - minimum) / 0.25) + 2 trials, with the existing bounded inner solver.
+// The plan for one body and species with `reached` whether the atmosphere solver attained the mean of some aim, or null as `plan` only when no candidate solves an atmosphere. Try the clamped ideal, then the 0.25 K lattice from the minimum plus the exact maximum, nearest to the ideal first (lower on ties), without duplicates or response-based pruning. At most ceil((maximum - minimum) / 0.25) + 2 trials, with the existing bounded inner solver.
 // Every sampled feasible witness and every feasible aim interval strictly wider than 0.25 K inside the species' range is found. Narrower islands can be missed; this is neither a continuum nor an alternative-atmosphere guarantee. Each trial prices its own three temperatures without slack. The first full plan that clears the non-oxygen water cost wins; otherwise the first full wet plan, then the solved ideal or first solved partial plan, is retained. Drainage searches insertion points among that trial's gas operations, not extra temporary atmospheres outside the sampled aims.
-export const planTerraforming = (body, species, gasInfo) => {
+const searchAims = (body, species, gasInfo, lever) => {
   const minimum = species.MinimumTemperature
   const maximum = species.MaximumTemperature
   const ideal = clamp(species.IdealTemperature, minimum, maximum)
-  const initial = planAtTemperature(body, species, gasInfo, ideal)
+  const initial = planAtTemperature(body, species, gasInfo, ideal, false, lever)
   let fallback = initial
   let full = initial && !initial.partial ? initial : null
+  // A mean is attained where the solver reaches it: with the greenhouse or anti-greenhouse gas at its limit it falls short, and no more dampening of the swing around it can bring that body into the range.
+  const attains = (plan) => !!plan && plan.attained
+  let reached = attains(initial)
   const clearsWater = (plan) => !leavesDrainableWater(body, species, plan, gasInfo)
 
   if (initial && !initial.partial && clearsWater(initial)) {
-    return initial
+    return { plan: initial, reached }
   }
 
   // Integer indices generate L + k*h for k*h < W, followed by exact U. The two pointers merge the lower and upper candidates by distance without allocating or sorting a candidate list.
@@ -583,17 +623,89 @@ export const planTerraforming = (body, species, gasInfo) => {
       continue
     }
 
-    const trial = planAtTemperature(body, species, gasInfo, aim)
+    const trial = planAtTemperature(body, species, gasInfo, aim, false, lever)
 
     if (trial && !trial.partial && clearsWater(trial)) {
-      return trial
+      return { plan: trial, reached: true }
     }
 
+    reached = reached || attains(trial)
     fallback = fallback || trial
     full = full || (trial && !trial.partial ? trial : null)
   }
 
-  return full || fallback
+  return { plan: full || fallback, reached }
+}
+
+// The rungs of each lever ladder: the surface water from what the body holds to the whole surface, the pressure from what it holds to what the species bears (the dampening's pressure term stops at 5 atm), and both together; each ladder in `LEVER_RUNGS` equal steps, weakest first. Empty for a body whose orbit is circular (no seasons to damp) and for a lever that has no room left.
+const leverLadders = (body, species) => {
+  const { distance, eccentricity } = orbitOf(body)
+
+  if (!(distance > 0 && eccentricity > 0) || !Number.isFinite(body.HydroExt) || !Number.isFinite(body.AtmosPress)) {
+    return []
+  }
+
+  const rungs = (from, to) => (to > from ? Array.from({ length: LEVER_RUNGS }, (_, index) => from + (to - from) * (index + 1) / LEVER_RUNGS) : [])
+  const waters = rungs(Math.max(body.HydroExt, 0), 100)
+  const airs = rungs(Math.max(body.AtmosPress, 0), Math.min(DAMPENING_PRESSURE, species.MaximumPressure))
+
+  return [
+    waters.map((hydroExt) => ({ hydroExt, pressure: 0 })),
+    airs.map((pressure) => ({ hydroExt: 0, pressure })),
+    waters.length && airs.length ? waters.map((hydroExt, index) => ({ hydroExt, pressure: airs[index] })) : [],
+  ].filter((ladder) => ladder.length)
+}
+
+// The colony cost a plan leaves, worst of the three priced points before the race's skill; Infinity where no colony can stand on the body.
+const leftCost = (body, species, plan, gasInfo) => {
+  const cost = colonyCost(terraformedBody(body, species, plan, gasInfo), species, 1, true)
+
+  return cost.colonisable ? cost.raw : Infinity
+}
+
+// The weakest rung of a ladder with a plan that `fits`, taking the more dampening a rung pulls, the more of the whole orbit's swing a plan can hold in the species' range (a rung that fits is not followed by one that does not): the top rung first, which ends a ladder that cannot fit at all, then a bisection down; at most 1 + log2(LEVER_RUNGS) searches of the aims.
+const weakestRung = (ladder, fits) => {
+  let found = fits(ladder[ladder.length - 1])
+
+  if (!found) {
+    return null
+  }
+
+  let low = 0
+  let high = ladder.length - 1
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    const plan = fits(ladder[middle])
+
+    if (plan) {
+      found = plan
+      high = middle
+    } else {
+      low = middle + 1
+    }
+  }
+
+  return found
+}
+
+// Where no aim of the greenhouse and anti-greenhouse gases fits both extremes in the species' range but some aim's mean is attained, the body's own dampening can be raised: more surface water, more pressure, or both. Of the three ladders the plan that moves the least work wins; it must fit the whole orbit, need only gases the table has figures of and leave a lower colony cost than the plan with no lever (a lever the species pays for, such as the liquid water of a breather other than oxygen, is no gain when it costs more than the temperature it saves). Null when no rung does.
+const raisedDampening = (body, species, gasInfo, partial) => {
+  const baseline = leftCost(body, species, partial, gasInfo)
+  const fits = (lever) => {
+    const { plan } = searchAims(body, species, gasInfo, lever)
+
+    return plan && !plan.partial && plan.dampening && !planGasGaps(species, plan, gasInfo).length && leftCost(body, species, plan, gasInfo) < baseline ? plan : null
+  }
+
+  return leverLadders(body, species).map((ladder) => weakestRung(ladder, fits)).reduce((best, plan) => (plan && (!best || plan.work < best.work) ? plan : best), null)
+}
+
+// The plan for one body and species, or null only when no candidate solves an atmosphere. The search of the aims, and where it leaves an extreme outside the species' range although some aim's mean is attained, the cheapest plan that also pulls a dampening lever.
+export const planTerraforming = (body, species, gasInfo) => {
+  const { plan, reached } = searchAims(body, species, gasInfo, NO_LEVER)
+
+  return plan && plan.partial && reached ? raisedDampening(body, species, gasInfo, plan) || plan : plan
 }
 
 // The gases a plan ends the atmosphere with, as [id, atm, the body's own row of the gas or undefined]; the gases it removes are not in it.

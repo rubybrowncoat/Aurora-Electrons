@@ -82,7 +82,7 @@
               <v-card class="pa-4 planner-menu" :style="sectionColors">
                 <div class="subtitle-2 mb-1">How targets are ranked</div>
                 <div class="caption text--secondary mb-3">
-                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before the race's colonisation tech, so the scale means the same for every race), years of terraforming, and AU from the nearest colony. A plan that drains surface water counts its minimum years, the terraformers' time, so its discount is the most that plan can earn. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
+                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before the race's colonisation tech, so the scale means the same for every race), years of terraforming, and AU from the nearest colony. A plan that drains surface water counts its minimum years, the terraformers' time, so its discount is the most that plan can earn. A plan that raises the pressure or the surface water to damp the seasons of an eccentric orbit counts that work, and its years, like any other step. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
                 </div>
                 <v-row dense>
                   <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
