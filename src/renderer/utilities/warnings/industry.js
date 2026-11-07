@@ -2,6 +2,7 @@ import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { MINERALS, projectShortages } from '../minerals'
 import { capacityKind, typesOf } from '../production-types'
+import { GFCC_INSTALLATION } from '../production'
 import { QUARTER, amount, bandOf, bandWords, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, listWords, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'industry', title: 'Industry', summary: 'Review idle factory capacity, stalled projects and unused shipyards.' }
@@ -29,15 +30,15 @@ const FACTORY_TYPE = 'the type of an installation of the colony'
 const FACTORY_AMOUNT = 'the amount of a factory of the colony'
 const PROJECT_SHARE = 'the share, queue state or type of an industrial project of the colony'
 
-// A colony with some capacity that its projects of one kind leave unshared, more than `minimum` percent of it. `value` names the installation value that makes the capacity, `alias` the total of those installations, and `types` the project types sharing it. `FreePercentage` is null while a project's share, queue state or type is not stored. `Positive` counts the installations with that value whose amount is known to be above 0, `TypeGaps` those whose type has none stored and `AmountGaps` those with that value whose amount is not stored. The colony has capacity when `Positive` proves it, has none when it has no such installation (or every one's amount is 0), and its capacity is not known while no positive amount is proved and a type or an amount is not stored; `Verdict` is null while the colony's capacity or its free share is not known.
+// A colony with some capacity that its projects of one kind leave unshared, more than `minimum` percent of it. `value` names the installation value that makes the capacity, `alias` the total of those installations, and `types` the project types sharing it. `FreePercentage` is null while a project's share, queue state or type is not stored. The category total is the weighted installation amount truncated to a whole productive count, `TypeGaps` those whose type has none stored and `AmountGaps` those with that value whose amount is not stored. The colony has capacity when the known whole category count proves it, has none when it has no such installation (or every one's amount is 0), and its capacity is not known while no positive amount is proved and a type or an amount is not stored; `Verdict` is null while the colony's capacity or its free share is not known.
 const freeCapacityQuery = ({ GameID, RaceID }, { value, alias, types, minimum }) => {
   const project = `(FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType ${types})`
 
-  return `select VIR_Free.*, ((case when VIR_Free.Positive > 0 then 1 when VIR_Free.TypeGaps > 0 or VIR_Free.AmountGaps > 0 then null else 0 end) and VIR_Free.FreePercentage > ${minimum}) as Verdict from (select VIR_Capacity.*, case when sum(case when FCT_IndustrialProjects.ProjectID is null then 0 when ${project} is null then 1 when ${project} = 1 and FCT_IndustrialProjects.Percentage is null then 1 else 0 end) > 0 then null else 100 - COALESCE(SUM(case when ${project} then FCT_IndustrialProjects.Percentage else 0 end), 0) end as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(case when DIM_PlanetaryInstallation.${value} > 0 then FCT_PopulationInstallations.Amount else 0 end) as ${alias}, sum(case when DIM_PlanetaryInstallation.${value} > 0 and FCT_PopulationInstallations.Amount > 0 then 1 else 0 end) as Positive, sum(case when DIM_PlanetaryInstallation.${value} is null then 1 else 0 end) as TypeGaps, sum(case when DIM_PlanetaryInstallation.${value} > 0 and FCT_PopulationInstallations.Amount is null then 1 else 0 end) as AmountGaps, ${COLONY_COLUMNS} from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (DIM_PlanetaryInstallation.${value} > 0 or DIM_PlanetaryInstallation.${value} is null) GROUP BY FCT_Population.PopulationID) as VIR_Capacity left join FCT_IndustrialProjects on VIR_Capacity.PopulationID = FCT_IndustrialProjects.PopulationID group by VIR_Capacity.PopulationID) as VIR_Free where Verdict is not 0 order by VIR_Free.PopulationID`
+  return `select VIR_Free.*, ((case when VIR_Free.${alias} > 0 then 1 when VIR_Free.TypeGaps > 0 or VIR_Free.AmountGaps > 0 then null else 0 end) and VIR_Free.FreePercentage > ${minimum}) as Verdict from (select VIR_Capacity.*, case when sum(case when FCT_IndustrialProjects.ProjectID is null then 0 when ${project} is null then 1 when ${project} = 1 and FCT_IndustrialProjects.Percentage is null then 1 else 0 end) > 0 then null else 100 - COALESCE(SUM(case when ${project} then FCT_IndustrialProjects.Percentage else 0 end), 0) end as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, cast(coalesce(sum(case when DIM_PlanetaryInstallation.${value} > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value} else 0 end), 0) as integer) as ${alias}, sum(case when DIM_PlanetaryInstallation.${value} is null then 1 else 0 end) as TypeGaps, sum(case when DIM_PlanetaryInstallation.${value} > 0 and FCT_PopulationInstallations.Amount is null then 1 else 0 end) as AmountGaps, ${COLONY_COLUMNS} from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (DIM_PlanetaryInstallation.${value} > 0 or DIM_PlanetaryInstallation.${value} is null) GROUP BY FCT_Population.PopulationID) as VIR_Capacity left join FCT_IndustrialProjects on VIR_Capacity.PopulationID = FCT_IndustrialProjects.PopulationID group by VIR_Capacity.PopulationID) as VIR_Free where Verdict is not 0 order by VIR_Free.PopulationID`
 }
 
 const freeCapacityRows = (ctx, populations, alias) => verdictRows(ctx, populations, {
-  missing: (population) => [...(population.Positive > 0 ? [] : [...(population.TypeGaps > 0 ? [FACTORY_TYPE] : []), ...(population.AmountGaps > 0 ? [FACTORY_AMOUNT] : [])]), ...(population.FreePercentage === null ? [PROJECT_SHARE] : [])],
+  missing: (population) => [...(population[alias] > 0 ? [] : [...(population.TypeGaps > 0 ? [FACTORY_TYPE] : []), ...(population.AmountGaps > 0 ? [FACTORY_AMOUNT] : [])]), ...(population.FreePercentage === null ? [PROJECT_SHARE] : [])],
   build: (population) => ({
     id: `colony:${population.PopulationID}`,
     cells: {
@@ -58,7 +59,7 @@ const freeCapacityColumns = (installations) => [
 
 const FREE_CAPACITY_STRUCTURE = ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation capacity values', 'FCT_IndustrialProjects.Percentage, Queue, ProductionType']
 
-const freeCapacityNote = (kind) => `A colony with ${kind} installations whose projects of that kind (not queued) take under 100% of its capacity, by the stored shares. Whether the shares add up to the capacity the game uses is not checked against the game. A colony counts as having ${kind} installations when an amount above 0 is stored for one; a colony with only installations whose amount is 0, or with none, has none. A colony with no stored amount above 0 and an installation's type or amount not stored, or with a project's share, queue state or type not stored, is listed apart, as not evaluated; the installations total shows a dash while a type or amount is missing.`
+const freeCapacityNote = (kind) => `A colony whose weighted ${kind} installation total, truncated to a whole productive count, is positive and whose nonqueued projects hold less than 100% by their stored shares. Fractional inventory below a whole category unit produces no capacity. The displayed factory count is the effective category count, not raw installed inventory. A missing type, amount or project share is reported as not evaluated unless known productive installations already prove capacity exists.`
 
 const projectKind = (project) => (project.ProductionType === null || project.ProductionType === undefined ? null : PRODUCTION_KINDS[capacityKind(project.ProductionType)])
 
@@ -108,7 +109,7 @@ export const checks = checksOf([
     rule: 'A colony has construction factories while the industrial projects it is building (not queued) take under 100% of its construction capacity.',
     evidence: {
       verification: 'estimated',
-      versions: ['2.7.x'],
+      versions: ['3.2.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('construction'),
       assumptions: ['A free share of more than 0.00006% of the capacity counts as free; smaller remainders are rounding.'],
@@ -130,7 +131,7 @@ export const checks = checksOf([
     rule: 'A colony has ordnance factories while the ordnance projects it is building (not queued) take under 100% of its ordnance capacity.',
     evidence: {
       verification: 'estimated',
-      versions: ['2.7.x'],
+      versions: ['3.2.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('ordnance'),
     },
@@ -151,7 +152,7 @@ export const checks = checksOf([
     rule: 'A colony has light naval factories while the light naval projects it is building (not queued) take under 100% of its light naval capacity.',
     evidence: {
       verification: 'estimated',
-      versions: ['2.7.x'],
+      versions: ['3.2.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('light naval'),
     },
@@ -169,18 +170,18 @@ export const checks = checksOf([
     material: 'the unallocated share crossing 25% of the capacity',
     captured: [bandWords('unallocated share under 25% of the capacity', 'unallocated share at 25% or more of the capacity')],
     title: (count) => `${amount(count, 'population')} with idle ground training capacity`,
-    rule: 'A colony with people on it has ground force construction complexes staffed at its efficiency while the ground unit training tasks under way (not queued) take under 100% of that capacity, so the rest trains nothing; a colony with no training task at all counts as fully idle.',
+    rule: 'A colony with people has a positive whole ground force construction complex count, scaled by efficiency, while its nonqueued training tasks leave capacity unallocated.',
     evidence: {
       verification: 'estimated',
-      versions: ['2.7.x'],
-      structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.GroundTrainingValue', 'FCT_Population.Efficiency, Population', 'FCT_GroundUnitTraining.TaskPercentage'],
-      note: 'The complexes are staffed at the colony\'s efficiency and the tasks\' stored shares are summed (to at most 100%); that this is how the game allocates the capacity is not checked against the game. A colony with a complex\'s amount or type, the efficiency, the population or a task\'s share not stored is listed apart, as not evaluated.',
-      assumptions: ['The complexes work at the colony\'s efficiency (at most 1), and a remainder of more than 0.005 complexes is idle.'],
+      versions: ['3.2.x'],
+      structure: ['FCT_PopulationInstallations.Amount', 'FCT_Population.Efficiency, Population', 'FCT_GroundUnitTraining.TaskPercentage'],
+      note: 'Only ground force construction complexes (installation type 17) count. Their installed amount is floored before multiplying by efficiency and the unallocated share. Raw fractional inventory is shown separately and does not imply productive capacity. Missing count, efficiency, population or task share leaves the condition unevaluated.',
+      assumptions: ['The warning uses efficiency-scaled complex equivalents, not a full build-point rate; a remainder above 0.005 equivalents is idle, and a colony with no people is excluded.'],
     },
     columns: [
       { key: 'colony', text: 'Colony' },
-      { key: 'installed', text: 'GFCCs installed', align: 'end' },
-      { key: 'staffed', text: 'GFCCs staffed', align: 'end' },
+      { key: 'installed', text: 'GFCCs installed (raw)', align: 'end' },
+      { key: 'staffed', text: 'GFCC equivalents', align: 'end' },
       { key: 'allocated', text: 'Allocated', align: 'end' },
       { key: 'idle', text: 'GFCCs unallocated', align: 'end' },
     ],
@@ -192,13 +193,13 @@ export const checks = checksOf([
       const ALLOCATED = 'the share of a ground unit training task'
       const unallocated = '(VIR_Training.Staffed * (100 - min(100, VIR_Training.Allocated)) / 100)'
 
-      const populations = await rowsOf(ctx, `select VIR_Training.*, ${unallocated} as Unallocated, ((case when VIR_Training.Types > 0 then 1 when VIR_Training.TypeGaps > 0 then null else 0 end) and VIR_Training.Population > 0 and ${unallocated} > 0.005) as Verdict from (select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, VIR_Complexes.Installed, VIR_Complexes.Types, VIR_Complexes.TypeGaps, VIR_Complexes.Installed * min(1, FCT_Population.Efficiency) as Staffed, (case when VIR_Tasks.Gaps > 0 then null else coalesce(VIR_Tasks.Allocated, 0) end) as Allocated, coalesce(VIR_Tasks.Tasks, 0) as Tasks, coalesce(VIR_Queue.Queued, 0) as Queued, ${COLONY_COLUMNS} from FCT_Population inner join (select VIR_Types.PopID, case when sum(case when DIM_PlanetaryInstallation.GroundTrainingValue > 0 and VIR_Types.Amount is null then 1 else 0 end) > 0 then null else SUM(case when DIM_PlanetaryInstallation.GroundTrainingValue > 0 then VIR_Types.Amount * DIM_PlanetaryInstallation.GroundTrainingValue else 0 end) end as Installed, sum(case when DIM_PlanetaryInstallation.GroundTrainingValue > 0 then 1 else 0 end) as Types, sum(case when DIM_PlanetaryInstallation.GroundTrainingValue is null then 1 else 0 end) as TypeGaps from (select FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.PlanetaryInstallationID, MAX(FCT_PopulationInstallations.Amount) as Amount from FCT_PopulationInstallations where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.PlanetaryInstallationID) as VIR_Types left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = VIR_Types.PlanetaryInstallationID where (DIM_PlanetaryInstallation.GroundTrainingValue > 0 or DIM_PlanetaryInstallation.GroundTrainingValue is null) group by VIR_Types.PopID) as VIR_Complexes on VIR_Complexes.PopID = FCT_Population.PopulationID left join (select FCT_GroundUnitTraining.PopulationID, SUM(FCT_GroundUnitTraining.TaskPercentage) as Allocated, sum(case when FCT_GroundUnitTraining.TaskPercentage is null then 1 else 0 end) as Gaps, COUNT(*) as Tasks from FCT_GroundUnitTraining where FCT_GroundUnitTraining.GameID = ${GameID} and FCT_GroundUnitTraining.RaceID = ${RaceID} group by FCT_GroundUnitTraining.PopulationID) as VIR_Tasks on VIR_Tasks.PopulationID = FCT_Population.PopulationID left join (select FCT_GroundUnitTrainingQueue.PopulationID, COUNT(*) as Queued from FCT_GroundUnitTrainingQueue where FCT_GroundUnitTrainingQueue.GameID = ${GameID} group by FCT_GroundUnitTrainingQueue.PopulationID) as VIR_Queue on VIR_Queue.PopulationID = FCT_Population.PopulationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0) is not 0) as VIR_Training where Verdict is not 0 order by Unallocated desc, VIR_Training.PopName`)
+      const populations = await rowsOf(ctx, `select VIR_Training.*, ${unallocated} as Unallocated, ((case when VIR_Training.Types > 0 then 1 when VIR_Training.TypeGaps > 0 then null else 0 end) and VIR_Training.Population > 0 and ${unallocated} > 0.005) as Verdict from (select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, VIR_Complexes.Installed, VIR_Complexes.Types, VIR_Complexes.TypeGaps, cast(VIR_Complexes.Installed as integer) * FCT_Population.Efficiency as Staffed, (case when VIR_Tasks.Gaps > 0 then null else coalesce(VIR_Tasks.Allocated, 0) end) as Allocated, coalesce(VIR_Tasks.Tasks, 0) as Tasks, coalesce(VIR_Queue.Queued, 0) as Queued, ${COLONY_COLUMNS} from FCT_Population inner join (select VIR_Types.PopID, case when sum(case when VIR_Types.PlanetaryInstallationID is null or (VIR_Types.PlanetaryInstallationID = ${GFCC_INSTALLATION} and VIR_Types.Amount is null) then 1 else 0 end) > 0 then null else SUM(case when VIR_Types.PlanetaryInstallationID = ${GFCC_INSTALLATION} then VIR_Types.Amount else 0 end) end as Installed, sum(case when VIR_Types.PlanetaryInstallationID = ${GFCC_INSTALLATION} then 1 else 0 end) as Types, sum(case when VIR_Types.PlanetaryInstallationID is null then 1 else 0 end) as TypeGaps from (select FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.PlanetaryInstallationID, MAX(FCT_PopulationInstallations.Amount) as Amount from FCT_PopulationInstallations where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.PlanetaryInstallationID) as VIR_Types where (VIR_Types.PlanetaryInstallationID = ${GFCC_INSTALLATION} or VIR_Types.PlanetaryInstallationID is null) group by VIR_Types.PopID) as VIR_Complexes on VIR_Complexes.PopID = FCT_Population.PopulationID left join (select FCT_GroundUnitTraining.PopulationID, SUM(FCT_GroundUnitTraining.TaskPercentage) as Allocated, sum(case when FCT_GroundUnitTraining.TaskPercentage is null then 1 else 0 end) as Gaps, COUNT(*) as Tasks from FCT_GroundUnitTraining where FCT_GroundUnitTraining.GameID = ${GameID} and FCT_GroundUnitTraining.RaceID = ${RaceID} group by FCT_GroundUnitTraining.PopulationID) as VIR_Tasks on VIR_Tasks.PopulationID = FCT_Population.PopulationID left join (select FCT_GroundUnitTrainingQueue.PopulationID, COUNT(*) as Queued from FCT_GroundUnitTrainingQueue where FCT_GroundUnitTrainingQueue.GameID = ${GameID} group by FCT_GroundUnitTrainingQueue.PopulationID) as VIR_Queue on VIR_Queue.PopulationID = FCT_Population.PopulationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0) is not 0) as VIR_Training where Verdict is not 0 order by Unallocated desc, VIR_Training.PopName`)
 
       return verdictRows(ctx, populations, {
         missing: (population) => [
-          ...(population.Types > 0 || !(population.TypeGaps > 0) ? [] : ['the type of an installation of the colony']),
+          ...(!(population.TypeGaps > 0) ? [] : ['the type of an installation of the colony']),
           ...lacking(population, { Population: 'the colony\'s population', Efficiency: EFFICIENCY }),
-          ...(isKnownNumber(population.Installed) ? [] : [INSTALLED]),
+          ...(isKnownNumber(population.Installed) || population.TypeGaps > 0 ? [] : [INSTALLED]),
           ...(isKnownNumber(population.Allocated) ? [] : [ALLOCATED]),
         ],
         build: (population) => {

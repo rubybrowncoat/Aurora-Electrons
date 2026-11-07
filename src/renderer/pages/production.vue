@@ -208,7 +208,7 @@
                 </template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">
-                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, light naval units and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
+                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, light naval units and ground training (whole GFCCs only), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
               </div>
             </v-card>
           </v-col>
@@ -250,7 +250,7 @@ import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { boxLineShown, boxLines, categoryOf, completionBins, componentCredit, creditLines, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, taskUseComponents, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { GFCC_INSTALLATION, boxLineShown, boxLines, categoryOf, completionBins, componentCredit, creditLines, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, taskUseComponents, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { REFIT_TASK_TYPES } from '../utilities/refits'
@@ -683,7 +683,7 @@ export default {
           finish,
           rateText: this.rateText(rate, this.bp, 'BP/yr'),
           rateNote: `${this.count(training.TaskPercentage, 1)}% of ${this.count(gfccs)} ${gfccs === 1 ? 'GFCC' : 'GFCCs'}`,
-          status: jobStatus({ paused: false, rate, stalled: { label: 'No GFCC', note: 'The colony has no ground force construction complex' } }),
+          status: jobStatus({ paused: false, rate, stalled: { label: 'No training capacity', note: 'The whole-complex count and current modifiers provide no productive ground training capacity' } }),
         })
       })
     },
@@ -1106,7 +1106,7 @@ export default {
     gfccCount(populationId) {
       const facilities = this.facilitiesByColony[populationId]
 
-      return facilities && isKnownNumber(facilities.TrainingFacilities) ? facilities.TrainingFacilities : null
+      return facilities && isKnownNumber(facilities.TrainingFacilities) ? Math.floor(facilities.TrainingFacilities) : null
     },
 
     // A job's rate with its unit, a dash while the rate is not known.
@@ -1124,8 +1124,9 @@ export default {
 
         // A colony's count is not known while any installation row lacks its amount or value, a project's or yard's while any row lacks the figure; a colony with none of them has 0.
         const installed = (value) => `(select case when sum(FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.${value} is null) > 0 then null else coalesce(sum(case when DIM_PlanetaryInstallation.${value} > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value} end), 0) end from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID)`
+        const training = `(select case when sum(FCT_PopulationInstallations.PlanetaryInstallationID is null or (FCT_PopulationInstallations.PlanetaryInstallationID = ${GFCC_INSTALLATION} and FCT_PopulationInstallations.Amount is null)) > 0 then null else coalesce(sum(case when FCT_PopulationInstallations.PlanetaryInstallationID = ${GFCC_INSTALLATION} then FCT_PopulationInstallations.Amount else 0 end), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID)`
 
-        const [rows] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, ${installed('ResearchValue')} as ResearchFacilities, (select case when count(*) = count(FCT_ResearchProject.Facilities) then coalesce(sum(FCT_ResearchProject.Facilities), 0) end from FCT_ResearchProject where FCT_ResearchProject.PopulationID = FCT_Population.PopulationID and FCT_ResearchProject.RaceID = ${this.RaceID}) as ResearchFacilitiesUsed, ${installed('GroundTrainingValue')} as TrainingFacilities, (select case when count(*) = count(FCT_Shipyard.Slipways) then coalesce(sum(FCT_Shipyard.Slipways), 0) end from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Slipways, (select case when count(*) = count(FCT_Shipyard.Slipways) then coalesce(sum(min(FCT_Shipyard.Slipways, (select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID))), 0) end from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as SlipwaysUsed, (select count(*) from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Shipyards from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, ${installed('ResearchValue')} as ResearchFacilities, (select case when count(*) = count(FCT_ResearchProject.Facilities) then coalesce(sum(FCT_ResearchProject.Facilities), 0) end from FCT_ResearchProject where FCT_ResearchProject.PopulationID = FCT_Population.PopulationID and FCT_ResearchProject.RaceID = ${this.RaceID}) as ResearchFacilitiesUsed, ${training} as TrainingFacilities, (select case when count(*) = count(FCT_Shipyard.Slipways) then coalesce(sum(FCT_Shipyard.Slipways), 0) end from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Slipways, (select case when count(*) = count(FCT_Shipyard.Slipways) then coalesce(sum(min(FCT_Shipyard.Slipways, (select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID))), 0) end from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as SlipwaysUsed, (select count(*) from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Shipyards from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return rows
       }),

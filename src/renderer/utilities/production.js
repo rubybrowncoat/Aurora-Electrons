@@ -15,6 +15,7 @@ const LINE_VERSIONS = ['3.2.x']
 const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
 const DAYS_PER_YEAR = 365
+export const GFCC_INSTALLATION = 17
 
 // Water vapour, as the game has it: condensation a year, hydrographic extent per atm, relative humidity factor.
 const CONDENSATION_PER_YEAR = 0.1
@@ -38,7 +39,7 @@ registerRule({
 
 registerRule({
   id: 'production.capacityFree',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.populationCapacity', 'production.trainingCapacity', 'FCT_IndustrialProjects.Percentage, Queue, Pause, ProductionType', 'FCT_GroundUnitTraining.TaskPercentage'],
@@ -47,11 +48,11 @@ registerRule({
 
 registerRule({
   id: 'production.trainingCapacity',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'BP/yr',
   verification: 'estimated',
-  structure: ['FCT_Race.GroundFormationConstructionRate, EconomicProdModifier', 'FCT_Species.ProductionRateModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'FCT_Commander, FCT_CommanderBonuses', 'DIM_PlanetaryInstallation.GroundTrainingValue', 'FCT_PopulationInstallations.Amount'],
-  note: 'The race\'s ground formation construction rate with the colony\'s modifiers (governor and sector Ground Unit bonus, species rate, economy, efficiency, radiation, stability and political status) times the colony\'s ground force construction complexes. The modifier is not compared with a saved build rate of a training task.',
+  structure: ['FCT_Race.GroundFormationConstructionRate, EconomicProdModifier', 'FCT_Species.ProductionRateModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_PopulationInstallations.PlanetaryInstallationID, Amount'],
+  note: 'The race\'s ground formation construction rate with the colony\'s modifiers (governor and sector Ground Unit bonus, species rate, economy, efficiency, radiation, stability and political status) times the whole ground force construction complex count (installation type 17, with its amount floored before rate modifiers). The modifier is not compared with a saved build rate of a training task.',
 })
 
 registerRule({
@@ -111,7 +112,7 @@ registerRule({
 
 registerRule({
   id: 'production.trainingRate',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.trainingCapacity', 'FCT_GroundUnitTraining.TaskPercentage'],
@@ -142,7 +143,7 @@ registerRule({
   { key: 'research', versions: PRODUCTION_VERSIONS, note: 'The remaining research points over the project\'s effective rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs and scientist but its own field bonuses. The game carries unused time into that tech; the date is continuous time and the game completes it at the end of the first increment at or after it.', assumptions: ['The current labs, scientist, colony output and racial field bonuses stay fixed throughout the queue'] },
   { key: 'ship', versions: ['3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
-  { key: 'training', versions: ['2.7.x'], note: 'The absolute difference between total and completed build points over the task\'s rate, in days.' },
+  { key: 'training', versions: ['3.2.x'], note: 'The absolute difference between total and completed build points over the task\'s rate, in days.' },
 ].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`], assumptions = [] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}`, assumptions }))
 
 // The terraforming job, with the strategic water update (condensation and evaporation of water vapour) before it and, at the end of each increment, the hydrosphere transition, atmospheric pressure and surface temperature updates; terraforming has a minimum gravity of 0.1 g.
@@ -158,7 +159,7 @@ registerRule({
 
 registerRule({
   id: 'production.timeline',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'jobs',
   verification: 'estimated',
   structure: ['production.researchFinish, industryFinish, shipFinish, shipyardUpgradeFinish, trainingFinish, terraformFinish'],
@@ -528,7 +529,7 @@ export const trainingCapacity = (modifiers, facilities) => {
     return unavailable({ rule, missing })
   }
 
-  return ofRule({ rule, value: modifiers.OverallGroundUnitModifier * facilities.TrainingFacilities, inputs: { present: [MODIFIER_TEXT.OverallGroundUnitModifier, 'the colony\'s ground force construction complexes'] } })
+  return ofRule({ rule, value: modifiers.OverallGroundUnitModifier * Math.floor(facilities.TrainingFacilities), inputs: { present: [MODIFIER_TEXT.OverallGroundUnitModifier, 'the colony\'s ground force construction complexes'] } })
 }
 
 // A capacity result (`total`) and the share the running work uses (`usage`, { used, missing } or undefined for none): { total, free } where free is the part no running work uses, unavailable while the capacity or a share is not known. Work holding more than 100% leaves nothing idle and the result says so.

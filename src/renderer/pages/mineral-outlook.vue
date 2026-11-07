@@ -60,7 +60,7 @@
             </v-row>
             <v-alert v-else type="info" outlined dense class="mb-2">{{ projectionUnavailableText }}</v-alert>
             <div class="caption text--secondary">
-              Mining follows each deposit's accessibility as it's worked down; other income and all uses stay at today's rates. In transit counts as stock.
+              Continuous aggregate decline holds mining capability and other flows fixed. Per-increment, per-extractor accessibility rounding is omitted, with no proven error bound. In transit counts as stock.
             </div>
           </div>
         </v-card>
@@ -105,7 +105,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to judge which minerals need action first, and how far each runway rests on the game's ledger or on a model. {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is modelled, not measured, from the industry queue, the refineries, the maintenance facilities and the shipyards over the next 12 months (see Mineral uses).' }} Click a row to see its outlook.
+            Use it to judge which minerals need action first, and how far each runway rests on the game's ledger or on a model. {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is modelled, not measured, from the industry queue, the refineries, the maintenance facilities and the shipyards over the next 12 months (see Mineral uses).' }} Queue demand holds capacities, shares and the minimum construction period fixed, assumes unlimited input minerals, fuel and conversion sources, and admits a queued project only after a completion frees its whole share. Click a row to see its outlook.
           </div>
         </v-card>
         <v-card class="panel" data-summary="Review logged or modelled mineral uses and choose which to include in the runway." elevation="1">
@@ -229,7 +229,7 @@
           </template>
         </v-data-table>
         <div class="panel-foot caption text--secondary">
-          Use it to plan new deposits before the old ones empty. Rates include governor, sector, commander and naval-admin bonuses. Orbital mining is an estimate that follows the game's formula with the crew share. It may read low once a deposit is mined below half its original amount. A short crew, a damaged module, a miner with no commander and one outside any naval admin command are unobserved. Timeline: solid until half mined, lighter while accessibility falls, across {{ horizon }} years.
+          Use it to plan new deposits before the old ones empty. Rates include governor, sector, commander and naval-admin bonuses. Orbital mining is an estimate that follows the game's formula with the crew share. It may read low once a deposit is mined below half its original amount. A short crew, a damaged module, a miner with no commander and one outside any naval admin command are unobserved. Timeline: solid until half mined, lighter while accessibility falls, across {{ horizon }} years. This continuous aggregate decline estimate holds mining capability and other flows fixed, omits per-increment, per-extractor accessibility rounding and has no proven error bound.
         </div>
       </v-card>
     </v-container>
@@ -542,7 +542,7 @@ export default {
 
     // `annualQueueDemand`'s { demand, unknown, incomplete }: a colony whose production capacity is not known leaves the demand of the minerals its queue uses unknown.
     queueDemand() {
-      return annualQueueDemand(this.industrialProjects, (populationId, facility) => valueOrNull(this.populationCapacityResult(populationId, facility)))
+      return annualQueueDemand(this.industrialProjects, (populationId, facility) => valueOrNull(this.populationCapacityResult(populationId, facility)), (populationId) => this.populationProductionModifiers && this.populationProductionModifiers[populationId] && this.populationProductionModifiers[populationId].MinConstructionPeriod)
     },
 
     // The modelled uses of a save without a ledger (null with one, which observes them): `{ industry, fuel, maintenance, shipbuilding }`, each `{ byMineral, basis }`. A ledger save never gets a model on top of its observed uses.
@@ -1376,7 +1376,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },

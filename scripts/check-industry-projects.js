@@ -392,13 +392,13 @@ check('types', 'every production type from 0 to 7 draws on the capacity the game
   for (let type = 0; type <= 7; type++) {
     const asked = []
 
-    m.annualQueueDemand([row(type)], (_population, facility) => { asked.push(facility); return 100 })
+    m.annualQueueDemand([row(type)], (_population, facility) => { asked.push(facility); return 100 }, () => 31536000)
     assert.deepEqual(asked, [KIND_OF[type]], `the mineral demand of a type ${type} project asks for the ${KIND_OF[type]} capacity`)
   }
 
   const undecided = []
 
-  m.annualQueueDemand([row(null)], (_population, facility) => { undecided.push(facility); return 100 })
+  m.annualQueueDemand([row(null)], (_population, facility) => { undecided.push(facility); return 100 }, () => 31536000)
   assert.deepEqual(undecided, [], 'a project without a type asks for no capacity')
 })
 

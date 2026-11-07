@@ -595,9 +595,9 @@ const defineCases = (modules) => {
   })
 
   // ---- Industry queue demand ----------------------------------------------------------------------------------
-  // One queued project at a colony: 10 units of 100 BP each costing 5 t Duranium a unit, the whole of the colony's capacity.
-  const queued = (extra = {}) => ({ PopulationID: 1, ProductionType: 0, Percentage: 100, Queue: 1, Amount: 10, ProdPerUnit: 100, Duranium: 5, Neutronium: 0, Corbomite: 0, Tritanium: 0, Boronide: 0, Mercassium: 0, Vendarite: 0, Sorium: 0, Uridium: 0, Corundium: 0, Gallicite: 0, ...extra })
-  const demandOf = (project, capacity) => mineralOutlook.queueDemandResult(minerals.annualQueueDemand([project], () => capacity), 'Duranium')
+  // One running project at a colony: 10 units of 100 BP each costing 5 t Duranium a unit, the whole of the colony's capacity.
+  const queued = (extra = {}) => ({ ProjectID: 1, Pause: 0, PopulationID: 1, ProductionType: 0, Percentage: 100, Queue: 0, Amount: 10, ProdPerUnit: 100, Duranium: 5, Neutronium: 0, Corbomite: 0, Tritanium: 0, Boronide: 0, Mercassium: 0, Vendarite: 0, Sorium: 0, Uridium: 0, Corundium: 0, Gallicite: 0, ...extra })
+  const demandOf = (project, capacity) => mineralOutlook.queueDemandResult(minerals.annualQueueDemand([project], () => capacity, () => 31536000), 'Duranium')
 
   invariant('queue demand', 'a complete project at a known capacity gives its tonnes (control)', () => {
     const result = demandOf(queued(), 1000)
@@ -636,7 +636,7 @@ const defineCases = (modules) => {
 
   invariant('queue demand', 'a project with no production type is never taken as construction: its demand and that of the colony\'s other projects are unknown, naming the type', () => {
     const projects = [queued({ ProductionType: null }), queued({ Queue: 2 })]
-    const result = mineralOutlook.queueDemandResult(minerals.annualQueueDemand(projects, () => 1000), 'Duranium')
+    const result = mineralOutlook.queueDemandResult(minerals.annualQueueDemand(projects, () => 1000, () => 31536000), 'Duranium')
 
     assert.equal(result.status, 'unavailable')
     assert.ok(result.inputs.missing.some((name) => name.includes('production type')), `missing: ${result.inputs.missing}`)
@@ -644,7 +644,7 @@ const defineCases = (modules) => {
 
   invariant('queue demand', 'a project with no production type at another colony leaves this colony\'s demand known (control)', () => {
     const projects = [queued({ ProductionType: null, PopulationID: 2, Duranium: 0 }), queued()]
-    const queue = minerals.annualQueueDemand(projects, () => 1000)
+    const queue = minerals.annualQueueDemand(projects, () => 1000, () => 31536000)
 
     assert.equal(queue.demand.Duranium, 50)
     assert.equal(mineralOutlook.queueDemandResult(queue, 'Duranium').status, 'estimated')

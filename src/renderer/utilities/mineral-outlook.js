@@ -88,8 +88,8 @@ registerRule({
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_MineralDeposit.Amount, Accessibility, HalfOriginalAmount, OriginalAcc', 'the deposit\'s mining rate'],
-  note: 'Above half the original amount the rate is flat; below it accessibility falls toward 0.1 as the deposit is worked, so output slows until it is empty. The fall matched the stored accessibility of 37 declining deposits to within 0.005, the rounding of the stored value. The years assume today\'s mining rate throughout. A ground survey can raise accessibility without updating the original values, which makes the years indicative.',
-  assumptions: ['the mining rate stays at today\'s level'],
+  note: 'A continuous aggregate decline estimate with mining capability held fixed: output is flat above half the original deposit, then accessibility falls toward 0.1. Other flows stay fixed. It omits per-increment, per-extractor accessibility rounding and has no proven error bound. A ground survey can raise accessibility without updating the original values, making the years indicative.',
+  assumptions: ['Mining capability and other flows hold; decline is continuous, not an increment-by-increment extractor replay', 'Per-increment accessibility rounding is omitted; no proven error bound is established'],
 })
 
 registerRule({
@@ -98,17 +98,18 @@ registerRule({
   units: 't',
   verification: 'estimated',
   structure: ['the mineral\'s stock and cargo in transit', 'its deposits\' forecasts', 'its other production and its use'],
-  note: 'The stockpile over the horizon: today\'s stock, what each deposit still delivers as it declines, and every other flow at today\'s net rate. The level rises while mining beats the net drain, peaks, then falls and crosses zero at most once.',
-  assumptions: ['other production and all use stay at today\'s rates'],
+  note: 'A continuous aggregate decline estimate of the stockpile with mining capability and other production and use held fixed. It omits per-increment, per-extractor accessibility rounding and has no proven error bound. The level rises while mining beats the net drain, peaks, then falls and crosses zero at most once.',
+  assumptions: ['Mining capability, other production and all use stay fixed', 'Continuous aggregate decline omits per-increment, per-extractor rounding and has no proven error bound'],
 })
 
 registerRule({
   id: 'mineral.queueDemand',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't',
   verification: 'estimated',
-  structure: ['FCT_IndustrialProjects.Amount, ProdPerUnit, Percentage, Queue, <mineral>', 'each colony\'s production capacity (production.populationCapacity)'],
-  note: 'The minerals the industry queue will take in the next year: each project\'s cost scaled to one year of work at its share of the colony\'s capacity, with queued entries counted only while the year has capacity left. The ordnance capacity behind it matched the logged use of five minerals to within 0.15%; queued entries have no saved case.',
+  structure: ['FCT_IndustrialProjects.ProjectID, Pause, Amount, ProdPerUnit, Percentage, Queue, <mineral>', 'each colony\'s production capacity (production.populationCapacity)', 'FCT_Game.MinConstructionPeriod'],
+  note: 'Capacity-driven mineral demand over the complete minimum-construction increments of the next year. Running projects build at their saved shares; paused projects retain a share without building. A queued project starts after a completion only when its whole share fits, and builds from the next increment. The shared production-cycle limiter floors mineral-limited builds before separate fuel and conversion limits.',
+  assumptions: ['The minimum construction period, capacities and project shares stay fixed for the year', 'Input minerals, fuel and conversion-source installations are unlimited: this is capacity demand, not a stock-constrained completion prediction', 'No project is added; the final incomplete increment of the year is not counted'],
 })
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value)

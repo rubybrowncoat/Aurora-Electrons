@@ -194,7 +194,7 @@ const ORBITAL_CENSUS_READS = 'FCT_ClassComponent(ClassID ComponentID GameID NumC
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
   '/production': Object.freeze({
-    colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue GroundTrainingValue)',
+    colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue)',
     researches: ORBITAL_CENSUS_READS,
     procurementSources: 'FCT_ShipDesignComponents(Size Cost)',
     page: FLEET_COMMAND_READS,

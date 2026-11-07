@@ -970,7 +970,7 @@ const PRODUCTION_CHECKS = [
       assert.equal(production.terraformFinish(modifiers, { ...job, GasAtm: null, GasAtmUnknown: 0, MaxAtm: 0.0625 }, rate).result.value, 730, 'the first increment creates a missing gas; the second checks its target')
       assert.deepEqual([...provenance.getRule('production.jobCount').versions], ['3.2.x'])
       assert.deepEqual([...provenance.getRule('production.terraformFinish').versions], ['3.2.x'])
-      assert.deepEqual([...provenance.getRule('production.timeline').versions], ['2.7.x'], 'the broad timeline still depends on unrepaired research, training and industrial forecasts')
+      assert.deepEqual([...provenance.getRule('production.timeline').versions], ['3.2.x'], 'the finish inputs are repaired under their stated forecast assumptions')
     },
   },
   {

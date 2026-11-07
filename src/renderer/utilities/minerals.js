@@ -1,6 +1,7 @@
 // Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against saved games; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
 import { crewFraction } from './crew'
+import { forecastColony } from './industry-cycle'
 import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { capacityKind } from './production-types'
@@ -488,16 +489,16 @@ export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, s
   return { known: coverageDays > 0, minerals: outlook }
 }
 
-// Minerals the industrial queue will consume over the next year: each project's cost scaled to one year of work at its share of the colony's capacity; queued entries count only while the year has capacity left (as "mineral use.sql" does), and only for the capacity earlier entries leave.
-// `capacityOf(PopulationID, facility)`: BP/yr at 100% of the colony's 'construction', 'ordnance' or 'fighter' capacity, or null when it is not known. Returns `{ demand, unknown, incomplete }`: `demand` is t by mineral name, over the projects whose inputs are known; `unknown` lists by mineral name the colonies (PopulationID) whose queued projects use that mineral but have no known capacity; `incomplete` lists by mineral name the project inputs a queued project lacks: the mineral's own cost (also at a colony with unknown capacity), a production type, or at a colony with known capacity its place in the queue, units left, build points per unit or share, which set how much of the year each project gets. The demand of a mineral with either is not known. A real capacity of 0 means no work gets done and demands nothing, whatever the queue lacks.
-const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left'], ['ProdPerUnit', 'build points per unit'], ['Percentage', 'share of the colony\'s capacity']]
+// Capacity-driven demand over the next year's complete minimum-construction increments. Reuse the shared cycle engine's floor and whole-share queue admission, without mineral, fuel or conversion-source shortages.
+// capacityOf(PopulationID, kind) gives annual BP; periodOf(PopulationID) gives the explicit minimum construction period in seconds. Missing scheduling inputs or period leave affected mineral demand unknown. Missing per-unit mineral costs affect that mineral only. A known zero capacity needs no other input to establish zero demand.
+const SCHEDULE_INPUTS = [['ProjectID', 'identity'], ['Pause', 'pause state'], ['Queue', 'place in the queue'], ['Amount', 'units left'], ['ProdPerUnit', 'build points per unit'], ['Percentage', 'share of the colony\'s capacity']]
 
 const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // The capacity a project draws on (`capacityKind` of utilities/production-types.js); null for a production type the save lacks, which is never taken as construction.
 const facilityOf = (productionType) => (!recorded(productionType) ? null : capacityKind(productionType))
 
-export const annualQueueDemand = (projects, capacityOf) => {
+export const annualQueueDemand = (projects, capacityOf, periodOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
   const unknown = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, []]))
   const incomplete = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, []]))
@@ -550,7 +551,8 @@ export const annualQueueDemand = (projects, capacityOf) => {
     }
 
     // A project missing what sets its share of the year leaves the share of every later one open too, so every mineral the colony's queue may use is unknown.
-    const gaps = SCHEDULE_INPUTS.filter(([field]) => group.some((project) => !recorded(project[field])))
+    const period = typeof periodOf === 'function' ? periodOf(group[0].PopulationID) : null
+    const gaps = [...SCHEDULE_INPUTS.filter(([field]) => group.some((project) => !recorded(project[field]))), ...(recorded(period) && period > 0 ? [] : [[null, 'construction period']])]
 
     if (gaps.length) {
       MINERALS.forEach((mineral) => {
@@ -562,37 +564,29 @@ export const annualQueueDemand = (projects, capacityOf) => {
       return
     }
 
-    // The year's capacity spent so far, in percent of a full year at 100%.
-    let usedPercent = 0
+    const cycleDays = period / SECONDS_PER_DAY
+    const cycles = Math.floor(31536000 / period)
 
-    ;[...new Set(group.map((project) => project.Queue))].sort((a, b) => a - b).forEach((queue) => {
-      if (usedPercent >= 100) {
-        return
-      }
+    if (cycles === 0) {
+      return
+    }
 
-      group.filter((project) => project.Queue === queue).forEach((project) => {
-        const remainingBP = project.Amount * project.ProdPerUnit
+    const forecast = forecastColony({
+      projects: group.map((project) => ({ ID: project.ProjectID, Percentage: project.Percentage, Amount: project.Amount, PartialCompletion: 0, ProdPerUnit: project.ProdPerUnit, Queue: project.Queue, Paused: Boolean(project.Pause), category: facilityOf(project.ProductionType), needs: {} })),
+      capacities: { [facilityOf(group[0].ProductionType)]: capacity },
+      stock: {},
+      cycleDays,
+      // The engine rounds its horizon up to an ending cycle. Aim inside the last complete increment so float division cannot add an extra one.
+      horizonDays: (cycles - 0.5) * cycleDays,
+    })
 
-        if (!capacity || !project.Percentage || !remainingBP) {
-          return
+    group.forEach((project) => {
+      MINERALS.forEach((mineral) => {
+        if (!recorded(project[mineral.name])) {
+          lack(mineral, `a queued project's ${mineral.name} cost`)
+        } else {
+          demand[mineral.name] += forecast.projects[project.ProjectID].built * project[mineral.name]
         }
-
-        // A year at the project's own share, but no more than earlier projects left.
-        const availablePercent = Math.max(0, Math.min(project.Percentage, 100 - usedPercent))
-        const builtBP = Math.min(remainingBP, (capacity * availablePercent) / 100)
-        const oneYearFactor = builtBP / remainingBP
-
-        MINERALS.forEach((mineral) => {
-          if (!recorded(project[mineral.name])) {
-            lack(mineral, `a queued project's ${mineral.name} cost`)
-
-            return
-          }
-
-          demand[mineral.name] += project.Amount * project[mineral.name] * oneYearFactor
-        })
-
-        usedPercent += (100 * builtBP) / capacity
       })
     })
   })
