@@ -38,7 +38,7 @@ const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
-const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2, PLAYED_D1, PLAYED_D1_SIBLING } = require('./lib/fixtures')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2, PLAYED_D2_1, PLAYED_D2_2 } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
@@ -55,8 +55,8 @@ const REAL = [
   { label: 'played 3.2 save B', file: PLAYED_NEXT.file, expect: 'accepted' },
   { label: 'played 3.2 save C1 (first branch from B)', file: PLAYED_C1.file, expect: 'accepted' },
   { label: 'played 3.2 save C2 (second branch from B)', file: PLAYED_C2.file, expect: 'accepted' },
-  { label: 'played 3.2 save D1 (specimen branch from C2)', file: PLAYED_D1.file, expect: 'accepted' },
-  { label: 'played 3.2 save D1 sibling (second branch from C2)', file: PLAYED_D1_SIBLING.file, expect: 'accepted' },
+  { label: 'played 3.2 save D2-1 (C2\'s continuation)', file: PLAYED_D2_1.file, expect: 'accepted' },
+  { label: 'played 3.2 save D2-2 (sibling of D2-1 from C2, the AE-310-03 specimen)', file: PLAYED_D2_2.file, expect: 'accepted' },
   { label: 'modded save from before 3.0', file: 'AuroraDB.db', expect: 'refused' },
   { label: 'stock save from before 3.0', file: 'saves/AuroraDB_271_skoormit_saved.db', expect: 'refused' },
 ]
