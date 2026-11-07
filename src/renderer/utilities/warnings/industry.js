@@ -65,7 +65,7 @@ const freeCapacityColumns = (installations) => [
 
 const FREE_CAPACITY_STRUCTURE = ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation capacity values', 'FCT_IndustrialProjects.Percentage, Queue, ProductionType']
 
-const freeCapacityNote = (kind) => `A colony whose ${kind} installation amounts and weights are converted to decimal individually and summed before taking the whole productive count, and whose nonqueued projects hold less than 100% by their stored shares. Fractional inventory below a whole category unit produces no capacity. The displayed factory count is the effective category count, not raw installed inventory; any unread amount or weight leaves that count unknown. A missing type, amount or project share is reported as not evaluated unless known productive installations already prove capacity exists.`
+const freeCapacityNote = (kind) => `A colony with ${kind} installations whose amounts and weights are converted to decimal individually and summed before taking the whole productive count, and whose nonqueued projects hold less than 100% by their stored shares. Fractional inventory below a whole category unit produces no capacity. The displayed factory count is the effective category count, not raw installed inventory; any unread amount or weight leaves that count unknown. A missing type, amount or project share is reported as not evaluated unless known productive installations already prove capacity exists.`
 
 const projectKind = (project) => (project.ProductionType === null || project.ProductionType === undefined ? null : PRODUCTION_KINDS[capacityKind(project.ProductionType)])
 
